@@ -1,0 +1,23 @@
+{
+  "name": "@orchestrat/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "lint": "eslint src",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test dist/routes/health.test.js",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "@orchestrat/config": "workspace:*",
+    "@orchestrat/logger": "workspace:*",
+    "@orchestrat/protocol": "workspace:*",
+    "fastify": "^5.5.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.5"
+  }
+}

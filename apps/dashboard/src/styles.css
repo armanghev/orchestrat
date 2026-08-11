@@ -1,0 +1,150 @@
+:root {
+  color: #fafafa;
+  background: #09090b;
+  font-family: Outfit, ui-sans-serif, system-ui, sans-serif;
+  font-synthesis: none;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+.shell {
+  display: grid;
+  grid-template-columns: 224px minmax(0, 1fr);
+  min-height: 100vh;
+}
+aside {
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid rgba(255, 255, 255, 0.07);
+  padding: 20px 12px;
+}
+.brand,
+.eyebrow,
+header p,
+.sidebar-footer {
+  font-family: "Geist Mono", ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+.brand {
+  font-weight: 700;
+  padding: 0 12px 25px;
+}
+.brand span {
+  color: #71717a;
+  margin-left: 5px;
+}
+nav {
+  display: grid;
+  gap: 3px;
+}
+nav a {
+  border-radius: 6px;
+  color: #71717a;
+  padding: 9px 12px;
+  text-decoration: none;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+nav a:hover {
+  background: rgba(255, 255, 255, 0.03);
+  color: #a1a1aa;
+}
+nav a.active {
+  background: rgba(255, 255, 255, 0.05);
+  color: #fafafa;
+}
+.sidebar-footer {
+  color: #71717a;
+  margin-top: auto;
+  padding: 12px;
+}
+.workspace {
+  min-width: 0;
+}
+header {
+  align-items: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  display: flex;
+  height: 65px;
+  justify-content: space-between;
+  padding: 0 32px;
+}
+header p {
+  color: #71717a;
+  margin: 0 0 4px;
+}
+header strong {
+  font-weight: 500;
+}
+header span {
+  color: #a1a1aa;
+  font:
+    12px "Geist Mono",
+    ui-monospace,
+    monospace;
+}
+.content {
+  padding: 48px 56px;
+}
+.eyebrow {
+  color: #71717a;
+  margin: 0 0 12px;
+}
+h1 {
+  font-family: "Space Grotesk", Outfit, sans-serif;
+  font-size: 30px;
+  letter-spacing: -0.02em;
+  margin: 0 0 28px;
+}
+.placeholder {
+  background: #111116;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 14px;
+  max-width: 620px;
+  padding: 24px;
+}
+.placeholder p {
+  margin: 0 0 8px;
+}
+.placeholder span {
+  color: #a1a1aa;
+  font-weight: 300;
+}
+@media (max-width: 640px) {
+  .shell {
+    grid-template-columns: 1fr;
+  }
+  aside {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    border-right: 0;
+    padding: 12px;
+  }
+  .brand {
+    padding-bottom: 12px;
+  }
+  nav {
+    grid-template-columns: repeat(4, 1fr);
+    overflow-x: auto;
+  }
+  nav a {
+    font-size: 12px;
+    padding: 7px;
+    text-align: center;
+  }
+  .sidebar-footer {
+    display: none;
+  }
+  header {
+    padding: 0 20px;
+  }
+  .content {
+    padding: 32px 20px;
+  }
+}

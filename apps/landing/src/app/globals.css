@@ -1,0 +1,40 @@
+:root {
+  background: #09090b;
+  color: #fafafa;
+  font-family: Outfit, ui-sans-serif, system-ui, sans-serif;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+main {
+  align-content: center;
+  background-image: radial-gradient(
+    rgba(255, 255, 255, 0.04) 1px,
+    transparent 1px
+  );
+  background-size: 24px 24px;
+  min-height: 100vh;
+  padding: 48px;
+}
+p {
+  color: #a1a1aa;
+  font:
+    12px "Geist Mono",
+    ui-monospace,
+    monospace;
+  letter-spacing: 0.09em;
+}
+h1 {
+  font-size: clamp(42px, 8vw, 72px);
+  letter-spacing: -0.05em;
+  line-height: 1;
+  margin: 18px 0;
+}
+span {
+  color: #a1a1aa;
+  font-size: 18px;
+  font-weight: 300;
+}
