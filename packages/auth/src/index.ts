@@ -49,7 +49,8 @@ export function createClerkAuth(options: {
       const email = user.emailAddresses.find(
         (item) => item.id === user.primaryEmailAddressId
       )?.emailAddress;
-      if (!email) throw new Error("The Clerk user has no primary email address.");
+      if (!email)
+        throw new Error("The Clerk user has no primary email address.");
 
       return {
         authSubject,

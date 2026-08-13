@@ -16,12 +16,31 @@ orchestrat is a developer-first coordination plane for humans and autonomous age
 
 - Node.js 20.19+ (or 22.12+)
 - pnpm 10+
+- a PostgreSQL connection string
+- a Clerk application
 
 ## Install and run
 
 ```bash
 pnpm install
+cp .env.example .env
+pnpm db:migrate
 pnpm dev
+```
+
+Set `ORCHESTRAT_DATABASE_URL` to the PostgreSQL connection string you provide.
+The API verifies Clerk session tokens with
+`ORCHESTRAT_CLERK_PUBLISHABLE_KEY` and `ORCHESTRAT_CLERK_SECRET_KEY`; the
+dashboard uses the same instance through `VITE_CLERK_PUBLISHABLE_KEY`.
+Enable GitHub, email/password, and email magic-link sign-in methods in the
+Clerk dashboard.
+
+To create a local organization, workspace, and project without using the UI,
+set the `ORCHESTRAT_SEED_*` variables from `.env.example`, including your Clerk
+user ID, then run:
+
+```bash
+pnpm db:seed
 ```
 
 Run one surface:
@@ -32,12 +51,16 @@ pnpm dev:dashboard
 pnpm dev:api
 ```
 
-The API health endpoint is `GET http://localhost:3001/health`.
+The API health endpoints are `GET http://localhost:3001/health` and
+`GET http://localhost:3001/api/v1/health`.
 
 ## Scripts
 
 ```bash
 pnpm build
+pnpm db:generate
+pnpm db:migrate
+pnpm db:seed
 pnpm lint
 pnpm typecheck
 pnpm test
@@ -46,6 +69,10 @@ pnpm format:check
 
 ## Architecture
 
-The dashboard and future desktop app share `apps/dashboard`. API transports remain thin and delegate to application services; PostgreSQL will be the durable source of truth once database work begins. Shared API contracts live in `@orchestrat/protocol`.
+The dashboard and future desktop app share `apps/dashboard`. API transports
+remain thin and delegate to application services. PostgreSQL is the durable
+source of truth, Drizzle owns the reviewed migration workflow, and shared API
+contracts live in `@orchestrat/protocol`. Clerk authenticates humans; local
+organization membership controls workspace and project access.
 
 See [architecture documentation](docs/architecture/README.md), [product documentation](docs/product/README.md), and [API documentation](docs/api/README.md).

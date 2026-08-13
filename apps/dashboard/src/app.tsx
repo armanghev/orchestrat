@@ -35,7 +35,9 @@ function CreateForm({
       await onCreate(name);
       setName("");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "The request failed.");
+      setError(
+        caught instanceof Error ? caught.message : "The request failed."
+      );
     }
   };
 
@@ -144,14 +146,19 @@ function Dashboard() {
   const createProject = useMutation({
     mutationFn: (name: string) => api.createProject(workspaceId, { name }),
     onSuccess: async (created) => {
-      await queryClient.invalidateQueries({ queryKey: ["projects", workspaceId] });
+      await queryClient.invalidateQueries({
+        queryKey: ["projects", workspaceId]
+      });
       navigate(`/projects/${created.id}`);
     }
   });
 
-  if (organizationsQuery.isPending) return <div className="loading">Loading workspace…</div>;
+  if (organizationsQuery.isPending)
+    return <div className="loading">Loading workspace…</div>;
   if (organizationsQuery.error) {
-    return <div className="loading error">{organizationsQuery.error.message}</div>;
+    return (
+      <div className="loading error">{organizationsQuery.error.message}</div>
+    );
   }
   if (!organizations.length) {
     return (
@@ -163,7 +170,8 @@ function Dashboard() {
       />
     );
   }
-  if (workspacesQuery.isPending) return <div className="loading">Loading workspaces…</div>;
+  if (workspacesQuery.isPending)
+    return <div className="loading">Loading workspaces…</div>;
   if (workspacesQuery.error) {
     return <div className="loading error">{workspacesQuery.error.message}</div>;
   }
@@ -177,7 +185,8 @@ function Dashboard() {
       />
     );
   }
-  if (projectsQuery.isPending) return <div className="loading">Loading projects…</div>;
+  if (projectsQuery.isPending)
+    return <div className="loading">Loading projects…</div>;
   if (projectsQuery.error) {
     return <div className="loading error">{projectsQuery.error.message}</div>;
   }
@@ -281,7 +290,11 @@ function Dashboard() {
           <p className="eyebrow">{project!.slug.toUpperCase()}</p>
           <h1>{section}</h1>
           <section className="placeholder">
-            <p>{section === "Overview" ? "This project is ready." : `No ${section.toLowerCase()} yet.`}</p>
+            <p>
+              {section === "Overview"
+                ? "This project is ready."
+                : `No ${section.toLowerCase()} yet.`}
+            </p>
             <span>
               {section === "Overview"
                 ? "Tasks and agents arrive in later phases; the durable project boundary is active now."

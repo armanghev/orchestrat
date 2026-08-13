@@ -85,7 +85,9 @@ nav a {
   color: #71717a;
   padding: 9px 12px;
   text-decoration: none;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 nav a:hover {
   background: rgba(255, 255, 255, 0.03);
@@ -127,7 +129,10 @@ header select {
 }
 .new-project summary {
   color: #a1a1aa;
-  font: 12px "Geist Mono", ui-monospace, monospace;
+  font:
+    12px "Geist Mono",
+    ui-monospace,
+    monospace;
   list-style: none;
 }
 .new-project[open] .create-form {

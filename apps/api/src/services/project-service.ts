@@ -41,7 +41,9 @@ const organizationJson = (
   updated_at: organization.updatedAt.toISOString()
 });
 
-const workspaceJson = (workspace: typeof workspaces.$inferSelect): Workspace => ({
+const workspaceJson = (
+  workspace: typeof workspaces.$inferSelect
+): Workspace => ({
   id: workspace.id,
   organization_id: workspace.organizationId,
   name: workspace.name,
@@ -79,7 +81,11 @@ export class ProjectService {
       )
       .where(eq(organizationMembers.userId, userId))
       .orderBy(asc(organizations.name));
-    return { organizations: rows.map((row) => organizationJson(row.organization, row.role)) };
+    return {
+      organizations: rows.map((row) =>
+        organizationJson(row.organization, row.role)
+      )
+    };
   }
 
   async createOrganization(userId: string, input: CreateOrganizationRequest) {
@@ -194,7 +200,8 @@ export class ProjectService {
       .set({ archivedAt: now, status: "archived", updatedAt: now })
       .where(and(eq(projects.id, projectId), eq(projects.status, "active")))
       .returning();
-    if (!project) throw new ApiError(409, "CONFLICT", "Project could not be archived.");
+    if (!project)
+      throw new ApiError(409, "CONFLICT", "Project could not be archived.");
     return projectJson(project);
   }
 }

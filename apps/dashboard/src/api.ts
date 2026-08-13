@@ -17,7 +17,11 @@ const apiUrl = import.meta.env.VITE_API_URL ?? "http://localhost:3001";
 export class ApiClient {
   constructor(private readonly getToken: () => Promise<string | null>) {}
 
-  private async request<T>(path: string, schema: ZodType<T>, init?: RequestInit) {
+  private async request<T>(
+    path: string,
+    schema: ZodType<T>,
+    init?: RequestInit
+  ) {
     const token = await this.getToken();
     if (!token) throw new Error("Your session is no longer available.");
     const response = await fetch(`${apiUrl}/api/v1${path}`, {
@@ -31,7 +35,9 @@ export class ApiClient {
     const body: unknown = await response.json();
     if (!response.ok) {
       const parsed = apiErrorSchema.safeParse(body);
-      throw new Error(parsed.success ? parsed.data.error.message : "The request failed.");
+      throw new Error(
+        parsed.success ? parsed.data.error.message : "The request failed."
+      );
     }
     return schema.parse(body);
   }

@@ -38,16 +38,23 @@ test("Phase 2 API enforces membership and manages projects", async () => {
       delete supported.types;
       const result = await query(supported, ...args);
       return arrayMode
-        ? { ...result, rows: result.rows.map((row: object) => Object.values(row)) }
+        ? {
+            ...result,
+            rows: result.rows.map((row: object) => Object.values(row))
+          }
         : result;
     };
     return client;
   };
   patchClient(pool);
   const connect = pool.connect.bind(pool);
-  pool.connect = (async () => patchClient(await connect())) as typeof pool.connect;
+  pool.connect = (async () =>
+    patchClient(await connect())) as typeof pool.connect;
   const migration = await readFile(
-    new URL("../../../../packages/db/drizzle/0000_phase2_core.sql", import.meta.url),
+    new URL(
+      "../../../../packages/db/drizzle/0000_phase2_core.sql",
+      import.meta.url
+    ),
     "utf8"
   );
   for (const statement of migration.split("--> statement-breakpoint")) {
@@ -56,9 +63,11 @@ test("Phase 2 API enforces membership and manages projects", async () => {
 
   const auth: HumanAuth = {
     async authenticate(request) {
-      return new Headers(request.headers)
-        .get("authorization")
-        ?.replace(/^Bearer\s+/, "") ?? null;
+      return (
+        new Headers(request.headers)
+          .get("authorization")
+          ?.replace(/^Bearer\s+/, "") ?? null
+      );
     },
     async getProfile(authSubject) {
       return {

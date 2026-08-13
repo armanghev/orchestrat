@@ -27,10 +27,13 @@ const errorResponse = (
   error: { code, details, message, request_id: requestId }
 });
 
-const requestHeaders = (headers: Record<string, string | string[] | undefined>) => {
+const requestHeaders = (
+  headers: Record<string, string | string[] | undefined>
+) => {
   const result = new Headers();
   for (const [name, value] of Object.entries(headers)) {
-    if (Array.isArray(value)) value.forEach((item) => result.append(name, item));
+    if (Array.isArray(value))
+      value.forEach((item) => result.append(name, item));
     else if (value !== undefined) result.set(name, value);
   }
   return result;
@@ -57,7 +60,9 @@ export function buildApp(options: AppOptions) {
     if (error instanceof ApiError) {
       return reply
         .code(error.statusCode)
-        .send(errorResponse(request.id, error.code, error.message, error.details));
+        .send(
+          errorResponse(request.id, error.code, error.message, error.details)
+        );
     }
 
     const caught = error as {
@@ -69,13 +74,16 @@ export function buildApp(options: AppOptions) {
       statusCode?: number;
     };
     if (caught.name === "ZodError" || caught.statusCode === 400) {
-      return reply
-        .code(400)
-        .send(
-          errorResponse(request.id, "VALIDATION_ERROR", "The request is invalid.", {
+      return reply.code(400).send(
+        errorResponse(
+          request.id,
+          "VALIDATION_ERROR",
+          "The request is invalid.",
+          {
             issues: caught.issues
-          })
-        );
+          }
+        )
+      );
     }
 
     if (caught.code === "23505") {
@@ -120,7 +128,11 @@ export function buildApp(options: AppOptions) {
           url: `http://${request.headers.host ?? "localhost"}${request.url}`
         });
         if (!authSubject) {
-          throw new ApiError(401, "UNAUTHENTICATED", "Authentication is required.");
+          throw new ApiError(
+            401,
+            "UNAUTHENTICATED",
+            "Authentication is required."
+          );
         }
         request.userId = await identities.resolveUserId(authSubject);
       });

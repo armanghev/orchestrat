@@ -56,9 +56,7 @@ export type CreateOrganizationRequest = z.infer<
 export const organizationsResponseSchema = z.object({
   organizations: z.array(organizationSchema)
 });
-export type OrganizationsResponse = z.infer<
-  typeof organizationsResponseSchema
->;
+export type OrganizationsResponse = z.infer<typeof organizationsResponseSchema>;
 
 export const workspaceSchema = z.object({
   id: idSchema,

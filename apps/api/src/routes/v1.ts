@@ -40,14 +40,17 @@ export async function v1Routes(
     )
   );
 
-  app.post("/organizations/:organizationId/workspaces", async (request, reply) => {
-    const result = await options.projects.createWorkspace(
-      request.userId,
-      organizationParamsSchema.parse(request.params).organizationId,
-      createWorkspaceRequestSchema.parse(request.body)
-    );
-    return reply.code(201).send(result);
-  });
+  app.post(
+    "/organizations/:organizationId/workspaces",
+    async (request, reply) => {
+      const result = await options.projects.createWorkspace(
+        request.userId,
+        organizationParamsSchema.parse(request.params).organizationId,
+        createWorkspaceRequestSchema.parse(request.body)
+      );
+      return reply.code(201).send(result);
+    }
+  );
 
   app.get("/workspaces/:id", (request) =>
     options.projects.getWorkspace(

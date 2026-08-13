@@ -40,7 +40,10 @@ export const users = pgTable(
   (table) => [
     uniqueIndex("users_auth_subject_unique").on(table.authSubject),
     uniqueIndex("users_email_unique").on(table.email),
-    check("users_email_normalized", sql`${table.email} = lower(btrim(${table.email}))`)
+    check(
+      "users_email_normalized",
+      sql`${table.email} = lower(btrim(${table.email}))`
+    )
   ]
 );
 
