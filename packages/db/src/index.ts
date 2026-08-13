@@ -5,7 +5,8 @@ import * as schema from "./schema.js";
 export * from "./schema.js";
 
 export function createDatabase(config: PoolConfig | Pool) {
-  const pool = config instanceof Pool ? config : new Pool(config);
+  const pool =
+    "query" in config ? (config as Pool) : new Pool(config as PoolConfig);
   return { db: drizzle(pool, { schema }), pool };
 }
 

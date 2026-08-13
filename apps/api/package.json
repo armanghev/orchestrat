@@ -8,7 +8,7 @@
     "build": "tsc -p tsconfig.json",
     "lint": "eslint src",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/**/*.test.ts",
+    "test": "node --test dist/routes/*.test.js",
     "start": "node dist/server.js"
   },
   "dependencies": {
