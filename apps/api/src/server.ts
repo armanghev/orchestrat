@@ -1,8 +1,11 @@
+import { config as loadEnv } from "dotenv";
 import { createClerkAuth } from "@orchestrat/auth";
 import { loadApiConfig } from "@orchestrat/config";
 import { createDatabase } from "@orchestrat/db";
 import { logger } from "@orchestrat/logger";
 import { buildApp } from "./app.js";
+
+loadEnv({ path: "../../.env" });
 
 const config = loadApiConfig();
 const { db, pool } = createDatabase({
