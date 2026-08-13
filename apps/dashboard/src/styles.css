@@ -12,9 +12,19 @@ body {
   min-width: 320px;
   min-height: 100vh;
 }
+button,
+input,
+select {
+  font: inherit;
+}
+button,
+summary,
+select {
+  cursor: pointer;
+}
 .shell {
   display: grid;
-  grid-template-columns: 224px minmax(0, 1fr);
+  grid-template-columns: 240px minmax(0, 1fr);
   min-height: 100vh;
 }
 aside {
@@ -26,18 +36,45 @@ aside {
 .brand,
 .eyebrow,
 header p,
-.sidebar-footer {
+.sidebar-footer,
+.selectors label {
   font-family: "Geist Mono", ui-monospace, monospace;
   font-size: 11px;
   letter-spacing: 0.08em;
 }
 .brand {
   font-weight: 700;
-  padding: 0 12px 25px;
+  padding: 0 12px 22px;
 }
 .brand span {
   color: #71717a;
   margin-left: 5px;
+}
+.selectors {
+  display: grid;
+  gap: 12px;
+  padding: 0 8px 20px;
+}
+.selectors label {
+  color: #71717a;
+  display: grid;
+  gap: 6px;
+  text-transform: uppercase;
+}
+select,
+input {
+  background: #111116;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 6px;
+  color: #fafafa;
+  min-width: 0;
+  padding: 9px 10px;
+}
+.selectors select {
+  font-family: Outfit, sans-serif;
+  font-size: 13px;
+  letter-spacing: 0;
+  width: 100%;
 }
 nav {
   display: grid;
@@ -48,9 +85,7 @@ nav a {
   color: #71717a;
   padding: 9px 12px;
   text-decoration: none;
-  transition:
-    background 0.15s,
-    color 0.15s;
+  transition: background 0.15s, color 0.15s;
 }
 nav a:hover {
   background: rgba(255, 255, 255, 0.03);
@@ -61,7 +96,10 @@ nav a.active {
   color: #fafafa;
 }
 .sidebar-footer {
+  align-items: center;
   color: #71717a;
+  display: flex;
+  justify-content: space-between;
   margin-top: auto;
   padding: 12px;
 }
@@ -75,20 +113,33 @@ header {
   height: 65px;
   justify-content: space-between;
   padding: 0 32px;
+  position: relative;
 }
 header p {
   color: #71717a;
-  margin: 0 0 4px;
+  margin: 0 0 3px;
 }
-header strong {
+header select {
+  background: transparent;
+  border: 0;
   font-weight: 500;
+  padding: 0 18px 0 0;
 }
-header span {
+.new-project summary {
   color: #a1a1aa;
-  font:
-    12px "Geist Mono",
-    ui-monospace,
-    monospace;
+  font: 12px "Geist Mono", ui-monospace, monospace;
+  list-style: none;
+}
+.new-project[open] .create-form {
+  background: #111116;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 10px;
+  padding: 16px;
+  position: absolute;
+  right: 24px;
+  top: 54px;
+  width: 280px;
+  z-index: 2;
 }
 .content {
   padding: 48px 56px;
@@ -103,7 +154,8 @@ h1 {
   letter-spacing: -0.02em;
   margin: 0 0 28px;
 }
-.placeholder {
+.placeholder,
+.setup-card {
   background: #111116;
   border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: 14px;
@@ -113,11 +165,71 @@ h1 {
 .placeholder p {
   margin: 0 0 8px;
 }
-.placeholder span {
+.placeholder span,
+.setup-screen > p,
+.sign-in-screen > div > p:last-child,
+.configuration-error p {
   color: #a1a1aa;
   font-weight: 300;
 }
-@media (max-width: 640px) {
+.setup-screen,
+.configuration-error {
+  margin: 12vh auto;
+  max-width: 620px;
+  padding: 24px;
+}
+.setup-screen > p {
+  max-width: 520px;
+}
+.setup-card {
+  margin-top: 28px;
+}
+.create-form {
+  display: grid;
+  gap: 12px;
+}
+.create-form label {
+  color: #a1a1aa;
+  display: grid;
+  font-size: 13px;
+  gap: 7px;
+}
+.create-form button {
+  background: #fafafa;
+  border: 0;
+  border-radius: 6px;
+  color: #09090b;
+  font-weight: 600;
+  padding: 10px 14px;
+}
+.create-form button:disabled {
+  opacity: 0.5;
+}
+.form-error,
+.loading.error {
+  color: #fda4af;
+  font-size: 13px;
+  margin: 0;
+}
+.loading {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+}
+.sign-in-screen {
+  align-items: center;
+  display: grid;
+  gap: 64px;
+  grid-template-columns: minmax(260px, 430px) auto;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 40px;
+}
+.sign-in-screen h1 {
+  font-size: clamp(40px, 6vw, 72px);
+  margin-bottom: 18px;
+}
+@media (max-width: 720px) {
   .shell {
     grid-template-columns: 1fr;
   }
@@ -129,14 +241,18 @@ h1 {
   .brand {
     padding-bottom: 12px;
   }
+  .selectors {
+    grid-template-columns: 1fr 1fr;
+    padding-bottom: 12px;
+  }
   nav {
-    grid-template-columns: repeat(4, 1fr);
+    display: flex;
     overflow-x: auto;
   }
   nav a {
+    flex: 0 0 auto;
     font-size: 12px;
-    padding: 7px;
-    text-align: center;
+    padding: 7px 10px;
   }
   .sidebar-footer {
     display: none;
@@ -146,5 +262,8 @@ h1 {
   }
   .content {
     padding: 32px 20px;
+  }
+  .sign-in-screen {
+    grid-template-columns: 1fr;
   }
 }
