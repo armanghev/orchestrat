@@ -8,16 +8,22 @@
     "build": "tsc -p tsconfig.json",
     "lint": "eslint src",
     "typecheck": "tsc --noEmit",
-    "test": "node --test dist/routes/health.test.js",
+    "test": "node --test dist/routes/*.test.js",
     "start": "node dist/server.js"
   },
   "dependencies": {
+    "@fastify/cors": "^11.3.0",
+    "@orchestrat/auth": "workspace:*",
     "@orchestrat/config": "workspace:*",
+    "@orchestrat/db": "workspace:*",
     "@orchestrat/logger": "workspace:*",
     "@orchestrat/protocol": "workspace:*",
+    "dotenv": "^17.4.2",
+    "drizzle-orm": "^0.45.2",
     "fastify": "^5.5.0"
   },
   "devDependencies": {
+    "pg-mem": "^3.0.14",
     "tsx": "^4.20.5"
   }
 }

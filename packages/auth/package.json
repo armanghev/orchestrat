@@ -11,5 +11,8 @@
     "lint": "eslint src",
     "typecheck": "tsc --noEmit",
     "test": "node --test"
+  },
+  "dependencies": {
+    "@clerk/backend": "^3.16.4"
   }
 }
