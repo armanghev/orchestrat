@@ -161,6 +161,10 @@ importers:
       '@clerk/backend':
         specifier: ^3.16.4
         version: 3.16.4(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+    devDependencies:
+      tsx:
+        specifier: ^4.20.5
+        version: 4.23.12
 
   packages/config:
     dependencies:

@@ -10,9 +10,12 @@
     "build": "tsc -p tsconfig.json",
     "lint": "eslint src",
     "typecheck": "tsc --noEmit",
-    "test": "node --test"
+    "test": "tsx --test src/index.test.ts"
   },
   "dependencies": {
     "@clerk/backend": "^3.16.4"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.5"
   }
 }

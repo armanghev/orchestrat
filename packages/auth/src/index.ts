@@ -18,16 +18,20 @@ export type HumanAuth = {
   getProfile(authSubject: string): Promise<HumanProfile>;
 };
 
-export function createClerkAuth(options: {
-  authorizedParties: string[];
-  publishableKey: string;
-  secretKey: string;
-}): HumanAuth {
-  const clerk = createClerkClient({
+const humanTokenTypes = ["session_token", "oauth_token"] as const;
+type ClerkClient = ReturnType<typeof createClerkClient>;
+
+export function createClerkAuth(
+  options: {
+    authorizedParties: string[];
+    publishableKey: string;
+    secretKey: string;
+  },
+  clerk: ClerkClient = createClerkClient({
     publishableKey: options.publishableKey,
     secretKey: options.secretKey
-  });
-
+  })
+): HumanAuth {
   return {
     async authenticate(request) {
       const state = await clerk.authenticateRequest(
@@ -36,7 +40,7 @@ export function createClerkAuth(options: {
           method: request.method
         }),
         {
-          acceptsToken: "session_token",
+          acceptsToken: [...humanTokenTypes],
           authorizedParties: options.authorizedParties
         }
       );
