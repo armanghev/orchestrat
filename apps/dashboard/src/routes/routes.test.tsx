@@ -89,10 +89,10 @@ describe("dashboard routes", () => {
     second.unmount();
   });
 
-  it("allows an authenticated user into the setup route", async () => {
+  it("sends an authenticated user with an existing project through setup to its overview", async () => {
     const view = await renderDashboardRoute({ path: "/setup", auth: new FakeAuthClient({ status: "signedIn" }), platform: platform() });
-    await waitFor(() => expect(view.router.state.location.pathname).toBe("/setup"));
-    expect(await screen.findByText("Setup")).toBeVisible();
+    await waitFor(() => expect(view.router.state.location.pathname).toBe("/projects/00000000-0000-4000-8000-000000000003/overview"));
+    expect(screen.queryByRole("button", { name: /create (organization|workspace|project)/i })).not.toBeInTheDocument();
   });
 
   it("shows the safe application error view for a render error", async () => {
