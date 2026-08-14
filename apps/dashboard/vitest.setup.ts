@@ -1,4 +1,6 @@
 import "@testing-library/jest-dom/vitest";
+import { afterAll, afterEach, beforeAll } from "vitest";
+import { server } from "@/test/msw-server";
 
 const storageFrame = document.createElement("iframe");
 document.body.append(storageFrame);
@@ -10,3 +12,7 @@ Object.defineProperty(globalThis, "localStorage", {
   value: storage,
   writable: true
 });
+
+beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
+afterEach(() => server.resetHandlers());
+afterAll(() => server.close());
