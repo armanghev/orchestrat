@@ -11,8 +11,19 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
+import { Route as AuthenticatedPreferencesRouteImport } from './routes/_authenticated.preferences'
 import { Route as AuthenticatedSetupRouteImport } from './routes/_authenticated.setup'
 import { Route as AuthCallbackRouteImport } from './routes/auth.callback'
+import { Route as AuthenticatedProjectsProjectIdRouteImport } from './routes/_authenticated.projects.$projectId'
+import { Route as AuthenticatedProjectsProjectIdIndexRouteImport } from './routes/_authenticated.projects.$projectId.index'
+import { Route as AuthenticatedProjectsProjectIdActivityRouteImport } from './routes/_authenticated.projects.$projectId.activity'
+import { Route as AuthenticatedProjectsProjectIdAgentsRouteImport } from './routes/_authenticated.projects.$projectId.agents'
+import { Route as AuthenticatedProjectsProjectIdDocumentsRouteImport } from './routes/_authenticated.projects.$projectId.documents'
+import { Route as AuthenticatedProjectsProjectIdIntegrationsRouteImport } from './routes/_authenticated.projects.$projectId.integrations'
+import { Route as AuthenticatedProjectsProjectIdMessagesRouteImport } from './routes/_authenticated.projects.$projectId.messages'
+import { Route as AuthenticatedProjectsProjectIdOverviewRouteImport } from './routes/_authenticated.projects.$projectId.overview'
+import { Route as AuthenticatedProjectsProjectIdSettingsRouteImport } from './routes/_authenticated.projects.$projectId.settings'
+import { Route as AuthenticatedProjectsProjectIdTasksRouteImport } from './routes/_authenticated.projects.$projectId.tasks'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -23,6 +34,12 @@ const AuthenticatedRoute = AuthenticatedRouteImport.update({
   id: '/_authenticated',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthenticatedPreferencesRoute =
+  AuthenticatedPreferencesRouteImport.update({
+    id: '/preferences',
+    path: '/preferences',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 const AuthenticatedSetupRoute = AuthenticatedSetupRouteImport.update({
   id: '/setup',
   path: '/setup',
@@ -33,35 +50,165 @@ const AuthCallbackRoute = AuthCallbackRouteImport.update({
   path: '/auth/callback',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthenticatedProjectsProjectIdRoute =
+  AuthenticatedProjectsProjectIdRouteImport.update({
+    id: '/projects/$projectId',
+    path: '/projects/$projectId',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
+const AuthenticatedProjectsProjectIdIndexRoute =
+  AuthenticatedProjectsProjectIdIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => AuthenticatedProjectsProjectIdRoute,
+  } as any)
+const AuthenticatedProjectsProjectIdActivityRoute =
+  AuthenticatedProjectsProjectIdActivityRouteImport.update({
+    id: '/activity',
+    path: '/activity',
+    getParentRoute: () => AuthenticatedProjectsProjectIdRoute,
+  } as any)
+const AuthenticatedProjectsProjectIdAgentsRoute =
+  AuthenticatedProjectsProjectIdAgentsRouteImport.update({
+    id: '/agents',
+    path: '/agents',
+    getParentRoute: () => AuthenticatedProjectsProjectIdRoute,
+  } as any)
+const AuthenticatedProjectsProjectIdDocumentsRoute =
+  AuthenticatedProjectsProjectIdDocumentsRouteImport.update({
+    id: '/documents',
+    path: '/documents',
+    getParentRoute: () => AuthenticatedProjectsProjectIdRoute,
+  } as any)
+const AuthenticatedProjectsProjectIdIntegrationsRoute =
+  AuthenticatedProjectsProjectIdIntegrationsRouteImport.update({
+    id: '/integrations',
+    path: '/integrations',
+    getParentRoute: () => AuthenticatedProjectsProjectIdRoute,
+  } as any)
+const AuthenticatedProjectsProjectIdMessagesRoute =
+  AuthenticatedProjectsProjectIdMessagesRouteImport.update({
+    id: '/messages',
+    path: '/messages',
+    getParentRoute: () => AuthenticatedProjectsProjectIdRoute,
+  } as any)
+const AuthenticatedProjectsProjectIdOverviewRoute =
+  AuthenticatedProjectsProjectIdOverviewRouteImport.update({
+    id: '/overview',
+    path: '/overview',
+    getParentRoute: () => AuthenticatedProjectsProjectIdRoute,
+  } as any)
+const AuthenticatedProjectsProjectIdSettingsRoute =
+  AuthenticatedProjectsProjectIdSettingsRouteImport.update({
+    id: '/settings',
+    path: '/settings',
+    getParentRoute: () => AuthenticatedProjectsProjectIdRoute,
+  } as any)
+const AuthenticatedProjectsProjectIdTasksRoute =
+  AuthenticatedProjectsProjectIdTasksRouteImport.update({
+    id: '/tasks',
+    path: '/tasks',
+    getParentRoute: () => AuthenticatedProjectsProjectIdRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/preferences': typeof AuthenticatedPreferencesRoute
   '/setup': typeof AuthenticatedSetupRoute
   '/auth/callback': typeof AuthCallbackRoute
+  '/projects/$projectId': typeof AuthenticatedProjectsProjectIdRouteWithChildren
+  '/projects/$projectId/activity': typeof AuthenticatedProjectsProjectIdActivityRoute
+  '/projects/$projectId/agents': typeof AuthenticatedProjectsProjectIdAgentsRoute
+  '/projects/$projectId/documents': typeof AuthenticatedProjectsProjectIdDocumentsRoute
+  '/projects/$projectId/integrations': typeof AuthenticatedProjectsProjectIdIntegrationsRoute
+  '/projects/$projectId/messages': typeof AuthenticatedProjectsProjectIdMessagesRoute
+  '/projects/$projectId/overview': typeof AuthenticatedProjectsProjectIdOverviewRoute
+  '/projects/$projectId/settings': typeof AuthenticatedProjectsProjectIdSettingsRoute
+  '/projects/$projectId/tasks': typeof AuthenticatedProjectsProjectIdTasksRoute
+  '/projects/$projectId/': typeof AuthenticatedProjectsProjectIdIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/preferences': typeof AuthenticatedPreferencesRoute
   '/setup': typeof AuthenticatedSetupRoute
   '/auth/callback': typeof AuthCallbackRoute
+  '/projects/$projectId/activity': typeof AuthenticatedProjectsProjectIdActivityRoute
+  '/projects/$projectId/agents': typeof AuthenticatedProjectsProjectIdAgentsRoute
+  '/projects/$projectId/documents': typeof AuthenticatedProjectsProjectIdDocumentsRoute
+  '/projects/$projectId/integrations': typeof AuthenticatedProjectsProjectIdIntegrationsRoute
+  '/projects/$projectId/messages': typeof AuthenticatedProjectsProjectIdMessagesRoute
+  '/projects/$projectId/overview': typeof AuthenticatedProjectsProjectIdOverviewRoute
+  '/projects/$projectId/settings': typeof AuthenticatedProjectsProjectIdSettingsRoute
+  '/projects/$projectId/tasks': typeof AuthenticatedProjectsProjectIdTasksRoute
+  '/projects/$projectId': typeof AuthenticatedProjectsProjectIdIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteWithChildren
+  '/_authenticated/preferences': typeof AuthenticatedPreferencesRoute
   '/_authenticated/setup': typeof AuthenticatedSetupRoute
   '/auth/callback': typeof AuthCallbackRoute
+  '/_authenticated/projects/$projectId': typeof AuthenticatedProjectsProjectIdRouteWithChildren
+  '/_authenticated/projects/$projectId/activity': typeof AuthenticatedProjectsProjectIdActivityRoute
+  '/_authenticated/projects/$projectId/agents': typeof AuthenticatedProjectsProjectIdAgentsRoute
+  '/_authenticated/projects/$projectId/documents': typeof AuthenticatedProjectsProjectIdDocumentsRoute
+  '/_authenticated/projects/$projectId/integrations': typeof AuthenticatedProjectsProjectIdIntegrationsRoute
+  '/_authenticated/projects/$projectId/messages': typeof AuthenticatedProjectsProjectIdMessagesRoute
+  '/_authenticated/projects/$projectId/overview': typeof AuthenticatedProjectsProjectIdOverviewRoute
+  '/_authenticated/projects/$projectId/settings': typeof AuthenticatedProjectsProjectIdSettingsRoute
+  '/_authenticated/projects/$projectId/tasks': typeof AuthenticatedProjectsProjectIdTasksRoute
+  '/_authenticated/projects/$projectId/': typeof AuthenticatedProjectsProjectIdIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/setup' | '/auth/callback'
+  fullPaths:
+    | '/'
+    | '/preferences'
+    | '/setup'
+    | '/auth/callback'
+    | '/projects/$projectId'
+    | '/projects/$projectId/activity'
+    | '/projects/$projectId/agents'
+    | '/projects/$projectId/documents'
+    | '/projects/$projectId/integrations'
+    | '/projects/$projectId/messages'
+    | '/projects/$projectId/overview'
+    | '/projects/$projectId/settings'
+    | '/projects/$projectId/tasks'
+    | '/projects/$projectId/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/setup' | '/auth/callback'
+  to:
+    | '/'
+    | '/preferences'
+    | '/setup'
+    | '/auth/callback'
+    | '/projects/$projectId/activity'
+    | '/projects/$projectId/agents'
+    | '/projects/$projectId/documents'
+    | '/projects/$projectId/integrations'
+    | '/projects/$projectId/messages'
+    | '/projects/$projectId/overview'
+    | '/projects/$projectId/settings'
+    | '/projects/$projectId/tasks'
+    | '/projects/$projectId'
   id:
     | '__root__'
     | '/'
     | '/_authenticated'
+    | '/_authenticated/preferences'
     | '/_authenticated/setup'
     | '/auth/callback'
+    | '/_authenticated/projects/$projectId'
+    | '/_authenticated/projects/$projectId/activity'
+    | '/_authenticated/projects/$projectId/agents'
+    | '/_authenticated/projects/$projectId/documents'
+    | '/_authenticated/projects/$projectId/integrations'
+    | '/_authenticated/projects/$projectId/messages'
+    | '/_authenticated/projects/$projectId/overview'
+    | '/_authenticated/projects/$projectId/settings'
+    | '/_authenticated/projects/$projectId/tasks'
+    | '/_authenticated/projects/$projectId/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -86,6 +233,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_authenticated/preferences': {
+      id: '/_authenticated/preferences'
+      path: '/preferences'
+      fullPath: '/preferences'
+      preLoaderRoute: typeof AuthenticatedPreferencesRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/setup': {
       id: '/_authenticated/setup'
       path: '/setup'
@@ -100,15 +254,129 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_authenticated/projects/$projectId': {
+      id: '/_authenticated/projects/$projectId'
+      path: '/projects/$projectId'
+      fullPath: '/projects/$projectId'
+      preLoaderRoute: typeof AuthenticatedProjectsProjectIdRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/projects/$projectId/': {
+      id: '/_authenticated/projects/$projectId/'
+      path: '/'
+      fullPath: '/projects/$projectId/'
+      preLoaderRoute: typeof AuthenticatedProjectsProjectIdIndexRouteImport
+      parentRoute: typeof AuthenticatedProjectsProjectIdRoute
+    }
+    '/_authenticated/projects/$projectId/activity': {
+      id: '/_authenticated/projects/$projectId/activity'
+      path: '/activity'
+      fullPath: '/projects/$projectId/activity'
+      preLoaderRoute: typeof AuthenticatedProjectsProjectIdActivityRouteImport
+      parentRoute: typeof AuthenticatedProjectsProjectIdRoute
+    }
+    '/_authenticated/projects/$projectId/agents': {
+      id: '/_authenticated/projects/$projectId/agents'
+      path: '/agents'
+      fullPath: '/projects/$projectId/agents'
+      preLoaderRoute: typeof AuthenticatedProjectsProjectIdAgentsRouteImport
+      parentRoute: typeof AuthenticatedProjectsProjectIdRoute
+    }
+    '/_authenticated/projects/$projectId/documents': {
+      id: '/_authenticated/projects/$projectId/documents'
+      path: '/documents'
+      fullPath: '/projects/$projectId/documents'
+      preLoaderRoute: typeof AuthenticatedProjectsProjectIdDocumentsRouteImport
+      parentRoute: typeof AuthenticatedProjectsProjectIdRoute
+    }
+    '/_authenticated/projects/$projectId/integrations': {
+      id: '/_authenticated/projects/$projectId/integrations'
+      path: '/integrations'
+      fullPath: '/projects/$projectId/integrations'
+      preLoaderRoute: typeof AuthenticatedProjectsProjectIdIntegrationsRouteImport
+      parentRoute: typeof AuthenticatedProjectsProjectIdRoute
+    }
+    '/_authenticated/projects/$projectId/messages': {
+      id: '/_authenticated/projects/$projectId/messages'
+      path: '/messages'
+      fullPath: '/projects/$projectId/messages'
+      preLoaderRoute: typeof AuthenticatedProjectsProjectIdMessagesRouteImport
+      parentRoute: typeof AuthenticatedProjectsProjectIdRoute
+    }
+    '/_authenticated/projects/$projectId/overview': {
+      id: '/_authenticated/projects/$projectId/overview'
+      path: '/overview'
+      fullPath: '/projects/$projectId/overview'
+      preLoaderRoute: typeof AuthenticatedProjectsProjectIdOverviewRouteImport
+      parentRoute: typeof AuthenticatedProjectsProjectIdRoute
+    }
+    '/_authenticated/projects/$projectId/settings': {
+      id: '/_authenticated/projects/$projectId/settings'
+      path: '/settings'
+      fullPath: '/projects/$projectId/settings'
+      preLoaderRoute: typeof AuthenticatedProjectsProjectIdSettingsRouteImport
+      parentRoute: typeof AuthenticatedProjectsProjectIdRoute
+    }
+    '/_authenticated/projects/$projectId/tasks': {
+      id: '/_authenticated/projects/$projectId/tasks'
+      path: '/tasks'
+      fullPath: '/projects/$projectId/tasks'
+      preLoaderRoute: typeof AuthenticatedProjectsProjectIdTasksRouteImport
+      parentRoute: typeof AuthenticatedProjectsProjectIdRoute
+    }
   }
 }
 
+interface AuthenticatedProjectsProjectIdRouteChildren {
+  AuthenticatedProjectsProjectIdActivityRoute: typeof AuthenticatedProjectsProjectIdActivityRoute
+  AuthenticatedProjectsProjectIdAgentsRoute: typeof AuthenticatedProjectsProjectIdAgentsRoute
+  AuthenticatedProjectsProjectIdDocumentsRoute: typeof AuthenticatedProjectsProjectIdDocumentsRoute
+  AuthenticatedProjectsProjectIdIntegrationsRoute: typeof AuthenticatedProjectsProjectIdIntegrationsRoute
+  AuthenticatedProjectsProjectIdMessagesRoute: typeof AuthenticatedProjectsProjectIdMessagesRoute
+  AuthenticatedProjectsProjectIdOverviewRoute: typeof AuthenticatedProjectsProjectIdOverviewRoute
+  AuthenticatedProjectsProjectIdSettingsRoute: typeof AuthenticatedProjectsProjectIdSettingsRoute
+  AuthenticatedProjectsProjectIdTasksRoute: typeof AuthenticatedProjectsProjectIdTasksRoute
+  AuthenticatedProjectsProjectIdIndexRoute: typeof AuthenticatedProjectsProjectIdIndexRoute
+}
+
+const AuthenticatedProjectsProjectIdRouteChildren: AuthenticatedProjectsProjectIdRouteChildren =
+  {
+    AuthenticatedProjectsProjectIdActivityRoute:
+      AuthenticatedProjectsProjectIdActivityRoute,
+    AuthenticatedProjectsProjectIdAgentsRoute:
+      AuthenticatedProjectsProjectIdAgentsRoute,
+    AuthenticatedProjectsProjectIdDocumentsRoute:
+      AuthenticatedProjectsProjectIdDocumentsRoute,
+    AuthenticatedProjectsProjectIdIntegrationsRoute:
+      AuthenticatedProjectsProjectIdIntegrationsRoute,
+    AuthenticatedProjectsProjectIdMessagesRoute:
+      AuthenticatedProjectsProjectIdMessagesRoute,
+    AuthenticatedProjectsProjectIdOverviewRoute:
+      AuthenticatedProjectsProjectIdOverviewRoute,
+    AuthenticatedProjectsProjectIdSettingsRoute:
+      AuthenticatedProjectsProjectIdSettingsRoute,
+    AuthenticatedProjectsProjectIdTasksRoute:
+      AuthenticatedProjectsProjectIdTasksRoute,
+    AuthenticatedProjectsProjectIdIndexRoute:
+      AuthenticatedProjectsProjectIdIndexRoute,
+  }
+
+const AuthenticatedProjectsProjectIdRouteWithChildren =
+  AuthenticatedProjectsProjectIdRoute._addFileChildren(
+    AuthenticatedProjectsProjectIdRouteChildren,
+  )
+
 interface AuthenticatedRouteChildren {
+  AuthenticatedPreferencesRoute: typeof AuthenticatedPreferencesRoute
   AuthenticatedSetupRoute: typeof AuthenticatedSetupRoute
+  AuthenticatedProjectsProjectIdRoute: typeof AuthenticatedProjectsProjectIdRouteWithChildren
 }
 
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
+  AuthenticatedPreferencesRoute: AuthenticatedPreferencesRoute,
   AuthenticatedSetupRoute: AuthenticatedSetupRoute,
+  AuthenticatedProjectsProjectIdRoute:
+    AuthenticatedProjectsProjectIdRouteWithChildren,
 }
 
 const AuthenticatedRouteWithChildren = AuthenticatedRoute._addFileChildren(

@@ -286,7 +286,8 @@ export function SetupFlow() {
       pending={projectMutation.isPending}
       onSubmit={async (input) => {
         const created = await projectMutation.mutateAsync(input);
-        await queryClient.invalidateQueries({ queryKey: hierarchyKeys.projects(workspace.id) });
+        queryClient.setQueryData(projectsQueryOptions(api, workspace.id).queryKey, { projects: [created] });
+        await queryClient.invalidateQueries({ queryKey: hierarchyKeys.catalog() });
         await (router.navigate as (options: { to: string }) => Promise<unknown>)({
           to: `/projects/${created.id}/overview`
         });

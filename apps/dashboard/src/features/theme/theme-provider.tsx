@@ -5,7 +5,7 @@ import { applyTheme, resolveTheme, type ResolvedTheme, type Theme } from "./them
 type ThemeContextValue = {
   theme: Theme;
   resolvedTheme: ResolvedTheme;
-  setTheme: (theme: Theme) => void;
+  setTheme: (theme: Theme) => Promise<void>;
 };
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
@@ -48,10 +48,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, [apply, preferences.theme, ready]);
 
   const setTheme = useCallback((theme: Theme) => {
-    if (selectedTheme.current === theme) return;
+    if (selectedTheme.current === theme) return Promise.resolve();
     selectedTheme.current = theme;
     apply(theme, systemDark());
-    void update({ theme });
+    return update({ theme });
   }, [apply, update]);
 
   return <ThemeContext.Provider value={{ theme: preferences.theme, resolvedTheme, setTheme }}>{children}</ThemeContext.Provider>;
