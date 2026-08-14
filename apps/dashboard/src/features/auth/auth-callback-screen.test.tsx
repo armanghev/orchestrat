@@ -1,19 +1,29 @@
 import { render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthContext } from "./auth-context";
 import type { AuthClient, AuthSnapshot } from "./auth-client";
 import { AuthCallbackScreen } from "./auth-callback-screen";
 
-function client(snapshot: AuthSnapshot): AuthClient {
+function client(snapshot: AuthSnapshot, completeSignIn = vi.fn(async () => undefined)): AuthClient {
   return {
     initialize: vi.fn(async () => undefined), getSnapshot: () => snapshot,
     subscribe: () => () => undefined, signIn: vi.fn(async () => undefined),
-    completeSignIn: vi.fn(async () => undefined), signOut: vi.fn(async () => undefined),
+    completeSignIn, signOut: vi.fn(async () => undefined),
     expireSession: vi.fn(async () => undefined), getAccessToken: vi.fn(async () => null)
   };
 }
 
 describe("AuthCallbackScreen", () => {
+  let browserPathBeforeTest = "";
+
+  beforeEach(() => {
+    browserPathBeforeTest = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  });
+
+  afterEach(() => {
+    window.history.replaceState({}, "", browserPathBeforeTest);
+  });
+
   it("announces callback progress without rendering callback parameters", async () => {
     window.history.replaceState({}, "", "/auth/callback?code=secret-token&state=opaque");
     const auth = client({ status: "signingIn" });
@@ -24,8 +34,22 @@ describe("AuthCallbackScreen", () => {
     expect(container).not.toHaveTextContent("state=opaque");
   });
 
-  it("shows a retry link only for a stable auth error", () => {
+  it("shows a retry link with a stable message for an auth error", () => {
     render(<AuthContext.Provider value={client({ status: "error", code: "state_mismatch", message: "The callback state does not match." })}><AuthCallbackScreen /></AuthContext.Provider>);
+    expect(screen.getByRole("alert")).toHaveTextContent("We couldn't complete your sign-in.");
+    expect(screen.queryByText("The callback state does not match.")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Try again" })).toHaveAttribute("href", "/");
+  });
+
+  it("shows stable recovery after callback completion rejects", async () => {
+    window.history.replaceState({}, "", "/auth/callback?code=secret-token&state=opaque");
+    const completion = vi.fn(async () => { throw new Error("secret-token"); });
+    const auth = client({ status: "signingIn" }, completion);
+    const { container } = render(<AuthContext.Provider value={auth}><AuthCallbackScreen /></AuthContext.Provider>);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("We couldn't complete your sign-in.");
+    expect(screen.getByRole("link", { name: "Try again" })).toHaveAttribute("href", "/");
+    expect(container).not.toHaveTextContent("secret-token");
+    expect(container).not.toHaveTextContent("opaque");
   });
 });

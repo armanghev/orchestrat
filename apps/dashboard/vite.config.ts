@@ -10,7 +10,11 @@ export default defineConfig({
   clearScreen: false,
   envDir: ".",
   plugins: [
-    tanstackRouter({ autoCodeSplitting: true, target: "react" }),
+    tanstackRouter({
+      autoCodeSplitting: true,
+      target: "react",
+      routeFileIgnorePattern: "\\.test\\.(ts|tsx)$"
+    }),
     react(),
     tailwindcss()
   ],
