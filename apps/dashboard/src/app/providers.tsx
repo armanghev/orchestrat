@@ -8,6 +8,8 @@ import { loadingAuthClient } from "@/features/auth/auth-client";
 import { useAuthClient } from "@/features/auth/auth-context";
 import { ApiClient } from "@/lib/api/client";
 import { PlatformProvider, usePlatform } from "@/platform/provider";
+import { PreferencesProvider } from "@/platform/preferences-provider";
+import { ThemeProvider } from "@/features/theme/theme-provider";
 import { createDashboardQueryClient } from "./query-client";
 import { createAppRouter } from "./router";
 
@@ -52,5 +54,5 @@ function ProviderGraph({ config }: { config: PublicConfig }) {
 }
 
 export function AppProviders({ config }: { config: PublicConfig }) {
-  return <PlatformProvider><ProviderGraph config={config} /></PlatformProvider>;
+  return <PlatformProvider><PreferencesProvider><ThemeProvider><ProviderGraph config={config} /></ThemeProvider></PreferencesProvider></PlatformProvider>;
 }

@@ -29,18 +29,25 @@ function freshDefaultPreferences(): Preferences {
 
 const unique = (values: string[]) => [...new Set(values)];
 
+export function parsePreferences(input: unknown): Preferences {
+  const parsed = preferencesSchema.safeParse(input);
+  return parsed.success ? parsed.data : freshDefaultPreferences();
+}
+
 export function cleanPreferences(
   input: unknown,
   accessibleProjectIds: ReadonlySet<string>
 ): Preferences {
-  const parsed = preferencesSchema.safeParse(input);
-  if (!parsed.success) return freshDefaultPreferences();
-  const pinnedProjectIds = unique(parsed.data.pinnedProjectIds).filter((id) =>
+  const parsed = parsePreferences(input);
+  const pinnedProjectIds = unique(parsed.pinnedProjectIds).filter((id) =>
     accessibleProjectIds.has(id)
   );
   const pinned = new Set(pinnedProjectIds);
-  const recentProjectIds = unique(parsed.data.recentProjectIds).filter(
-    (id) => accessibleProjectIds.has(id) && !pinned.has(id)
-  );
-  return { ...parsed.data, pinnedProjectIds, recentProjectIds };
+  return {
+    ...parsed,
+    pinnedProjectIds,
+    recentProjectIds: unique(parsed.recentProjectIds).filter(
+      (id) => accessibleProjectIds.has(id) && !pinned.has(id)
+    )
+  };
 }

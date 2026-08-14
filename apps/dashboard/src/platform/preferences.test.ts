@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cleanPreferences, defaultPreferences } from "./preferences";
+import { cleanPreferences, defaultPreferences, parsePreferences } from "./preferences";
 
 describe("preferences", () => {
   it("falls back from corrupt values and removes inaccessible project IDs", () => {
@@ -23,6 +23,21 @@ describe("preferences", () => {
       pinnedProjectIds: ["pinned"],
       recentProjectIds: ["recent"],
       contextSidebarCollapsed: true
+    });
+  });
+
+  it("parses valid IDs before the catalog is available and cleans only after reconciliation", () => {
+    const stored = {
+      theme: "dark",
+      railMode: "projects",
+      pinnedProjectIds: ["later"],
+      recentProjectIds: ["also-later"],
+      contextSidebarCollapsed: false
+    };
+    expect(parsePreferences(stored)).toEqual(stored);
+    expect(cleanPreferences(stored, new Set())).toMatchObject({
+      pinnedProjectIds: [],
+      recentProjectIds: []
     });
   });
 

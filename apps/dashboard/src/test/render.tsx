@@ -10,6 +10,9 @@ import { AuthContext } from "@/features/auth/auth-context";
 import { ApiClient } from "@/lib/api/client";
 import type { Platform } from "@/platform/contract";
 import { PlatformProvider } from "@/platform/provider";
+import { PreferencesProvider } from "@/platform/preferences-provider";
+import { defaultPreferences, parsePreferences } from "@/platform/preferences";
+import { ThemeProvider } from "@/features/theme/theme-provider";
 import { handlers as defaultHandlers } from "@/test/handlers";
 import { server } from "@/test/msw-server";
 
@@ -30,9 +33,18 @@ export async function renderDashboardRoute({
   const history = createMemoryHistory({ initialEntries: [path] });
   const context = { api, auth, platform, queryClient };
   const router = createAppRouter(context, history);
+  let storedPreferences = parsePreferences(defaultPreferences);
+  const preferenceStore = {
+    load: async () => storedPreferences,
+    save: async (value: unknown) => {
+      storedPreferences = parsePreferences(value);
+    }
+  };
 
   const view = render(
     <PlatformProvider value={platform}>
+      <PreferencesProvider store={preferenceStore}>
+        <ThemeProvider>
       <AuthContext.Provider value={auth}>
         <QueryClientProvider client={queryClient}>
           <TooltipProvider>
@@ -40,6 +52,8 @@ export async function renderDashboardRoute({
           </TooltipProvider>
         </QueryClientProvider>
       </AuthContext.Provider>
+        </ThemeProvider>
+      </PreferencesProvider>
     </PlatformProvider>
   );
   await act(async () => { await router.load(); });
