@@ -28,8 +28,8 @@ tauri-plugin-deep-link = "2.4.9"
 tauri-plugin-opener = "2.5.4"
 tauri-plugin-store = "2.4.4"
 thiserror = "2.0.20"
+tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread", "sync", "time"] }
 url = "2.5.8"
 
 [dev-dependencies]
 httpmock = "0.8.3"
-tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
