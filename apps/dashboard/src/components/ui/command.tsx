@@ -42,10 +42,6 @@ function CommandDialog({
 }) {
   return (
     <Dialog {...props}>
-      <DialogHeader className="sr-only">
-        <DialogTitle>{title}</DialogTitle>
-        <DialogDescription>{description}</DialogDescription>
-      </DialogHeader>
       <DialogContent
         className={cn(
           "top-1/3 translate-y-0 overflow-hidden rounded-xl! p-0",
@@ -53,6 +49,10 @@ function CommandDialog({
         )}
         showCloseButton={showCloseButton}
       >
+        {title || description ? <DialogHeader className="sr-only">
+          {title ? <DialogTitle>{title}</DialogTitle> : null}
+          {description ? <DialogDescription>{description}</DialogDescription> : null}
+        </DialogHeader> : null}
         {children}
       </DialogContent>
     </Dialog>

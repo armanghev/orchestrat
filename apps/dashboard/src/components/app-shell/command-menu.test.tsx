@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useRef, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -48,6 +48,7 @@ describe("CommandMenu", () => {
     render(<MenuHarness run={run} />);
     const trigger = screen.getByRole("button", { name: "Open palette" });
     await user.click(trigger);
+    expect(within(screen.getByRole("dialog")).getByRole("heading", { name: "Command Palette" })).toBeInTheDocument();
     await user.click(screen.getByText("Run test command"));
     await waitFor(() =>
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument()

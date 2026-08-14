@@ -9,6 +9,7 @@ import { GlobalRail } from "./global-rail";
 import { ContextSidebar } from "./context-sidebar";
 import { TopToolbar } from "./top-toolbar";
 import { CommandMenu } from "./command-menu";
+import { ConnectivityBanner } from "@/features/connectivity/connectivity-banner";
 
 export type AppShellProps = {
   catalog: ProjectCatalog;
@@ -54,6 +55,8 @@ export function AppShell({ catalog, activeProjectId, activeRoute = "overview", n
   const commands = useMemo(() => buildCommands({ catalog, activeProjectId, navigateToProject: selectProject, navigateToRoute, setTheme, toggleSidebar, openPreferences, signOut }), [catalog, activeProjectId, preferences, navigateToProject, navigateToRoute, setTheme, openPreferences, signOut]);
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (target instanceof HTMLElement && (target.isContentEditable || target.matches("input, textarea, select, [role='textbox']"))) return;
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); openCommands(); }
     };
     window.addEventListener("keydown", handler);
@@ -75,7 +78,7 @@ export function AppShell({ catalog, activeProjectId, activeRoute = "overview", n
     <GlobalRail catalog={catalog} activeProjectId={activeProjectId} onOpenProject={selectProject} onOpenCommands={openCommands} onOpenPreferences={openPreferences} onTogglePin={togglePin} />
     <ContextSidebar catalog={catalog} activeProjectId={activeProjectId} activeRoute={activeRoute} collapsed={preferences.contextSidebarCollapsed} onNavigate={navigateToRoute} />
     <div className="grid min-w-0 grid-rows-[56px_minmax(0,1fr)] md:grid-rows-[48px_minmax(0,1fr)]"><TopToolbar context={current} collapsed={preferences.contextSidebarCollapsed} onToggleSidebar={toggleSidebar} onOpenCommands={openCommands} onOpenMobileNavigation={() => setMobileNavigationOpen(true)} commandTriggerRef={defaultCommandTriggerRef} />
-      <main id="main-content" tabIndex={-1} className="min-h-0 overflow-auto">{catalog.failures.length ? <div role="status" className="m-3 flex items-center gap-2 rounded-md border px-3 py-2 text-sm text-muted-foreground">Some projects could not be loaded.{retryCatalog ? <button type="button" className="font-medium text-foreground underline focus-visible:ring-2 focus-visible:ring-ring" onClick={() => void retryCatalog()}>Retry</button> : null}</div> : null}{children}</main>
+      <main id="main-content" tabIndex={-1} className="min-h-0 overflow-auto"><ConnectivityBanner />{catalog.failures.length ? <div role="status" className="m-3 flex items-center gap-2 rounded-md border px-3 py-2 text-sm text-muted-foreground">Some projects could not be loaded.{retryCatalog ? <button type="button" className="font-medium text-foreground underline focus-visible:ring-2 focus-visible:ring-ring" onClick={() => void retryCatalog()}>Retry</button> : null}</div> : null}{children}</main>
     </div>
     <Sheet open={mobileNavigationOpen} onOpenChange={setMobileNavigationOpen}><SheetContent side="left" className="w-[calc(100vw-1rem)] max-w-80 gap-0 p-0" aria-describedby={undefined}><SheetHeader><SheetTitle>Workspace navigation</SheetTitle></SheetHeader>
       <div className="flex min-h-0 flex-1 overflow-hidden"><GlobalRail mobile catalog={catalog} activeProjectId={activeProjectId} onOpenProject={(id) => { selectProject(id); closeMobileNavigation(); }} onOpenCommands={openMobileCommands} onOpenPreferences={() => { void openPreferences(); closeMobileNavigation(); }} onTogglePin={togglePin} />

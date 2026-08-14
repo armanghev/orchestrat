@@ -21,6 +21,7 @@ describe("SignInScreen", () => {
     await userEvent.setup().click(screen.getByRole("button", { name: "Continue in browser" }));
     expect(auth.signIn).toHaveBeenCalledOnce();
     expect(screen.getByRole("heading", { name: "Coordinate agents. Keep control." })).toBeVisible();
+    expect(screen.getByText("ORCHESTRAT")).toHaveClass("text-primary-text");
   });
 
   it("shows a disabled waiting action while signing in", () => {

@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -19,12 +20,15 @@ const catalog: ProjectCatalog = { failures: [], projects: ids.map((id, index) =>
 function renderShell(overrides: Partial<Parameters<typeof AppShell>[0]> = {}, initialPreferences = { theme: "system" as const, railMode: "projects" as const, pinnedProjectIds: [ids[0]], recentProjectIds: [ids[1], ids[2]], contextSidebarCollapsed: false }) {
  const platform: Platform = { kind: "desktop", preferences: { load: vi.fn(), save: vi.fn(async () => undefined) }, openExternal: vi.fn(), onAuthCallback: vi.fn(async () => () => undefined) };
  const props = { catalog, activeProjectId: ids[1], navigateToProject: vi.fn(), navigateToRoute: vi.fn(), openPreferences: vi.fn(), signOut: vi.fn(), children: <p>Body</p>, ...overrides };
- return { ...render(<PlatformProvider value={platform}><PreferencesProvider initialPreferences={initialPreferences}><ThemeProvider><TooltipProvider><AppShell {...props} /></TooltipProvider></ThemeProvider></PreferencesProvider></PlatformProvider>), props, platform };
+ const queryClient = new QueryClient();
+ return { ...render(<QueryClientProvider client={queryClient}><PlatformProvider value={platform}><PreferencesProvider initialPreferences={initialPreferences}><ThemeProvider><TooltipProvider><AppShell {...props} /></TooltipProvider></ThemeProvider></PreferencesProvider></PlatformProvider></QueryClientProvider>), props, platform };
 }
 describe("AppShell", () => {
  it("provides an accessible rail, sidebar, command shortcut, collapse and drag-safe toolbar", async () => {
    const user = userEvent.setup(); const view = renderShell();
    expect(screen.getByRole("complementary", { name: "Projects" })).toBeInTheDocument();
+   expect(screen.getByRole("navigation", { name: "Project shortcuts" })).toBeInTheDocument();
+   expect(screen.getByRole("navigation", { name: "Project routes" })).toBeInTheDocument();
    expect(screen.getByRole("link", { name: "Open Beta" })).toHaveAttribute("aria-current", "page");
    expect(screen.getByRole("link", { name: "Open Beta" }).className).toContain("focus-visible:ring");
    expect(screen.getAllByRole("button", { name: /Overview|Tasks|Agents|Documents|Messages|Activity|Integrations|Settings/ })).toHaveLength(8);
@@ -47,6 +51,14 @@ describe("AppShell", () => {
    expect(screen.getByRole("complementary", { name: "Projects" })).toHaveClass("bg-rail");
    await user.click(screen.getByRole("button", { name: "Project options for Alpha Project" }));
    expect(screen.getByRole("menuitem", { name: "Unpin project" })).toBeInTheDocument();
+ });
+ it("does not open the command palette while typing in an editable field", async () => {
+   const user = userEvent.setup();
+   renderShell({ children: <input aria-label="Project note" /> });
+   const note = screen.getByRole("textbox", { name: "Project note" });
+   await user.click(note);
+   await user.keyboard("{Meta>}k{/Meta}");
+   expect(screen.queryByRole("dialog", { name: "Command Palette" })).not.toBeInTheDocument();
  });
  it("opens the project-local pin action from a project mark context menu", () => {
    renderShell();

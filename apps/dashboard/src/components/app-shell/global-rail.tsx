@@ -22,7 +22,7 @@ export function GlobalRail({ catalog, activeProjectId, onOpenProject, onOpenComm
   const [contextProjectId, setContextProjectId] = useState<string | null>(null);
   const controlSize = mobile ? "icon" : "icon-sm";
   return <aside aria-label="Projects" className={cn("w-16 shrink-0 flex-col items-center border-r bg-rail", mobile ? "flex h-full pt-2" : `hidden md:flex ${platform.kind === "desktop" ? "pt-11" : "pt-2"}`)}>
-    <nav className="flex flex-1 flex-col items-center gap-2 py-2">
+    <nav aria-label="Project shortcuts" className="flex flex-1 flex-col items-center gap-2 py-2">
       {order.visible.map((id) => {
         const context = byId.get(id)!; const active = id === activeProjectId; const pinned = order.pinnedProjectIds.includes(id);
         return <div key={id} className="flex flex-col items-center gap-1"><Tooltip><TooltipTrigger asChild>
