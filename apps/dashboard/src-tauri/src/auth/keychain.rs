@@ -3,6 +3,7 @@ use super::AuthError;
 use std::collections::HashMap;
 pub const PENDING_ACCOUNT: &str = "pending-pkce";
 pub const REFRESH_ACCOUNT: &str = "refresh-session";
+pub const SESSION_STATE_ACCOUNT: &str = "session-state";
 
 pub trait CredentialStore: Send + Sync {
     fn get(&self, account: &str) -> Result<Option<String>, AuthError>;
@@ -49,9 +50,9 @@ impl CredentialStore for KeychainStore {
 #[cfg(test)]
 pub struct MemoryStore {
     values: std::sync::Mutex<HashMap<String, String>>,
-    fail_set: std::sync::Mutex<bool>,
     fail_set_accounts: std::sync::Mutex<std::collections::HashSet<String>>,
     fail_delete_accounts: std::sync::Mutex<std::collections::HashSet<String>>,
+    set_failure_sequences: std::sync::Mutex<HashMap<String, std::collections::VecDeque<bool>>>,
     events: std::sync::Mutex<Vec<String>>,
 }
 #[cfg(test)]
@@ -59,14 +60,11 @@ impl MemoryStore {
     pub fn new() -> Self {
         Self {
             values: Default::default(),
-            fail_set: Default::default(),
             fail_set_accounts: Default::default(),
             fail_delete_accounts: Default::default(),
+            set_failure_sequences: Default::default(),
             events: Default::default(),
         }
-    }
-    pub fn fail_writes(&self, value: bool) {
-        *self.fail_set.lock().unwrap() = value;
     }
     pub fn fail_set_for(&self, account: &str, value: bool) {
         let mut accounts = self.fail_set_accounts.lock().unwrap();
@@ -75,6 +73,12 @@ impl MemoryStore {
         } else {
             accounts.remove(account);
         }
+    }
+    pub fn set_failure_sequence(&self, account: &str, failures: impl IntoIterator<Item = bool>) {
+        self.set_failure_sequences
+            .lock()
+            .unwrap()
+            .insert(account.into(), failures.into_iter().collect());
     }
     pub fn fail_delete_for(&self, account: &str, value: bool) {
         let mut accounts = self.fail_delete_accounts.lock().unwrap();
@@ -86,6 +90,9 @@ impl MemoryStore {
     }
     pub fn events(&self) -> Vec<String> {
         self.events.lock().unwrap().clone()
+    }
+    pub fn clear_events(&self) {
+        self.events.lock().unwrap().clear();
     }
 }
 #[cfg(test)]
@@ -99,8 +106,20 @@ impl CredentialStore for MemoryStore {
             .cloned())
     }
     fn set(&self, a: &str, v: &str) -> Result<(), AuthError> {
-        self.events.lock().unwrap().push(format!("set:{a}"));
-        if *self.fail_set.lock().unwrap() || self.fail_set_accounts.lock().unwrap().contains(a) {
+        let event = if a == SESSION_STATE_ACCOUNT {
+            format!("set:{a}:{v}")
+        } else {
+            format!("set:{a}")
+        };
+        self.events.lock().unwrap().push(event);
+        let sequence_failure = self
+            .set_failure_sequences
+            .lock()
+            .unwrap()
+            .get_mut(a)
+            .and_then(std::collections::VecDeque::pop_front)
+            .unwrap_or(false);
+        if sequence_failure || self.fail_set_accounts.lock().unwrap().contains(a) {
             return Err(AuthError::CredentialStore);
         }
         self.values.lock().unwrap().insert(a.into(), v.into());

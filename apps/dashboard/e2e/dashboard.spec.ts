@@ -88,7 +88,7 @@ async function expectNoAxe(page: Page) {
 }
 
 // Each test starts from localStorage so the in-browser auth adapter, router, and token-bearing API client are exercised together.
-test("signed-out users continue in browser and reach setup", async ({ page }) => {
+test("@auth signed-out users continue in browser and reach setup", async ({ page }) => {
   await seed(page, "signedOut");
   await mockHierarchy(page, { organizations: [], workspaces: {}, projects: {} });
   await page.goto("/");
@@ -98,7 +98,7 @@ test("signed-out users continue in browser and reach setup", async ({ page }) =>
   await expect(page.getByRole("heading", { name: "Create your organization" })).toBeVisible();
 });
 
-test("magic-link rejects invalid email, shows masked sent state, and completes the sent flow", async ({ page }) => {
+test("@auth magic-link rejects invalid email, shows masked sent state, and completes the sent flow", async ({ page }) => {
   await seed(page, "signedOut");
   await mockHierarchy(page, { organizations: [], workspaces: {}, projects: {} });
   await page.goto("/");
@@ -116,6 +116,7 @@ test("magic-link rejects invalid email, shows masked sent state, and completes t
 
   await page.goto("/auth/callback?code=e2e-magic-code");
   await expect(page.getByRole("heading", { name: "Create your organization" })).toBeVisible();
+  await expectNoAxe(page);
 });
 
 test("sign-out survives reload", async ({ page }) => {

@@ -23,6 +23,11 @@ export default defineConfig({
     {
       name: "macos-compact",
       use: { ...devices["Desktop Safari"], viewport: { width: 960, height: 640 } }
+    },
+    {
+      name: "phone-auth",
+      grep: /@auth/,
+      use: { ...devices["iPhone 13"], viewport: { width: 390, height: 844 } }
     }
   ]
 });

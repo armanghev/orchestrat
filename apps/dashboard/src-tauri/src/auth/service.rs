@@ -1,7 +1,7 @@
 use super::{
     callback::{parse_callback, PendingAuthorization, PendingKind},
     config::SupabaseConfig,
-    keychain::{CredentialStore, PENDING_ACCOUNT, REFRESH_ACCOUNT},
+    keychain::{CredentialStore, PENDING_ACCOUNT, REFRESH_ACCOUNT, SESSION_STATE_ACCOUNT},
     pkce::Pkce,
     transport::{AuthTransport, TokenGrant},
     AuthError,
@@ -9,6 +9,9 @@ use super::{
 use serde::Serialize;
 use std::sync::{Arc, Mutex};
 use tokio::sync::Mutex as AsyncMutex;
+
+const SESSION_BLOCKED: &str = "v1:blocked";
+const SESSION_VALID: &str = "v1:valid";
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -28,7 +31,6 @@ pub struct AuthService {
     lifecycle: Arc<AsyncMutex<()>>,
     current_access: Arc<Mutex<Option<String>>>,
     pending_logout_access: Arc<Mutex<Option<String>>>,
-    session_unusable: Arc<Mutex<bool>>,
 }
 impl AuthService {
     pub fn new(
@@ -43,7 +45,6 @@ impl AuthService {
             lifecycle: Arc::new(AsyncMutex::new(())),
             current_access: Arc::new(Mutex::new(None)),
             pending_logout_access: Arc::new(Mutex::new(None)),
-            session_unusable: Arc::new(Mutex::new(false)),
         }
     }
     fn pending(
@@ -151,37 +152,56 @@ impl AuthService {
             }
             Err(error) => return Err(error),
         };
-        self.persist_grant(grant, now, true)
+        self.persist_grant(grant, now, true, false)
     }
     pub async fn restore(&self, now: u64) -> Result<Option<AccessGrant>, AuthError> {
         let _guard = self.lifecycle.lock().await;
-        self.ensure_session_usable()?;
-        let Some(token) = self.store.get(REFRESH_ACCOUNT)? else {
-            return Ok(None);
+        let marker = self.store.get(SESSION_STATE_ACCOUNT)?;
+        let refresh = self.store.get(REFRESH_ACCOUNT)?;
+        let token = match (marker.as_deref(), refresh) {
+            (None, None) => return Ok(None),
+            (Some(SESSION_VALID), Some(token)) => token,
+            _ => {
+                self.cleanup_all_fail_closed()?;
+                return Ok(None);
+            }
         };
+        self.write_blocked()?;
         match self.transport.refresh(&token).await {
-            Ok(grant) => self.persist_grant(grant, now, false).map(Some),
+            Ok(grant) => self.persist_grant(grant, now, false, true).map(Some),
             Err(error) if error.is_terminal_session() => {
-                self.clear_session_locked()?;
+                self.clear_refresh_after_block()?;
                 Ok(None)
             }
-            Err(error) => Err(error),
+            Err(error) => {
+                self.restore_valid_after_transient()?;
+                Err(error)
+            }
         }
     }
     pub async fn refresh(&self, now: u64) -> Result<AccessGrant, AuthError> {
         let _guard = self.lifecycle.lock().await;
-        self.ensure_session_usable()?;
-        let token = self
-            .store
-            .get(REFRESH_ACCOUNT)?
-            .ok_or(AuthError::NoSession)?;
+        let marker = self.store.get(SESSION_STATE_ACCOUNT)?;
+        let refresh = self.store.get(REFRESH_ACCOUNT)?;
+        let token = match (marker.as_deref(), refresh) {
+            (Some(SESSION_VALID), Some(token)) => token,
+            (None, None) => return Err(AuthError::NoSession),
+            _ => {
+                self.cleanup_all_fail_closed()?;
+                return Err(AuthError::NoSession);
+            }
+        };
+        self.write_blocked()?;
         match self.transport.refresh(&token).await {
-            Ok(grant) => self.persist_grant(grant, now, false),
+            Ok(grant) => self.persist_grant(grant, now, false, true),
             Err(error) if error.is_terminal_session() => {
-                self.clear_session_locked()?;
+                self.clear_refresh_after_block()?;
                 Err(error)
             }
-            Err(error) => Err(error),
+            Err(error) => {
+                self.restore_valid_after_transient()?;
+                Err(error)
+            }
         }
     }
     fn persist_grant(
@@ -189,9 +209,13 @@ impl AuthService {
         grant: TokenGrant,
         now: u64,
         consume_pending: bool,
+        already_blocked: bool,
     ) -> Result<AccessGrant, AuthError> {
+        if !already_blocked {
+            self.write_blocked()?;
+        }
         if grant.refresh_token.is_empty() {
-            self.clear_session_locked()?;
+            self.abandon_grant_locked(consume_pending)?;
             return Err(AuthError::InvalidProviderResponse);
         }
         if self
@@ -199,24 +223,22 @@ impl AuthService {
             .set(REFRESH_ACCOUNT, &grant.refresh_token)
             .is_err()
         {
-            *self
-                .current_access
-                .lock()
-                .map_err(|_| AuthError::CredentialStore)? = None;
-            let cleanup = self.store.delete(REFRESH_ACCOUNT);
-            self.set_session_unusable(cleanup.is_err())?;
+            self.abandon_grant_locked(consume_pending)?;
             return Err(AuthError::CredentialStore);
         }
         if consume_pending && self.store.delete(PENDING_ACCOUNT).is_err() {
-            *self
-                .current_access
-                .lock()
-                .map_err(|_| AuthError::CredentialStore)? = None;
-            let cleanup = self.store.delete(REFRESH_ACCOUNT);
-            self.set_session_unusable(cleanup.is_err())?;
+            self.abandon_grant_locked(false)?;
             return Err(AuthError::CredentialStore);
         }
-        self.set_session_unusable(false)?;
+        if self
+            .store
+            .set(SESSION_STATE_ACCOUNT, SESSION_VALID)
+            .is_err()
+        {
+            let _ = self.store.set(SESSION_STATE_ACCOUNT, SESSION_BLOCKED);
+            self.abandon_grant_locked(false)?;
+            return Err(AuthError::CredentialStore);
+        }
         let result = access_grant(grant.access_token.clone(), grant.expires_in, now);
         *self
             .current_access
@@ -226,10 +248,26 @@ impl AuthService {
     }
     pub async fn expire(&self) -> Result<(), AuthError> {
         let _guard = self.lifecycle.lock().await;
-        self.clear_all_locked()
+        self.write_blocked()?;
+        *self
+            .current_access
+            .lock()
+            .map_err(|_| AuthError::CredentialStore)? = None;
+        if self.delete_both().is_err() {
+            return Err(AuthError::CredentialStore);
+        }
+        if self.store.delete(SESSION_STATE_ACCOUNT).is_err() {
+            return Err(AuthError::CredentialStore);
+        }
+        self.pending_logout_access
+            .lock()
+            .map_err(|_| AuthError::CredentialStore)?
+            .take();
+        Ok(())
     }
     pub async fn sign_out(&self) -> Result<(), AuthError> {
         let _guard = self.lifecycle.lock().await;
+        self.write_blocked()?;
         let access = self
             .current_access
             .lock()
@@ -244,11 +282,12 @@ impl AuthService {
                 *pending = Some(token);
             }
         }
-        self.set_session_unusable(true)?;
         if self.delete_both().is_err() {
             return Err(AuthError::CredentialStore);
         }
-        self.set_session_unusable(false)?;
+        if self.store.delete(SESSION_STATE_ACCOUNT).is_err() {
+            return Err(AuthError::CredentialStore);
+        }
         let access = self
             .pending_logout_access
             .lock()
@@ -264,49 +303,51 @@ impl AuthService {
         let refresh = self.store.delete(REFRESH_ACCOUNT);
         pending.and(refresh)
     }
+    fn write_blocked(&self) -> Result<(), AuthError> {
+        self.store.set(SESSION_STATE_ACCOUNT, SESSION_BLOCKED)
+    }
+    fn restore_valid_after_transient(&self) -> Result<(), AuthError> {
+        self.store.set(SESSION_STATE_ACCOUNT, SESSION_VALID)
+    }
     fn ensure_session_usable(&self) -> Result<(), AuthError> {
-        if *self
-            .session_unusable
-            .lock()
-            .map_err(|_| AuthError::CredentialStore)?
-        {
-            Err(AuthError::CredentialStore)
-        } else {
-            Ok(())
+        match self.store.get(SESSION_STATE_ACCOUNT)?.as_deref() {
+            None | Some(SESSION_VALID) => Ok(()),
+            _ => Err(AuthError::CredentialStore),
         }
     }
-    fn set_session_unusable(&self, value: bool) -> Result<(), AuthError> {
-        *self
-            .session_unusable
-            .lock()
-            .map_err(|_| AuthError::CredentialStore)? = value;
-        Ok(())
-    }
-    fn clear_all_locked(&self) -> Result<(), AuthError> {
+    fn abandon_grant_locked(&self, delete_pending: bool) -> Result<(), AuthError> {
         *self
             .current_access
             .lock()
             .map_err(|_| AuthError::CredentialStore)? = None;
-        self.set_session_unusable(true)?;
+        let refresh = self.store.delete(REFRESH_ACCOUNT);
+        let pending = if delete_pending {
+            self.store.delete(PENDING_ACCOUNT)
+        } else {
+            Ok(())
+        };
+        refresh.and(pending).map_err(|_| AuthError::CredentialStore)
+    }
+    fn cleanup_all_fail_closed(&self) -> Result<(), AuthError> {
+        self.write_blocked()?;
+        *self
+            .current_access
+            .lock()
+            .map_err(|_| AuthError::CredentialStore)? = None;
         if self.delete_both().is_err() {
             return Err(AuthError::CredentialStore);
         }
-        self.pending_logout_access
-            .lock()
-            .map_err(|_| AuthError::CredentialStore)?
-            .take();
-        self.set_session_unusable(false)
+        self.store.delete(SESSION_STATE_ACCOUNT)
     }
-    fn clear_session_locked(&self) -> Result<(), AuthError> {
+    fn clear_refresh_after_block(&self) -> Result<(), AuthError> {
         *self
             .current_access
             .lock()
             .map_err(|_| AuthError::CredentialStore)? = None;
-        self.set_session_unusable(true)?;
         if self.store.delete(REFRESH_ACCOUNT).is_err() {
             return Err(AuthError::CredentialStore);
         }
-        self.set_session_unusable(false)
+        self.store.delete(SESSION_STATE_ACCOUNT)
     }
     #[cfg(test)]
     fn access_for_test(&self) -> Option<String> {
@@ -391,7 +432,7 @@ fn normalize_email(value: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::auth::keychain::MemoryStore;
+    use crate::auth::keychain::{MemoryStore, SESSION_STATE_ACCOUNT};
     use async_trait::async_trait;
     use std::sync::Mutex as StdMutex;
     use url::Url;
@@ -531,6 +572,10 @@ mod tests {
         let t = Arc::new(Fake::new());
         (AuthService::new(config(), s.clone(), t.clone()), s, t)
     }
+    fn store_valid_refresh(store: &MemoryStore, token: &str) {
+        store.set(REFRESH_ACCOUNT, token).unwrap();
+        store.set(SESSION_STATE_ACCOUNT, "v1:valid").unwrap();
+    }
     fn callback(req: &AuthorizationRequest) -> String {
         format!(
             "dev.orchestrat.app://auth/callback?code=auth-code&sb_flow_id={}",
@@ -617,7 +662,7 @@ mod tests {
     #[tokio::test]
     async fn restore_terminal_clears_stale_while_transient_preserves() {
         let (s, store, t) = fixture();
-        store.set(REFRESH_ACCOUNT, "old").unwrap();
+        store_valid_refresh(&store, "old");
         *t.refresh_error.lock().unwrap() = Some(AuthError::ProviderTransient);
         assert!(matches!(
             s.restore(1000).await,
@@ -631,8 +676,8 @@ mod tests {
     #[tokio::test]
     async fn rotation_write_precedes_access_and_failure_never_claims_success() {
         let (s, store, _) = fixture();
-        store.set(REFRESH_ACCOUNT, "old").unwrap();
-        store.fail_writes(true);
+        store_valid_refresh(&store, "old");
+        store.fail_set_for(REFRESH_ACCOUNT, true);
         assert!(matches!(
             s.refresh(1000).await,
             Err(AuthError::CredentialStore)
@@ -758,7 +803,7 @@ mod tests {
     #[tokio::test]
     async fn rotation_set_and_delete_failure_blocks_restore_until_explicit_cleanup() {
         let (service, store, transport) = fixture();
-        store.set(REFRESH_ACCOUNT, "old").unwrap();
+        store_valid_refresh(&store, "old");
         store.fail_set_for(REFRESH_ACCOUNT, true);
         store.fail_delete_for(REFRESH_ACCOUNT, true);
         assert!(matches!(
@@ -808,6 +853,221 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn restore_securely_cleans_pre_marker_or_unknown_state_without_provider_calls() {
+        for marker in [None, Some("v0:unknown")] {
+            let store = Arc::new(MemoryStore::new());
+            store.set(REFRESH_ACCOUNT, "legacy-refresh").unwrap();
+            store.set(PENDING_ACCOUNT, "legacy-pending").unwrap();
+            if let Some(marker) = marker {
+                store.set(SESSION_STATE_ACCOUNT, marker).unwrap();
+            }
+            let transport = Arc::new(Fake::new());
+            let service = AuthService::new(config(), store.clone(), transport.clone());
+            assert!(service.restore(1_000).await.unwrap().is_none());
+            assert_eq!(*transport.refresh_calls.lock().unwrap(), 0);
+            assert!(store.get(REFRESH_ACCOUNT).unwrap().is_none());
+            assert!(store.get(PENDING_ACCOUNT).unwrap().is_none());
+            assert!(store.get(SESSION_STATE_ACCOUNT).unwrap().is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn missing_marker_and_no_refresh_is_signed_out_without_destroying_pending_flow() {
+        let (service, store, transport) = fixture();
+        let request = service.begin_github(1_000).await.unwrap();
+        let second = AuthService::new(config(), store.clone(), transport.clone());
+        assert!(second.restore(1_001).await.unwrap().is_none());
+        assert_eq!(*transport.refresh_calls.lock().unwrap(), 0);
+        let pending: PendingAuthorization =
+            serde_json::from_str(&store.get(PENDING_ACCOUNT).unwrap().unwrap()).unwrap();
+        assert_eq!(pending.flow_id, request.flow_id);
+    }
+
+    #[tokio::test]
+    async fn marker_write_failure_prevents_provider_refresh_and_local_mutation() {
+        let (service, store, transport) = fixture();
+        store_valid_refresh(&store, "old");
+        store.fail_set_for(SESSION_STATE_ACCOUNT, true);
+        assert!(matches!(
+            service.refresh(1_000).await,
+            Err(AuthError::CredentialStore)
+        ));
+        assert_eq!(*transport.refresh_calls.lock().unwrap(), 0);
+        assert_eq!(store.get(REFRESH_ACCOUNT).unwrap().as_deref(), Some("old"));
+        assert_eq!(
+            store.get(SESSION_STATE_ACCOUNT).unwrap().as_deref(),
+            Some("v1:valid")
+        );
+        assert!(matches!(
+            service.sign_out().await,
+            Err(AuthError::CredentialStore)
+        ));
+        assert!(transport.logout.lock().unwrap().is_empty());
+        assert_eq!(store.get(REFRESH_ACCOUNT).unwrap().as_deref(), Some("old"));
+    }
+
+    #[tokio::test]
+    async fn failed_valid_marker_after_rotation_or_transient_remains_persistently_blocked() {
+        for provider_succeeds in [true, false] {
+            let (service, store, transport) = fixture();
+            store_valid_refresh(&store, "old");
+            if !provider_succeeds {
+                *transport.refresh_error.lock().unwrap() = Some(AuthError::ProviderTransient);
+            }
+            // The first marker write blocks before network; the second fails when restoring validity.
+            store.set_failure_sequence(SESSION_STATE_ACCOUNT, [false, true]);
+            assert!(matches!(
+                service.refresh(1_000).await,
+                Err(AuthError::CredentialStore)
+            ));
+            assert_eq!(*transport.refresh_calls.lock().unwrap(), 1);
+            assert_eq!(
+                store.get(SESSION_STATE_ACCOUNT).unwrap().as_deref(),
+                Some("v1:blocked")
+            );
+
+            let second = AuthService::new(config(), store.clone(), transport.clone());
+            assert!(second.restore(1_001).await.unwrap().is_none());
+            assert_eq!(*transport.refresh_calls.lock().unwrap(), 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn persistent_block_prevents_cross_process_restore_after_rotation_cleanup_failure() {
+        let store = Arc::new(MemoryStore::new());
+        store_valid_refresh(&store, "old");
+        let transport = Arc::new(Fake::new());
+        let first = AuthService::new(config(), store.clone(), transport.clone());
+        store.clear_events();
+        store.fail_set_for(REFRESH_ACCOUNT, true);
+        store.fail_delete_for(REFRESH_ACCOUNT, true);
+        assert!(matches!(
+            first.refresh(1_000).await,
+            Err(AuthError::CredentialStore)
+        ));
+        assert_eq!(
+            store.get(SESSION_STATE_ACCOUNT).unwrap().as_deref(),
+            Some("v1:blocked")
+        );
+        assert_eq!(
+            store.events().first().map(String::as_str),
+            Some("set:session-state:v1:blocked")
+        );
+
+        let second = AuthService::new(config(), store.clone(), transport.clone());
+        assert!(matches!(
+            second.restore(1_001).await,
+            Err(AuthError::CredentialStore)
+        ));
+        assert_eq!(*transport.refresh_calls.lock().unwrap(), 1);
+
+        store.fail_set_for(REFRESH_ACCOUNT, false);
+        store.fail_delete_for(REFRESH_ACCOUNT, false);
+        assert!(second.restore(1_002).await.unwrap().is_none());
+        assert_eq!(*transport.refresh_calls.lock().unwrap(), 1);
+        assert!(store.get(SESSION_STATE_ACCOUNT).unwrap().is_none());
+        assert!(second.begin_github(1_003).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn persistent_block_prevents_cross_process_restore_after_signout_delete_failure() {
+        let (first, store, transport) = fixture();
+        let request = first.begin_github(1_000).await.unwrap();
+        first.complete(&callback(&request), 1_100).await.unwrap();
+        store.fail_delete_for(REFRESH_ACCOUNT, true);
+        assert!(matches!(
+            first.sign_out().await,
+            Err(AuthError::CredentialStore)
+        ));
+        assert!(transport.logout.lock().unwrap().is_empty());
+        assert_eq!(
+            store.get(SESSION_STATE_ACCOUNT).unwrap().as_deref(),
+            Some("v1:blocked")
+        );
+
+        let second = AuthService::new(config(), store.clone(), transport.clone());
+        assert!(matches!(
+            second.restore(1_101).await,
+            Err(AuthError::CredentialStore)
+        ));
+        assert_eq!(*transport.refresh_calls.lock().unwrap(), 0);
+        store.fail_delete_for(REFRESH_ACCOUNT, false);
+        assert!(second.restore(1_102).await.unwrap().is_none());
+        assert_eq!(*transport.refresh_calls.lock().unwrap(), 0);
+        assert!(second.begin_github(1_103).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn persistent_marker_orders_grants_refresh_and_local_signout_fail_closed() {
+        let (service, store, _) = fixture();
+        let request = service.begin_github(900).await.unwrap();
+        store.clear_events();
+        service.complete(&callback(&request), 950).await.unwrap();
+        let events = store.events();
+        let blocked = events
+            .iter()
+            .position(|e| e == "set:session-state:v1:blocked")
+            .unwrap();
+        let refresh = events
+            .iter()
+            .position(|e| e == "set:refresh-session")
+            .unwrap();
+        let pending = events
+            .iter()
+            .position(|e| e == "delete:pending-pkce")
+            .unwrap();
+        let valid = events
+            .iter()
+            .position(|e| e == "set:session-state:v1:valid")
+            .unwrap();
+        assert!(blocked < refresh && refresh < pending && pending < valid);
+        assert_eq!(
+            events.last().map(String::as_str),
+            Some("set:session-state:v1:valid")
+        );
+
+        store.clear_events();
+        service.refresh(1_000).await.unwrap();
+        let events = store.events();
+        assert_eq!(
+            events.first().map(String::as_str),
+            Some("set:session-state:v1:blocked")
+        );
+        assert!(
+            events
+                .iter()
+                .position(|e| e == "set:refresh-session")
+                .unwrap()
+                < events
+                    .iter()
+                    .rposition(|e| e == "set:session-state:v1:valid")
+                    .unwrap()
+        );
+        assert_eq!(
+            events.last().map(String::as_str),
+            Some("set:session-state:v1:valid")
+        );
+
+        store.clear_events();
+        service.sign_out().await.unwrap();
+        let events = store.events();
+        assert_eq!(
+            events.first().map(String::as_str),
+            Some("set:session-state:v1:blocked")
+        );
+        assert!(
+            events
+                .iter()
+                .position(|e| e == "delete:refresh-session")
+                .unwrap()
+                < events
+                    .iter()
+                    .position(|e| e == "delete:session-state")
+                    .unwrap()
+        );
+    }
+
+    #[tokio::test]
     async fn completion_and_signout_serialize_and_clear_before_remote_logout() {
         let store = Arc::new(MemoryStore::new());
         let transport = Arc::new(BlockingTransport::new());
@@ -841,7 +1101,7 @@ mod tests {
     #[tokio::test]
     async fn concurrent_refreshes_serialize_rotated_credentials() {
         let store = Arc::new(MemoryStore::new());
-        store.set(REFRESH_ACCOUNT, "original").unwrap();
+        store_valid_refresh(&store, "original");
         let transport = Arc::new(BlockingTransport::new());
         let service = AuthService::new(config(), store.clone(), transport.clone());
         let first = tokio::spawn({
@@ -877,7 +1137,7 @@ mod tests {
     #[tokio::test]
     async fn signout_after_inflight_refresh_cannot_resurrect_rotation() {
         let store = Arc::new(MemoryStore::new());
-        store.set(REFRESH_ACCOUNT, "original").unwrap();
+        store_valid_refresh(&store, "original");
         let transport = Arc::new(BlockingTransport::new());
         let service = AuthService::new(config(), store.clone(), transport.clone());
         let refresh = tokio::spawn({

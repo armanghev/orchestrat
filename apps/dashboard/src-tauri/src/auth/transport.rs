@@ -60,6 +60,7 @@ struct TokenResponse {
     refresh_token: Option<String>,
     expires_in: u64,
     token_type: String,
+    user: serde_json::Value,
 }
 
 impl SupabaseAuthTransport {
@@ -94,7 +95,7 @@ impl SupabaseAuthTransport {
                 AUTHORIZATION,
                 format!("Bearer {}", self.config.publishable_key),
             )
-            .header(CONTENT_TYPE, "application/json")
+            .header(CONTENT_TYPE, "application/json;charset=UTF-8")
             .header("X-Supabase-Api-Version", API_VERSION)
             .header("X-Client-Info", CLIENT_INFO)
     }
@@ -150,6 +151,7 @@ impl SupabaseAuthTransport {
             || token.access_token.len() > 16384
             || !token.token_type.eq_ignore_ascii_case("bearer")
             || token.expires_in == 0
+            || !token.user.is_object()
         {
             return Err(AuthError::InvalidProviderResponse);
         }
@@ -223,6 +225,9 @@ impl AuthTransport for SupabaseAuthTransport {
             .post(url)
             .header("apikey", &self.config.publishable_key)
             .header(AUTHORIZATION, format!("Bearer {access_token}"))
+            .header(CONTENT_TYPE, "application/json;charset=UTF-8")
+            .header("X-Supabase-Api-Version", API_VERSION)
+            .header("X-Client-Info", CLIENT_INFO)
             .send()
             .await
             .map_err(|_| AuthError::ProviderTransient)?;
@@ -262,7 +267,7 @@ mod tests {
                     "authorization",
                     "Bearer sb_publishable_abcdefghijklmnopqrstuvwxyz",
                 )
-                .header("content-type", "application/json")
+                .header("content-type", "application/json;charset=UTF-8")
                 .header("x-supabase-api-version", "2024-01-01")
                 .header("x-client-info", "orchestrat-desktop-auth/1.0")
         };
@@ -288,7 +293,7 @@ mod tests {
             );
             then.status(200).json_body_obj(&serde_json::json!({
                 "access_token": "access-one", "refresh_token": "refresh-one",
-                "expires_in": 60, "token_type": "bearer"
+                "expires_in": 60, "token_type": "bearer", "user": {"id": "user-one"}
             }));
         });
         let refresh = s.mock(|when, then| {
@@ -300,7 +305,7 @@ mod tests {
             .json_body_obj(&serde_json::json!({"refresh_token": "refresh-one"}));
             then.status(200).json_body_obj(&serde_json::json!({
                 "access_token": "access-two", "refresh_token": "refresh-two",
-                "expires_in": 60, "token_type": "bearer"
+                "expires_in": 60, "token_type": "bearer", "user": {"id": "user-one"}
             }));
         });
         let logout = s.mock(|when, then| {
@@ -308,7 +313,10 @@ mod tests {
                 .path("/auth/v1/logout")
                 .query_param("scope", "local")
                 .header("apikey", "sb_publishable_abcdefghijklmnopqrstuvwxyz")
-                .header("authorization", "Bearer access-two");
+                .header("authorization", "Bearer access-two")
+                .header("content-type", "application/json;charset=UTF-8")
+                .header("x-supabase-api-version", "2024-01-01")
+                .header("x-client-info", "orchestrat-desktop-auth/1.0");
             then.status(204);
         });
         let t = SupabaseAuthTransport::new(config(&s));
@@ -385,6 +393,50 @@ mod tests {
                 .await;
             assert!(matches!(result, Err(AuthError::InvalidProviderResponse)));
             otp.assert();
+        }
+    }
+
+    #[tokio::test]
+    async fn token_success_requires_a_user_object_for_pkce_and_refresh() {
+        for grant_type in ["pkce", "refresh_token"] {
+            for user in [serde_json::Value::Null, serde_json::json!([])] {
+                let server = MockServer::start();
+                let response = server.mock(|when, then| {
+                    when.method(POST)
+                        .path("/auth/v1/token")
+                        .query_param("grant_type", grant_type);
+                    then.status(200).json_body_obj(&serde_json::json!({
+                        "access_token": "access", "refresh_token": "refresh", "expires_in": 60,
+                        "token_type": "bearer", "user": user
+                    }));
+                });
+                let transport = SupabaseAuthTransport::new(config(&server));
+                let result = if grant_type == "pkce" {
+                    transport.exchange_code("code", "verifier").await
+                } else {
+                    transport.refresh("refresh").await
+                };
+                assert!(matches!(result, Err(AuthError::InvalidProviderResponse)));
+                response.assert();
+            }
+            let server = MockServer::start();
+            let missing = server.mock(|when, then| {
+                when.method(POST)
+                    .path("/auth/v1/token")
+                    .query_param("grant_type", grant_type);
+                then.status(200).json_body_obj(&serde_json::json!({
+                    "access_token": "access", "refresh_token": "refresh", "expires_in": 60,
+                    "token_type": "bearer"
+                }));
+            });
+            let transport = SupabaseAuthTransport::new(config(&server));
+            let result = if grant_type == "pkce" {
+                transport.exchange_code("code", "verifier").await
+            } else {
+                transport.refresh("refresh").await
+            };
+            assert!(matches!(result, Err(AuthError::InvalidProviderResponse)));
+            missing.assert();
         }
     }
 
