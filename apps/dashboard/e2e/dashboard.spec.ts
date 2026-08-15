@@ -33,7 +33,7 @@ function populatedState(): HierarchyState {
 }
 
 async function mockHierarchy(page: Page, state: HierarchyState) {
-  await page.route("http://api.orchestrat.test/api/v1/**", async (route) => {
+  await page.route("https://api.orchestrat.test/api/v1/**", async (route) => {
     expect(route.request().headers().authorization).toBe("Bearer e2e-session-token");
     const url = new URL(route.request().url());
     const path = url.pathname;

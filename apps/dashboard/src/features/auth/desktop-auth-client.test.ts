@@ -3,6 +3,13 @@ import { DesktopAuthClient } from "./desktop-auth-client";
 
 const grant = { accessToken: "access-1", expiresAtMs: 60_000 };
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
+}
+
 function fixture(restored: typeof grant | null = null) {
   let callback: ((url: URL) => void) | undefined;
   const bridge = {
@@ -40,9 +47,11 @@ describe("DesktopAuthClient", () => {
     await client.completeSignIn(
       "dev.orchestrat.app://auth/callback?code=a&state=b"
     );
-    expect(client.getSnapshot()).toEqual({ status: "signedIn" });
+    expect(client.getSnapshot()).toMatchObject({ status: "signedIn" });
     expect(await client.getAccessToken()).toBe("access-1");
+    const identityBeforeRefresh = (client.getSnapshot() as { identityKey: string }).identityKey;
     expect(await client.getAccessToken({ forceRefresh: true })).toBe("access-2");
+    expect((client.getSnapshot() as { identityKey: string }).identityKey).toBe(identityBeforeRefresh);
 
     await client.signOut();
     expect(client.getSnapshot()).toEqual({ status: "signedOut" });
@@ -65,6 +74,68 @@ describe("DesktopAuthClient", () => {
       code: "state_mismatch",
       message: "The callback state does not match."
     });
+  });
+
+
+  it("lets a cold callback synchronously own auth before subscription and restore settle", async () => {
+    const f = fixture({ accessToken: "old-restored", expiresAtMs: 60_000 });
+    const subscription = deferred<() => void>();
+    const completion = deferred<typeof grant>();
+    f.platform.onAuthCallback.mockImplementation((handler) => {
+      handler(new URL("dev.orchestrat.app://auth/callback?code=cold&state=fresh"));
+      return subscription.promise;
+    });
+    f.bridge.complete.mockReturnValueOnce(completion.promise);
+    const client = new DesktopAuthClient(f.platform, f.bridge, () => 1_000);
+    const initializing = client.initialize();
+
+    expect(client.getSnapshot()).toEqual({ status: "signingIn" });
+    expect(await client.getAccessToken()).toBeNull();
+    expect(f.bridge.restore).not.toHaveBeenCalled();
+    subscription.resolve(vi.fn());
+    await initializing;
+    expect(f.bridge.restore).not.toHaveBeenCalled();
+    expect(client.getSnapshot()).toEqual({ status: "signingIn" });
+
+    completion.resolve({ accessToken: "callback-new", expiresAtMs: 60_000 });
+    await vi.waitFor(() => expect(client.getSnapshot()).toMatchObject({ status: "signedIn" }));
+    expect(await client.getAccessToken()).toBe("callback-new");
+  });
+
+  it("leaves no restored grant or token when a cold callback fails", async () => {
+    const f = fixture({ accessToken: "must-not-restore", expiresAtMs: 60_000 });
+    const subscription = deferred<() => void>();
+    const completion = deferred<typeof grant>();
+    f.platform.onAuthCallback.mockImplementation((handler) => {
+      handler(new URL("dev.orchestrat.app://auth/callback?code=cold-failure&state=fresh"));
+      return subscription.promise;
+    });
+    f.bridge.complete.mockReturnValueOnce(completion.promise);
+    const client = new DesktopAuthClient(f.platform, f.bridge, () => 1_000);
+    const initializing = client.initialize();
+    subscription.resolve(vi.fn());
+    await initializing;
+    completion.reject({ code: "callback_failed", message: "Try again." });
+    await vi.waitFor(() => expect(client.getSnapshot()).toEqual({ status: "error", code: "callback_failed", message: "Try again." }));
+    expect(f.bridge.restore).not.toHaveBeenCalled();
+    expect(await client.getAccessToken()).toBeNull();
+  });
+
+  it("clears a warm grant synchronously and changes identity only when callback B completes", async () => {
+    const f = fixture(grant);
+    const completion = deferred<typeof grant>();
+    f.bridge.complete.mockReturnValueOnce(completion.promise);
+    const client = new DesktopAuthClient(f.platform, f.bridge, () => 1_000);
+    await client.initialize();
+    const first = client.getSnapshot();
+    expect(first).toMatchObject({ status: "signedIn" });
+
+    f.getCallback()?.(new URL("dev.orchestrat.app://auth/callback?code=switch&state=fresh"));
+    expect(client.getSnapshot()).toEqual({ status: "signingIn" });
+    expect(await client.getAccessToken()).toBeNull();
+    completion.resolve({ accessToken: "account-b", expiresAtMs: 60_000 });
+    await vi.waitFor(() => expect(client.getSnapshot()).toMatchObject({ status: "signedIn" }));
+    expect((client.getSnapshot() as { identityKey: string }).identityKey).not.toBe((first as { identityKey: string }).identityKey);
   });
 
   it("refreshes automatically when fewer than 30 seconds remain", async () => {
@@ -107,7 +178,7 @@ describe("DesktopAuthClient", () => {
     expect(callback).toBeDefined();
 
     callback?.(new URL("dev.orchestrat.app://auth/callback?code=a&state=b"));
-    await vi.waitFor(() => expect(client.getSnapshot()).toEqual({ status: "signedIn" }));
+    await vi.waitFor(() => expect(client.getSnapshot()).toMatchObject({ status: "signedIn" }));
     await new Promise((resolve) => setTimeout(resolve, 0));
     callback?.(new URL("dev.orchestrat.app://auth/callback?code=a&state=b"));
     await Promise.resolve();
@@ -122,7 +193,7 @@ describe("DesktopAuthClient", () => {
     await client.signOut();
     await client.signInWithGitHub();
     f.getCallback()?.(new URL("dev.orchestrat.app://auth/callback?code=new&state=fresh"));
-    await vi.waitFor(() => expect(client.getSnapshot()).toEqual({ status: "signedIn" }));
+    await vi.waitFor(() => expect(client.getSnapshot()).toMatchObject({ status: "signedIn" }));
     expect(f.bridge.complete).toHaveBeenCalledOnce();
   });
 

@@ -1,5 +1,5 @@
 import { createClient, type AuthChangeEvent, type Session, type SupabaseClient } from "@supabase/supabase-js";
-import { type AuthCapabilities, type AuthClient, type AuthSnapshot, loadingAuthSnapshot, type TokenOptions } from "./auth-client";
+import { type AuthCapabilities, type AuthClient, type AuthCompletionResult, type AuthSnapshot, loadingAuthSnapshot, type TokenOptions } from "./auth-client";
 import { ProviderTokenStrippingStorage } from "./web-auth-storage";
 
 type AuthResult<T> = Promise<{ data: T; error: unknown }>;
@@ -37,6 +37,7 @@ type OperationContext = { generation: number; authEventVersion: number; operatio
 function snapshotsEqual(left: AuthSnapshot, right: AuthSnapshot): boolean {
   if (left.status !== right.status) return false;
   if (left.status === "error" && right.status === "error") return left.code === right.code && left.message === right.message;
+  if (left.status === "signedIn" && right.status === "signedIn") return left.identityKey === right.identityKey;
   if ((left.status === "sendingMagicLink" || left.status === "magicLinkSent") &&
       (right.status === "sendingMagicLink" || right.status === "magicLinkSent")) return left.email === right.email;
   return true;
@@ -99,7 +100,7 @@ export class WebAuthClient implements AuthClient {
   private initialization: Promise<void> | null = null;
   private githubOperation: Promise<void> | null = null;
   private magicLinkOperation: Promise<void> | null = null;
-  private callbackOperation: Promise<void> | null = null;
+  private callbackOperation: Promise<AuthCompletionResult> | null = null;
   private callbackAttempted = false;
   private refreshOperation: Promise<string | null> | null = null;
   private signOutOperation: Promise<void> | null = null;
@@ -131,7 +132,7 @@ export class WebAuthClient implements AuthClient {
         this.authEventVersion += 1;
         this.operationEpoch += 1;
         this.session = session;
-        this.setSnapshot(session ? { status: "signedIn" } : { status: "signedOut" });
+        this.setSnapshot(session ? { status: "signedIn", identityKey: session.user.id } : { status: "signedOut" });
       }
     }).data.subscription;
     if (this.disposed) {
@@ -144,7 +145,7 @@ export class WebAuthClient implements AuthClient {
       if (result.error) throw result.error;
       if (!this.disposed && generation === this.generation && version === this.authEventVersion) {
         this.session = result.data.session;
-        this.setSnapshot(this.session ? { status: "signedIn" } : { status: "signedOut" });
+        this.setSnapshot(this.session ? { status: "signedIn", identityKey: this.session.user.id } : { status: "signedOut" });
       }
     } catch {
       if (!this.disposed && generation === this.generation && this.snapshot.status === "loading") {
@@ -221,20 +222,20 @@ export class WebAuthClient implements AuthClient {
     return operation;
   }
 
-  completeSignIn(callbackUrl: string): Promise<void> {
-    if (this.disposed) return Promise.resolve();
+  completeSignIn(callbackUrl: string): Promise<AuthCompletionResult> {
+    if (this.disposed) return Promise.resolve({ status: "error" });
     if (this.callbackOperation) return this.callbackOperation;
-    if (this.callbackAttempted) return Promise.resolve();
+    if (this.callbackAttempted) return Promise.resolve({ status: "error" });
     const parsed = parseCallback(callbackUrl, this.callbackUrl);
     const context = this.beginOperation();
     if (parsed.kind === "invalid") {
       this.setSnapshot(invalidCallbackError);
-      return Promise.resolve();
+      return Promise.resolve({ status: "error" });
     }
     this.callbackAttempted = true;
     if (parsed.kind === "providerError") {
       this.setSnapshot(providerCallbackError);
-      return Promise.resolve();
+      return Promise.resolve({ status: "error" });
     }
     this.setSnapshot({ status: "signingIn" });
     let request: ReturnType<WebAuthApi["exchangeCodeForSession"]>;
@@ -244,18 +245,24 @@ export class WebAuthClient implements AuthClient {
       if (this.canCommit(context)) {
         this.setSnapshot({ status: "error", code: "callback_exchange_failed", message: "We couldn't complete your sign-in. Try again." });
       }
-      return Promise.resolve();
+      return Promise.resolve({ status: "error" });
     }
-    const operation = request.then((result) => {
+    const operation: Promise<AuthCompletionResult> = request.then((result): AuthCompletionResult => {
       if (result.error || !result.data.session) throw result.error ?? new Error("Session missing");
+      const identityKey = result.data.session.user.id;
       if (this.canCommit(context)) {
         this.session = result.data.session;
-        this.setSnapshot({ status: "signedIn" });
+        this.setSnapshot({ status: "signedIn", identityKey });
+        return { status: "success", identityKey };
       }
-    }).catch(() => {
+      if (this.authEventVersion !== context.authEventVersion && this.session?.user.id === identityKey &&
+          this.snapshot.status === "signedIn") return { status: "success", identityKey };
+      return { status: "error" };
+    }).catch((): AuthCompletionResult => {
       if (this.canCommit(context)) {
         this.setSnapshot({ status: "error", code: "callback_exchange_failed", message: "We couldn't complete your sign-in. Try again." });
       }
+      return { status: "error" };
     }).finally(() => { if (this.callbackOperation === operation) this.callbackOperation = null; });
     this.callbackOperation = operation;
     return operation;
@@ -298,7 +305,7 @@ export class WebAuthClient implements AuthClient {
         return null;
       }
       this.session = result.data.session;
-      this.setSnapshot({ status: "signedIn" });
+      this.setSnapshot({ status: "signedIn", identityKey: this.session.user.id });
       return this.session.access_token;
     } catch {
       if (!this.canCommit(context)) return this.session?.access_token ?? null;

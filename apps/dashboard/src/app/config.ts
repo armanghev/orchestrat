@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 const baseSchema = z.object({
-  VITE_API_URL: z.url(),
+  VITE_API_URL: z.string(),
   VITE_E2E_AUTH: z.enum(["0", "1"]).optional()
 });
 
@@ -15,13 +15,21 @@ export type PublicConfig = {
 };
 
 function cleanUrl(value: unknown): URL | null {
-  if (typeof value !== "string" || value.length === 0 || value !== value.trim()) return null;
+  if (typeof value !== "string" || value.length === 0 || value !== value.trim() ||
+      !/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(value)) return null;
   try { return new URL(value); } catch { return null; }
+}
+
+function hasAuthorityCredentials(value: unknown): boolean {
+  if (typeof value !== "string") return true;
+  const authorityStart = value.indexOf("://") + 3;
+  const authority = value.slice(authorityStart).split(/[/?#]/, 1)[0] ?? "";
+  return authority.includes("@");
 }
 
 function isSupabaseProjectUrl(value: unknown): value is string {
   const url = cleanUrl(value);
-  return url !== null && url.protocol === "https:" && url.username === "" && url.password === "" &&
+  return url !== null && !hasAuthorityCredentials(value) && url.protocol === "https:" && url.username === "" && url.password === "" &&
     url.pathname === "/" && url.search === "" && url.hash === "";
 }
 
@@ -29,29 +37,44 @@ function isLoopback(hostname: string): boolean {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
 }
 
-function isWebCallbackUrl(value: unknown): value is string {
+function isApiRootUrl(value: unknown): value is string {
   const url = cleanUrl(value);
-  if (!url || url.username || url.password || url.pathname !== "/auth/callback" || url.search || url.hash) return false;
+  if (!url || hasAuthorityCredentials(value) || url.username || url.password || url.pathname !== "/" || url.search || url.hash) return false;
   return url.protocol === "https:" || (url.protocol === "http:" && isLoopback(url.hostname));
 }
 
-function jwtRole(value: string): string | null {
-  const parts = value.split(".");
-  if (parts.length !== 3) return null;
+function isWebCallbackUrl(value: unknown): value is string {
+  const url = cleanUrl(value);
+  if (!url || hasAuthorityCredentials(value) || url.username || url.password || url.pathname !== "/auth/callback" || url.search || url.hash) return false;
+  return url.protocol === "https:" || (url.protocol === "http:" && isLoopback(url.hostname));
+}
+
+function parseJwtObject(part: string): Record<string, unknown> | null {
+  if (part.length === 0 || part.length > 4096 || !/^[A-Za-z0-9_-]+$/.test(part)) return null;
   try {
-    const base64 = parts[1].replaceAll("-", "+").replaceAll("_", "/");
-    const payload = JSON.parse(atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, "="))) as unknown;
-    if (typeof payload === "object" && payload !== null && "role" in payload && typeof payload.role === "string") return payload.role;
-  } catch { /* A malformed public key is handled by Supabase. */ }
-  return null;
+    const base64 = part.replaceAll("-", "+").replaceAll("_", "/");
+    const parsed: unknown = JSON.parse(atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, "=")));
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
+function isLegacyAnonKey(value: string): boolean {
+  const parts = value.split(".");
+  if (parts.length !== 3 || !/^[A-Za-z0-9_-]{8,4096}$/.test(parts[2] ?? "")) return false;
+  const header = parseJwtObject(parts[0] ?? "");
+  const payload = parseJwtObject(parts[1] ?? "");
+  return header?.alg === "HS256" && payload?.role === "anon";
 }
 
 function isPublicSupabaseKey(value: unknown): value is string {
-  if (typeof value !== "string" || value.length === 0 || value.length > 4096 || value !== value.trim()) return false;
+  if (typeof value !== "string" || value.length > 4096 || value !== value.trim()) return false;
+  // This is a build-time guardrail against secret formats, not proof that a key is safe or correctly scoped.
   const lower = value.toLowerCase();
-  return !lower.includes("service_role") && !lower.includes("service-role") &&
-    !lower.startsWith("sb_secret_") && !lower.startsWith("sk_") && !lower.includes("secret-key") &&
-    jwtRole(value) !== "service_role";
+  if (lower.includes("service_role") || lower.includes("service-role") || lower.includes("secret-key")) return false;
+  if (/^sb_publishable_[A-Za-z0-9_-]{20,256}$/.test(value)) return true;
+  return !lower.startsWith("sb_secret_") && isLegacyAnonKey(value);
 }
 
 export function parsePublicConfig(
@@ -59,12 +82,13 @@ export function parsePublicConfig(
   runtime: PublicConfig["runtime"]
 ): PublicConfig {
   const common = baseSchema.safeParse(input);
+  const validCommon = common.success && isApiRootUrl(input.VITE_API_URL);
   const validWeb = runtime === "desktop" || (
     isSupabaseProjectUrl(input.VITE_SUPABASE_URL) &&
     isPublicSupabaseKey(input.VITE_SUPABASE_PUBLISHABLE_KEY) &&
     isWebCallbackUrl(input.VITE_WEB_AUTH_CALLBACK_URL)
   );
-  if (!common.success || !validWeb) throw new Error("Dashboard configuration is invalid.");
+  if (!validCommon || !validWeb) throw new Error("Dashboard configuration is invalid.");
 
   return {
     apiUrl: common.data.VITE_API_URL,

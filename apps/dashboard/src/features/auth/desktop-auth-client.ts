@@ -1,8 +1,10 @@
 import type { Platform } from "@/platform/contract";
-import { loadingAuthSnapshot, type AccessGrant, type AuthClient, type AuthSnapshot, type TokenOptions } from "./auth-client";
+import { loadingAuthSnapshot, type AccessGrant, type AuthClient, type AuthCompletionResult, type AuthSnapshot, type TokenOptions } from "./auth-client";
 import type { DesktopAuthBridge } from "./desktop-bridge";
 
 const refreshWindowMs = 30_000;
+let desktopIdentitySequence = 0;
+function newDesktopIdentityKey(): string { return `desktop-session-${++desktopIdentitySequence}`; }
 function commandError(error: unknown): Extract<AuthSnapshot, { status: "error" }> {
   if (
     typeof error === "object" &&
@@ -20,7 +22,8 @@ function commandError(error: unknown): Extract<AuthSnapshot, { status: "error" }
 function snapshotsEqual(left: AuthSnapshot, right: AuthSnapshot): boolean {
   return left.status === right.status &&
     (left.status !== "error" || right.status !== "error" ||
-      (left.code === right.code && left.message === right.message));
+      (left.code === right.code && left.message === right.message)) &&
+    (left.status !== "signedIn" || right.status !== "signedIn" || left.identityKey === right.identityKey);
 }
 
 export class DesktopAuthClient implements AuthClient {
@@ -31,10 +34,11 @@ export class DesktopAuthClient implements AuthClient {
   private signInOperation: Promise<void> | null = null;
   private refreshOperation: Promise<string | null> | null = null;
   private readonly listeners = new Set<() => void>();
-  private callbackOperation: Promise<void> | null = null;
+  private callbackOperation: Promise<AuthCompletionResult> | null = null;
   private callbackCompleted = false;
   private callbackUnsubscribe: (() => void) | null = null;
   private generation = 0;
+  private identityKey: string | null = null;
   private disposed = false;
 
   constructor(
@@ -54,8 +58,11 @@ export class DesktopAuthClient implements AuthClient {
     this.disposed = true;
     this.generation += 1;
     this.signInOperation = null;
+    this.refreshOperation = null;
     this.callbackOperation = null;
     this.callbackCompleted = true;
+    this.grant = null;
+    this.identityKey = null;
     const unsubscribe = this.callbackUnsubscribe;
     this.callbackUnsubscribe = null;
     unsubscribe?.();
@@ -74,10 +81,12 @@ export class DesktopAuthClient implements AuthClient {
         return;
       }
       this.callbackUnsubscribe = unsubscribe;
+      if (this.generation !== generation) return;
       const restored = await this.bridge.restore();
       if (!this.disposed && this.generation === generation && this.snapshot.status === "loading") {
         this.grant = restored;
-        this.setSnapshot(restored ? { status: "signedIn" } : { status: "signedOut" });
+        this.identityKey = restored ? newDesktopIdentityKey() : null;
+        this.setSnapshot(restored ? { status: "signedIn", identityKey: this.identityKey as string } : { status: "signedOut" });
       }
     } catch (error) {
       if (!this.disposed && this.generation === generation && this.snapshot.status === "loading") {
@@ -118,24 +127,32 @@ export class DesktopAuthClient implements AuthClient {
     this.setSnapshot({ status: "error", code: "unsupported_auth_method", message: "Email sign-in is not available in the desktop app." });
   }
 
-  completeSignIn(callbackUrl: string): Promise<void> {
-    if (this.disposed) return Promise.resolve();
+  completeSignIn(callbackUrl: string): Promise<AuthCompletionResult> {
+    if (this.disposed) return Promise.resolve({ status: "error" });
     return this.completeCallback(callbackUrl);
   }
 
-  private completeCallback(callbackUrl: string): Promise<void> {
-    if (this.callbackCompleted) return Promise.resolve();
+  private completeCallback(callbackUrl: string): Promise<AuthCompletionResult> {
+    if (this.callbackCompleted) return Promise.resolve({ status: "error" });
     if (this.callbackOperation) return this.callbackOperation;
-    const generation = this.generation;
-    const operation = this.bridge.complete(callbackUrl)
-      .then((grant) => {
-        if (this.generation !== generation) return;
+    const generation = ++this.generation;
+    this.grant = null;
+    this.identityKey = null;
+    this.signInOperation = null;
+    this.refreshOperation = null;
+    this.setSnapshot({ status: "signingIn" });
+    const operation: Promise<AuthCompletionResult> = this.bridge.complete(callbackUrl)
+      .then((grant): AuthCompletionResult => {
+        if (this.generation !== generation) return { status: "error" };
         this.grant = grant;
+        this.identityKey = newDesktopIdentityKey();
         this.callbackCompleted = true;
-        this.setSnapshot({ status: "signedIn" });
+        this.setSnapshot({ status: "signedIn", identityKey: this.identityKey });
+        return { status: "success", identityKey: this.identityKey };
       })
-      .catch((error) => {
+      .catch((error): AuthCompletionResult => {
         if (this.generation === generation) this.setSnapshot(commandError(error));
+        return { status: "error" };
       })
       .finally(() => {
         if (this.callbackOperation === operation) this.callbackOperation = null;
@@ -149,6 +166,7 @@ export class DesktopAuthClient implements AuthClient {
     this.signInOperation = null;
     this.callbackOperation = null;
     this.grant = null;
+    this.identityKey = null;
     this.setSnapshot({ status: "signedOut" });
     try {
       await this.bridge.signOut();
@@ -162,6 +180,7 @@ export class DesktopAuthClient implements AuthClient {
     this.signInOperation = null;
     this.callbackOperation = null;
     this.grant = null;
+    this.identityKey = null;
     this.setSnapshot({ status: "signedOut" });
   }
 
@@ -181,7 +200,7 @@ export class DesktopAuthClient implements AuthClient {
       const refreshed = await this.bridge.refresh();
       if (this.generation !== generation || this.grant !== grant) return this.grant?.accessToken ?? null;
       this.grant = refreshed;
-      this.setSnapshot({ status: "signedIn" });
+      if (this.identityKey) this.setSnapshot({ status: "signedIn", identityKey: this.identityKey });
       return refreshed.accessToken;
     } catch {
       if (this.generation === generation && this.grant === grant) await this.expireSession();

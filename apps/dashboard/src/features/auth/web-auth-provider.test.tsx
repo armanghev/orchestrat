@@ -25,7 +25,7 @@ class FakeWebClient implements AuthClient {
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => this.listeners.delete(listener); };
   signInWithGitHub = vi.fn(async () => undefined);
   sendMagicLink = vi.fn(async () => undefined);
-  completeSignIn = vi.fn(async () => undefined);
+  completeSignIn = vi.fn(async () => ({ status: "error" as const }));
   signOut = vi.fn(async () => undefined);
   expireSession = vi.fn(async () => undefined);
   getAccessToken = vi.fn(async () => null);

@@ -11,9 +11,9 @@ const apiUrl = "http://localhost:3001/api/v1";
 
 class FakeAuthClient implements AuthClient {
   readonly capabilities = { github: true, magicLink: true };
-  private readonly snapshot: AuthSnapshot = { status: "signedIn" };
+  private readonly snapshot: AuthSnapshot = { status: "signedIn", identityKey: "setup-user" };
   async initialize() {}
-  async completeSignIn() {}
+  async completeSignIn() { return { status: "error" as const }; }
   getSnapshot() { return this.snapshot; }
   subscribe() { return () => undefined; }
   async signInWithGitHub() {}

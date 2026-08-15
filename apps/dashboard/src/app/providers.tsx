@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
-import { QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import { RouterProvider } from "@tanstack/react-router";
 import type { PublicConfig } from "@/app/config";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/features/auth/auth-provider";
-import { loadingAuthClient } from "@/features/auth/auth-client";
+import { loadingAuthClient, type AuthClient } from "@/features/auth/auth-client";
 import { useAuthClient } from "@/features/auth/auth-context";
 import { ApiClient } from "@/lib/api/client";
 import { PlatformProvider, usePlatform } from "@/platform/provider";
@@ -13,6 +13,28 @@ import { ThemeProvider } from "@/features/theme/theme-provider";
 import { createDashboardQueryClient } from "./query-client";
 import { createAppRouter } from "./router";
 
+export function watchAuthSessionBoundaries(
+  auth: Pick<AuthClient, "getSnapshot" | "subscribe">,
+  queryClient: Pick<QueryClient, "clear">,
+  router: { navigate(options: { to: "/" }): unknown }
+): () => void {
+  const initial = auth.getSnapshot();
+  let previousStatus = initial.status;
+  let activeIdentity = initial.status === "signedIn" ? initial.identityKey : null;
+  return auth.subscribe(() => {
+    const snapshot = auth.getSnapshot();
+    if (snapshot.status === "signedIn") {
+      if (activeIdentity !== null && activeIdentity !== snapshot.identityKey) queryClient.clear();
+      activeIdentity = snapshot.identityKey;
+    } else if (snapshot.status === "signedOut") {
+      if (activeIdentity !== null) queryClient.clear();
+      activeIdentity = null;
+      if (previousStatus !== "signedOut") void router.navigate({ to: "/" });
+    }
+    previousStatus = snapshot.status;
+  });
+}
+
 function RouterRuntime({ config }: { config: PublicConfig }) {
   const auth = useAuthClient();
   const platform = usePlatform();
@@ -20,17 +42,7 @@ function RouterRuntime({ config }: { config: PublicConfig }) {
   const [api] = useState(() => new ApiClient(config.apiUrl, auth));
   const [router] = useState(() => createAppRouter({ api, auth, platform, queryClient }));
 
-  useEffect(() => {
-    let previousStatus = auth.getSnapshot().status;
-    return auth.subscribe(() => {
-      const status = auth.getSnapshot().status;
-      if (previousStatus === "signedIn" && status === "signedOut") {
-        queryClient.clear();
-        void router.navigate({ to: "/" });
-      }
-      previousStatus = status;
-    });
-  }, [auth, queryClient, router]);
+  useEffect(() => watchAuthSessionBoundaries(auth, queryClient, router), [auth, queryClient, router]);
 
   return <QueryClientProvider client={queryClient}>
     <TooltipProvider>

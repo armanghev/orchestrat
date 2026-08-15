@@ -4,6 +4,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuthClient, useAuthSnapshot } from "./auth-context";
 
+function maskedEmail(value: string): string {
+  const separator = value.lastIndexOf("@");
+  return separator > 0 ? `•••${value.slice(separator)}` : "•••";
+}
+
 export function SignInScreen() {
   const client = useAuthClient();
   const snapshot = useAuthSnapshot();
@@ -72,7 +77,7 @@ export function SignInScreen() {
         className="rounded-lg border border-border bg-muted/40 p-4 text-left"
       >
         <p className="font-medium text-foreground">Check your email</p>
-        <p className="mt-1 text-sm text-muted-foreground">A sign-in link was accepted for {sentEmail}. Delivery may take a moment.</p>
+        <p className="mt-1 text-sm text-muted-foreground">A sign-in link was accepted for {maskedEmail(sentEmail)}. Delivery may take a moment.</p>
         <div className="mt-4 flex flex-wrap gap-2">
           <Button type="button" size="sm" variant="outline" onClick={() => { void client.sendMagicLink(sentEmail); }}>Send again</Button>
           <Button type="button" size="sm" variant="ghost" onClick={changeEmail}>Use a different email</Button>

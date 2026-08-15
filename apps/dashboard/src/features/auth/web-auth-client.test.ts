@@ -5,7 +5,7 @@ import { WebAuthClient, createBrowserWebAuthClient, type WebAuthApi } from "./we
 
 const callbackUrl = "https://dashboard.example.com/auth/callback";
 
-function session(token = "supabase-access"): Session {
+function session(token = "supabase-access", userId = "user-1"): Session {
   return {
     access_token: token,
     token_type: "bearer",
@@ -13,7 +13,7 @@ function session(token = "supabase-access"): Session {
     expires_at: 4_000_000_000,
     refresh_token: "supabase-refresh",
     user: {
-      id: "user-1", app_metadata: {}, user_metadata: {}, aud: "authenticated",
+      id: userId, app_metadata: {}, user_metadata: {}, aud: "authenticated",
       created_at: "2026-01-01T00:00:00.000Z"
     }
   };
@@ -68,7 +68,7 @@ describe("WebAuthClient", () => {
       return { data: { subscription: { unsubscribe: vi.fn() } } };
     });
     await f.client.initialize();
-    expect(f.client.getSnapshot()).toEqual({ status: "signedIn" });
+    expect(f.client.getSnapshot()).toMatchObject({ status: "signedIn" });
     expect(await f.client.getAccessToken()).toBe("event-access");
   });
 
@@ -81,7 +81,7 @@ describe("WebAuthClient", () => {
     f.emit("SIGNED_OUT", null);
     expect(f.client.getSnapshot()).toBe(signedOut);
     f.emit("SIGNED_IN", session());
-    expect(f.client.getSnapshot()).toEqual({ status: "signedIn" });
+    expect(f.client.getSnapshot()).toMatchObject({ status: "signedIn" });
     f.emit("TOKEN_REFRESHED", session("new-access"));
     expect(await f.client.getAccessToken()).toBe("new-access");
     stop();
@@ -121,6 +121,21 @@ describe("WebAuthClient", () => {
     consoleLog.mockRestore();
   });
 
+
+  it("notifies on signed-in principal changes but not same-user token refresh", async () => {
+    const f = fixture();
+    await f.client.initialize();
+    const listener = vi.fn();
+    f.client.subscribe(listener);
+    f.emit("SIGNED_IN", session("account-a-token", "account-a"));
+    expect(f.client.getSnapshot()).toEqual({ status: "signedIn", identityKey: "account-a" });
+    f.emit("TOKEN_REFRESHED", session("account-a-refreshed", "account-a"));
+    expect(listener).toHaveBeenCalledOnce();
+    f.emit("SIGNED_IN", session("account-b-token", "account-b"));
+    expect(f.client.getSnapshot()).toEqual({ status: "signedIn", identityKey: "account-b" });
+    expect(listener).toHaveBeenCalledTimes(2);
+  });
+
   it("starts GitHub OAuth once with the exact configured callback", async () => {
     const f = fixture();
     await f.client.initialize();
@@ -146,7 +161,7 @@ describe("WebAuthClient", () => {
     f.emit("SIGNED_IN", session("github-event-token"));
     pending.resolve({ data: { provider: "github", url: null }, error: new Error("stale OAuth failure") });
     await request;
-    expect(f.client.getSnapshot()).toEqual({ status: "signedIn" });
+    expect(f.client.getSnapshot()).toMatchObject({ status: "signedIn" });
     expect(await f.client.getAccessToken()).toBe("github-event-token");
   });
 
@@ -179,7 +194,7 @@ describe("WebAuthClient", () => {
     f.emit("SIGNED_IN", session("event-signed-in"));
     pending.resolve({ data: { user: null, session: null, messageId: "accepted" }, error: null });
     await request;
-    expect(f.client.getSnapshot()).toEqual({ status: "signedIn" });
+    expect(f.client.getSnapshot()).toMatchObject({ status: "signedIn" });
     expect(await f.client.getAccessToken()).toBe("event-signed-in");
   });
 
@@ -234,10 +249,10 @@ describe("WebAuthClient", () => {
     expect(f.auth.exchangeCodeForSession).toHaveBeenCalledOnce();
     expect(f.auth.exchangeCodeForSession).toHaveBeenCalledWith("one-time-code");
     pending.resolve({ data: { session: session(), user: session().user }, error: null });
-    await first;
+    expect(await first).toEqual({ status: "success", identityKey: "user-1" });
     await f.client.completeSignIn(`${callbackUrl}?code=ignored-after-success`);
     expect(f.auth.exchangeCodeForSession).toHaveBeenCalledOnce();
-    expect(f.client.getSnapshot()).toEqual({ status: "signedIn" });
+    expect(f.client.getSnapshot()).toMatchObject({ status: "signedIn" });
   });
 
 
@@ -255,7 +270,7 @@ describe("WebAuthClient", () => {
     await f.client.signInWithGitHub();
     await f.client.completeSignIn(`${callbackUrl}?code=new-flow-code`);
     expect(f.auth.exchangeCodeForSession).toHaveBeenCalledTimes(2);
-    expect(f.client.getSnapshot()).toEqual({ status: "signedIn" });
+    expect(f.client.getSnapshot()).toMatchObject({ status: "signedIn" });
   });
 
 
@@ -303,7 +318,7 @@ describe("WebAuthClient", () => {
     f.emit("SIGNED_IN", session("callback-event-token"));
     pending.resolve({ data: { session: null, user: null }, error: new Error("stale callback failure") });
     await exchange;
-    expect(f.client.getSnapshot()).toEqual({ status: "signedIn" });
+    expect(f.client.getSnapshot()).toMatchObject({ status: "signedIn" });
     expect(await f.client.getAccessToken()).toBe("callback-event-token");
   });
 
@@ -316,7 +331,7 @@ describe("WebAuthClient", () => {
       return { data: { session: session("stale-exchange-token"), user: session().user }, error: null };
     });
     await f.client.completeSignIn(`${callbackUrl}?code=emits-event`);
-    expect(f.client.getSnapshot()).toEqual({ status: "signedIn" });
+    expect(f.client.getSnapshot()).toMatchObject({ status: "signedIn" });
     expect(await f.client.getAccessToken()).toBe("exchange-event-token");
   });
 
@@ -329,7 +344,28 @@ describe("WebAuthClient", () => {
     await f.client.sendMagicLink("person@example.com");
     await f.client.completeSignIn(`${callbackUrl}?code=new-magic-flow`);
     expect(f.auth.exchangeCodeForSession).toHaveBeenCalledTimes(2);
-    expect(f.client.getSnapshot()).toEqual({ status: "signedIn" });
+    expect(f.client.getSnapshot()).toMatchObject({ status: "signedIn" });
+  });
+
+
+  it("replaces signed-in account A with callback account B and returns attributable success", async () => {
+    const f = fixture(session("account-a-token", "account-a"));
+    await f.client.initialize();
+    const pending = deferred<{ data: { session: Session; user: Session["user"] }; error: null }>();
+    f.auth.exchangeCodeForSession.mockReturnValueOnce(pending.promise);
+    const completion = f.client.completeSignIn(`${callbackUrl}?code=account-b`);
+    expect(f.client.getSnapshot()).toEqual({ status: "signingIn" });
+    pending.resolve({ data: { session: session("account-b-token", "account-b"), user: session("unused", "account-b").user }, error: null });
+    expect(await completion).toEqual({ status: "success", identityKey: "account-b" });
+    expect(f.client.getSnapshot()).toEqual({ status: "signedIn", identityKey: "account-b" });
+  });
+
+  it("returns callback failure instead of accepting a preexisting signed-in account", async () => {
+    const f = fixture(session("account-a-token", "account-a"));
+    await f.client.initialize();
+    expect(await f.client.completeSignIn(`${callbackUrl}?error=access_denied`)).toEqual({ status: "error" });
+    expect(f.auth.exchangeCodeForSession).not.toHaveBeenCalled();
+    expect(f.client.getSnapshot()).toMatchObject({ status: "error", code: "provider_error" });
   });
 
   it.each([
@@ -397,7 +433,7 @@ describe("WebAuthClient", () => {
     pending.resolve({ data: { session: null, user: null }, error: new Error("stale refresh failure") });
     expect(await refresh).toBe("event-refreshed");
     expect(f.auth.signOut).not.toHaveBeenCalled();
-    expect(f.client.getSnapshot()).toEqual({ status: "signedIn" });
+    expect(f.client.getSnapshot()).toMatchObject({ status: "signedIn" });
   });
 
   it("expires the local session after refresh failure", async () => {
@@ -424,7 +460,7 @@ describe("WebAuthClient", () => {
     await first;
     expect(f.auth.signOut).toHaveBeenCalledOnce();
     f.emit("SIGNED_IN", session("next-session"));
-    expect(f.client.getSnapshot()).toEqual({ status: "signedIn" });
+    expect(f.client.getSnapshot()).toMatchObject({ status: "signedIn" });
     expect(await f.client.getAccessToken()).toBe("next-session");
   });
 });

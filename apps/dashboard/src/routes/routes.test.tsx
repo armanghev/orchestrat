@@ -3,15 +3,25 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { http, HttpResponse } from "msw";
 import { organization, project, workspace } from "@/test/factories";
-import type { AuthClient, AuthSnapshot } from "@/features/auth/auth-client";
+import type { AuthClient, AuthCompletionResult, AuthSnapshot } from "@/features/auth/auth-client";
 import type { Platform } from "@/platform/contract";
 import { renderDashboardRoute } from "@/test/render";
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => { resolve = done; });
+  return { promise, resolve };
+}
 
 class FakeAuthClient implements AuthClient {
   readonly capabilities = { github: true, magicLink: true };
   private snapshot: AuthSnapshot;
   private listeners = new Set<() => void>();
-  completeSignIn = vi.fn(async (callbackUrl: string) => { void callbackUrl; this.setSnapshot({ status: "signedIn" }); });
+  completeSignIn = vi.fn<(callbackUrl: string) => Promise<AuthCompletionResult>>(async (callbackUrl: string) => {
+    void callbackUrl;
+    this.setSnapshot({ status: "signedIn", identityKey: "callback-user" });
+    return { status: "success" as const, identityKey: "callback-user" };
+  });
 
   constructor(snapshot: AuthSnapshot) { this.snapshot = snapshot; }
   async initialize() {}
@@ -67,10 +77,35 @@ describe("dashboard routes", () => {
     expect(document.body.textContent).not.toContain("code=a");
   });
 
+
+  it("does not navigate an already signed-in account A until this callback completes account B", async () => {
+    const auth = new FakeAuthClient({ status: "signedIn", identityKey: "account-a" });
+    const completion = deferred<AuthCompletionResult>();
+    auth.completeSignIn.mockImplementationOnce(() => completion.promise);
+    const view = await renderDashboardRoute({ path: "/auth/callback?code=account-b", auth, platform: platform() });
+    await waitFor(() => expect(auth.completeSignIn).toHaveBeenCalledOnce());
+    expect(view.router.state.location.pathname).toBe("/auth/callback");
+    expect(view.router.state.location.searchStr).toBe("");
+    expect(screen.getByRole("status")).toHaveTextContent("Completing sign-in");
+
+    await act(async () => { completion.resolve({ status: "success", identityKey: "account-b" }); });
+    await waitFor(() => expect(view.router.state.location.pathname).not.toBe("/auth/callback"));
+  });
+
+  it("shows recovery for an invalid callback while account A was already signed in", async () => {
+    const auth = new FakeAuthClient({ status: "signedIn", identityKey: "account-a" });
+    auth.completeSignIn.mockResolvedValueOnce({ status: "error" });
+    const view = await renderDashboardRoute({ path: "/auth/callback?error=access_denied", auth, platform: platform() });
+    expect(await screen.findByRole("alert")).toHaveTextContent("We couldn't complete your sign-in.");
+    expect(view.router.state.location.pathname).toBe("/auth/callback");
+    expect(view.router.state.location.searchStr).toBe("");
+  });
+
   it("renders safe recovery after callback completion rejects and returns to sign-in on retry", async () => {
     const auth = new FakeAuthClient({ status: "signingIn" });
     auth.completeSignIn.mockImplementation(async () => {
       auth.setSnapshot({ status: "error", code: "provider_error", message: "private callback failure" });
+      return { status: "error" as const };
     });
     const view = await renderDashboardRoute({ path: "/auth/callback?error=access_denied&error_description=opaque", auth, platform: platform() });
 
@@ -89,13 +124,13 @@ describe("dashboard routes", () => {
     expect(`${window.location.pathname}${window.location.search}${window.location.hash}`).toBe(browserPathBeforeRender);
     first.unmount();
 
-    const second = await renderDashboardRoute({ path: "/setup", auth: new FakeAuthClient({ status: "signedIn" }), platform: platform() });
+    const second = await renderDashboardRoute({ path: "/setup", auth: new FakeAuthClient({ status: "signedIn", identityKey: "test-user" }), platform: platform() });
     expect(`${window.location.pathname}${window.location.search}${window.location.hash}`).toBe(browserPathBeforeRender);
     second.unmount();
   });
 
   it("sends an authenticated user with an existing project through setup to its overview", async () => {
-    const view = await renderDashboardRoute({ path: "/setup", auth: new FakeAuthClient({ status: "signedIn" }), platform: platform() });
+    const view = await renderDashboardRoute({ path: "/setup", auth: new FakeAuthClient({ status: "signedIn", identityKey: "test-user" }), platform: platform() });
     await waitFor(() => expect(view.router.state.location.pathname).toBe("/projects/00000000-0000-4000-8000-000000000003/overview"));
     expect(screen.queryByRole("button", { name: /create (organization|workspace|project)/i })).not.toBeInTheDocument();
   });
@@ -114,7 +149,7 @@ describe("dashboard routes", () => {
   };
 
   it("renders the overview from the matching catalog project without operational metrics", async () => {
-    await renderDashboardRoute({ path: `/projects/${projectId}/overview`, auth: new FakeAuthClient({ status: "signedIn" }), platform: platform(), handlers: catalogHandlers() });
+    await renderDashboardRoute({ path: `/projects/${projectId}/overview`, auth: new FakeAuthClient({ status: "signedIn", identityKey: "test-user" }), platform: platform(), handlers: catalogHandlers() });
     expect(await screen.findByRole("heading", { name: "Overview" })).toBeVisible();
     expect(screen.getByText("Northstar Organization")).toBeVisible();
     expect(screen.getByText("Product Workspace")).toBeVisible();
@@ -135,14 +170,14 @@ describe("dashboard routes", () => {
     ["activity", "Activity", "Activity service unavailable"],
     ["integrations", "Integrations", "Integration service unavailable"]
   ])("renders an honest unavailable state for %s", async (route, heading, status) => {
-    await renderDashboardRoute({ path: `/projects/${projectId}/${route}`, auth: new FakeAuthClient({ status: "signedIn" }), platform: platform(), handlers: catalogHandlers() });
+    await renderDashboardRoute({ path: `/projects/${projectId}/${route}`, auth: new FakeAuthClient({ status: "signedIn", identityKey: "test-user" }), platform: platform(), handlers: catalogHandlers() });
     expect(await screen.findByRole("heading", { name: heading })).toBeVisible();
     expect(screen.getByText(status)).toBeVisible();
     expect(screen.getByRole("link", { name: "Return to overview" })).toHaveAttribute("href", `/projects/${projectId}/overview`);
   });
 
   it("does not silently switch projects when catalog access to the URL project is unavailable", async () => {
-    await renderDashboardRoute({ path: `/projects/${missingProjectId}/overview`, auth: new FakeAuthClient({ status: "signedIn" }), platform: platform(), handlers: catalogHandlers() });
+    await renderDashboardRoute({ path: `/projects/${missingProjectId}/overview`, auth: new FakeAuthClient({ status: "signedIn", identityKey: "test-user" }), platform: platform(), handlers: catalogHandlers() });
     const heading = await screen.findByRole("heading", { name: "Project access unavailable" });
     expect(heading).toHaveFocus();
     expect(screen.queryByText("Native Dashboard")).not.toBeInTheDocument();
@@ -151,7 +186,7 @@ describe("dashboard routes", () => {
   });
 
   it("redirects an empty catalog to setup", async () => {
-    const view = await renderDashboardRoute({ path: `/projects/${projectId}/overview`, auth: new FakeAuthClient({ status: "signedIn" }), platform: platform(), handlers: [http.get("http://localhost:3001/api/v1/organizations", () => HttpResponse.json({ organizations: [] }))] });
+    const view = await renderDashboardRoute({ path: `/projects/${projectId}/overview`, auth: new FakeAuthClient({ status: "signedIn", identityKey: "test-user" }), platform: platform(), handlers: [http.get("http://localhost:3001/api/v1/organizations", () => HttpResponse.json({ organizations: [] }))] });
     await waitFor(() => expect(view.router.state.location.pathname).toBe("/setup"));
   });
 
@@ -160,7 +195,7 @@ describe("dashboard routes", () => {
     const knownWorkspace = workspace({ id: "22222222-2222-4222-8222-222222222222", organization_id: organizationRecord.id });
     const failedWorkspace = workspace({ id: "33333333-3333-4333-8333-333333333333", organization_id: organizationRecord.id, name: "Unreachable workspace" });
     const knownProject = project({ id: projectId, workspace_id: knownWorkspace.id });
-    await renderDashboardRoute({ path: `/projects/${projectId}/overview`, auth: new FakeAuthClient({ status: "signedIn" }), platform: platform(), handlers: [
+    await renderDashboardRoute({ path: `/projects/${projectId}/overview`, auth: new FakeAuthClient({ status: "signedIn", identityKey: "test-user" }), platform: platform(), handlers: [
       http.get("http://localhost:3001/api/v1/organizations", () => HttpResponse.json({ organizations: [organizationRecord] })),
       http.get("http://localhost:3001/api/v1/organizations/:organizationId/workspaces", () => HttpResponse.json({ workspaces: [knownWorkspace, failedWorkspace] })),
       http.get(`http://localhost:3001/api/v1/workspaces/${knownWorkspace.id}/projects`, () => HttpResponse.json({ projects: [knownProject] })),
@@ -172,12 +207,12 @@ describe("dashboard routes", () => {
   });
 
   it("redirects a project index to Overview", async () => {
-    const view = await renderDashboardRoute({ path: `/projects/${projectId}`, auth: new FakeAuthClient({ status: "signedIn" }), platform: platform(), handlers: catalogHandlers() });
+    const view = await renderDashboardRoute({ path: `/projects/${projectId}`, auth: new FakeAuthClient({ status: "signedIn", identityKey: "test-user" }), platform: platform(), handlers: catalogHandlers() });
     await waitFor(() => expect(view.router.state.location.pathname).toBe(`/projects/${projectId}/overview`));
   });
 
   it("limits preferences to appearance and contextual-sidebar changes", async () => {
-    await renderDashboardRoute({ path: "/preferences", auth: new FakeAuthClient({ status: "signedIn" }), platform: platform(), handlers: catalogHandlers() });
+    await renderDashboardRoute({ path: "/preferences", auth: new FakeAuthClient({ status: "signedIn", identityKey: "test-user" }), platform: platform(), handlers: catalogHandlers() });
     expect(await screen.findByRole("heading", { name: "Preferences" })).toBeVisible();
     expect(screen.getByRole("radio", { name: "System" })).toBeVisible();
     expect(screen.getByRole("radio", { name: "Light" })).toBeVisible();
@@ -188,7 +223,7 @@ describe("dashboard routes", () => {
   });
 
   it("shows only real project metadata in Project Settings", async () => {
-    await renderDashboardRoute({ path: `/projects/${projectId}/settings`, auth: new FakeAuthClient({ status: "signedIn" }), platform: platform(), handlers: catalogHandlers() });
+    await renderDashboardRoute({ path: `/projects/${projectId}/settings`, auth: new FakeAuthClient({ status: "signedIn", identityKey: "test-user" }), platform: platform(), handlers: catalogHandlers() });
     expect(await screen.findByRole("heading", { name: "Project Settings" })).toBeVisible();
     expect(screen.getAllByText("Native Dashboard").at(-1)).toBeVisible();
     expect(screen.getAllByText("native-dashboard").at(-1)).toBeVisible();
@@ -197,7 +232,7 @@ describe("dashboard routes", () => {
   });
 
   it("focuses the main heading after a main navigation route change", async () => {
-    const view = await renderDashboardRoute({ path: `/projects/${projectId}/overview`, auth: new FakeAuthClient({ status: "signedIn" }), platform: platform(), handlers: catalogHandlers() });
+    const view = await renderDashboardRoute({ path: `/projects/${projectId}/overview`, auth: new FakeAuthClient({ status: "signedIn", identityKey: "test-user" }), platform: platform(), handlers: catalogHandlers() });
     await screen.findByRole("heading", { name: "Overview" });
     await act(async () => {
       await view.router.navigate({ to: "/projects/$projectId/tasks", params: { projectId } });
@@ -211,7 +246,7 @@ describe("dashboard routes", () => {
     const recoveredOrganization = organization();
     const recoveredWorkspace = workspace({ organization_id: recoveredOrganization.id });
     const recoveredProject = project({ id: projectId, workspace_id: recoveredWorkspace.id });
-    const view = await renderDashboardRoute({ path: `/projects/${projectId}/overview`, auth: new FakeAuthClient({ status: "signedIn" }), platform: platform(), handlers: [
+    const view = await renderDashboardRoute({ path: `/projects/${projectId}/overview`, auth: new FakeAuthClient({ status: "signedIn", identityKey: "test-user" }), platform: platform(), handlers: [
       http.get("http://localhost:3001/api/v1/organizations", () => fail
         ? HttpResponse.error()
         : HttpResponse.json({ organizations: [recoveredOrganization] })),
@@ -232,7 +267,7 @@ describe("dashboard routes", () => {
     const workspaceRecord = workspace({ organization_id: organizationRecord.id });
     const recoveredProject = project({ id: projectId, workspace_id: workspaceRecord.id });
     let fail = true;
-    const view = await renderDashboardRoute({ path: `/projects/${projectId}/overview`, auth: new FakeAuthClient({ status: "signedIn" }), platform: platform(), handlers: [
+    const view = await renderDashboardRoute({ path: `/projects/${projectId}/overview`, auth: new FakeAuthClient({ status: "signedIn", identityKey: "test-user" }), platform: platform(), handlers: [
       http.get("http://localhost:3001/api/v1/organizations", () => HttpResponse.json({ organizations: [organizationRecord] })),
       http.get("http://localhost:3001/api/v1/organizations/:organizationId/workspaces", () => HttpResponse.json({ workspaces: [workspaceRecord] })),
       http.get("http://localhost:3001/api/v1/workspaces/:workspaceId/projects", () => fail ? HttpResponse.error() : HttpResponse.json({ projects: [recoveredProject] }))
@@ -247,12 +282,12 @@ describe("dashboard routes", () => {
   });
 
   it("focuses the Preferences heading after its route loads", async () => {
-    await renderDashboardRoute({ path: "/preferences", auth: new FakeAuthClient({ status: "signedIn" }), platform: platform(), handlers: catalogHandlers() });
+    await renderDashboardRoute({ path: "/preferences", auth: new FakeAuthClient({ status: "signedIn", identityKey: "test-user" }), platform: platform(), handlers: catalogHandlers() });
     expect(await screen.findByRole("heading", { name: "Preferences" })).toHaveFocus();
   });
 
   it("makes keyboard-focused theme radios visibly indicated", async () => {
-    await renderDashboardRoute({ path: "/preferences", auth: new FakeAuthClient({ status: "signedIn" }), platform: platform(), handlers: catalogHandlers() });
+    await renderDashboardRoute({ path: "/preferences", auth: new FakeAuthClient({ status: "signedIn", identityKey: "test-user" }), platform: platform(), handlers: catalogHandlers() });
     const system = await screen.findByRole("radio", { name: "System" });
     await userEvent.setup().tab();
     expect(system).toHaveFocus();

@@ -1,7 +1,7 @@
-import { useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { createFileRoute, useLocation, useNavigate } from "@tanstack/react-router";
 import { z } from "zod";
-import { useAuthClient, useAuthSnapshot } from "@/features/auth/auth-context";
+import { useAuthClient } from "@/features/auth/auth-context";
 import { AuthCallbackScreen } from "@/features/auth/auth-callback-screen";
 
 const callbackSearchSchema = z.looseObject({
@@ -17,21 +17,18 @@ function browserCallbackUrl(pathname: string, search: string): string {
 
 function AuthCallbackRoute() {
   const auth = useAuthClient();
-  const snapshot = useAuthSnapshot();
   const location = useLocation();
   const navigate = useNavigate();
-  const callbackUrl = browserCallbackUrl(location.pathname, location.searchStr);
+  const callbackUrl = useRef(browserCallbackUrl(location.pathname, location.searchStr)).current;
+  const handleSuccess = useCallback(() => { void navigate({ to: "/setup", replace: true }); }, [navigate]);
 
   useEffect(() => {
     if (location.searchStr) void navigate({ to: "/auth/callback", search: {}, replace: true });
   }, [location.searchStr, navigate]);
 
-  useEffect(() => {
-    if (snapshot.status === "signedIn") void navigate({ to: "/setup", replace: true });
-  }, [navigate, snapshot.status]);
-
   return <AuthCallbackScreen
     callbackUrl={callbackUrl}
+    onSuccess={handleSuccess}
     onRetry={() => {
       void auth.expireSession().catch(() => undefined).then(() => navigate({ to: "/", replace: true }));
     }}

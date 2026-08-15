@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { AuthClient, AuthCompletionResult } from "./auth-client";
 import { useAuthClient, useAuthSnapshot } from "./auth-context";
 
 const recoveryMessage = "We couldn't complete your sign-in.";
@@ -6,13 +7,14 @@ const recoveryMessage = "We couldn't complete your sign-in.";
 type AuthCallbackScreenProps = {
   callbackUrl?: string;
   onRetry?: () => void;
+  onSuccess?: (identityKey: string) => void;
 };
 
-export function AuthCallbackScreen({ callbackUrl = window.location.href, onRetry }: AuthCallbackScreenProps) {
+export function AuthCallbackScreen({ callbackUrl = window.location.href, onRetry, onSuccess }: AuthCallbackScreenProps) {
   const client = useAuthClient();
   const snapshot = useAuthSnapshot();
   const [completionFailed, setCompletionFailed] = useState(false);
-  const completionStarted = useRef(false);
+  const completion = useRef<{ client: AuthClient; callbackUrl: string; promise: Promise<AuthCompletionResult> } | null>(null);
 
   useLayoutEffect(() => {
     try {
@@ -24,14 +26,19 @@ export function AuthCallbackScreen({ callbackUrl = window.location.href, onRetry
   }, [callbackUrl]);
 
   useEffect(() => {
-    if (completionStarted.current) return;
-    completionStarted.current = true;
+    if (!completion.current || completion.current.client !== client || completion.current.callbackUrl !== callbackUrl) {
+      completion.current = { client, callbackUrl, promise: client.completeSignIn(callbackUrl) };
+    }
     let active = true;
-    void client.completeSignIn(callbackUrl).catch(() => {
+    void completion.current.promise.then((result) => {
+      if (!active) return;
+      if (result.status === "success") onSuccess?.(result.identityKey);
+      else if (client.getSnapshot().status !== "error") setCompletionFailed(true);
+    }).catch(() => {
       if (active) setCompletionFailed(true);
     });
     return () => { active = false; };
-  }, [callbackUrl, client]);
+  }, [callbackUrl, client, onSuccess]);
 
   if (completionFailed || snapshot.status === "error") {
     return <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-6 text-center">

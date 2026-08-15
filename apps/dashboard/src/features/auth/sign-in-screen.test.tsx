@@ -10,7 +10,7 @@ function client(snapshot: AuthSnapshot, capabilities: AuthCapabilities = { githu
     capabilities,
     initialize: vi.fn(async () => undefined), getSnapshot: () => snapshot,
     subscribe: () => () => undefined, signInWithGitHub: vi.fn(async () => undefined),
-    sendMagicLink: vi.fn(async () => undefined), completeSignIn: vi.fn(async () => undefined),
+    sendMagicLink: vi.fn(async () => undefined), completeSignIn: vi.fn(async () => ({ status: "error" as const })),
     signOut: vi.fn(async () => undefined), expireSession: vi.fn(async () => undefined),
     getAccessToken: vi.fn(async () => null)
   };
@@ -65,7 +65,8 @@ describe("SignInScreen", () => {
     const auth = client({ status: "magicLinkSent", email: "person@example.com" });
     renderScreen(auth);
     expect(screen.getByRole("status")).toHaveTextContent("Check your email");
-    expect(screen.getByText(/person@example.com/)).toBeVisible();
+    expect(screen.getByText(/•••@example\.com/)).toBeVisible();
+    expect(screen.queryByText(/person@example\.com/)).not.toBeInTheDocument();
     await userEvent.setup().click(screen.getByRole("button", { name: "Send again" }));
     expect(auth.sendMagicLink).toHaveBeenCalledWith("person@example.com");
     await userEvent.setup().click(screen.getByRole("button", { name: "Use a different email" }));
