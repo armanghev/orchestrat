@@ -6,8 +6,13 @@ import {
   type JWTPayload
 } from "jose";
 
+export type AuthHeaders =
+  | Headers
+  | Record<string, string | string[] | undefined>
+  | Iterable<readonly [string, string]>;
+
 export type AuthRequest = {
-  headers: HeadersInit;
+  headers: AuthHeaders;
   method: string;
   url: string;
 };
@@ -86,8 +91,23 @@ function validateOptions(options: SupabaseAuthOptions) {
   };
 }
 
-function exactBearer(headers: HeadersInit) {
-  const authorization = new Headers(headers).get("authorization");
+function headerEntries(headers: AuthHeaders) {
+  if (headers instanceof Headers) return headers.entries();
+  return Symbol.iterator in headers
+    ? headers
+    : Object.entries(headers as Record<string, string | string[] | undefined>);
+}
+
+function exactBearer(headers: AuthHeaders) {
+  let authorization: string | undefined;
+  let count = 0;
+  for (const [name, value] of headerEntries(headers)) {
+    if (name.toLowerCase() !== "authorization") continue;
+    count += 1;
+    if (typeof value !== "string") return null;
+    authorization = value;
+  }
+  if (count !== 1) return null;
   const match = authorization?.match(/^Bearer ([^\s]+)$/);
   return match?.[1] ?? null;
 }
@@ -119,9 +139,9 @@ function safeAvatarUrl(value: unknown) {
   if (!avatarUrl || avatarUrl.length > AVATAR_URL_MAX_LENGTH) return null;
   try {
     const url = new URL(avatarUrl);
-    return url.protocol === "https:" || url.protocol === "http:"
-      ? url.toString()
-      : null;
+    if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+    const canonicalUrl = url.toString();
+    return canonicalUrl.length <= AVATAR_URL_MAX_LENGTH ? canonicalUrl : null;
   } catch {
     return null;
   }

@@ -134,6 +134,61 @@ test("requires one exact Bearer token", async () => {
   }
 });
 
+test("rejects whitespace, casing, arrays, and duplicate bearer headers", async () => {
+  let keyResolutions = 0;
+  const strictAuth = createSupabaseAuth(options, {
+    keyResolver: async (...args) => {
+      keyResolutions += 1;
+      return localKeys(...args);
+    }
+  });
+  const value = await token();
+  for (const authorization of [
+    ` Bearer ${value}`,
+    `Bearer ${value} `,
+    `Bearer\t${value}`,
+    `bearer ${value}`
+  ]) {
+    assert.equal(
+      await strictAuth.authenticate(request(authorization)),
+      null,
+      authorization
+    );
+  }
+
+  await assert.doesNotReject(async () => {
+    assert.equal(
+      await strictAuth.authenticate({
+        ...request(),
+        headers: { authorization: [`Bearer ${value}`] }
+      }),
+      null
+    );
+  });
+  assert.equal(
+    await strictAuth.authenticate({
+      ...request(),
+      headers: [
+        ["authorization", `Bearer ${value}`],
+        ["Authorization", `Bearer ${value}`]
+      ]
+    }),
+    null
+  );
+  assert.equal(keyResolutions, 0);
+});
+
+test("rejects an avatar URL whose canonical form exceeds the bound", async () => {
+  const rawAvatar = `https://example.com/${"é".repeat(680)}`;
+  assert.ok(rawAvatar.length < 2048);
+  const value = await token({
+    user_metadata: { avatar_url: rawAvatar, full_name: "Alice" }
+  });
+  const result = await auth().authenticate(request(`Bearer ${value}`));
+  assert.ok(result);
+  assert.equal(result.avatarUrl, null);
+});
+
 test("rejects invalid signature, issuer, audience, and algorithm", async () => {
   const cases = [
     await token({}, { key: otherEc.privateKey }),
@@ -174,7 +229,11 @@ test("requires a UUID subject and authenticated role", async () => {
 });
 
 test("requires a normalized, bounded email", async () => {
-  for (const email of [undefined, "not-an-email", `a@${"x".repeat(318)}`]) {
+  for (const email of [
+    undefined,
+    "not-an-email",
+    `${"a".repeat(310)}@example.com`
+  ]) {
     assert.equal(
       await auth().authenticate(request(`Bearer ${await token({ email })}`)),
       null
