@@ -3,6 +3,7 @@ import type { AuthClient, AuthSnapshot } from "../features/auth/auth-client";
 const storageKey = "orchestrat.e2e.auth";
 
 export class E2eAuthClient implements AuthClient {
+  readonly capabilities = { github: true, magicLink: true };
   private snapshot: AuthSnapshot = { status: "loading" };
   private readonly listeners = new Set<() => void>();
 
@@ -15,7 +16,8 @@ export class E2eAuthClient implements AuthClient {
   }
   getSnapshot(): AuthSnapshot { return this.snapshot; }
   subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
-  async signIn(): Promise<void> { localStorage.setItem(storageKey, "signedIn"); this.setSnapshot({ status: "signedIn" }); }
+  async signInWithGitHub(): Promise<void> { localStorage.setItem(storageKey, "signedIn"); this.setSnapshot({ status: "signedIn" }); }
+  async sendMagicLink(email: string): Promise<void> { this.setSnapshot({ status: "magicLinkSent", email: email.trim().toLowerCase() }); }
   async completeSignIn(): Promise<void> { this.setSnapshot({ status: "signedIn" }); }
   async signOut(): Promise<void> { localStorage.setItem(storageKey, "signedOut"); this.setSnapshot({ status: "signedOut" }); }
   async expireSession(): Promise<void> { this.setSnapshot({ status: "signedOut" }); }

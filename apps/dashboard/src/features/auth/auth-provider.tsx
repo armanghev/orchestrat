@@ -63,7 +63,13 @@ export function AuthProvider({ children, config, platform }: { children: ReactNo
     return <E2eProvider>{children}</E2eProvider>;
   }
   if (platform.kind === "desktop") return <DesktopProvider platform={platform}>{children}</DesktopProvider>;
-  if (!config.clerkPublishableKey) return <p role="alert">Dashboard configuration is invalid.</p>;
-  return <WebAuthProvider publishableKey={config.clerkPublishableKey}>{children}</WebAuthProvider>;
+  if (!config.supabaseUrl || !config.supabasePublishableKey || !config.webAuthCallbackUrl) {
+    return <p role="alert">Dashboard configuration is invalid.</p>;
+  }
+  return <WebAuthProvider
+    supabaseUrl={config.supabaseUrl}
+    supabasePublishableKey={config.supabasePublishableKey}
+    callbackUrl={config.webAuthCallbackUrl}
+  >{children}</WebAuthProvider>;
 }
 

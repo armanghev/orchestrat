@@ -24,6 +24,7 @@ function snapshotsEqual(left: AuthSnapshot, right: AuthSnapshot): boolean {
 }
 
 export class DesktopAuthClient implements AuthClient {
+  readonly capabilities = Object.freeze({ github: true, magicLink: false });
   private snapshot: AuthSnapshot = loadingAuthSnapshot;
   private grant: AccessGrant | null = null;
   private initialization: Promise<void> | null = null;
@@ -65,10 +66,10 @@ export class DesktopAuthClient implements AuthClient {
     const generation = this.generation;
     try {
       const unsubscribe = await this.platform.onAuthCallback((url) => {
-        if (this.disposed || this.generation !== generation) return;
+        if (this.disposed) return;
         void this.completeSignIn(url.toString());
       });
-      if (this.disposed || this.generation !== generation) {
+      if (this.disposed) {
         unsubscribe();
         return;
       }
@@ -94,7 +95,7 @@ export class DesktopAuthClient implements AuthClient {
     return () => this.listeners.delete(listener);
   }
 
-  async signIn(): Promise<void> {
+  async signInWithGitHub(): Promise<void> {
     if (this.disposed) return;
     if (this.signInOperation) return this.signInOperation;
     const generation = this.generation;
@@ -110,6 +111,11 @@ export class DesktopAuthClient implements AuthClient {
       });
     this.signInOperation = operation;
     return operation;
+  }
+
+
+  async sendMagicLink(): Promise<void> {
+    this.setSnapshot({ status: "error", code: "unsupported_auth_method", message: "Email sign-in is not available in the desktop app." });
   }
 
   completeSignIn(callbackUrl: string): Promise<void> {

@@ -10,12 +10,14 @@ import { renderDashboardRoute } from "@/test/render";
 const apiUrl = "http://localhost:3001/api/v1";
 
 class FakeAuthClient implements AuthClient {
+  readonly capabilities = { github: true, magicLink: true };
   private readonly snapshot: AuthSnapshot = { status: "signedIn" };
   async initialize() {}
   async completeSignIn() {}
   getSnapshot() { return this.snapshot; }
   subscribe() { return () => undefined; }
-  async signIn() {}
+  async signInWithGitHub() {}
+  async sendMagicLink() {}
   async signOut() {}
   async expireSession() {}
   async getAccessToken() { return "test-token"; }

@@ -22,7 +22,9 @@ vi.mock("./desktop-bridge", () => ({ desktopAuthBridge: mockedBridge }));
 
 const desktopConfig = {
   apiUrl: "https://api.test",
-  clerkPublishableKey: null,
+  supabaseUrl: null,
+  supabasePublishableKey: null,
+  webAuthCallbackUrl: null,
   e2eAuth: false,
   runtime: "desktop" as const
 };

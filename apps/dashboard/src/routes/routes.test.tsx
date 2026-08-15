@@ -8,6 +8,7 @@ import type { Platform } from "@/platform/contract";
 import { renderDashboardRoute } from "@/test/render";
 
 class FakeAuthClient implements AuthClient {
+  readonly capabilities = { github: true, magicLink: true };
   private snapshot: AuthSnapshot;
   private listeners = new Set<() => void>();
   completeSignIn = vi.fn(async (callbackUrl: string) => { void callbackUrl; this.setSnapshot({ status: "signedIn" }); });
@@ -16,7 +17,8 @@ class FakeAuthClient implements AuthClient {
   async initialize() {}
   getSnapshot() { return this.snapshot; }
   subscribe(listener: () => void) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
-  async signIn() { this.setSnapshot({ status: "signingIn" }); }
+  async signInWithGitHub() { this.setSnapshot({ status: "signingIn" }); }
+  async sendMagicLink(email: string) { this.setSnapshot({ status: "magicLinkSent", email }); }
   async signOut() { this.setSnapshot({ status: "signedOut" }); }
   async expireSession() { this.setSnapshot({ status: "signedOut" }); }
   async getAccessToken() { return this.snapshot.status === "signedIn" ? "test-token" : null; }
@@ -35,7 +37,7 @@ function platform(): Platform {
 describe("dashboard routes", () => {
   it("shows browser sign-in at the signed-out root", async () => {
     await renderDashboardRoute({ path: "/", auth: new FakeAuthClient({ status: "signedOut" }), platform: platform() });
-    expect(await screen.findByRole("button", { name: "Continue in browser" })).toBeVisible();
+    expect(await screen.findByRole("button", { name: "Continue with GitHub" })).toBeVisible();
   });
 
   it("keeps protected content hidden while session restoration is loading", async () => {
@@ -47,37 +49,38 @@ describe("dashboard routes", () => {
   it("redirects signed-out setup navigation to the root", async () => {
     const view = await renderDashboardRoute({ path: "/setup", auth: new FakeAuthClient({ status: "signedOut" }), platform: platform() });
     await waitFor(() => expect(view.router.state.location.pathname).toBe("/"));
-    expect(screen.getByRole("button", { name: "Continue in browser" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Continue with GitHub" })).toBeVisible();
   });
 
   it("redirects a successfully completed browser callback to setup without exposing its query or mutating the browser URL", async () => {
     const auth = new FakeAuthClient({ status: "signedOut" });
     const browserPathBeforeRender = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-    const view = await renderDashboardRoute({ path: "/auth/callback?code=a&state=b", auth, platform: platform() });
+    const view = await renderDashboardRoute({ path: "/auth/callback?code=a", auth, platform: platform() });
 
     await waitFor(() => expect(auth.completeSignIn).toHaveBeenCalledOnce());
     const callbackUrl = new URL(auth.completeSignIn.mock.calls[0]?.[0] ?? "");
     expect(callbackUrl.origin).toBe(window.location.origin);
     expect(callbackUrl.pathname).toBe("/auth/callback");
-    expect(callbackUrl.search).toBe("?code=a&state=b");
+    expect(callbackUrl.search).toBe("?code=a");
     await waitFor(() => expect(view.router.state.location.pathname).toBe("/setup"));
     expect(`${window.location.pathname}${window.location.search}${window.location.hash}`).toBe(browserPathBeforeRender);
     expect(document.body.textContent).not.toContain("code=a");
-    expect(document.body.textContent).not.toContain("state=b");
   });
 
   it("renders safe recovery after callback completion rejects and returns to sign-in on retry", async () => {
     const auth = new FakeAuthClient({ status: "signingIn" });
-    auth.completeSignIn.mockRejectedValue(new Error("code=secret-token"));
-    const view = await renderDashboardRoute({ path: "/auth/callback?code=secret-token&state=opaque", auth, platform: platform() });
+    auth.completeSignIn.mockImplementation(async () => {
+      auth.setSnapshot({ status: "error", code: "provider_error", message: "private callback failure" });
+    });
+    const view = await renderDashboardRoute({ path: "/auth/callback?error=access_denied&error_description=opaque", auth, platform: platform() });
 
     expect(await screen.findByRole("alert")).toHaveTextContent("We couldn't complete your sign-in.");
-    expect(document.body.textContent).not.toContain("secret-token");
     expect(document.body.textContent).not.toContain("opaque");
+    expect(view.router.state.location.searchStr).toBe("");
 
     await userEvent.setup().click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(view.router.state.location.pathname).toBe("/"));
-    expect(await screen.findByRole("button", { name: "Continue in browser" })).toBeVisible();
+    expect(await screen.findByRole("button", { name: "Continue with GitHub" })).toBeVisible();
   });
 
   it("does not change the browser URL across back-to-back route renders", async () => {

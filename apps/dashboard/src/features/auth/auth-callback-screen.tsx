@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useAuthClient, useAuthSnapshot } from "./auth-context";
 
 const recoveryMessage = "We couldn't complete your sign-in.";
@@ -11,12 +11,21 @@ type AuthCallbackScreenProps = {
 export function AuthCallbackScreen({ callbackUrl = window.location.href, onRetry }: AuthCallbackScreenProps) {
   const client = useAuthClient();
   const snapshot = useAuthSnapshot();
-  const completed = useRef(false);
   const [completionFailed, setCompletionFailed] = useState(false);
+  const completionStarted = useRef(false);
+
+  useLayoutEffect(() => {
+    try {
+      const callback = new URL(callbackUrl);
+      if (callback.origin === window.location.origin && callback.pathname === window.location.pathname) {
+        window.history.replaceState(window.history.state, "", window.location.pathname);
+      }
+    } catch { /* The auth client reports a stable invalid-callback error. */ }
+  }, [callbackUrl]);
 
   useEffect(() => {
-    if (completed.current) return;
-    completed.current = true;
+    if (completionStarted.current) return;
+    completionStarted.current = true;
     let active = true;
     void client.completeSignIn(callbackUrl).catch(() => {
       if (active) setCompletionFailed(true);

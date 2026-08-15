@@ -88,7 +88,7 @@ test("signed-out users continue in browser and reach setup", async ({ page }) =>
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Coordinate agents. Keep control." })).toBeVisible();
   await expectNoAxe(page);
-  await page.getByRole("button", { name: "Continue in browser" }).click();
+  await page.getByRole("button", { name: "Continue with GitHub" }).click();
   await expect(page.getByRole("heading", { name: "Create your organization" })).toBeVisible();
 });
 

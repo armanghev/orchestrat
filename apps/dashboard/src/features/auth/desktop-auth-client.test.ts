@@ -31,7 +31,8 @@ describe("DesktopAuthClient", () => {
     await client.initialize();
     expect(client.getSnapshot()).toEqual({ status: "signedOut" });
 
-    await client.signIn();
+    expect(client.capabilities).toEqual({ github: true, magicLink: false });
+    await client.signInWithGitHub();
     expect(client.getSnapshot()).toEqual({ status: "signingIn" });
     expect(f.bridge.begin).toHaveBeenCalledOnce();
     expect(f.platform.openExternal).not.toHaveBeenCalled();
@@ -94,7 +95,7 @@ describe("DesktopAuthClient", () => {
     expect(client.getSnapshot()).toEqual({
       status: "error", code: "restore_failed", message: "Try again."
     });
-    await client.signIn();
+    await client.signInWithGitHub();
     expect(f.bridge.begin).toHaveBeenCalledOnce();
   });
 
@@ -110,6 +111,18 @@ describe("DesktopAuthClient", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     callback?.(new URL("dev.orchestrat.app://auth/callback?code=a&state=b"));
     await Promise.resolve();
+    expect(f.bridge.complete).toHaveBeenCalledOnce();
+  });
+
+
+  it("accepts a new GitHub callback after a local sign-out", async () => {
+    const f = fixture();
+    const client = new DesktopAuthClient(f.platform, f.bridge, () => 1_000);
+    await client.initialize();
+    await client.signOut();
+    await client.signInWithGitHub();
+    f.getCallback()?.(new URL("dev.orchestrat.app://auth/callback?code=new&state=fresh"));
+    await vi.waitFor(() => expect(client.getSnapshot()).toEqual({ status: "signedIn" }));
     expect(f.bridge.complete).toHaveBeenCalledOnce();
   });
 

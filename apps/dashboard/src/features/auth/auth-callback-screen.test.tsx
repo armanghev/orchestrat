@@ -6,8 +6,10 @@ import { AuthCallbackScreen } from "./auth-callback-screen";
 
 function client(snapshot: AuthSnapshot, completeSignIn = vi.fn(async () => undefined)): AuthClient {
   return {
+    capabilities: { github: true, magicLink: true },
     initialize: vi.fn(async () => undefined), getSnapshot: () => snapshot,
-    subscribe: () => () => undefined, signIn: vi.fn(async () => undefined),
+    subscribe: () => () => undefined, signInWithGitHub: vi.fn(async () => undefined),
+    sendMagicLink: vi.fn(async () => undefined),
     completeSignIn, signOut: vi.fn(async () => undefined),
     expireSession: vi.fn(async () => undefined), getAccessToken: vi.fn(async () => null)
   };
@@ -32,6 +34,7 @@ describe("AuthCallbackScreen", () => {
     await waitFor(() => expect(auth.completeSignIn).toHaveBeenCalledOnce());
     expect(container).not.toHaveTextContent("secret-token");
     expect(container).not.toHaveTextContent("state=opaque");
+    expect(`${window.location.pathname}${window.location.search}${window.location.hash}`).toBe("/auth/callback");
   });
 
   it("shows a retry link with a stable message for an auth error", () => {
@@ -51,5 +54,6 @@ describe("AuthCallbackScreen", () => {
     expect(screen.getByRole("link", { name: "Try again" })).toHaveAttribute("href", "/");
     expect(container).not.toHaveTextContent("secret-token");
     expect(container).not.toHaveTextContent("opaque");
+    expect(`${window.location.pathname}${window.location.search}${window.location.hash}`).toBe("/auth/callback");
   });
 });

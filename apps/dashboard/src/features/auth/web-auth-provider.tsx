@@ -1,61 +1,51 @@
-import { ClerkProvider, useAuth, useClerk } from "@clerk/react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { loadingAuthClient, type AuthClient, type AuthSnapshot, type TokenOptions } from "./auth-client";
+import { loadingAuthClient, type AuthClient } from "./auth-client";
 import { AuthContext } from "./auth-context";
+import { createBrowserWebAuthClient } from "./web-auth-client";
 
-class ClerkAuthClient implements AuthClient {
-  private snapshot: AuthSnapshot = { status: "loading" };
-  private readonly listeners = new Set<() => void>();
-  private openSignIn: (() => void) | null = null;
-  private signOutWithClerk: (() => Promise<void>) | null = null;
-  private getTokenWithClerk: ((options: { skipCache: boolean }) => Promise<string | null>) | null = null;
+type WebAuthProviderProps =
+  | { children: ReactNode; client: AuthClient; supabaseUrl?: never; supabasePublishableKey?: never; callbackUrl?: never }
+  | { children: ReactNode; client?: never; supabaseUrl: string; supabasePublishableKey: string; callbackUrl: string };
 
-  update(isLoaded: boolean, isSignedIn: boolean | undefined, openSignIn: () => void, signOut: () => Promise<void>, getToken: (options: { skipCache: boolean }) => Promise<string | null>): void {
-    this.openSignIn = openSignIn;
-    this.signOutWithClerk = signOut;
-    this.getTokenWithClerk = getToken;
-    this.setSnapshot(!isLoaded ? { status: "loading" } : isSignedIn ? { status: "signedIn" } : { status: "signedOut" });
+let productionClient: AuthClient | null = null;
+let productionSignature = "";
+
+function getProductionClient(supabaseUrl: string, supabasePublishableKey: string, callbackUrl: string): AuthClient {
+  const signature = JSON.stringify([supabaseUrl, supabasePublishableKey, callbackUrl]);
+  if (!productionClient || productionSignature !== signature) {
+    productionClient = createBrowserWebAuthClient(supabaseUrl, supabasePublishableKey, callbackUrl);
+    productionSignature = signature;
   }
-
-  async initialize(): Promise<void> {}
-  getSnapshot(): AuthSnapshot { return this.snapshot; }
-  subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
-  async signIn(): Promise<void> { this.openSignIn?.(); }
-  async completeSignIn(): Promise<void> {}
-  async signOut(): Promise<void> { await this.signOutWithClerk?.(); this.setSnapshot({ status: "signedOut" }); }
-  async expireSession(): Promise<void> { await this.signOut(); }
-  async getAccessToken(options?: TokenOptions): Promise<string | null> { return this.getTokenWithClerk?.({ skipCache: options?.forceRefresh === true }) ?? null; }
-
-  private setSnapshot(snapshot: AuthSnapshot): void {
-    if (this.snapshot.status === snapshot.status) return;
-    this.snapshot = snapshot;
-    this.listeners.forEach((listener) => listener());
-  }
+  return productionClient;
 }
 
-function ClerkBridge({ children }: { children: ReactNode }) {
-  const { isLoaded, isSignedIn, getToken } = useAuth();
-  const clerk = useClerk();
-  const client = useRef<ClerkAuthClient | null>(null);
+function disposeClient(client: AuthClient): void {
+  const disposable = client as AuthClient & { dispose?: unknown };
+  if (typeof disposable.dispose === "function") disposable.dispose();
+}
+
+export function WebAuthProvider(props: WebAuthProviderProps) {
+  const client = props.client ?? getProductionClient(props.supabaseUrl, props.supabasePublishableKey, props.callbackUrl);
   const [initialized, setInitialized] = useState(false);
-  if (!client.current) client.current = new ClerkAuthClient();
+  const initialization = useRef<Promise<void> | null>(null);
+  const pendingDisposal = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    client.current?.update(isLoaded, isSignedIn, () => clerk.openSignIn(), () => clerk.signOut(), (options) => getToken(options));
-  }, [clerk, getToken, isLoaded, isSignedIn]);
-
-  useEffect(() => {
-    const authClient = client.current;
-    if (!authClient) return;
+    if (pendingDisposal.current) {
+      clearTimeout(pendingDisposal.current);
+      pendingDisposal.current = null;
+    }
     let active = true;
-    const unsubscribe = authClient.subscribe(() => undefined);
-    void authClient.initialize().finally(() => { if (active) setInitialized(true); });
-    return () => { active = false; unsubscribe(); };
-  }, []);
+    if (!initialization.current) initialization.current = client.initialize();
+    void initialization.current.finally(() => { if (active) setInitialized(true); });
+    return () => {
+      active = false;
+      pendingDisposal.current = setTimeout(() => {
+        pendingDisposal.current = null;
+        disposeClient(client);
+      }, 0);
+    };
+  }, [client]);
 
-  return <AuthContext.Provider value={initialized ? client.current : loadingAuthClient}>{children}</AuthContext.Provider>;
-}
-
-export function WebAuthProvider({ children, publishableKey }: { children: ReactNode; publishableKey: string }) {
-  return <ClerkProvider publishableKey={publishableKey}><ClerkBridge>{children}</ClerkBridge></ClerkProvider>;
+  return <AuthContext.Provider value={initialized ? client : loadingAuthClient}>{props.children}</AuthContext.Provider>;
 }

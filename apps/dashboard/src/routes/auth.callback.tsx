@@ -4,14 +4,14 @@ import { z } from "zod";
 import { useAuthClient, useAuthSnapshot } from "@/features/auth/auth-context";
 import { AuthCallbackScreen } from "@/features/auth/auth-callback-screen";
 
-const callbackSearchSchema = z.object({
-  code: z.string().min(1).optional(),
-  state: z.string().min(1).optional(),
-  error: z.string().min(1).optional()
+const callbackSearchSchema = z.looseObject({
+  code: z.unknown().optional(),
+  error: z.unknown().optional(),
+  error_code: z.unknown().optional(),
+  error_description: z.unknown().optional()
 });
 
 function browserCallbackUrl(pathname: string, search: string): string {
-  // Rebuild from the router location so a route can never forward a foreign URL.
   return new URL(`${pathname}${search}`, window.location.origin).toString();
 }
 
@@ -20,15 +20,18 @@ function AuthCallbackRoute() {
   const snapshot = useAuthSnapshot();
   const location = useLocation();
   const navigate = useNavigate();
+  const callbackUrl = browserCallbackUrl(location.pathname, location.searchStr);
 
   useEffect(() => {
-    if (snapshot.status === "signedIn") {
-      void navigate({ to: "/setup", replace: true });
-    }
+    if (location.searchStr) void navigate({ to: "/auth/callback", search: {}, replace: true });
+  }, [location.searchStr, navigate]);
+
+  useEffect(() => {
+    if (snapshot.status === "signedIn") void navigate({ to: "/setup", replace: true });
   }, [navigate, snapshot.status]);
 
   return <AuthCallbackScreen
-    callbackUrl={browserCallbackUrl(location.pathname, location.searchStr)}
+    callbackUrl={callbackUrl}
     onRetry={() => {
       void auth.expireSession().catch(() => undefined).then(() => navigate({ to: "/", replace: true }));
     }}

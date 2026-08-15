@@ -11,7 +11,7 @@ export default defineConfig({
   },
   webServer: {
     command:
-      "VITE_API_URL=http://api.orchestrat.test VITE_CLERK_PUBLISHABLE_KEY=pk_test_e2e VITE_E2E_AUTH=1 pnpm exec vite --mode e2e --host 127.0.0.1 --port 4173 --strictPort",
+      "VITE_API_URL=http://api.orchestrat.test VITE_SUPABASE_URL=https://e2e-placeholder.supabase.co VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_e2e-placeholder VITE_WEB_AUTH_CALLBACK_URL=http://127.0.0.1:4173/auth/callback VITE_E2E_AUTH=1 pnpm exec vite --mode e2e --host 127.0.0.1 --port 4173 --strictPort",
     port: 4173,
     reuseExistingServer: !process.env.CI
   },
