@@ -96,8 +96,8 @@ impl AuthService {
     }
     pub async fn send_magic_link(&self, value: &str, now: u64) -> Result<(), AuthError> {
         let _guard = self.lifecycle.lock().await;
-        self.prepare_new_flow()?;
         let email = normalize_email(value).ok_or(AuthError::InvalidEmail)?;
+        self.prepare_new_flow()?;
         let (pkce, pending) = self.pending(PendingKind::MagicLink, now)?;
         let redirect = self.redirect_for(&pending.flow_id);
         let result = self
@@ -169,10 +169,7 @@ impl AuthService {
                 Err(AuthError::InvalidProviderResponse)
             }
             Err(error) => {
-                *self
-                    .current_access
-                    .lock()
-                    .map_err(|_| AuthError::CredentialStore)? = None;
+                self.preserve_current_for_logout()?;
                 // The exchange marker is already durable, so a stale parent refresh can never be
                 // restored even if this best-effort physical deletion fails.
                 let _ = self.store.delete(REFRESH_ACCOUNT);
@@ -218,6 +215,9 @@ impl AuthService {
     pub async fn refresh(&self, now: u64) -> Result<AccessGrant, AuthError> {
         let _guard = self.lifecycle.lock().await;
         let marker = self.store.get(SESSION_STATE_ACCOUNT)?;
+        if marker.as_deref() == Some(SESSION_EXCHANGE) {
+            return Err(AuthError::ProviderTransient);
+        }
         let refresh = self.store.get(REFRESH_ACCOUNT)?;
         let token = match (marker.as_deref(), refresh) {
             (Some(SESSION_VALID), Some(token)) | (Some(SESSION_RECOVERY), Some(token)) => token,
@@ -276,6 +276,10 @@ impl AuthService {
             return Err(AuthError::CredentialStore);
         }
         let result = access_grant(grant.access_token.clone(), grant.expires_in, now);
+        self.pending_logout_access
+            .lock()
+            .map_err(|_| AuthError::CredentialStore)?
+            .take();
         *self
             .current_access
             .lock()
@@ -343,6 +347,20 @@ impl AuthService {
             }
         }
         result
+    }
+    fn preserve_current_for_logout(&self) -> Result<(), AuthError> {
+        let access = self
+            .current_access
+            .lock()
+            .map_err(|_| AuthError::CredentialStore)?
+            .take();
+        if let Some(token) = access {
+            *self
+                .pending_logout_access
+                .lock()
+                .map_err(|_| AuthError::CredentialStore)? = Some(token);
+        }
+        Ok(())
     }
     fn delete_both(&self) -> Result<(), AuthError> {
         let pending = self.store.delete(PENDING_ACCOUNT);
@@ -526,6 +544,7 @@ mod tests {
     struct Fake {
         exchange_error: StdMutex<Option<AuthError>>,
         exchange_calls: StdMutex<usize>,
+        exchange_access: StdMutex<String>,
         refresh_error: StdMutex<Option<AuthError>>,
         refresh_calls: StdMutex<usize>,
         refresh_inputs: StdMutex<Vec<String>>,
@@ -540,6 +559,7 @@ mod tests {
             Self {
                 exchange_error: Default::default(),
                 exchange_calls: Default::default(),
+                exchange_access: StdMutex::new("access-one".into()),
                 refresh_error: Default::default(),
                 refresh_calls: Default::default(),
                 refresh_inputs: Default::default(),
@@ -566,7 +586,7 @@ mod tests {
                 return Err(e);
             }
             Ok(TokenGrant {
-                access_token: "access-one".into(),
+                access_token: self.exchange_access.lock().unwrap().clone(),
                 refresh_token: "refresh-one".into(),
                 expires_in: 60,
             })
@@ -1514,6 +1534,109 @@ mod tests {
             *transport.logout.lock().unwrap(),
             vec!["access-one", "access-one"]
         );
+    }
+
+    #[tokio::test]
+    async fn refresh_during_exchange_preserves_pending_marker_and_never_calls_provider() {
+        let (service, store, transport) = fixture();
+        let request = service.begin_github(1_000).await.unwrap();
+        store.set(REFRESH_ACCOUNT, "old-account").unwrap();
+        store.set(SESSION_STATE_ACCOUNT, "v1:exchange").unwrap();
+        let pending_before = store.get(PENDING_ACCOUNT).unwrap().unwrap();
+        store.clear_events();
+
+        assert!(matches!(
+            service.refresh(1_100).await,
+            Err(AuthError::ProviderTransient)
+        ));
+        assert_eq!(*transport.refresh_calls.lock().unwrap(), 0);
+        assert_eq!(
+            store.get(PENDING_ACCOUNT).unwrap().as_deref(),
+            Some(pending_before.as_str())
+        );
+        assert_eq!(
+            store.get(SESSION_STATE_ACCOUNT).unwrap().as_deref(),
+            Some("v1:exchange")
+        );
+        assert_eq!(
+            store.get(REFRESH_ACCOUNT).unwrap().as_deref(),
+            Some("old-account")
+        );
+        assert!(store.events().is_empty());
+        service.complete(&callback(&request), 1_101).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn transient_exchange_preserves_old_access_for_explicit_logout() {
+        let (service, _, transport) = fixture();
+        let account_a = service.begin_github(1_000).await.unwrap();
+        service
+            .complete(&callback(&account_a), 1_100)
+            .await
+            .unwrap();
+        let account_b = service.begin_github(1_200).await.unwrap();
+        *transport.exchange_error.lock().unwrap() = Some(AuthError::ProviderTransient);
+        assert!(matches!(
+            service.complete(&callback(&account_b), 1_300).await,
+            Err(AuthError::ProviderTransient)
+        ));
+
+        service.sign_out().await.unwrap();
+        assert_eq!(*transport.logout.lock().unwrap(), vec!["access-one"]);
+    }
+
+    #[tokio::test]
+    async fn successful_exchange_retry_replaces_stale_logout_access() {
+        let (service, _, transport) = fixture();
+        let account_a = service.begin_github(1_000).await.unwrap();
+        service
+            .complete(&callback(&account_a), 1_100)
+            .await
+            .unwrap();
+        let account_b = service.begin_github(1_200).await.unwrap();
+        *transport.exchange_error.lock().unwrap() = Some(AuthError::ProviderTransient);
+        assert!(matches!(
+            service.complete(&callback(&account_b), 1_300).await,
+            Err(AuthError::ProviderTransient)
+        ));
+
+        *transport.exchange_access.lock().unwrap() = "access-two".into();
+        service
+            .complete(&callback(&account_b), 1_301)
+            .await
+            .unwrap();
+        service.sign_out().await.unwrap();
+        assert_eq!(*transport.logout.lock().unwrap(), vec!["access-two"]);
+    }
+
+    #[tokio::test]
+    async fn invalid_magic_email_does_not_mutate_stale_exchange_state() {
+        let (service, store, transport) = fixture();
+        let request = service.begin_github(1_000).await.unwrap();
+        store.set(REFRESH_ACCOUNT, "old-refresh").unwrap();
+        store.set(SESSION_STATE_ACCOUNT, "v1:exchange").unwrap();
+        let pending_before = store.get(PENDING_ACCOUNT).unwrap().unwrap();
+        store.clear_events();
+
+        assert!(matches!(
+            service.send_magic_link("not-an-email", 1_100).await,
+            Err(AuthError::InvalidEmail)
+        ));
+        assert_eq!(
+            store.get(PENDING_ACCOUNT).unwrap().as_deref(),
+            Some(pending_before.as_str())
+        );
+        assert_eq!(
+            store.get(REFRESH_ACCOUNT).unwrap().as_deref(),
+            Some("old-refresh")
+        );
+        assert_eq!(
+            store.get(SESSION_STATE_ACCOUNT).unwrap().as_deref(),
+            Some("v1:exchange")
+        );
+        assert!(store.events().is_empty());
+        assert!(transport.magic.lock().unwrap().is_empty());
+        assert!(!request.flow_id.is_empty());
     }
 
     #[tokio::test]

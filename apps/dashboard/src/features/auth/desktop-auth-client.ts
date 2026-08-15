@@ -30,6 +30,9 @@ function isTerminalRefreshError(error: unknown): boolean {
   if (typeof error !== "object" || error === null || !("code" in error) || typeof error.code !== "string") return false;
   return new Set(["provider_rejected", "invalid_provider_response", "no_session"]).has(error.code);
 }
+function isUncertainExchangeError(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "provider_unavailable";
+}
 
 function snapshotsEqual(left: AuthSnapshot, right: AuthSnapshot): boolean {
   if (left.status !== right.status) return false;
@@ -59,6 +62,8 @@ export class DesktopAuthClient implements AuthClient {
   private refreshRetryAtMs = 0;
   private transientRefreshError: unknown = null;
   private callbackPreservesWarmSession = false;
+  private callbackExchangePending = false;
+  private callbackExchangeError: unknown = null;
   private generation = 0;
   private identityKey: string | null = null;
   private disposed = false;
@@ -78,6 +83,7 @@ export class DesktopAuthClient implements AuthClient {
     this.generation += 1;
     this.clearTimer();
     this.resetRefreshRetry();
+    this.resetCallbackExchange();
     this.signInOperation = this.magicLinkOperation = null;
     this.refreshOperation = null;
     this.callbackOperations.clear();
@@ -164,7 +170,7 @@ export class DesktopAuthClient implements AuthClient {
     if (generation === null) {
       generation = ++this.generation;
       this.callbackGeneration = generation;
-      this.callbackPreservesWarmSession = this.grant !== null && this.identityKey !== null && this.snapshot.status === "signedIn";
+      this.callbackPreservesWarmSession = this.grant !== null && this.identityKey !== null;
       this.clearTimer();
       this.resetRefreshRetry();
       this.signInOperation = this.magicLinkOperation = null;
@@ -183,8 +189,19 @@ export class DesktopAuthClient implements AuthClient {
       this.setSnapshot({ status: "signedIn", identityKey: this.identityKey });
       return { status: "success", identityKey: this.identityKey };
     }).catch((error): AuthCompletionResult => {
-      if (this.generation === generation && !this.callbackCompleted && this.callbackOperations.size === 1) {
-        if (this.callbackPreservesWarmSession && this.grant && this.identityKey) {
+      const active = this.generation === generation && !this.callbackCompleted;
+      if (active && isUncertainExchangeError(error)) {
+        this.callbackExchangePending = true;
+        this.callbackExchangeError = error;
+      }
+      if (active && this.callbackOperations.size === 1) {
+        if (this.callbackExchangePending) {
+          if (this.callbackPreservesWarmSession && this.grant && this.identityKey && this.grant.expiresAtMs > this.now()) {
+            this.setSnapshot({ status: "signedIn", identityKey: this.identityKey });
+          } else {
+            this.setSnapshot(commandError(this.callbackExchangeError ?? error));
+          }
+        } else if (this.callbackPreservesWarmSession && this.grant && this.identityKey) {
           this.installGrant(this.grant);
           this.setSnapshot({ status: "signedIn", identityKey: this.identityKey });
         } else {
@@ -225,16 +242,26 @@ export class DesktopAuthClient implements AuthClient {
     const grant = this.grant;
     if (!grant) return null;
     const now = this.now();
+    const forced = options?.forceRefresh === true;
+    const refreshLocked = this.callbackExchangePending || this.callbackGeneration !== null || this.refreshRetryAtMs > now;
     if (grant.expiresAtMs <= now) {
-      if (this.refreshRetryAtMs > now || this.callbackGeneration !== null) {
-        if (this.transientRefreshError !== null) this.setSnapshot(commandError(this.transientRefreshError));
+      if (refreshLocked) {
+        const error = this.callbackExchangeError ?? this.transientRefreshError;
+        if (error !== null) this.setSnapshot(commandError(error));
         return null;
       }
-      return this.refreshCurrent(grant);
+      return this.refreshForCaller(grant, forced);
     }
-    if (this.callbackGeneration !== null || this.refreshRetryAtMs > now) return grant.accessToken;
-    if (!options?.forceRefresh && grant.expiresAtMs - now >= refreshWindowMs) return grant.accessToken;
-    return this.refreshCurrent(grant);
+    if (refreshLocked) return forced ? null : grant.accessToken;
+    if (!forced && grant.expiresAtMs - now >= refreshWindowMs) return grant.accessToken;
+    return this.refreshForCaller(grant, forced);
+  }
+
+  private async refreshForCaller(grant: AccessGrant, forced: boolean): Promise<string | null> {
+    const token = await this.refreshCurrent(grant);
+    if (forced && this.grant === grant &&
+        (this.callbackExchangePending || this.refreshRetryAtMs > this.now())) return null;
+    return token;
   }
 
   private refreshCurrent(grant: AccessGrant): Promise<string | null> {
@@ -267,6 +294,7 @@ export class DesktopAuthClient implements AuthClient {
   private installGrant(grant: AccessGrant | null): void {
     this.clearTimer();
     this.resetRefreshRetry();
+    this.resetCallbackExchange();
     this.grant = grant;
     if (!grant || this.disposed) return;
     const delay = Math.max(minimumRefreshBackoffMs,
@@ -295,10 +323,15 @@ export class DesktopAuthClient implements AuthClient {
     this.refreshRetryAtMs = 0;
     this.transientRefreshError = null;
   }
+  private resetCallbackExchange(): void {
+    this.callbackExchangePending = false;
+    this.callbackExchangeError = null;
+  }
   private clearTimer(): void { if (this.refreshTimer !== null) clearTimeout(this.refreshTimer); this.refreshTimer = null; }
   private clearLocalSession(): void {
     this.clearTimer();
     this.resetRefreshRetry();
+    this.resetCallbackExchange();
     this.signInOperation = this.magicLinkOperation = null;
     this.callbackOperations.clear();
     this.callbackGeneration = null;

@@ -123,6 +123,41 @@ describe("DesktopAuthClient", () => {
     expect(await client.getAccessToken()).toBeNull();
   });
 
+  it("preserves a warm grant through mismatched callbacks during active GitHub and magic operations", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    try {
+      for (const method of ["github", "magic"] as const) {
+        vi.setSystemTime(1_000);
+        const f = fixture(grant);
+        const active = deferred<undefined>();
+        if (method === "github") f.bridge.beginGitHub.mockReturnValueOnce(active.promise);
+        else f.bridge.sendMagicLink.mockReturnValueOnce(active.promise);
+        f.bridge.complete.mockRejectedValueOnce({
+          code: "flow_mismatch", message: "The callback flow does not match."
+        });
+        const client = new DesktopAuthClient(f.platform, f.bridge, Date.now);
+        await client.initialize();
+        const identity = (client.getSnapshot() as { identityKey: string }).identityKey;
+        if (method === "github") void client.signInWithGitHub();
+        else void client.sendMagicLink("person@example.com");
+
+        await expect(client.completeSignIn(
+          `dev.orchestrat.app://auth/callback?code=bad-${method}&sb_flow_id=wrong-${method}`
+        )).resolves.toEqual({ status: "error" });
+        expect(client.getSnapshot()).toEqual({ status: "signedIn", identityKey: identity });
+        expect(await client.getAccessToken()).toBe("access-1");
+        await vi.advanceTimersByTimeAsync(28_999);
+        expect(f.bridge.refresh).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(1);
+        expect(f.bridge.refresh).toHaveBeenCalledOnce();
+        active.resolve(undefined);
+        await Promise.resolve();
+        client.dispose();
+      }
+    } finally { vi.useRealTimers(); }
+  });
+
   it("preserves a warm grant until a correlated account switch succeeds", async () => {
     const f = fixture(grant);
     const completion = deferred<typeof grant>();
@@ -167,6 +202,56 @@ describe("DesktopAuthClient", () => {
     expect(f.bridge.refresh).toHaveBeenCalledOnce();
   });
 
+  it("maps a forced caller coalesced with transient proactive refresh to null", async () => {
+    const f = fixture({ accessToken: "old-access", expiresAtMs: 20_000 });
+    const refreshing = deferred<typeof grant>();
+    f.bridge.refresh.mockReturnValueOnce(refreshing.promise);
+    const client = new DesktopAuthClient(f.platform, f.bridge, () => 1_000);
+    await client.initialize();
+
+    const proactive = client.getAccessToken();
+    const forced = client.getAccessToken({ forceRefresh: true });
+    expect(f.bridge.refresh).toHaveBeenCalledOnce();
+    refreshing.reject({ code: "provider_unavailable", message: "Try again." });
+    await expect(proactive).resolves.toBe("old-access");
+    await expect(forced).resolves.toBeNull();
+    expect(f.bridge.expire).not.toHaveBeenCalled();
+    client.dispose();
+  });
+
+  it("does not proactively refresh a warm session while exchange retry is pending", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    try {
+      const f = fixture({ accessToken: "account-a", expiresAtMs: 61_000 });
+      f.bridge.complete
+        .mockRejectedValueOnce({ code: "provider_unavailable", message: "Try again." })
+        .mockResolvedValueOnce({ accessToken: "account-b", expiresAtMs: 300_000 });
+      const client = new DesktopAuthClient(f.platform, f.bridge, Date.now);
+      await client.initialize();
+      const identityA = (client.getSnapshot() as { identityKey: string }).identityKey;
+
+      await expect(client.completeSignIn(
+        "dev.orchestrat.app://auth/callback?code=uncertain&sb_flow_id=flow-a"
+      )).resolves.toEqual({ status: "error" });
+      expect(await client.getAccessToken()).toBe("account-a");
+      expect(await client.getAccessToken({ forceRefresh: true })).toBeNull();
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(f.bridge.refresh).not.toHaveBeenCalled();
+      expect(await client.getAccessToken()).toBeNull();
+      expect(client.getSnapshot()).toEqual({
+        status: "error", code: "provider_unavailable", message: "Try again."
+      });
+
+      await expect(client.completeSignIn(
+        "dev.orchestrat.app://auth/callback?code=retry&sb_flow_id=flow-a"
+      )).resolves.toMatchObject({ status: "success" });
+      expect(await client.getAccessToken()).toBe("account-b");
+      expect((client.getSnapshot() as { identityKey: string }).identityKey).not.toBe(identityA);
+      client.dispose();
+    } finally { vi.useRealTimers(); }
+  });
+
   it("expires the native session when refresh fails terminally", async () => {
     const f = fixture({ ...grant, expiresAtMs: 1_001 });
     f.bridge.refresh.mockRejectedValue({ code: "provider_rejected", message: "Sign in again." });
@@ -194,7 +279,7 @@ describe("DesktopAuthClient", () => {
       await vi.advanceTimersByTimeAsync(1_000);
       expect(f.bridge.refresh).toHaveBeenCalledTimes(1);
       expect(client.getSnapshot()).toEqual({ status: "signedIn", identityKey: identity });
-      expect(await client.getAccessToken({ forceRefresh: true })).toBe("old-access");
+      expect(await client.getAccessToken({ forceRefresh: true })).toBeNull();
       expect(f.bridge.refresh).toHaveBeenCalledTimes(1);
 
       await vi.advanceTimersByTimeAsync(999);
@@ -385,6 +470,36 @@ describe("DesktopAuthClient", () => {
       expect(expired.bridge.refresh).toHaveBeenCalledOnce();
       client.dispose();
       expiredClient.dispose();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("keeps exchange lock when a transient distinct callback settles before a mismatch", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    try {
+      const f = fixture({ accessToken: "account-a", expiresAtMs: 61_000 });
+      const uncertain = deferred<typeof grant>();
+      const mismatch = deferred<typeof grant>();
+      f.bridge.complete.mockImplementation((callback) =>
+        callback.includes("sb_flow_id=uncertain") ? uncertain.promise : mismatch.promise
+      );
+      const client = new DesktopAuthClient(f.platform, f.bridge, Date.now);
+      await client.initialize();
+      const first = client.completeSignIn(
+        "dev.orchestrat.app://auth/callback?code=a&sb_flow_id=uncertain"
+      );
+      const second = client.completeSignIn(
+        "dev.orchestrat.app://auth/callback?code=b&sb_flow_id=mismatch"
+      );
+      uncertain.reject({ code: "provider_unavailable", message: "Try again." });
+      await expect(first).resolves.toEqual({ status: "error" });
+      mismatch.reject({ code: "flow_mismatch", message: "Wrong flow." });
+      await expect(second).resolves.toEqual({ status: "error" });
+
+      expect(await client.getAccessToken({ forceRefresh: true })).toBeNull();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(f.bridge.refresh).not.toHaveBeenCalled();
+      client.dispose();
     } finally { vi.useRealTimers(); }
   });
 

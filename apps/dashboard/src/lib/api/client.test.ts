@@ -5,6 +5,7 @@ import {
   DashboardApiError,
   type ApiTokenSource
 } from "@/lib/api/client";
+import { DesktopAuthClient } from "@/features/auth/desktop-auth-client";
 import { organization, project, workspace } from "@/test/factories";
 import { handlers } from "@/test/handlers";
 import { server } from "@/test/msw-server";
@@ -184,6 +185,58 @@ describe("ApiClient", () => {
       forceRefresh: true
     });
     expect(requests).toBe(2);
+  });
+
+  it("does not replay an old JWT when forced native refresh is transient", async () => {
+    let requests = 0;
+    server.use(
+      http.get(`${apiUrl}/api/v1/organizations`, ({ request }) => {
+        requests += 1;
+        if (requests === 1) {
+          expect(request.headers.get("authorization")).toBe("Bearer old-native-token");
+          return HttpResponse.json(
+            { error: { code: "UNAUTHENTICATED", message: "Expired", details: {}, request_id: "req_old" } },
+            { status: 401 }
+          );
+        }
+        expect(request.headers.get("authorization")).toBe("Bearer recovered-native-token");
+        return HttpResponse.json({ organizations: [organization()] });
+      })
+    );
+    let now = 1_000;
+    const bridge = {
+      beginGitHub: vi.fn(async () => undefined),
+      sendMagicLink: vi.fn(async () => undefined),
+      complete: vi.fn(async () => ({ accessToken: "unused", expiresAtMs: 90_000 })),
+      refresh: vi.fn()
+        .mockRejectedValueOnce({ code: "provider_unavailable", message: "Try again." })
+        .mockResolvedValueOnce({ accessToken: "recovered-native-token", expiresAtMs: 90_000 }),
+      restore: vi.fn(async () => ({ accessToken: "old-native-token", expiresAtMs: 60_000 })),
+      expire: vi.fn(async () => undefined),
+      signOut: vi.fn(async () => undefined)
+    };
+    const platform = {
+      kind: "desktop" as const,
+      preferences: { load: vi.fn(), save: vi.fn() },
+      openExternal: vi.fn(async () => undefined),
+      onAuthCallback: vi.fn(async () => () => undefined)
+    };
+    const auth = new DesktopAuthClient(platform, bridge, () => now);
+    await auth.initialize();
+    const api = new ApiClient(apiUrl, auth);
+
+    await expect(api.listOrganizations()).rejects.toMatchObject({
+      kind: "UNAUTHENTICATED", status: null
+    } satisfies Partial<DashboardApiError>);
+    expect(requests).toBe(1);
+    expect(bridge.refresh).toHaveBeenCalledOnce();
+    expect(bridge.expire).not.toHaveBeenCalled();
+
+    now += 1_000;
+    await expect(auth.getAccessToken({ forceRefresh: true })).resolves.toBe("recovered-native-token");
+    await expect(api.listOrganizations()).resolves.toEqual({ organizations: [organization()] });
+    expect(requests).toBe(2);
+    auth.dispose();
   });
 
   it("expires the session once after a second 401", async () => {
