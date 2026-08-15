@@ -13,6 +13,7 @@
     "lint": "eslint src vite.config.ts",
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run",
+    "test:native": "ORCHESTRAT_SUPABASE_URL=https://example.supabase.co ORCHESTRAT_SUPABASE_PUBLISHABLE_KEY=sb_publishable_abcdefghijklmnopqrstuvwxyz123456 ORCHESTRAT_AUTH_ENVIRONMENT=test ORCHESTRAT_DESKTOP_AUTH_REDIRECT_URI=dev.orchestrat.app://auth/callback cargo test --manifest-path src-tauri/Cargo.toml",
     "test:watch": "vitest",
     "test:e2e": "playwright test"
   },

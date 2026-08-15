@@ -10,8 +10,11 @@ use serde::Serialize;
 use std::sync::{Arc, Mutex};
 use tokio::sync::Mutex as AsyncMutex;
 
+// Static, nonsecret protocol markers. They never contain tokens, verifiers, codes, or identity data.
 const SESSION_BLOCKED: &str = "v1:blocked";
 const SESSION_VALID: &str = "v1:valid";
+const SESSION_RECOVERY: &str = "v1:recovery";
+const SESSION_EXCHANGE: &str = "v1:exchange";
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -30,6 +33,8 @@ pub struct AuthService {
     transport: Arc<dyn AuthTransport>,
     lifecycle: Arc<AsyncMutex<()>>,
     current_access: Arc<Mutex<Option<String>>>,
+    // Intentionally memory-only: a process crash can forfeit remote logout retry only after
+    // local secrets are already deleted; persisting an access JWT would widen secret storage.
     pending_logout_access: Arc<Mutex<Option<String>>>,
 }
 impl AuthService {
@@ -73,7 +78,7 @@ impl AuthService {
     }
     pub(crate) async fn begin_github(&self, now: u64) -> Result<AuthorizationRequest, AuthError> {
         let _guard = self.lifecycle.lock().await;
-        self.ensure_session_usable()?;
+        self.prepare_new_flow()?;
         let (pkce, pending) = self.pending(PendingKind::Github, now)?;
         let redirect = self.redirect_for(&pending.flow_id);
         let mut url = self.config.authorize_url();
@@ -91,7 +96,7 @@ impl AuthService {
     }
     pub async fn send_magic_link(&self, value: &str, now: u64) -> Result<(), AuthError> {
         let _guard = self.lifecycle.lock().await;
-        self.ensure_session_usable()?;
+        self.prepare_new_flow()?;
         let email = normalize_email(value).ok_or(AuthError::InvalidEmail)?;
         let (pkce, pending) = self.pending(PendingKind::MagicLink, now)?;
         let redirect = self.redirect_for(&pending.flow_id);
@@ -121,7 +126,6 @@ impl AuthService {
     }
     pub async fn complete(&self, callback: &str, now: u64) -> Result<AccessGrant, AuthError> {
         let _guard = self.lifecycle.lock().await;
-        self.ensure_session_usable()?;
         let raw = self
             .store
             .get(PENDING_ACCOUNT)?
@@ -140,19 +144,41 @@ impl AuthService {
             .code
             .as_deref()
             .ok_or(AuthError::InvalidCallback)?;
-        let grant = match self
+
+        let prior_marker = self.store.get(SESSION_STATE_ACCOUNT)?;
+        match prior_marker.as_deref() {
+            None | Some(SESSION_VALID) => {
+                self.store.set(SESSION_STATE_ACCOUNT, SESSION_EXCHANGE)?
+            }
+            Some(SESSION_EXCHANGE) => {}
+            _ => return Err(AuthError::CredentialStore),
+        }
+
+        match self
             .transport
             .exchange_code(code, &validated.verifier)
             .await
         {
-            Ok(g) => g,
-            Err(error @ (AuthError::ProviderRejected | AuthError::InvalidProviderResponse)) => {
-                self.store.delete(PENDING_ACCOUNT)?;
-                return Err(error);
+            Ok(grant) => self.persist_grant(grant, now, true, true),
+            Err(AuthError::ProviderRejected) => {
+                self.finish_rejected_exchange(prior_marker.as_deref())?;
+                Err(AuthError::ProviderRejected)
             }
-            Err(error) => return Err(error),
-        };
-        self.persist_grant(grant, now, true, false)
+            Err(AuthError::InvalidProviderResponse) => {
+                self.clear_uncertain_exchange()?;
+                Err(AuthError::InvalidProviderResponse)
+            }
+            Err(error) => {
+                *self
+                    .current_access
+                    .lock()
+                    .map_err(|_| AuthError::CredentialStore)? = None;
+                // The exchange marker is already durable, so a stale parent refresh can never be
+                // restored even if this best-effort physical deletion fails.
+                let _ = self.store.delete(REFRESH_ACCOUNT);
+                Err(error)
+            }
+        }
     }
     pub async fn restore(&self, now: u64) -> Result<Option<AccessGrant>, AuthError> {
         let _guard = self.lifecycle.lock().await;
@@ -160,7 +186,17 @@ impl AuthService {
         let refresh = self.store.get(REFRESH_ACCOUNT)?;
         let token = match (marker.as_deref(), refresh) {
             (None, None) => return Ok(None),
-            (Some(SESSION_VALID), Some(token)) => token,
+            (Some(SESSION_EXCHANGE), refresh) => {
+                *self
+                    .current_access
+                    .lock()
+                    .map_err(|_| AuthError::CredentialStore)? = None;
+                if refresh.is_some() {
+                    let _ = self.store.delete(REFRESH_ACCOUNT);
+                }
+                return Ok(None);
+            }
+            (Some(SESSION_VALID), Some(token)) | (Some(SESSION_RECOVERY), Some(token)) => token,
             _ => {
                 self.cleanup_all_fail_closed()?;
                 return Ok(None);
@@ -174,7 +210,7 @@ impl AuthService {
                 Ok(None)
             }
             Err(error) => {
-                self.restore_valid_after_transient()?;
+                self.write_recovery_after_transient()?;
                 Err(error)
             }
         }
@@ -184,7 +220,7 @@ impl AuthService {
         let marker = self.store.get(SESSION_STATE_ACCOUNT)?;
         let refresh = self.store.get(REFRESH_ACCOUNT)?;
         let token = match (marker.as_deref(), refresh) {
-            (Some(SESSION_VALID), Some(token)) => token,
+            (Some(SESSION_VALID), Some(token)) | (Some(SESSION_RECOVERY), Some(token)) => token,
             (None, None) => return Err(AuthError::NoSession),
             _ => {
                 self.cleanup_all_fail_closed()?;
@@ -199,7 +235,7 @@ impl AuthService {
                 Err(error)
             }
             Err(error) => {
-                self.restore_valid_after_transient()?;
+                self.write_recovery_after_transient()?;
                 Err(error)
             }
         }
@@ -292,11 +328,21 @@ impl AuthService {
             .pending_logout_access
             .lock()
             .map_err(|_| AuthError::CredentialStore)?
-            .take();
-        match access {
-            Some(token) => self.transport.logout(&token).await,
-            None => Ok(()),
+            .clone();
+        let Some(token) = access else {
+            return Ok(());
+        };
+        let result = self.transport.logout(&token).await;
+        if !matches!(result, Err(AuthError::ProviderTransient)) {
+            let mut pending = self
+                .pending_logout_access
+                .lock()
+                .map_err(|_| AuthError::CredentialStore)?;
+            if pending.as_deref() == Some(token.as_str()) {
+                pending.take();
+            }
         }
+        result
     }
     fn delete_both(&self) -> Result<(), AuthError> {
         let pending = self.store.delete(PENDING_ACCOUNT);
@@ -306,14 +352,55 @@ impl AuthService {
     fn write_blocked(&self) -> Result<(), AuthError> {
         self.store.set(SESSION_STATE_ACCOUNT, SESSION_BLOCKED)
     }
-    fn restore_valid_after_transient(&self) -> Result<(), AuthError> {
-        self.store.set(SESSION_STATE_ACCOUNT, SESSION_VALID)
+    fn write_recovery_after_transient(&self) -> Result<(), AuthError> {
+        self.store.set(SESSION_STATE_ACCOUNT, SESSION_RECOVERY)
     }
     fn ensure_session_usable(&self) -> Result<(), AuthError> {
         match self.store.get(SESSION_STATE_ACCOUNT)?.as_deref() {
             None | Some(SESSION_VALID) => Ok(()),
             _ => Err(AuthError::CredentialStore),
         }
+    }
+    fn prepare_new_flow(&self) -> Result<(), AuthError> {
+        match self.store.get(SESSION_STATE_ACCOUNT)?.as_deref() {
+            Some(SESSION_EXCHANGE) => {
+                // Keep the exchange marker until every stale secret has been physically removed.
+                let refresh = self.store.delete(REFRESH_ACCOUNT);
+                let pending = self.store.delete(PENDING_ACCOUNT);
+                if refresh.and(pending).is_err() {
+                    return Err(AuthError::CredentialStore);
+                }
+                self.store.delete(SESSION_STATE_ACCOUNT)
+            }
+            _ => self.ensure_session_usable(),
+        }
+    }
+    fn finish_rejected_exchange(&self, prior_marker: Option<&str>) -> Result<(), AuthError> {
+        self.store.delete(PENDING_ACCOUNT)?;
+        match prior_marker {
+            Some(SESSION_VALID) if self.store.get(REFRESH_ACCOUNT)?.is_some() => {
+                self.store.set(SESSION_STATE_ACCOUNT, SESSION_VALID)
+            }
+            None if self.store.get(REFRESH_ACCOUNT)?.is_none() => {
+                self.store.delete(SESSION_STATE_ACCOUNT)
+            }
+            _ => {
+                if self.store.delete(REFRESH_ACCOUNT).is_err() {
+                    return Err(AuthError::CredentialStore);
+                }
+                self.store.delete(SESSION_STATE_ACCOUNT)
+            }
+        }
+    }
+    fn clear_uncertain_exchange(&self) -> Result<(), AuthError> {
+        *self
+            .current_access
+            .lock()
+            .map_err(|_| AuthError::CredentialStore)? = None;
+        if self.delete_both().is_err() {
+            return Err(AuthError::CredentialStore);
+        }
+        self.store.delete(SESSION_STATE_ACCOUNT)
     }
     fn abandon_grant_locked(&self, delete_pending: bool) -> Result<(), AuthError> {
         *self
@@ -441,6 +528,7 @@ mod tests {
         exchange_calls: StdMutex<usize>,
         refresh_error: StdMutex<Option<AuthError>>,
         refresh_calls: StdMutex<usize>,
+        refresh_inputs: StdMutex<Vec<String>>,
         refresh: StdMutex<String>,
         logout: StdMutex<Vec<String>>,
         logout_error: StdMutex<Option<AuthError>>,
@@ -454,6 +542,7 @@ mod tests {
                 exchange_calls: Default::default(),
                 refresh_error: Default::default(),
                 refresh_calls: Default::default(),
+                refresh_inputs: Default::default(),
                 refresh: StdMutex::new("refresh-one".into()),
                 logout: Default::default(),
                 logout_error: Default::default(),
@@ -482,8 +571,9 @@ mod tests {
                 expires_in: 60,
             })
         }
-        async fn refresh(&self, _: &str) -> Result<TokenGrant, AuthError> {
+        async fn refresh(&self, token: &str) -> Result<TokenGrant, AuthError> {
             *self.refresh_calls.lock().unwrap() += 1;
+            self.refresh_inputs.lock().unwrap().push(token.into());
             if let Some(e) = self.refresh_error.lock().unwrap().take() {
                 return Err(e);
             }
@@ -1004,9 +1094,9 @@ mod tests {
         store.clear_events();
         service.complete(&callback(&request), 950).await.unwrap();
         let events = store.events();
-        let blocked = events
+        let exchange = events
             .iter()
-            .position(|e| e == "set:session-state:v1:blocked")
+            .position(|e| e == "set:session-state:v1:exchange")
             .unwrap();
         let refresh = events
             .iter()
@@ -1020,7 +1110,7 @@ mod tests {
             .iter()
             .position(|e| e == "set:session-state:v1:valid")
             .unwrap();
-        assert!(blocked < refresh && refresh < pending && pending < valid);
+        assert!(exchange < refresh && refresh < pending && pending < valid);
         assert_eq!(
             events.last().map(String::as_str),
             Some("set:session-state:v1:valid")
@@ -1131,6 +1221,298 @@ mod tests {
         assert_eq!(
             store.get(REFRESH_ACCOUNT).unwrap().as_deref(),
             Some("rotated-rotated-original")
+        );
+    }
+
+    #[tokio::test]
+    async fn exchange_marker_is_durable_before_transport_and_mismatch_precedes_marker() {
+        let (service, store, transport) = fixture();
+        let request = service.begin_github(1_000).await.unwrap();
+        store.clear_events();
+        assert!(matches!(
+            service
+                .complete(
+                    "dev.orchestrat.app://auth/callback?code=x&sb_flow_id=wrong_identifier_123",
+                    1_100,
+                )
+                .await,
+            Err(AuthError::FlowMismatch)
+        ));
+        assert!(store.events().is_empty());
+        assert_eq!(*transport.exchange_calls.lock().unwrap(), 0);
+
+        store.fail_set_for(SESSION_STATE_ACCOUNT, true);
+        assert!(matches!(
+            service.complete(&callback(&request), 1_100).await,
+            Err(AuthError::CredentialStore)
+        ));
+        assert_eq!(*transport.exchange_calls.lock().unwrap(), 0);
+        assert!(store.get(PENDING_ACCOUNT).unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn uncertain_exchange_blocks_old_restore_but_preserves_a_cold_pending_retry() {
+        let (service, store, transport) = fixture();
+        store_valid_refresh(&store, "old-account");
+        let request = service.begin_github(1_000).await.unwrap();
+        *transport.exchange_error.lock().unwrap() = Some(AuthError::ProviderTransient);
+        store.clear_events();
+        assert!(matches!(
+            service.complete(&callback(&request), 1_100).await,
+            Err(AuthError::ProviderTransient)
+        ));
+        assert_eq!(
+            store.events().first().map(String::as_str),
+            Some("set:session-state:v1:exchange")
+        );
+        assert_eq!(
+            store.get(SESSION_STATE_ACCOUNT).unwrap().as_deref(),
+            Some("v1:exchange")
+        );
+        assert!(store.get(REFRESH_ACCOUNT).unwrap().is_none());
+        assert!(store.get(PENDING_ACCOUNT).unwrap().is_some());
+
+        let cold = AuthService::new(config(), store.clone(), transport.clone());
+        assert!(cold.restore(1_101).await.unwrap().is_none());
+        assert_eq!(*transport.refresh_calls.lock().unwrap(), 0);
+        assert!(store.get(PENDING_ACCOUNT).unwrap().is_some());
+        assert_eq!(
+            store.get(SESSION_STATE_ACCOUNT).unwrap().as_deref(),
+            Some("v1:exchange")
+        );
+
+        let grant = cold.complete(&callback(&request), 1_102).await.unwrap();
+        assert_eq!(grant.access_token, "access-one");
+        assert!(store.get(PENDING_ACCOUNT).unwrap().is_none());
+        assert_eq!(
+            store.get(SESSION_STATE_ACCOUNT).unwrap().as_deref(),
+            Some("v1:valid")
+        );
+    }
+
+    #[tokio::test]
+    async fn exchange_marker_blocks_restore_when_old_refresh_deletion_keeps_failing() {
+        let (service, store, transport) = fixture();
+        store_valid_refresh(&store, "old-account");
+        let request = service.begin_github(1_000).await.unwrap();
+        store.fail_delete_for(REFRESH_ACCOUNT, true);
+        *transport.exchange_error.lock().unwrap() = Some(AuthError::ProviderTransient);
+        assert!(matches!(
+            service.complete(&callback(&request), 1_100).await,
+            Err(AuthError::ProviderTransient)
+        ));
+        assert_eq!(
+            store.get(SESSION_STATE_ACCOUNT).unwrap().as_deref(),
+            Some("v1:exchange")
+        );
+        assert_eq!(
+            store.get(REFRESH_ACCOUNT).unwrap().as_deref(),
+            Some("old-account")
+        );
+
+        let cold = AuthService::new(config(), store.clone(), transport.clone());
+        assert!(cold.restore(1_101).await.unwrap().is_none());
+        assert_eq!(*transport.refresh_calls.lock().unwrap(), 0);
+        assert!(store.get(PENDING_ACCOUNT).unwrap().is_some());
+        assert_eq!(
+            store.get(SESSION_STATE_ACCOUNT).unwrap().as_deref(),
+            Some("v1:exchange")
+        );
+
+        store.fail_delete_for(REFRESH_ACCOUNT, false);
+        let grant = cold.complete(&callback(&request), 1_102).await.unwrap();
+        assert_eq!(grant.access_token, "access-one");
+        assert_eq!(
+            store.get(SESSION_STATE_ACCOUNT).unwrap().as_deref(),
+            Some("v1:valid")
+        );
+    }
+
+    #[tokio::test]
+    async fn rejected_exchange_restores_old_committed_session_but_invalid_success_cleans_it() {
+        let (service, store, transport) = fixture();
+        store_valid_refresh(&store, "old-account");
+        let request = service.begin_github(1_000).await.unwrap();
+        *transport.exchange_error.lock().unwrap() = Some(AuthError::ProviderRejected);
+        assert!(matches!(
+            service.complete(&callback(&request), 1_100).await,
+            Err(AuthError::ProviderRejected)
+        ));
+        assert_eq!(
+            store.get(REFRESH_ACCOUNT).unwrap().as_deref(),
+            Some("old-account")
+        );
+        assert_eq!(
+            store.get(SESSION_STATE_ACCOUNT).unwrap().as_deref(),
+            Some("v1:valid")
+        );
+        assert!(store.get(PENDING_ACCOUNT).unwrap().is_none());
+
+        let request = service.begin_github(1_200).await.unwrap();
+        *transport.exchange_error.lock().unwrap() = Some(AuthError::InvalidProviderResponse);
+        assert!(matches!(
+            service.complete(&callback(&request), 1_300).await,
+            Err(AuthError::InvalidProviderResponse)
+        ));
+        assert!(store.get(REFRESH_ACCOUNT).unwrap().is_none());
+        assert!(store.get(PENDING_ACCOUNT).unwrap().is_none());
+        assert!(store.get(SESSION_STATE_ACCOUNT).unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn an_explicit_new_flow_securely_replaces_stale_exchange_state() {
+        for failed_account in [PENDING_ACCOUNT, REFRESH_ACCOUNT, SESSION_STATE_ACCOUNT] {
+            let store = Arc::new(MemoryStore::new());
+            store.set(PENDING_ACCOUNT, "stale-pending").unwrap();
+            store.set(REFRESH_ACCOUNT, "stale-refresh").unwrap();
+            store.set(SESSION_STATE_ACCOUNT, "v1:exchange").unwrap();
+            store.fail_delete_for(failed_account, true);
+            let transport = Arc::new(Fake::new());
+            let service = AuthService::new(config(), store.clone(), transport);
+            assert!(matches!(
+                service.begin_github(2_000).await,
+                Err(AuthError::CredentialStore)
+            ));
+            assert_eq!(
+                store.get(SESSION_STATE_ACCOUNT).unwrap().as_deref(),
+                Some("v1:exchange")
+            );
+            store.fail_delete_for(failed_account, false);
+            let replacement = service.begin_github(2_001).await.unwrap();
+            let pending: PendingAuthorization =
+                serde_json::from_str(&store.get(PENDING_ACCOUNT).unwrap().unwrap()).unwrap();
+            assert_eq!(pending.flow_id, replacement.flow_id);
+            assert!(store.get(REFRESH_ACCOUNT).unwrap().is_none());
+            assert!(store.get(SESSION_STATE_ACCOUNT).unwrap().is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn transient_refresh_uses_recovery_marker_across_new_services() {
+        let (service, store, transport) = fixture();
+        store_valid_refresh(&store, "parent-token");
+        *transport.refresh_error.lock().unwrap() = Some(AuthError::ProviderTransient);
+        store.clear_events();
+        assert!(matches!(
+            service.refresh(1_000).await,
+            Err(AuthError::ProviderTransient)
+        ));
+        assert_eq!(
+            store.get(SESSION_STATE_ACCOUNT).unwrap().as_deref(),
+            Some("v1:recovery")
+        );
+        assert_eq!(
+            store.get(REFRESH_ACCOUNT).unwrap().as_deref(),
+            Some("parent-token")
+        );
+        assert_eq!(
+            store.events(),
+            vec![
+                "set:session-state:v1:blocked",
+                "set:session-state:v1:recovery",
+            ]
+        );
+        assert!(matches!(
+            service.begin_github(1_001).await,
+            Err(AuthError::CredentialStore)
+        ));
+
+        let second = AuthService::new(config(), store.clone(), transport.clone());
+        *transport.refresh.lock().unwrap() = "active-descendant".into();
+        store.clear_events();
+        let grant = second.restore(1_002).await.unwrap().unwrap();
+        assert_eq!(
+            store.events().first().map(String::as_str),
+            Some("set:session-state:v1:blocked")
+        );
+        assert_eq!(*transport.refresh_calls.lock().unwrap(), 2);
+        assert_eq!(
+            *transport.refresh_inputs.lock().unwrap(),
+            vec!["parent-token", "parent-token"]
+        );
+        assert_eq!(grant.access_token, "access-two");
+        assert_eq!(
+            store.get(REFRESH_ACCOUNT).unwrap().as_deref(),
+            Some("active-descendant")
+        );
+        assert_eq!(
+            store.get(SESSION_STATE_ACCOUNT).unwrap().as_deref(),
+            Some("v1:valid")
+        );
+    }
+
+    #[tokio::test]
+    async fn repeated_transient_refresh_remains_recovery_not_committed_valid() {
+        let (service, store, transport) = fixture();
+        store.set(REFRESH_ACCOUNT, "parent-token").unwrap();
+        store.set(SESSION_STATE_ACCOUNT, "v1:recovery").unwrap();
+        *transport.refresh_error.lock().unwrap() = Some(AuthError::ProviderTransient);
+        assert!(matches!(
+            service.restore(1_001).await,
+            Err(AuthError::ProviderTransient)
+        ));
+        assert_eq!(
+            store.get(SESSION_STATE_ACCOUNT).unwrap().as_deref(),
+            Some("v1:recovery")
+        );
+        assert_eq!(
+            store.get(REFRESH_ACCOUNT).unwrap().as_deref(),
+            Some("parent-token")
+        );
+    }
+
+    #[tokio::test]
+    async fn terminal_refresh_from_recovery_clears_the_session() {
+        let (service, store, transport) = fixture();
+        store.set(REFRESH_ACCOUNT, "parent-token").unwrap();
+        store.set(SESSION_STATE_ACCOUNT, "v1:recovery").unwrap();
+        *transport.refresh_error.lock().unwrap() = Some(AuthError::ProviderRejected);
+        assert!(matches!(
+            service.refresh(1_000).await,
+            Err(AuthError::ProviderRejected)
+        ));
+        assert!(store.get(REFRESH_ACCOUNT).unwrap().is_none());
+        assert!(store.get(SESSION_STATE_ACCOUNT).unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn failure_to_write_refresh_recovery_remains_blocked() {
+        let (service, store, transport) = fixture();
+        store_valid_refresh(&store, "parent-token");
+        *transport.refresh_error.lock().unwrap() = Some(AuthError::ProviderTransient);
+        store.set_failure_sequence(SESSION_STATE_ACCOUNT, [false, true]);
+        assert!(matches!(
+            service.refresh(1_000).await,
+            Err(AuthError::CredentialStore)
+        ));
+        assert_eq!(
+            store.get(SESSION_STATE_ACCOUNT).unwrap().as_deref(),
+            Some("v1:blocked")
+        );
+        assert_eq!(
+            store.get(REFRESH_ACCOUNT).unwrap().as_deref(),
+            Some("parent-token")
+        );
+        let cold = AuthService::new(config(), store.clone(), transport.clone());
+        assert!(cold.restore(1_001).await.unwrap().is_none());
+        assert_eq!(*transport.refresh_calls.lock().unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn transient_remote_logout_is_retried_with_the_same_access_token() {
+        let (service, _, transport) = fixture();
+        let request = service.begin_github(1_000).await.unwrap();
+        service.complete(&callback(&request), 1_100).await.unwrap();
+        *transport.logout_error.lock().unwrap() = Some(AuthError::ProviderTransient);
+        assert!(matches!(
+            service.sign_out().await,
+            Err(AuthError::ProviderTransient)
+        ));
+        assert_eq!(*transport.logout.lock().unwrap(), vec!["access-one"]);
+        service.sign_out().await.unwrap();
+        assert_eq!(
+            *transport.logout.lock().unwrap(),
+            vec!["access-one", "access-one"]
         );
     }
 

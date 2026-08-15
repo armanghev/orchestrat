@@ -120,8 +120,10 @@ impl SupabaseAuthTransport {
             || status.is_server_error()
         {
             AuthError::ProviderTransient
-        } else {
+        } else if status.is_client_error() {
             AuthError::ProviderRejected
+        } else {
+            AuthError::InvalidProviderResponse
         }
     }
     async fn token<T: Serialize + Sync>(
@@ -352,7 +354,7 @@ mod tests {
         let t = SupabaseAuthTransport::new(config(&s));
         assert!(matches!(
             t.refresh("x").await,
-            Err(AuthError::ProviderRejected)
+            Err(AuthError::InvalidProviderResponse)
         ));
         redirect.assert();
         target.assert_calls(0);

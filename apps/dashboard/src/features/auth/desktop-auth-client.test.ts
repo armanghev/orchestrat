@@ -123,7 +123,7 @@ describe("DesktopAuthClient", () => {
     expect(await client.getAccessToken()).toBeNull();
   });
 
-  it("clears a warm grant synchronously and changes identity only when callback B completes", async () => {
+  it("preserves a warm grant until a correlated account switch succeeds", async () => {
     const f = fixture(grant);
     const completion = deferred<typeof grant>();
     f.bridge.complete.mockReturnValueOnce(completion.promise);
@@ -133,11 +133,29 @@ describe("DesktopAuthClient", () => {
     expect(first).toMatchObject({ status: "signedIn" });
 
     f.getCallback()?.(new URL("dev.orchestrat.app://auth/callback?code=switch&sb_flow_id=fresh"));
-    expect(client.getSnapshot()).toEqual({ status: "signingIn" });
-    expect(await client.getAccessToken()).toBeNull();
+    expect(client.getSnapshot()).toEqual(first);
+    expect(await client.getAccessToken()).toBe("access-1");
     completion.resolve({ accessToken: "account-b", expiresAtMs: 60_000 });
     await vi.waitFor(() => expect(client.getSnapshot()).toMatchObject({ status: "signedIn" }));
+    expect(await client.getAccessToken()).toBe("account-b");
     expect((client.getSnapshot() as { identityKey: string }).identityKey).not.toBe((first as { identityKey: string }).identityKey);
+  });
+
+  it("keeps a warm token and identity after a mismatched untrusted callback", async () => {
+    const f = fixture(grant);
+    f.bridge.complete.mockRejectedValue({
+      code: "flow_mismatch",
+      message: "The callback flow does not match."
+    });
+    const client = new DesktopAuthClient(f.platform, f.bridge, () => 1_000);
+    await client.initialize();
+    const before = client.getSnapshot();
+    const result = await client.completeSignIn(
+      "dev.orchestrat.app://auth/callback?code=untrusted&sb_flow_id=wrong"
+    );
+    expect(result).toEqual({ status: "error" });
+    expect(client.getSnapshot()).toEqual(before);
+    expect(await client.getAccessToken()).toBe("access-1");
   });
 
   it("refreshes automatically when fewer than 30 seconds remain", async () => {
@@ -160,14 +178,68 @@ describe("DesktopAuthClient", () => {
     expect(f.bridge.expire).toHaveBeenCalledOnce();
   });
 
-  it("preserves the native refresh session after a transient refresh failure", async () => {
-    const f = fixture({ ...grant, expiresAtMs: 1_001 });
-    f.bridge.refresh.mockRejectedValue({ code: "provider_unavailable", message: "Try again." });
-    const client = new DesktopAuthClient(f.platform, f.bridge, () => 1_000);
-    await client.initialize();
-    expect(await client.getAccessToken()).toBeNull();
-    expect(f.bridge.expire).not.toHaveBeenCalled();
-    expect(client.getSnapshot()).toEqual({ status: "error", code: "provider_unavailable", message: "Try again." });
+  it("keeps an unexpired grant and identity while transient refresh retries back off", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    try {
+      const f = fixture({ accessToken: "old-access", expiresAtMs: 20_000 });
+      f.bridge.refresh
+        .mockRejectedValueOnce({ code: "provider_unavailable", message: "Try again." })
+        .mockRejectedValueOnce({ code: "provider_unavailable", message: "Try again." })
+        .mockResolvedValueOnce({ accessToken: "recovered", expiresAtMs: 80_000 });
+      const client = new DesktopAuthClient(f.platform, f.bridge, Date.now);
+      await client.initialize();
+      const identity = (client.getSnapshot() as { identityKey: string }).identityKey;
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(f.bridge.refresh).toHaveBeenCalledTimes(1);
+      expect(client.getSnapshot()).toEqual({ status: "signedIn", identityKey: identity });
+      expect(await client.getAccessToken({ forceRefresh: true })).toBe("old-access");
+      expect(f.bridge.refresh).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(999);
+      expect(f.bridge.refresh).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(f.bridge.refresh).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(1_999);
+      expect(f.bridge.refresh).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(f.bridge.refresh).toHaveBeenCalledTimes(3);
+      expect(await client.getAccessToken()).toBe("recovered");
+      expect(client.getSnapshot()).toEqual({ status: "signedIn", identityKey: identity });
+      expect(f.bridge.expire).not.toHaveBeenCalled();
+      client.dispose();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("returns no expired token during transient cooldown and later recovers the same identity", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    try {
+      const f = fixture({ accessToken: "old-access", expiresAtMs: 2_500 });
+      f.bridge.refresh
+        .mockRejectedValueOnce({ code: "provider_unavailable", message: "Try again." })
+        .mockResolvedValueOnce({ accessToken: "recovered", expiresAtMs: 80_000 });
+      const client = new DesktopAuthClient(f.platform, f.bridge, Date.now);
+      await client.initialize();
+      const identity = (client.getSnapshot() as { identityKey: string }).identityKey;
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(f.bridge.refresh).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(500);
+      expect(await client.getAccessToken()).toBeNull();
+      expect(f.bridge.refresh).toHaveBeenCalledOnce();
+      expect(client.getSnapshot()).toEqual({
+        status: "error", code: "provider_unavailable", message: "Try again."
+      });
+      expect(f.bridge.expire).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(500);
+      expect(f.bridge.refresh).toHaveBeenCalledTimes(2);
+      expect(await client.getAccessToken()).toBe("recovered");
+      expect(client.getSnapshot()).toEqual({ status: "signedIn", identityKey: identity });
+      client.dispose();
+    } finally { vi.useRealTimers(); }
   });
 
   it("makes restore failures recoverable errors", async () => {

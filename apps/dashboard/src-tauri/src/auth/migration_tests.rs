@@ -117,3 +117,33 @@ fn single_instance_is_first_and_does_not_log_or_parse_arguments() {
     assert!(source.contains("second-instance argv is intentionally ignored and never logged"));
     assert!(source.contains("|app, _args, _cwd|"));
 }
+
+#[test]
+fn clean_checkout_documents_safe_native_test_configuration_without_legacy_provider() {
+    let package: serde_json::Value =
+        serde_json::from_str(include_str!("../../../package.json")).unwrap();
+    let script = package["scripts"]["test:native"].as_str().unwrap();
+    for setting in [
+        "ORCHESTRAT_SUPABASE_URL=https://example.supabase.co",
+        "ORCHESTRAT_SUPABASE_PUBLISHABLE_KEY=sb_publishable_abcdefghijklmnopqrstuvwxyz123456",
+        "ORCHESTRAT_AUTH_ENVIRONMENT=test",
+        "ORCHESTRAT_DESKTOP_AUTH_REDIRECT_URI=dev.orchestrat.app://auth/callback",
+        "cargo test --manifest-path src-tauri/Cargo.toml",
+    ] {
+        assert!(script.contains(setting));
+    }
+
+    let example = include_str!("../../../.env.example");
+    for setting in [
+        "VITE_SUPABASE_URL=https://example.supabase.co",
+        "VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_abcdefghijklmnopqrstuvwxyz123456",
+        "VITE_WEB_AUTH_CALLBACK_URL=http://localhost:5173/auth/callback",
+        "ORCHESTRAT_SUPABASE_URL=https://example.supabase.co",
+        "ORCHESTRAT_SUPABASE_PUBLISHABLE_KEY=sb_publishable_abcdefghijklmnopqrstuvwxyz123456",
+        "ORCHESTRAT_AUTH_ENVIRONMENT=development",
+        "ORCHESTRAT_DESKTOP_AUTH_REDIRECT_URI=dev.orchestrat.app://auth/callback",
+    ] {
+        assert!(example.contains(setting));
+    }
+    assert!(!example.to_ascii_lowercase().contains(concat!("cl", "erk")));
+}
