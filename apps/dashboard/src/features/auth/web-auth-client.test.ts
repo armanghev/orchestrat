@@ -105,6 +105,20 @@ describe("WebAuthClient", () => {
     expect(f.auth.signInWithOAuth).toHaveBeenCalledOnce();
   });
 
+
+  it("keeps a SIGNED_IN event authoritative over an older GitHub failure", async () => {
+    const f = fixture();
+    await f.client.initialize();
+    const pending = deferred<{ data: { provider: "github"; url: null }; error: unknown }>();
+    f.auth.signInWithOAuth.mockReturnValueOnce(pending.promise as never);
+    const request = f.client.signInWithGitHub();
+    f.emit("SIGNED_IN", session("github-event-token"));
+    pending.resolve({ data: { provider: "github", url: null }, error: new Error("stale OAuth failure") });
+    await request;
+    expect(f.client.getSnapshot()).toEqual({ status: "signedIn" });
+    expect(await f.client.getAccessToken()).toBe("github-event-token");
+  });
+
   it("normalizes and sends a magic link once, then reports request acceptance", async () => {
     const f = fixture();
     await f.client.initialize();
@@ -122,6 +136,48 @@ describe("WebAuthClient", () => {
     await first;
     expect(f.client.getSnapshot()).toEqual({ status: "magicLinkSent", email: "person@example.com" });
     expect(f.auth.signInWithOtp).toHaveBeenCalledOnce();
+  });
+
+
+  it("keeps a SIGNED_IN event authoritative when an older OTP request resolves", async () => {
+    const f = fixture();
+    await f.client.initialize();
+    const pending = deferred<{ data: { user: null; session: null; messageId: string }; error: null }>();
+    f.auth.signInWithOtp.mockReturnValueOnce(pending.promise);
+    const request = f.client.sendMagicLink("person@example.com");
+    f.emit("SIGNED_IN", session("event-signed-in"));
+    pending.resolve({ data: { user: null, session: null, messageId: "accepted" }, error: null });
+    await request;
+    expect(f.client.getSnapshot()).toEqual({ status: "signedIn" });
+    expect(await f.client.getAccessToken()).toBe("event-signed-in");
+  });
+
+  it.each(["success", "failure"] as const)(
+    "keeps a SIGNED_OUT event authoritative when an older OTP request ends with %s",
+    async (outcome) => {
+      const f = fixture();
+      await f.client.initialize();
+      const pending = deferred<{ data: { user: null; session: null; messageId?: string }; error: unknown }>();
+      f.auth.signInWithOtp.mockReturnValueOnce(pending.promise as never);
+      const request = f.client.sendMagicLink("person@example.com");
+      f.emit("SIGNED_OUT", null);
+      pending.resolve(outcome === "success"
+        ? { data: { user: null, session: null, messageId: "accepted" }, error: null }
+        : { data: { user: null, session: null }, error: new Error("old OTP failure") });
+      await request;
+      expect(f.client.getSnapshot()).toEqual({ status: "signedOut" });
+    }
+  );
+
+  it("does not let an older OTP failure overwrite a newer GitHub flow", async () => {
+    const f = fixture();
+    const pending = deferred<{ data: { user: null; session: null }; error: unknown }>();
+    f.auth.signInWithOtp.mockReturnValueOnce(pending.promise as never);
+    const otp = f.client.sendMagicLink("person@example.com");
+    await f.client.signInWithGitHub();
+    pending.resolve({ data: { user: null, session: null }, error: new Error("old OTP failure") });
+    await otp;
+    expect(f.client.getSnapshot()).toEqual({ status: "signingIn" });
   });
 
   it.each(["", "not-an-email", "a@b", `${"a".repeat(245)}@example.com`, "first@example.com,second@example.com"])(
@@ -150,6 +206,62 @@ describe("WebAuthClient", () => {
     await first;
     await f.client.completeSignIn(`${callbackUrl}?code=ignored-after-success`);
     expect(f.auth.exchangeCodeForSession).toHaveBeenCalledOnce();
+    expect(f.client.getSnapshot()).toEqual({ status: "signedIn" });
+  });
+
+
+  it("makes a failed accepted callback terminal until a genuinely new auth flow starts", async () => {
+    const f = fixture();
+    f.auth.exchangeCodeForSession.mockResolvedValueOnce({
+      data: { session: null, user: null }, error: new Error("old exchange failure")
+    } as never);
+    await f.client.completeSignIn(`${callbackUrl}?code=failed-once`);
+    const failedSnapshot = f.client.getSnapshot();
+    await f.client.completeSignIn(`${callbackUrl}?code=must-not-retry`);
+    expect(f.auth.exchangeCodeForSession).toHaveBeenCalledOnce();
+    expect(f.client.getSnapshot()).toBe(failedSnapshot);
+
+    await f.client.signInWithGitHub();
+    await f.client.completeSignIn(`${callbackUrl}?code=new-flow-code`);
+    expect(f.auth.exchangeCodeForSession).toHaveBeenCalledTimes(2);
+    expect(f.client.getSnapshot()).toEqual({ status: "signedIn" });
+  });
+
+  it("keeps an auth event authoritative over a callback exchange failure", async () => {
+    const f = fixture();
+    await f.client.initialize();
+    const pending = deferred<{ data: { session: null; user: null }; error: unknown }>();
+    f.auth.exchangeCodeForSession.mockReturnValueOnce(pending.promise as never);
+    const exchange = f.client.completeSignIn(`${callbackUrl}?code=event-owned`);
+    f.emit("SIGNED_IN", session("callback-event-token"));
+    pending.resolve({ data: { session: null, user: null }, error: new Error("stale callback failure") });
+    await exchange;
+    expect(f.client.getSnapshot()).toEqual({ status: "signedIn" });
+    expect(await f.client.getAccessToken()).toBe("callback-event-token");
+  });
+
+
+  it("keeps the SIGNED_IN event emitted by callback exchange authoritative over its result", async () => {
+    const f = fixture();
+    await f.client.initialize();
+    f.auth.exchangeCodeForSession.mockImplementationOnce(async () => {
+      f.emit("SIGNED_IN", session("exchange-event-token"));
+      return { data: { session: session("stale-exchange-token"), user: session().user }, error: null };
+    });
+    await f.client.completeSignIn(`${callbackUrl}?code=emits-event`);
+    expect(f.client.getSnapshot()).toEqual({ status: "signedIn" });
+    expect(await f.client.getAccessToken()).toBe("exchange-event-token");
+  });
+
+  it("also resets callback attempt terminality when a new magic-link flow starts", async () => {
+    const f = fixture();
+    f.auth.exchangeCodeForSession.mockResolvedValueOnce({
+      data: { session: null, user: null }, error: new Error("first exchange failure")
+    } as never);
+    await f.client.completeSignIn(`${callbackUrl}?code=failed-magic-predecessor`);
+    await f.client.sendMagicLink("person@example.com");
+    await f.client.completeSignIn(`${callbackUrl}?code=new-magic-flow`);
+    expect(f.auth.exchangeCodeForSession).toHaveBeenCalledTimes(2);
     expect(f.client.getSnapshot()).toEqual({ status: "signedIn" });
   });
 
@@ -193,6 +305,32 @@ describe("WebAuthClient", () => {
     pending.resolve({ data: { session: session("refreshed-access"), user: session().user }, error: null });
     expect(await first).toBe("refreshed-access");
     expect(f.auth.refreshSession).toHaveBeenCalledOnce();
+  });
+
+
+  it("keeps a SIGNED_OUT event authoritative over an older refresh success", async () => {
+    const f = fixture(session());
+    await f.client.initialize();
+    const pending = deferred<{ data: { session: Session; user: Session["user"] }; error: null }>();
+    f.auth.refreshSession.mockReturnValueOnce(pending.promise);
+    const refresh = f.client.getAccessToken({ forceRefresh: true });
+    f.emit("SIGNED_OUT", null);
+    pending.resolve({ data: { session: session("stale-refresh"), user: session().user }, error: null });
+    expect(await refresh).toBeNull();
+    expect(f.client.getSnapshot()).toEqual({ status: "signedOut" });
+  });
+
+  it("keeps a TOKEN_REFRESHED event authoritative over an older refresh failure", async () => {
+    const f = fixture(session());
+    await f.client.initialize();
+    const pending = deferred<{ data: { session: null; user: null }; error: unknown }>();
+    f.auth.refreshSession.mockReturnValueOnce(pending.promise as never);
+    const refresh = f.client.getAccessToken({ forceRefresh: true });
+    f.emit("TOKEN_REFRESHED", session("event-refreshed"));
+    pending.resolve({ data: { session: null, user: null }, error: new Error("stale refresh failure") });
+    expect(await refresh).toBe("event-refreshed");
+    expect(f.auth.signOut).not.toHaveBeenCalled();
+    expect(f.client.getSnapshot()).toEqual({ status: "signedIn" });
   });
 
   it("expires the local session after refresh failure", async () => {

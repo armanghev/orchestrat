@@ -31,6 +31,7 @@ const providerCallbackError: AuthSnapshot = {
 };
 
 type ParsedCallback = { kind: "code"; code: string } | { kind: "providerError" } | { kind: "invalid" };
+type OperationContext = { generation: number; authEventVersion: number; operationEpoch: number };
 
 function snapshotsEqual(left: AuthSnapshot, right: AuthSnapshot): boolean {
   if (left.status !== right.status) return false;
@@ -98,12 +99,13 @@ export class WebAuthClient implements AuthClient {
   private githubOperation: Promise<void> | null = null;
   private magicLinkOperation: Promise<void> | null = null;
   private callbackOperation: Promise<void> | null = null;
-  private callbackCompleted = false;
+  private callbackAttempted = false;
   private refreshOperation: Promise<string | null> | null = null;
   private signOutOperation: Promise<void> | null = null;
   private authUnsubscribe: (() => void) | null = null;
   private generation = 0;
   private authEventVersion = 0;
+  private operationEpoch = 0;
   private disposed = false;
 
   constructor(private readonly auth: WebAuthApi, private readonly callbackUrl: string) {}
@@ -121,10 +123,12 @@ export class WebAuthClient implements AuthClient {
       if (this.disposed) return;
       if (event === "SIGNED_OUT") {
         this.authEventVersion += 1;
+        this.operationEpoch += 1;
         this.session = null;
         this.setSnapshot({ status: "signedOut" });
       } else if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
         this.authEventVersion += 1;
+        this.operationEpoch += 1;
         this.session = session;
         this.setSnapshot(session ? { status: "signedIn" } : { status: "signedOut" });
       }
@@ -152,6 +156,7 @@ export class WebAuthClient implements AuthClient {
     if (this.disposed) return;
     this.disposed = true;
     this.generation += 1;
+    this.operationEpoch += 1;
     this.session = null;
     this.authUnsubscribe?.();
     this.authUnsubscribe = null;
@@ -169,15 +174,15 @@ export class WebAuthClient implements AuthClient {
   signInWithGitHub(): Promise<void> {
     if (this.disposed) return Promise.resolve();
     if (this.githubOperation) return this.githubOperation;
-    const generation = this.generation;
-    this.callbackCompleted = false;
+    const context = this.beginOperation();
+    this.callbackAttempted = false;
     this.setSnapshot({ status: "signingIn" });
     const operation = this.auth.signInWithOAuth({ provider: "github", options: { redirectTo: this.callbackUrl } })
       .then((result) => {
         if (result.error) throw result.error;
       })
       .catch(() => {
-        if (!this.disposed && generation === this.generation) {
+        if (this.canCommit(context)) {
           this.setSnapshot({ status: "error", code: "oauth_start_failed", message: "Sign-in could not be started. Try again." });
         }
       })
@@ -194,16 +199,17 @@ export class WebAuthClient implements AuthClient {
       this.setSnapshot({ status: "error", code: "invalid_email", message: "Enter a valid email address." });
       return Promise.resolve();
     }
-    const generation = this.generation;
+    const context = this.beginOperation();
+    this.callbackAttempted = false;
     this.setSnapshot({ status: "sendingMagicLink", email });
     const operation = this.auth.signInWithOtp({
       email,
       options: { emailRedirectTo: this.callbackUrl, shouldCreateUser: true }
     }).then((result) => {
       if (result.error) throw result.error;
-      if (!this.disposed && generation === this.generation) this.setSnapshot({ status: "magicLinkSent", email });
+      if (this.canCommit(context)) this.setSnapshot({ status: "magicLinkSent", email });
     }).catch(() => {
-      if (!this.disposed && generation === this.generation) {
+      if (this.canCommit(context)) {
         this.setSnapshot({ status: "error", code: "magic_link_failed", message: "The sign-in link could not be sent. Try again." });
       }
     }).finally(() => { if (this.magicLinkOperation === operation) this.magicLinkOperation = null; });
@@ -212,28 +218,38 @@ export class WebAuthClient implements AuthClient {
   }
 
   completeSignIn(callbackUrl: string): Promise<void> {
-    if (this.disposed || this.callbackCompleted) return Promise.resolve();
+    if (this.disposed) return Promise.resolve();
     if (this.callbackOperation) return this.callbackOperation;
+    if (this.callbackAttempted) return Promise.resolve();
     const parsed = parseCallback(callbackUrl, this.callbackUrl);
+    const context = this.beginOperation();
     if (parsed.kind === "invalid") {
       this.setSnapshot(invalidCallbackError);
       return Promise.resolve();
     }
+    this.callbackAttempted = true;
     if (parsed.kind === "providerError") {
       this.setSnapshot(providerCallbackError);
       return Promise.resolve();
     }
-    const generation = this.generation;
     this.setSnapshot({ status: "signingIn" });
-    const operation = this.auth.exchangeCodeForSession(parsed.code).then((result) => {
+    let request: ReturnType<WebAuthApi["exchangeCodeForSession"]>;
+    try {
+      request = this.auth.exchangeCodeForSession(parsed.code);
+    } catch {
+      if (this.canCommit(context)) {
+        this.setSnapshot({ status: "error", code: "callback_exchange_failed", message: "We couldn't complete your sign-in. Try again." });
+      }
+      return Promise.resolve();
+    }
+    const operation = request.then((result) => {
       if (result.error || !result.data.session) throw result.error ?? new Error("Session missing");
-      if (!this.disposed && generation === this.generation) {
+      if (this.canCommit(context)) {
         this.session = result.data.session;
-        this.callbackCompleted = true;
         this.setSnapshot({ status: "signedIn" });
       }
     }).catch(() => {
-      if (!this.disposed && generation === this.generation) {
+      if (this.canCommit(context)) {
         this.setSnapshot({ status: "error", code: "callback_exchange_failed", message: "We couldn't complete your sign-in. Try again." });
       }
     }).finally(() => { if (this.callbackOperation === operation) this.callbackOperation = null; });
@@ -248,11 +264,12 @@ export class WebAuthClient implements AuthClient {
     if (this.disposed) return Promise.resolve();
     if (this.signOutOperation) return this.signOutOperation;
     this.generation += 1;
+    this.operationEpoch += 1;
     this.session = null;
     this.githubOperation = null;
     this.magicLinkOperation = null;
     this.callbackOperation = null;
-    this.callbackCompleted = false;
+    this.callbackAttempted = false;
     this.setSnapshot({ status: "signedOut" });
     const operation = this.auth.signOut({ scope: "local" })
       .then(() => undefined, () => undefined)
@@ -269,20 +286,37 @@ export class WebAuthClient implements AuthClient {
   }
 
   private async refresh(): Promise<string | null> {
-    const generation = this.generation;
+    const context = this.beginOperation();
     try {
       const result = await this.auth.refreshSession();
-      if (result.error || !result.data.session) throw result.error ?? new Error("Session missing");
-      if (this.disposed || generation !== this.generation) return this.session?.access_token ?? null;
+      if (!this.canCommit(context)) return this.session?.access_token ?? null;
+      if (result.error || !result.data.session) {
+        await this.expireSession();
+        return null;
+      }
       this.session = result.data.session;
       this.setSnapshot({ status: "signedIn" });
       return this.session.access_token;
     } catch {
-      if (!this.disposed && generation === this.generation) await this.expireSession();
+      if (!this.canCommit(context)) return this.session?.access_token ?? null;
+      await this.expireSession();
       return null;
     } finally {
       this.refreshOperation = null;
     }
+  }
+
+  private beginOperation(): OperationContext {
+    return {
+      generation: this.generation,
+      authEventVersion: this.authEventVersion,
+      operationEpoch: ++this.operationEpoch
+    };
+  }
+
+  private canCommit(context: OperationContext): boolean {
+    return !this.disposed && context.generation === this.generation &&
+      context.authEventVersion === this.authEventVersion && context.operationEpoch === this.operationEpoch;
   }
 
   private setSnapshot(snapshot: AuthSnapshot): void {
