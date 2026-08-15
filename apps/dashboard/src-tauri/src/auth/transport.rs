@@ -60,7 +60,7 @@ struct TokenResponse {
     refresh_token: Option<String>,
     expires_in: u64,
     token_type: String,
-    user: serde_json::Value,
+    user: Option<serde_json::Value>,
 }
 
 impl SupabaseAuthTransport {
@@ -129,6 +129,7 @@ impl SupabaseAuthTransport {
         mut url: url::Url,
         grant_type: &str,
         body: &T,
+        require_user: bool,
     ) -> Result<TokenGrant, AuthError> {
         url.query_pairs_mut().append_pair("grant_type", grant_type);
         let response = self
@@ -151,7 +152,7 @@ impl SupabaseAuthTransport {
             || token.access_token.len() > 16384
             || !token.token_type.eq_ignore_ascii_case("bearer")
             || token.expires_in == 0
-            || !token.user.is_object()
+            || (require_user && !token.user.is_some_and(|user| user.is_object()))
         {
             return Err(AuthError::InvalidProviderResponse);
         }
@@ -206,6 +207,7 @@ impl AuthTransport for SupabaseAuthTransport {
                 auth_code: code,
                 code_verifier: verifier,
             },
+            true,
         )
         .await
     }
@@ -214,6 +216,7 @@ impl AuthTransport for SupabaseAuthTransport {
             self.config.token_url(),
             "refresh_token",
             &RefreshRequest { refresh_token },
+            false,
         )
         .await
     }
@@ -305,7 +308,7 @@ mod tests {
             .json_body_obj(&serde_json::json!({"refresh_token": "refresh-one"}));
             then.status(200).json_body_obj(&serde_json::json!({
                 "access_token": "access-two", "refresh_token": "refresh-two",
-                "expires_in": 60, "token_type": "bearer", "user": {"id": "user-one"}
+                "expires_in": 60, "token_type": "bearer"
             }));
         });
         let logout = s.mock(|when, then| {
@@ -397,46 +400,83 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn token_success_requires_a_user_object_for_pkce_and_refresh() {
-        for grant_type in ["pkce", "refresh_token"] {
-            for user in [serde_json::Value::Null, serde_json::json!([])] {
-                let server = MockServer::start();
-                let response = server.mock(|when, then| {
-                    when.method(POST)
-                        .path("/auth/v1/token")
-                        .query_param("grant_type", grant_type);
-                    then.status(200).json_body_obj(&serde_json::json!({
-                        "access_token": "access", "refresh_token": "refresh", "expires_in": 60,
-                        "token_type": "bearer", "user": user
-                    }));
-                });
-                let transport = SupabaseAuthTransport::new(config(&server));
-                let result = if grant_type == "pkce" {
-                    transport.exchange_code("code", "verifier").await
-                } else {
-                    transport.refresh("refresh").await
-                };
-                assert!(matches!(result, Err(AuthError::InvalidProviderResponse)));
-                response.assert();
-            }
+    async fn pkce_success_requires_a_user_object() {
+        for user in [
+            None,
+            Some(serde_json::Value::Null),
+            Some(serde_json::json!([])),
+        ] {
             let server = MockServer::start();
-            let missing = server.mock(|when, then| {
+            let response = server.mock(|when, then| {
                 when.method(POST)
                     .path("/auth/v1/token")
-                    .query_param("grant_type", grant_type);
-                then.status(200).json_body_obj(&serde_json::json!({
+                    .query_param("grant_type", "pkce");
+                let mut body = serde_json::json!({
                     "access_token": "access", "refresh_token": "refresh", "expires_in": 60,
                     "token_type": "bearer"
-                }));
+                });
+                if let Some(user) = user {
+                    body["user"] = user;
+                }
+                then.status(200).json_body_obj(&body);
             });
-            let transport = SupabaseAuthTransport::new(config(&server));
-            let result = if grant_type == "pkce" {
-                transport.exchange_code("code", "verifier").await
-            } else {
-                transport.refresh("refresh").await
-            };
+            let result = SupabaseAuthTransport::new(config(&server))
+                .exchange_code("code", "verifier")
+                .await;
             assert!(matches!(result, Err(AuthError::InvalidProviderResponse)));
-            missing.assert();
+            response.assert();
+        }
+    }
+
+    #[tokio::test]
+    async fn refresh_success_does_not_require_a_user() {
+        let server = MockServer::start();
+        let response = server.mock(|when, then| {
+            when.method(POST)
+                .path("/auth/v1/token")
+                .query_param("grant_type", "refresh_token");
+            then.status(200).json_body_obj(&serde_json::json!({
+                "access_token": "access", "refresh_token": "rotated", "expires_in": 60,
+                "token_type": "bearer"
+            }));
+        });
+        let grant = SupabaseAuthTransport::new(config(&server))
+            .refresh("refresh")
+            .await
+            .unwrap();
+        assert_eq!(grant.access_token, "access");
+        assert_eq!(grant.refresh_token, "rotated");
+        assert_eq!(grant.expires_in, 60);
+        response.assert();
+    }
+
+    #[tokio::test]
+    async fn refresh_rejects_malformed_common_token_fields() {
+        for override_field in [
+            serde_json::json!({"access_token": ""}),
+            serde_json::json!({"refresh_token": ""}),
+            serde_json::json!({"expires_in": 0}),
+            serde_json::json!({"token_type": "mac"}),
+        ] {
+            let server = MockServer::start();
+            let response = server.mock(|when, then| {
+                when.method(POST)
+                    .path("/auth/v1/token")
+                    .query_param("grant_type", "refresh_token");
+                let mut body = serde_json::json!({
+                    "access_token": "access", "refresh_token": "rotated", "expires_in": 60,
+                    "token_type": "bearer", "user": {"id": "optional"}
+                });
+                for (key, value) in override_field.as_object().unwrap() {
+                    body[key] = value.clone();
+                }
+                then.status(200).json_body_obj(&body);
+            });
+            let result = SupabaseAuthTransport::new(config(&server))
+                .refresh("refresh")
+                .await;
+            assert!(matches!(result, Err(AuthError::InvalidProviderResponse)));
+            response.assert();
         }
     }
 
