@@ -44,7 +44,7 @@ export function buildApp(options: AppOptions) {
     genReqId: () => `req_${randomUUID()}`,
     logger: false
   });
-  const identities = new IdentityService(options.db, options.auth);
+  const identities = new IdentityService(options.db);
   const projects = new ProjectService(options.db);
 
   app.register(cors, { origin: options.allowedOrigins });
@@ -122,19 +122,19 @@ export function buildApp(options: AppOptions) {
     async (api) => {
       api.decorateRequest("userId", "");
       api.addHook("preHandler", async (request) => {
-        const authSubject = await options.auth.authenticate({
+        const principal = await options.auth.authenticate({
           headers: requestHeaders(request.headers),
           method: request.method,
           url: `http://${request.headers.host ?? "localhost"}${request.url}`
         });
-        if (!authSubject) {
+        if (!principal) {
           throw new ApiError(
             401,
             "UNAUTHENTICATED",
             "Authentication is required."
           );
         }
-        request.userId = await identities.resolveUserId(authSubject);
+        request.userId = await identities.resolveUserId(principal);
       });
       api.register(v1Routes, { projects });
     },

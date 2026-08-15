@@ -7,10 +7,7 @@ test("GET /health returns the service status", async () => {
   const app = buildApp({
     allowedOrigins: [],
     auth: {
-      authenticate: async () => null,
-      getProfile: async () => {
-        throw new Error("Not used by the health route.");
-      }
+      authenticate: async () => null
     },
     db: {} as Database
   });

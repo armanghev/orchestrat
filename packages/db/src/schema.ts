@@ -31,6 +31,7 @@ export const users = pgTable(
   "users",
   {
     id: uuid("id").defaultRandom().primaryKey(),
+    authProvider: text("auth_provider").notNull(),
     authSubject: text("auth_subject").notNull(),
     name: text("name").notNull(),
     email: text("email").notNull(),
@@ -38,8 +39,11 @@ export const users = pgTable(
     ...timestamps
   },
   (table) => [
-    uniqueIndex("users_auth_subject_unique").on(table.authSubject),
-    uniqueIndex("users_email_unique").on(table.email),
+    uniqueIndex("users_auth_provider_subject_unique").on(
+      table.authProvider,
+      table.authSubject
+    ),
+    index("users_email_idx").on(table.email),
     check(
       "users_email_normalized",
       sql`${table.email} = lower(btrim(${table.email}))`

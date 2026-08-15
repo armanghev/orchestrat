@@ -1,5 +1,5 @@
 import { config as loadEnv } from "dotenv";
-import { createClerkAuth } from "@orchestrat/auth";
+import { createSupabaseAuth } from "@orchestrat/auth";
 import { loadApiConfig } from "@orchestrat/config";
 import { createDatabase } from "@orchestrat/db";
 import { logger } from "@orchestrat/logger";
@@ -11,10 +11,10 @@ const config = loadApiConfig();
 const { db, pool } = createDatabase({
   connectionString: config.ORCHESTRAT_DATABASE_URL
 });
-const auth = createClerkAuth({
-  authorizedParties: config.ORCHESTRAT_ALLOWED_ORIGINS,
-  publishableKey: config.ORCHESTRAT_CLERK_PUBLISHABLE_KEY,
-  secretKey: config.ORCHESTRAT_CLERK_SECRET_KEY
+const auth = createSupabaseAuth({
+  algorithm: config.ORCHESTRAT_SUPABASE_JWT_ALGORITHM,
+  audience: config.ORCHESTRAT_SUPABASE_JWT_AUDIENCE,
+  supabaseUrl: config.ORCHESTRAT_SUPABASE_URL
 });
 const app = buildApp({
   allowedOrigins: config.ORCHESTRAT_ALLOWED_ORIGINS,
