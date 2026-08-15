@@ -24,7 +24,7 @@ describe("watchAuthSessionBoundaries", () => {
     const stop = watchAuthSessionBoundaries(f.auth, queryClient, { navigate });
     f.emit({ status: "signedIn", identityKey: "account-b" });
     expect(queryClient.getQueryData(["private", "projects"])).toBeUndefined();
-    expect(navigate).not.toHaveBeenCalled();
+    expect(navigate).toHaveBeenCalledWith({ to: "/", replace: true });
     stop();
   });
 

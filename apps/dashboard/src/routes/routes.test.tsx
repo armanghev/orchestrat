@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { http, HttpResponse } from "msw";
 import { organization, project, workspace } from "@/test/factories";
 import type { AuthClient, AuthCompletionResult, AuthSnapshot } from "@/features/auth/auth-client";
+import { watchAuthSessionBoundaries } from "@/app/providers";
 import type { Platform } from "@/platform/contract";
 import { renderDashboardRoute } from "@/test/render";
 
@@ -147,6 +148,43 @@ describe("dashboard routes", () => {
       http.get("http://localhost:3001/api/v1/workspaces/:workspaceId/projects", () => options.partialFailure ? HttpResponse.error() : HttpResponse.json({ projects }))
     ];
   };
+
+
+  it("unmounts account A project content immediately on direct identity B and retains it on same-user refresh", async () => {
+    const organizationA = organization({ name: "Account A Confidential Organization", role: "admin" });
+    const workspaceA = workspace({ name: "Account A Confidential Workspace", organization_id: organizationA.id });
+    const projectA = project({ id: projectId, workspace_id: workspaceA.id, name: "Account A Secret Project", slug: "account-a-secret" });
+    const pendingBOrganizations = deferred<Response>();
+    let accountB = false;
+    const handlers = [
+      http.get("http://localhost:3001/api/v1/organizations", () => accountB
+        ? pendingBOrganizations.promise
+        : HttpResponse.json({ organizations: [organizationA] })),
+      http.get("http://localhost:3001/api/v1/organizations/:organizationId/workspaces", () => HttpResponse.json({ workspaces: [workspaceA] })),
+      http.get("http://localhost:3001/api/v1/workspaces/:workspaceId/projects", () => HttpResponse.json({ projects: [projectA] }))
+    ];
+    const auth = new FakeAuthClient({ status: "signedIn", identityKey: "account-a" });
+    const view = await renderDashboardRoute({ path: `/projects/${projectId}/overview`, auth, platform: platform(), handlers });
+    expect(await screen.findByText("Account A Secret Project")).toBeVisible();
+    const stop = watchAuthSessionBoundaries(auth, view.queryClient, view.router);
+
+    const routeBeforeRefresh = view.router.state.location.pathname;
+    const queriesBeforeRefresh = view.queryClient.getQueryCache().getAll().length;
+    await act(async () => { auth.setSnapshot({ status: "signedIn", identityKey: "account-a" }); });
+    expect(view.router.state.location.pathname).toBe(routeBeforeRefresh);
+    expect(view.queryClient.getQueryCache().getAll()).toHaveLength(queriesBeforeRefresh);
+    expect(screen.getByText("Account A Secret Project")).toBeVisible();
+
+    accountB = true;
+    await act(async () => { auth.setSnapshot({ status: "signedIn", identityKey: "account-b" }); });
+    await waitFor(() => expect(screen.queryByText("Account A Secret Project")).not.toBeInTheDocument());
+    expect(view.router.state.location.pathname).not.toBe(`/projects/${projectId}/overview`);
+
+    await act(async () => { pendingBOrganizations.resolve(HttpResponse.json({ organizations: [] })); });
+    await waitFor(() => expect(view.router.state.location.pathname).toBe("/setup"));
+    expect(await screen.findByRole("button", { name: "Create organization" })).toBeVisible();
+    stop();
+  });
 
   it("renders the overview from the matching catalog project without operational metrics", async () => {
     await renderDashboardRoute({ path: `/projects/${projectId}/overview`, auth: new FakeAuthClient({ status: "signedIn", identityKey: "test-user" }), platform: platform(), handlers: catalogHandlers() });

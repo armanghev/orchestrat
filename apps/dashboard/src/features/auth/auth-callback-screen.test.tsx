@@ -5,6 +5,12 @@ import { AuthContext } from "./auth-context";
 import type { AuthClient, AuthCompletionResult, AuthSnapshot } from "./auth-client";
 import { AuthCallbackScreen } from "./auth-callback-screen";
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
 function client(snapshot: AuthSnapshot, completeSignIn: (callbackUrl: string) => Promise<AuthCompletionResult> = vi.fn(async () => ({ status: "error" as const }))): AuthClient {
   return {
     capabilities: { github: true, magicLink: true },
@@ -50,8 +56,49 @@ describe("AuthCallbackScreen", () => {
     expect(completion).toHaveBeenCalledOnce();
   });
 
-  it("shows a retry link with a stable message for an auth error", () => {
-    render(<AuthContext.Provider value={client({ status: "error", code: "state_mismatch", message: "The callback state does not match." })}><AuthCallbackScreen /></AuthContext.Provider>);
+
+  it("drops the callback URL after handoff while its promise survives a scrub rerender", async () => {
+    const pending = deferred<AuthCompletionResult>();
+    const completion = vi.fn(() => pending.promise);
+    const onSuccess = vi.fn();
+    const auth = client({ status: "signingIn" }, completion);
+    const view = render(<StrictMode><AuthContext.Provider value={auth}>
+      <AuthCallbackScreen callbackUrl={`${window.location.origin}/auth/callback?code=one-time-secret`} onSuccess={onSuccess} />
+    </AuthContext.Provider></StrictMode>);
+    await waitFor(() => expect(completion).toHaveBeenCalledOnce());
+
+    view.rerender(<StrictMode><AuthContext.Provider value={auth}>
+      <AuthCallbackScreen callbackUrl={`${window.location.origin}/auth/callback`} onSuccess={onSuccess} />
+    </AuthContext.Provider></StrictMode>);
+    expect(completion).toHaveBeenCalledOnce();
+    expect(view.container).not.toHaveTextContent("one-time-secret");
+    pending.resolve({ status: "success", identityKey: "account-b" });
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledWith("account-b"));
+    expect(onSuccess).toHaveBeenCalledOnce();
+  });
+
+
+  it("delivers callback failure after scrub rerender without handing the code off twice", async () => {
+    const pending = deferred<AuthCompletionResult>();
+    const completion = vi.fn(() => pending.promise);
+    const auth = client({ status: "signingIn" }, completion);
+    const view = render(<StrictMode><AuthContext.Provider value={auth}>
+      <AuthCallbackScreen callbackUrl={`${window.location.origin}/auth/callback?code=failing-secret`} />
+    </AuthContext.Provider></StrictMode>);
+    await waitFor(() => expect(completion).toHaveBeenCalledOnce());
+    view.rerender(<StrictMode><AuthContext.Provider value={auth}>
+      <AuthCallbackScreen callbackUrl={`${window.location.origin}/auth/callback`} />
+    </AuthContext.Provider></StrictMode>);
+    pending.resolve({ status: "error" });
+    expect(await screen.findByRole("alert")).toHaveTextContent("We couldn't complete your sign-in.");
+    expect(completion).toHaveBeenCalledOnce();
+    expect(view.container).not.toHaveTextContent("failing-secret");
+  });
+
+  it("shows a retry link with a stable message for an auth error", async () => {
+    const auth = client({ status: "error", code: "state_mismatch", message: "The callback state does not match." });
+    render(<AuthContext.Provider value={auth}><AuthCallbackScreen /></AuthContext.Provider>);
+    await waitFor(() => expect(auth.completeSignIn).toHaveBeenCalledOnce());
     expect(screen.getByRole("alert")).toHaveTextContent("We couldn't complete your sign-in.");
     expect(screen.queryByText("The callback state does not match.")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Try again" })).toHaveAttribute("href", "/");

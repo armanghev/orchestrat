@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useState } from "react";
 import { createFileRoute, useLocation, useNavigate } from "@tanstack/react-router";
 import { z } from "zod";
 import { useAuthClient } from "@/features/auth/auth-context";
@@ -19,15 +19,17 @@ function AuthCallbackRoute() {
   const auth = useAuthClient();
   const location = useLocation();
   const navigate = useNavigate();
-  const callbackUrl = useRef(browserCallbackUrl(location.pathname, location.searchStr)).current;
+  const [callbackHandedOff, setCallbackHandedOff] = useState(false);
+  const callbackUrl = callbackHandedOff ? null : browserCallbackUrl(location.pathname, location.searchStr);
+  const handleHandoff = useCallback(() => {
+    setCallbackHandedOff(true);
+    void navigate({ to: "/auth/callback", search: {}, replace: true });
+  }, [navigate]);
   const handleSuccess = useCallback(() => { void navigate({ to: "/setup", replace: true }); }, [navigate]);
-
-  useEffect(() => {
-    if (location.searchStr) void navigate({ to: "/auth/callback", search: {}, replace: true });
-  }, [location.searchStr, navigate]);
 
   return <AuthCallbackScreen
     callbackUrl={callbackUrl}
+    onHandoff={handleHandoff}
     onSuccess={handleSuccess}
     onRetry={() => {
       void auth.expireSession().catch(() => undefined).then(() => navigate({ to: "/", replace: true }));

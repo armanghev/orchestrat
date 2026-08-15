@@ -16,7 +16,7 @@ import { createAppRouter } from "./router";
 export function watchAuthSessionBoundaries(
   auth: Pick<AuthClient, "getSnapshot" | "subscribe">,
   queryClient: Pick<QueryClient, "clear">,
-  router: { navigate(options: { to: "/" }): unknown }
+  router: { navigate(options: { to: "/"; replace?: boolean }): unknown }
 ): () => void {
   const initial = auth.getSnapshot();
   let previousStatus = initial.status;
@@ -24,7 +24,10 @@ export function watchAuthSessionBoundaries(
   return auth.subscribe(() => {
     const snapshot = auth.getSnapshot();
     if (snapshot.status === "signedIn") {
-      if (activeIdentity !== null && activeIdentity !== snapshot.identityKey) queryClient.clear();
+      if (activeIdentity !== null && activeIdentity !== snapshot.identityKey) {
+        queryClient.clear();
+        void router.navigate({ to: "/", replace: true });
+      }
       activeIdentity = snapshot.identityKey;
     } else if (snapshot.status === "signedOut") {
       if (activeIdentity !== null) queryClient.clear();
