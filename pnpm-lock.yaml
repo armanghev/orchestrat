@@ -63,6 +63,9 @@ importers:
         specifier: ^5.5.0
         version: 5.11.3
     devDependencies:
+      jose:
+        specifier: ^6.2.8
+        version: 6.2.8
       pg-mem:
         specifier: ^3.0.14
         version: 3.0.14

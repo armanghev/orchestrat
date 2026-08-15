@@ -69,13 +69,10 @@ test("Phase 2 API enforces membership and manages projects", async () => {
   };
   const auth: HumanAuth = {
     async authenticate(request) {
-      const authorization = (
-        request.headers as Record<string, string | string[] | undefined>
-      ).authorization;
-      const label =
-        typeof authorization === "string"
-          ? authorization.replace(/^Bearer\s+/, "")
-          : undefined;
+      const authorization = [
+        ...(request.headers as Iterable<[string, string]>)
+      ].find(([name]) => name.toLowerCase() === "authorization")?.[1];
+      const label = authorization?.replace(/^Bearer\s+/, "");
       const authSubject = label ? subjects[label] : undefined;
       return authSubject
         ? {

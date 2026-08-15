@@ -83,7 +83,18 @@ test("provisions once and updates verified profile on repeat login", async () =>
   const identities = new IdentityService(db);
   const subject = "550e8400-e29b-41d4-a716-446655440000";
   try {
-    const firstId = await identities.resolveUserId(principal(subject));
+    const firstId = await identities.resolveUserId(
+      principal(subject, {
+        email: `${"a".repeat(250)}@example.com`,
+        name: null
+      })
+    );
+    const fallback = await db.query.users.findFirst({
+      columns: { name: true },
+      where: eq(users.id, firstId)
+    });
+    assert.equal(fallback?.name, "a".repeat(200));
+
     const secondId = await identities.resolveUserId(
       principal(subject, {
         avatarUrl: "https://cdn.example.com/new.png",

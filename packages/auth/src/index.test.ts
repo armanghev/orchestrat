@@ -45,7 +45,12 @@ const request = (authorization?: string): AuthRequest => ({
 
 async function token(
   overrides: Record<string, unknown> = {},
-  signing: { algorithm?: "ES256" | "RS256"; key?: CryptoKey; kid?: string } = {}
+  signing: {
+    algorithm?: "ES256" | "RS256";
+    criticalHeader?: boolean;
+    key?: CryptoKey;
+    kid?: string;
+  } = {}
 ) {
   const algorithm = signing.algorithm ?? "ES256";
   const key = signing.key ?? ec.privateKey;
@@ -64,8 +69,13 @@ async function token(
     },
     ...overrides
   })
-    .setProtectedHeader({ alg: algorithm, kid, typ: "JWT" })
-    .sign(key);
+    .setProtectedHeader({
+      alg: algorithm,
+      kid,
+      typ: "JWT",
+      ...(signing.criticalHeader ? { crit: ["foo"], foo: "unsupported" } : {})
+    })
+    .sign(key, signing.criticalHeader ? { crit: { foo: true } } : undefined);
 }
 
 const auth = () => createSupabaseAuth(options, { keyResolver: localKeys });
@@ -189,6 +199,11 @@ test("rejects an avatar URL whose canonical form exceeds the bound", async () =>
   assert.equal(result.avatarUrl, null);
 });
 
+test("treats unsupported token-controlled JOSE headers as invalid credentials", async () => {
+  const value = await token({}, { criticalHeader: true });
+  assert.equal(await auth().authenticate(request(`Bearer ${value}`)), null);
+});
+
 test("rejects invalid signature, issuer, audience, and algorithm", async () => {
   const cases = [
     await token({}, { key: otherEc.privateKey }),
@@ -239,6 +254,27 @@ test("requires a normalized, bounded email", async () => {
       null
     );
   }
+});
+
+test("rejects control characters from database-bound profile fields", async () => {
+  for (const email of [
+    "ali\u0000ce@example.com",
+    "ali\u001fce@example.com",
+    "ali\u007fce@example.com",
+    "ali\u0085ce@example.com"
+  ]) {
+    assert.equal(
+      await auth().authenticate(request(`Bearer ${await token({ email })}`)),
+      null
+    );
+  }
+
+  const value = await token({
+    user_metadata: { full_name: "Alice\u0000Admin" }
+  });
+  const result = await auth().authenticate(request(`Bearer ${value}`));
+  assert.ok(result);
+  assert.equal(result.name, null);
 });
 
 test("bounds optional profile claims and ignores unsafe avatar URLs", async () => {

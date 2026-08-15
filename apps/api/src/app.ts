@@ -27,6 +27,14 @@ const errorResponse = (
   error: { code, details, message, request_id: requestId }
 });
 
+const rawHeaderEntries = (rawHeaders: string[]) => {
+  const entries: [string, string][] = [];
+  for (let index = 0; index < rawHeaders.length; index += 2) {
+    entries.push([rawHeaders[index]!, rawHeaders[index + 1]!]);
+  }
+  return entries;
+};
+
 export function buildApp(options: AppOptions) {
   const app = Fastify({
     genReqId: () => `req_${randomUUID()}`,
@@ -111,7 +119,7 @@ export function buildApp(options: AppOptions) {
       api.decorateRequest("userId", "");
       api.addHook("preHandler", async (request) => {
         const principal = await options.auth.authenticate({
-          headers: request.headers,
+          headers: rawHeaderEntries(request.raw.rawHeaders),
           method: request.method,
           url: `http://${request.headers.host ?? "localhost"}${request.url}`
         });

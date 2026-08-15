@@ -49,6 +49,7 @@ const CLOCK_TOLERANCE_SECONDS = 5;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const CONTROL_CHARACTER_PATTERN = /\p{Cc}/u;
 
 export class AuthInfrastructureError extends Error {
   constructor() {
@@ -115,7 +116,13 @@ function exactBearer(headers: AuthHeaders) {
 function normalizedEmail(value: unknown) {
   if (typeof value !== "string") return null;
   const email = value.trim().toLowerCase();
-  if (email.length === 0 || email.length > EMAIL_MAX_LENGTH) return null;
+  if (
+    email.length === 0 ||
+    email.length > EMAIL_MAX_LENGTH ||
+    CONTROL_CHARACTER_PATTERN.test(email)
+  ) {
+    return null;
+  }
   return EMAIL_PATTERN.test(email) ? email : null;
 }
 
@@ -129,7 +136,7 @@ function metadata(payload: JWTPayload) {
 function boundedName(value: unknown) {
   if (typeof value !== "string") return null;
   const name = value.trim();
-  if (!name) return null;
+  if (!name || CONTROL_CHARACTER_PATTERN.test(name)) return null;
   return Array.from(name).slice(0, NAME_MAX_LENGTH).join("");
 }
 
@@ -177,6 +184,7 @@ function principal(payload: JWTPayload): HumanPrincipal | null {
 
 const INVALID_CREDENTIAL_CODES = new Set([
   "ERR_JOSE_ALG_NOT_ALLOWED",
+  "ERR_JOSE_NOT_SUPPORTED",
   "ERR_JWKS_NO_MATCHING_KEY",
   "ERR_JWS_INVALID",
   "ERR_JWS_SIGNATURE_VERIFICATION_FAILED",
