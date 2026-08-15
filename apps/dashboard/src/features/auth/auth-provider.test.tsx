@@ -5,7 +5,8 @@ import { useAuthSnapshot } from "./auth-context";
 import { AuthProvider } from "./auth-provider";
 
 const mockedBridge = vi.hoisted(() => ({
-  begin: vi.fn(async () => undefined),
+  beginGitHub: vi.fn(async () => undefined),
+  sendMagicLink: vi.fn(async () => undefined),
   complete: vi.fn(async () => ({
     accessToken: "access-1",
     expiresAtMs: 60_000
@@ -15,6 +16,7 @@ const mockedBridge = vi.hoisted(() => ({
     expiresAtMs: 60_000
   })),
   restore: vi.fn(async () => null),
+  expire: vi.fn(async () => undefined),
   signOut: vi.fn(async () => undefined)
 }));
 
@@ -58,7 +60,7 @@ describe("AuthProvider", () => {
 
     await screen.findByText("signedOut");
     expect(platform.onAuthCallback).toHaveBeenCalledOnce();
-    callback?.(new URL("dev.orchestrat.app://auth/callback?code=a&state=b"));
+    callback?.(new URL("dev.orchestrat.app://auth/callback?code=a&sb_flow_id=b"));
 
     await waitFor(() => expect(mockedBridge.complete).toHaveBeenCalledOnce());
     expect(screen.getByText("signedIn")).toBeInTheDocument();
@@ -85,7 +87,7 @@ describe("AuthProvider", () => {
 
     view.unmount();
     await waitFor(() => expect(unlisten).toHaveBeenCalledOnce());
-    callback?.(new URL("dev.orchestrat.app://auth/callback?code=a&state=b"));
+    callback?.(new URL("dev.orchestrat.app://auth/callback?code=a&sb_flow_id=b"));
     await Promise.resolve();
 
     expect(mockedBridge.complete).not.toHaveBeenCalled();

@@ -9,7 +9,7 @@ const deepLink = vi.hoisted(() => ({
 vi.mock("@tauri-apps/plugin-deep-link", () => deepLink);
 
 describe("Tauri auth callbacks", () => {
-  const callback = "dev.orchestrat.app://auth/callback?code=abc&state=xyz";
+  const callback = "dev.orchestrat.app://auth/callback?code=abc&sb_flow_id=xyz";
   let unlisten: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
