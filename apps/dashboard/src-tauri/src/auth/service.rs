@@ -153,6 +153,7 @@ impl AuthService {
             Some(SESSION_EXCHANGE) => {}
             _ => return Err(AuthError::CredentialStore),
         }
+        self.preserve_current_for_logout()?;
 
         match self
             .transport
@@ -169,7 +170,6 @@ impl AuthService {
                 Err(AuthError::InvalidProviderResponse)
             }
             Err(error) => {
-                self.preserve_current_for_logout()?;
                 // The exchange marker is already durable, so a stale parent refresh can never be
                 // restored even if this best-effort physical deletion fails.
                 let _ = self.store.delete(REFRESH_ACCOUNT);
@@ -349,16 +349,17 @@ impl AuthService {
         result
     }
     fn preserve_current_for_logout(&self) -> Result<(), AuthError> {
-        let access = self
+        let mut pending = self
+            .pending_logout_access
+            .lock()
+            .map_err(|_| AuthError::CredentialStore)?;
+        if let Some(token) = self
             .current_access
             .lock()
             .map_err(|_| AuthError::CredentialStore)?
-            .take();
-        if let Some(token) = access {
-            *self
-                .pending_logout_access
-                .lock()
-                .map_err(|_| AuthError::CredentialStore)? = Some(token);
+            .take()
+        {
+            *pending = Some(token);
         }
         Ok(())
     }
@@ -1581,6 +1582,116 @@ mod tests {
             Err(AuthError::ProviderTransient)
         ));
 
+        service.sign_out().await.unwrap();
+        assert_eq!(*transport.logout.lock().unwrap(), vec!["access-one"]);
+    }
+
+    #[tokio::test]
+    async fn invalid_provider_exchange_preserves_old_access_for_logout() {
+        let (service, _, transport) = fixture();
+        let account_a = service.begin_github(1_000).await.unwrap();
+        service
+            .complete(&callback(&account_a), 1_100)
+            .await
+            .unwrap();
+        let account_b = service.begin_github(1_200).await.unwrap();
+        *transport.exchange_error.lock().unwrap() = Some(AuthError::InvalidProviderResponse);
+
+        assert!(matches!(
+            service.complete(&callback(&account_b), 1_300).await,
+            Err(AuthError::InvalidProviderResponse)
+        ));
+        service.sign_out().await.unwrap();
+        assert_eq!(*transport.logout.lock().unwrap(), vec!["access-one"]);
+    }
+
+    #[tokio::test]
+    async fn rejected_exchange_restores_old_session_and_logout_access() {
+        let (service, store, transport) = fixture();
+        let account_a = service.begin_github(1_000).await.unwrap();
+        service
+            .complete(&callback(&account_a), 1_100)
+            .await
+            .unwrap();
+        let account_b = service.begin_github(1_200).await.unwrap();
+        *transport.exchange_error.lock().unwrap() = Some(AuthError::ProviderRejected);
+
+        assert!(matches!(
+            service.complete(&callback(&account_b), 1_300).await,
+            Err(AuthError::ProviderRejected)
+        ));
+        assert_eq!(
+            store.get(SESSION_STATE_ACCOUNT).unwrap().as_deref(),
+            Some(SESSION_VALID)
+        );
+        assert_eq!(service.access_for_test(), None);
+        service.sign_out().await.unwrap();
+        assert_eq!(*transport.logout.lock().unwrap(), vec!["access-one"]);
+    }
+
+    #[tokio::test]
+    async fn exchange_refresh_write_failure_retains_old_access_for_logout_retry() {
+        let (service, store, transport) = fixture();
+        let account_a = service.begin_github(1_000).await.unwrap();
+        service
+            .complete(&callback(&account_a), 1_100)
+            .await
+            .unwrap();
+        let account_b = service.begin_github(1_200).await.unwrap();
+        store.fail_set_for(REFRESH_ACCOUNT, true);
+
+        assert!(matches!(
+            service.complete(&callback(&account_b), 1_300).await,
+            Err(AuthError::CredentialStore)
+        ));
+        store.fail_set_for(REFRESH_ACCOUNT, false);
+        *transport.logout_error.lock().unwrap() = Some(AuthError::ProviderTransient);
+        assert!(matches!(
+            service.sign_out().await,
+            Err(AuthError::ProviderTransient)
+        ));
+        service.sign_out().await.unwrap();
+        assert_eq!(
+            *transport.logout.lock().unwrap(),
+            vec!["access-one", "access-one"]
+        );
+    }
+
+    #[tokio::test]
+    async fn exchange_pending_delete_failure_retains_old_access_for_logout() {
+        let (service, store, transport) = fixture();
+        let account_a = service.begin_github(1_000).await.unwrap();
+        service
+            .complete(&callback(&account_a), 1_100)
+            .await
+            .unwrap();
+        let account_b = service.begin_github(1_200).await.unwrap();
+        store.fail_delete_for(PENDING_ACCOUNT, true);
+
+        assert!(matches!(
+            service.complete(&callback(&account_b), 1_300).await,
+            Err(AuthError::CredentialStore)
+        ));
+        store.fail_delete_for(PENDING_ACCOUNT, false);
+        service.sign_out().await.unwrap();
+        assert_eq!(*transport.logout.lock().unwrap(), vec!["access-one"]);
+    }
+
+    #[tokio::test]
+    async fn exchange_valid_marker_failure_retains_old_access_for_logout() {
+        let (service, store, transport) = fixture();
+        let account_a = service.begin_github(1_000).await.unwrap();
+        service
+            .complete(&callback(&account_a), 1_100)
+            .await
+            .unwrap();
+        let account_b = service.begin_github(1_200).await.unwrap();
+        store.set_failure_sequence(SESSION_STATE_ACCOUNT, [false, true, false]);
+
+        assert!(matches!(
+            service.complete(&callback(&account_b), 1_300).await,
+            Err(AuthError::CredentialStore)
+        ));
         service.sign_out().await.unwrap();
         assert_eq!(*transport.logout.lock().unwrap(), vec!["access-one"]);
     }
