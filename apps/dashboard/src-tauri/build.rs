@@ -56,19 +56,29 @@ fn main() {
         .collect::<HashMap<_, _>>();
     println!("cargo:rerun-if-changed={}", env_path.display());
     let mut values = Vec::new();
+    let mut missing = Vec::new();
     for key in PUBLIC_AUTH_KEYS {
         println!("cargo:rerun-if-env-changed={key}");
-        if let Ok(value) = env::var(key).or_else(|_| {
+        match env::var(key).or_else(|_| {
             file_values
                 .get(key)
                 .cloned()
                 .ok_or(env::VarError::NotPresent)
         }) {
-            if !validate(key, &value) {
-                panic!("invalid public desktop authentication build setting: {key}");
+            Ok(value) => {
+                if !validate(key, &value) {
+                    panic!("invalid public desktop authentication build setting: {key}");
+                }
+                values.push((key, value));
             }
-            values.push((key, value));
+            Err(_) => missing.push(key),
         }
+    }
+    if !missing.is_empty() {
+        panic!(
+            "missing required public desktop authentication build setting(s): {}",
+            missing.join(", ")
+        );
     }
     for (key, value) in values {
         println!("cargo:rustc-env={key}={value}");

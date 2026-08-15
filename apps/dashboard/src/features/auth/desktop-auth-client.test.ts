@@ -15,7 +15,7 @@ function fixture(restored: typeof grant | null = null) {
   const bridge = {
     beginGitHub: vi.fn(async () => undefined),
     sendMagicLink: vi.fn(async () => undefined),
-    complete: vi.fn(async () => grant),
+    complete: vi.fn(async (callback: string) => { void callback; return grant; }),
     refresh: vi.fn(async () => ({ ...grant, accessToken: "access-2" })),
     restore: vi.fn(async () => restored),
     expire: vi.fn(async () => undefined),
@@ -284,6 +284,75 @@ describe("DesktopAuthClient", () => {
     } finally { vi.useRealTimers(); }
   });
 
+
+  it("backs off repeated short-lived proactive grants and refreshes expired grants on demand", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    try {
+      const f = fixture({ accessToken: "short-0", expiresAtMs: 2_000 });
+      let sequence = 0;
+      f.bridge.refresh.mockImplementation(async () => ({
+        accessToken: `short-${++sequence}`,
+        expiresAtMs: Date.now() + 5_000
+      }));
+      const client = new DesktopAuthClient(f.platform, f.bridge, Date.now);
+      await client.initialize();
+
+      await vi.advanceTimersByTimeAsync(999);
+      expect(f.bridge.refresh).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(f.bridge.refresh).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(4_000);
+      expect(f.bridge.refresh).toHaveBeenCalledTimes(5);
+
+      const expired = fixture({ accessToken: "expired", expiresAtMs: Date.now() - 1 });
+      expired.bridge.refresh.mockResolvedValue({ accessToken: "recovered", expiresAtMs: Date.now() + 60_000 });
+      const expiredClient = new DesktopAuthClient(expired.platform, expired.bridge, Date.now);
+      await expiredClient.initialize();
+      expect(await expiredClient.getAccessToken()).toBe("recovered");
+      expect(expired.bridge.refresh).toHaveBeenCalledOnce();
+      client.dispose();
+      expiredClient.dispose();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("dispatches distinct in-flight flows, coalesces an identical flow, and lets the valid flow win", async () => {
+    const f = fixture();
+    const wrong = deferred<typeof grant>();
+    const valid = deferred<typeof grant>();
+    f.bridge.complete.mockImplementation((callback) => callback.includes("sb_flow_id=wrong") ? wrong.promise : valid.promise);
+    const client = new DesktopAuthClient(f.platform, f.bridge, () => 1_000);
+    await client.initialize();
+
+    const wrongResult = client.completeSignIn("dev.orchestrat.app://auth/callback?code=wrong-code&sb_flow_id=wrong");
+    const validUrl = "dev.orchestrat.app://auth/callback?code=valid-code&sb_flow_id=valid";
+    const validResult = client.completeSignIn(validUrl);
+    const duplicate = client.completeSignIn(validUrl);
+    expect(duplicate).toBe(validResult);
+    expect(f.bridge.complete).toHaveBeenCalledTimes(2);
+
+    wrong.reject({ code: "flow_mismatch", message: "The callback flow does not match." });
+    expect(await wrongResult).toEqual({ status: "error" });
+    expect(client.getSnapshot()).toEqual({ status: "signingIn" });
+    valid.resolve({ accessToken: "valid-access", expiresAtMs: 60_000 });
+    await expect(validResult).resolves.toMatchObject({ status: "success" });
+    expect(await client.getAccessToken()).toBe("valid-access");
+  });
+
+  it("uses the strict shared email grammar before creating native pending state", async () => {
+    const f = fixture();
+    const client = new DesktopAuthClient(f.platform, f.bridge, () => 1_000);
+    await client.initialize();
+    for (const invalid of [
+      "a@.com", "a@b..com", ".a@example.com", "a.@example.com", "a..b@example.com",
+      "a@example", "a@-example.com", "a@example-.com", "a b@example.com", "a@éxample.com", "K@example.com",
+      `${"a".repeat(65)}@example.com`, `a@${"b".repeat(64)}.com`
+    ]) await client.sendMagicLink(invalid);
+    expect(f.bridge.sendMagicLink).not.toHaveBeenCalled();
+
+    await client.sendMagicLink("  User.Name+tag@Sub.Example.COM  ");
+    expect(f.bridge.sendMagicLink).toHaveBeenCalledWith("user.name+tag@sub.example.com");
+  });
 
   it("clears proactive refresh timers on sign-out, expiry, and disposal", async () => {
     vi.useFakeTimers();

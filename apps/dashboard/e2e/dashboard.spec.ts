@@ -17,6 +17,7 @@ type HierarchyState = {
   projects: Record<string, Array<Record<string, unknown>>>;
   failingWorkspaceId?: string;
   abortOrganizations?: boolean;
+  unauthorized?: "once" | "always";
 };
 
 function organization(id = ids.organization, name = "Acme") {
@@ -33,8 +34,13 @@ function populatedState(): HierarchyState {
 }
 
 async function mockHierarchy(page: Page, state: HierarchyState) {
+  let rejectedOnce = false;
   await page.route("https://api.orchestrat.test/api/v1/**", async (route) => {
-    expect(route.request().headers().authorization).toBe("Bearer e2e-session-token");
+    expect(["Bearer e2e-session-token", "Bearer e2e-refreshed-token"]).toContain(route.request().headers().authorization);
+    if (state.unauthorized === "always" || (state.unauthorized === "once" && !rejectedOnce)) {
+      rejectedOnce = true;
+      return route.fulfill({ status: 401, json: { error: { code: "UNAUTHENTICATED", message: "Expired", request_id: "e2e-401", details: {} } } });
+    }
     const url = new URL(route.request().url());
     const path = url.pathname;
     const method = route.request().method();
@@ -90,6 +96,66 @@ test("signed-out users continue in browser and reach setup", async ({ page }) =>
   await expectNoAxe(page);
   await page.getByRole("button", { name: "Continue with GitHub" }).click();
   await expect(page.getByRole("heading", { name: "Create your organization" })).toBeVisible();
+});
+
+test("magic-link rejects invalid email, shows masked sent state, and completes the sent flow", async ({ page }) => {
+  await seed(page, "signedOut");
+  await mockHierarchy(page, { organizations: [], workspaces: {}, projects: {} });
+  await page.goto("/");
+  const email = page.getByLabel("Email address");
+  await email.fill("a@.com");
+  await page.getByRole("button", { name: "Email me a sign-in link" }).click();
+  await expect(page.getByRole("alert")).toHaveText("Enter a valid email address.");
+  await expectNoAxe(page);
+
+  await email.fill("Person@Example.COM");
+  await page.getByRole("button", { name: "Email me a sign-in link" }).click();
+  await expect(page.getByRole("status")).toContainText("•••@example.com");
+  await expect(page.getByText("person@example.com", { exact: true })).toHaveCount(0);
+  await expectNoAxe(page);
+
+  await page.goto("/auth/callback?code=e2e-magic-code");
+  await expect(page.getByRole("heading", { name: "Create your organization" })).toBeVisible();
+});
+
+test("sign-out survives reload", async ({ page }) => {
+  await seed(page);
+  await mockHierarchy(page, populatedState());
+  await page.goto(`/projects/${ids.alpha}/overview`);
+  await page.getByRole("button", { name: /Command/ }).click();
+  await page.getByPlaceholder("Search commands…").fill("Sign out");
+  await page.getByText("Sign out", { exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Coordinate agents. Keep control." })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Coordinate agents. Keep control." })).toBeVisible();
+});
+
+test("a 401 forces one token refresh and retries the request", async ({ page }) => {
+  await seed(page);
+  await mockHierarchy(page, { ...populatedState(), unauthorized: "once" });
+  await page.goto(`/projects/${ids.alpha}/overview`);
+  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => Number(localStorage.getItem("orchestrat.e2e.refreshes") ?? "0"))).toBe(1);
+});
+
+test("a repeated 401 expires the session and recovery remains signed out after reload", async ({ page }) => {
+  await seed(page);
+  await mockHierarchy(page, { ...populatedState(), unauthorized: "always" });
+  await page.goto(`/projects/${ids.alpha}/overview`);
+  await expect(page.getByRole("heading", { name: "Coordinate agents. Keep control." })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Coordinate agents. Keep control." })).toBeVisible();
+  await expectNoAxe(page);
+});
+
+test("the e2e adapter rejects arbitrary persisted auth modes", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.clear();
+    localStorage.setItem("orchestrat.e2e.auth", "unsafe-mode:<script>");
+    sessionStorage.setItem("orchestrat.e2e.seeded", "true");
+  });
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Coordinate agents. Keep control." })).toBeVisible();
 });
 
 test("creates organization, workspace, and project sequentially", async ({ page }) => {

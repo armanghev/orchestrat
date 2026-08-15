@@ -7,7 +7,11 @@ const callbackDedupeWindowMs = 30_000;
 export function normalizeAuthCallback(input: string): URL {
   const invalid = () => { throw new Error("Unexpected authentication callback."); };
   let url: URL;
-  try { url = new URL(input); } catch { return invalid(); }
+  try {
+    // URLSearchParams decodes malformed percent escapes lossily, so validate the raw URL first.
+    decodeURI(input);
+    url = new URL(input);
+  } catch { return invalid(); }
   if (
     url.protocol !== "dev.orchestrat.app:" || url.hostname !== "auth" ||
     url.port !== "" || url.username !== "" || url.password !== "" ||
@@ -84,7 +88,8 @@ export function createTauriPlatform(): Platform {
         for (const [value, receivedAt] of seen) {
           if (now - receivedAt >= callbackDedupeWindowMs) seen.delete(value);
         }
-        const key = url.toString();
+        // Retain only the nonsecret correlation identifier for dedupe; never retain auth codes.
+        const key = url.searchParams.get("sb_flow_id") as string;
         if (seen.has(key)) return;
         seen.set(key, now);
         handler(url);

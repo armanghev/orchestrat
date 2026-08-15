@@ -50,6 +50,8 @@ impl CredentialStore for KeychainStore {
 pub struct MemoryStore {
     values: std::sync::Mutex<HashMap<String, String>>,
     fail_set: std::sync::Mutex<bool>,
+    fail_set_accounts: std::sync::Mutex<std::collections::HashSet<String>>,
+    fail_delete_accounts: std::sync::Mutex<std::collections::HashSet<String>>,
     events: std::sync::Mutex<Vec<String>>,
 }
 #[cfg(test)]
@@ -58,11 +60,29 @@ impl MemoryStore {
         Self {
             values: Default::default(),
             fail_set: Default::default(),
+            fail_set_accounts: Default::default(),
+            fail_delete_accounts: Default::default(),
             events: Default::default(),
         }
     }
     pub fn fail_writes(&self, value: bool) {
         *self.fail_set.lock().unwrap() = value;
+    }
+    pub fn fail_set_for(&self, account: &str, value: bool) {
+        let mut accounts = self.fail_set_accounts.lock().unwrap();
+        if value {
+            accounts.insert(account.into());
+        } else {
+            accounts.remove(account);
+        }
+    }
+    pub fn fail_delete_for(&self, account: &str, value: bool) {
+        let mut accounts = self.fail_delete_accounts.lock().unwrap();
+        if value {
+            accounts.insert(account.into());
+        } else {
+            accounts.remove(account);
+        }
     }
     pub fn events(&self) -> Vec<String> {
         self.events.lock().unwrap().clone()
@@ -80,7 +100,7 @@ impl CredentialStore for MemoryStore {
     }
     fn set(&self, a: &str, v: &str) -> Result<(), AuthError> {
         self.events.lock().unwrap().push(format!("set:{a}"));
-        if *self.fail_set.lock().unwrap() {
+        if *self.fail_set.lock().unwrap() || self.fail_set_accounts.lock().unwrap().contains(a) {
             return Err(AuthError::CredentialStore);
         }
         self.values.lock().unwrap().insert(a.into(), v.into());
@@ -88,6 +108,9 @@ impl CredentialStore for MemoryStore {
     }
     fn delete(&self, a: &str) -> Result<(), AuthError> {
         self.events.lock().unwrap().push(format!("delete:{a}"));
+        if self.fail_delete_accounts.lock().unwrap().contains(a) {
+            return Err(AuthError::CredentialStore);
+        }
         self.values.lock().unwrap().remove(a);
         Ok(())
     }

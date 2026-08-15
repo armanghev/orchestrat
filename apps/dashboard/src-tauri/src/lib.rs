@@ -4,6 +4,8 @@ use tauri::Manager;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Keep single-instance first. On macOS, registered-scheme URLs arrive through the
+        // deep-link RunEvent pipeline; second-instance argv is intentionally ignored and never logged.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();

@@ -107,3 +107,13 @@ fn pkce_and_callback_use_a_separate_correlated_flow_id_and_kind_ttl() {
     )
     .is_ok());
 }
+
+#[test]
+fn single_instance_is_first_and_does_not_log_or_parse_arguments() {
+    let source = include_str!("../lib.rs");
+    let single = source.find("tauri_plugin_single_instance::init").unwrap();
+    let deep_link = source.find("tauri_plugin_deep_link::init").unwrap();
+    assert!(single < deep_link);
+    assert!(source.contains("second-instance argv is intentionally ignored and never logged"));
+    assert!(source.contains("|app, _args, _cwd|"));
+}

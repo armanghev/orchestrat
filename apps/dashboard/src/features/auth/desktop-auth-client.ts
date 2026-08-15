@@ -1,9 +1,10 @@
 import type { Platform } from "@/platform/contract";
 import { loadingAuthSnapshot, type AccessGrant, type AuthClient, type AuthCompletionResult, type AuthSnapshot, type TokenOptions } from "./auth-client";
 import type { DesktopAuthBridge } from "./desktop-bridge";
+import { normalizeAuthEmail } from "./email";
 
 const refreshWindowMs = 30_000;
-const maximumEmailLength = 254;
+const minimumRefreshBackoffMs = 1_000;
 let desktopIdentitySequence = 0;
 function newDesktopIdentityKey(): string { return `desktop-session-${++desktopIdentitySequence}`; }
 
@@ -15,11 +16,13 @@ function commandError(error: unknown): Extract<AuthSnapshot, { status: "error" }
   return { status: "error", code: "auth_failed", message: "Authentication could not be completed." };
 }
 
-function normalizeEmail(value: string): string | null {
-  const email = value.trim().toLowerCase();
-  if (email.length === 0 || email.length > maximumEmailLength || [...email].some((character) => { const code = character.charCodeAt(0); return code <= 31 || code === 127; }) ||
-      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(email)) return null;
-  return email;
+function callbackFlowId(input: string): string | null {
+  try {
+    decodeURI(input);
+    const url = new URL(input);
+    const flows = url.searchParams.getAll("sb_flow_id");
+    return flows.length === 1 && /^[A-Za-z0-9_-]{1,128}$/u.test(flows[0]) ? flows[0] : null;
+  } catch { return null; }
 }
 
 function isTerminalRefreshError(error: unknown): boolean {
@@ -45,7 +48,9 @@ export class DesktopAuthClient implements AuthClient {
   private magicLinkOperation: Promise<void> | null = null;
   private refreshOperation: Promise<string | null> | null = null;
   private readonly listeners = new Set<() => void>();
-  private callbackOperation: Promise<AuthCompletionResult> | null = null;
+  private readonly callbackOperations = new Map<string, Promise<AuthCompletionResult>>();
+  private callbackGeneration: number | null = null;
+  private uncorrelatedCallbackSequence = 0;
   private callbackCompleted = false;
   private callbackUnsubscribe: (() => void) | null = null;
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
@@ -69,7 +74,8 @@ export class DesktopAuthClient implements AuthClient {
     this.clearTimer();
     this.signInOperation = this.magicLinkOperation = null;
     this.refreshOperation = null;
-    this.callbackOperation = null;
+    this.callbackOperations.clear();
+    this.callbackGeneration = null;
     this.callbackCompleted = true;
     this.grant = null;
     this.identityKey = null;
@@ -108,7 +114,8 @@ export class DesktopAuthClient implements AuthClient {
     if (this.magicLinkOperation) return this.magicLinkOperation;
     const generation = this.generation;
     this.callbackCompleted = false;
-    this.callbackOperation = null;
+    this.callbackOperations.clear();
+    this.callbackGeneration = null;
     this.setSnapshot({ status: "signingIn" });
     const operation = this.bridge.beginGitHub().catch((error) => {
       if (this.generation === generation) this.setSnapshot(commandError(error));
@@ -121,14 +128,15 @@ export class DesktopAuthClient implements AuthClient {
     if (this.disposed) return Promise.resolve();
     if (this.magicLinkOperation) return this.magicLinkOperation;
     if (this.signInOperation) return this.signInOperation;
-    const email = normalizeEmail(value);
+    const email = normalizeAuthEmail(value);
     if (!email) {
       this.setSnapshot({ status: "error", code: "invalid_email", message: "Enter a valid email address." });
       return Promise.resolve();
     }
     const generation = this.generation;
     this.callbackCompleted = false;
-    this.callbackOperation = null;
+    this.callbackOperations.clear();
+    this.callbackGeneration = null;
     this.setSnapshot({ status: "sendingMagicLink", email });
     const operation = this.bridge.sendMagicLink(email).then(() => {
       if (this.generation === generation) this.setSnapshot({ status: "magicLinkSent", email });
@@ -141,26 +149,39 @@ export class DesktopAuthClient implements AuthClient {
 
   completeSignIn(callbackUrl: string): Promise<AuthCompletionResult> {
     if (this.disposed || this.callbackCompleted) return Promise.resolve({ status: "error" });
-    if (this.callbackOperation) return this.callbackOperation;
-    const generation = ++this.generation;
-    this.clearTimer();
-    this.grant = null;
-    this.identityKey = null;
-    this.signInOperation = this.magicLinkOperation = null;
-    this.refreshOperation = null;
-    this.setSnapshot({ status: "signingIn" });
+    const flow = callbackFlowId(callbackUrl);
+    const key = flow === null ? `uncorrelated-${++this.uncorrelatedCallbackSequence}` : `flow-${flow}`;
+    const existing = this.callbackOperations.get(key);
+    if (existing) return existing;
+
+    let generation = this.callbackGeneration;
+    if (generation === null) {
+      generation = ++this.generation;
+      this.callbackGeneration = generation;
+      this.clearTimer();
+      this.grant = null;
+      this.identityKey = null;
+      this.signInOperation = this.magicLinkOperation = null;
+      this.refreshOperation = null;
+      this.setSnapshot({ status: "signingIn" });
+    }
     const operation = this.bridge.complete(callbackUrl).then((grant): AuthCompletionResult => {
-      if (this.generation !== generation) return { status: "error" };
+      if (this.generation !== generation || this.callbackCompleted) return { status: "error" };
       this.identityKey = newDesktopIdentityKey();
       this.installGrant(grant);
       this.callbackCompleted = true;
       this.setSnapshot({ status: "signedIn", identityKey: this.identityKey });
       return { status: "success", identityKey: this.identityKey };
     }).catch((error): AuthCompletionResult => {
-      if (this.generation === generation) this.setSnapshot(commandError(error));
+      if (this.generation === generation && !this.callbackCompleted && this.callbackOperations.size === 1) {
+        this.setSnapshot(commandError(error));
+      }
       return { status: "error" };
-    }).finally(() => { if (this.callbackOperation === operation) this.callbackOperation = null; });
-    this.callbackOperation = operation;
+    }).finally(() => {
+      if (this.callbackOperations.get(key) === operation) this.callbackOperations.delete(key);
+      if (this.callbackOperations.size === 0 && this.callbackGeneration === generation) this.callbackGeneration = null;
+    });
+    this.callbackOperations.set(key, operation);
     return operation;
   }
 
@@ -216,7 +237,8 @@ export class DesktopAuthClient implements AuthClient {
     this.clearTimer();
     this.grant = grant;
     if (!grant || this.disposed) return;
-    const delay = Math.max(0, Math.min(2_147_483_647, grant.expiresAtMs - this.now() - refreshWindowMs));
+    const delay = Math.max(minimumRefreshBackoffMs,
+      Math.min(2_147_483_647, grant.expiresAtMs - this.now() - refreshWindowMs));
     this.refreshTimer = setTimeout(() => {
       this.refreshTimer = null;
       if (!this.disposed && this.grant === grant) void this.refreshCurrent(grant);
@@ -227,7 +249,8 @@ export class DesktopAuthClient implements AuthClient {
   private clearLocalSession(): void {
     this.clearTimer();
     this.signInOperation = this.magicLinkOperation = null;
-    this.callbackOperation = null;
+    this.callbackOperations.clear();
+    this.callbackGeneration = null;
     this.refreshOperation = null;
     this.grant = null;
     this.identityKey = null;

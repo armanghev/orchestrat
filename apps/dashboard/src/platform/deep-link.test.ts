@@ -42,4 +42,14 @@ describe("normalizeAuthCallback", () => {
       "dev.orchestrat.app://auth/callback?code=a%00b&sb_flow_id=f"
     ]) expect(() => normalizeAuthCallback(input)).toThrow("Unexpected authentication callback");
   });
+
+  it.each([
+    "dev.orchestrat.app://auth/callback?code=%ZZ&sb_flow_id=flow_123",
+    "dev.orchestrat.app://auth/callback?code=%&sb_flow_id=flow_123",
+    "dev.orchestrat.app://auth/callback?code=%FF&sb_flow_id=flow_123",
+    "dev.orchestrat.app://auth/callback?code=%E2%82&sb_flow_id=flow_123",
+    "dev.orchestrat.app://auth/callback?code=ok%FFmixed&sb_flow_id=flow_123"
+  ])("rejects malformed percent encoding before URLSearchParams decoding: %s", (input) => {
+    expect(() => normalizeAuthCallback(input)).toThrow("Unexpected authentication callback");
+  });
 });

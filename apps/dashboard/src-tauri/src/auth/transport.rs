@@ -11,6 +11,8 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 const READ_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_BODY: usize = 64 * 1024;
+const API_VERSION: &str = "2024-01-01";
+const CLIENT_INFO: &str = "orchestrat-desktop-auth/1.0";
 
 #[derive(Clone, Debug)]
 pub struct TokenGrant {
@@ -38,6 +40,7 @@ pub struct SupabaseAuthTransport {
 struct OtpRequest<'a> {
     email: &'a str,
     data: serde_json::Value,
+    gotrue_meta_security: serde_json::Value,
     create_user: bool,
     code_challenge: &'a str,
     code_challenge_method: &'static str,
@@ -92,6 +95,8 @@ impl SupabaseAuthTransport {
                 format!("Bearer {}", self.config.publishable_key),
             )
             .header(CONTENT_TYPE, "application/json")
+            .header("X-Supabase-Api-Version", API_VERSION)
+            .header("X-Client-Info", CLIENT_INFO)
     }
     async fn body(mut response: reqwest::Response) -> Result<(StatusCode, Vec<u8>), AuthError> {
         let status = response.status();
@@ -169,6 +174,7 @@ impl AuthTransport for SupabaseAuthTransport {
         let request = OtpRequest {
             email,
             data: serde_json::json!({}),
+            gotrue_meta_security: serde_json::json!({}),
             create_user: true,
             code_challenge: challenge,
             code_challenge_method: "s256",
@@ -179,12 +185,16 @@ impl AuthTransport for SupabaseAuthTransport {
             .send()
             .await
             .map_err(|_| AuthError::ProviderTransient)?;
-        let (status, _) = Self::body(response).await?;
-        if status.is_success() {
-            Ok(())
-        } else {
-            Err(Self::status_error(status))
+        let (status, bytes) = Self::body(response).await?;
+        if !status.is_success() {
+            return Err(Self::status_error(status));
         }
+        let value: serde_json::Value =
+            serde_json::from_slice(&bytes).map_err(|_| AuthError::InvalidProviderResponse)?;
+        if !value.is_object() {
+            return Err(AuthError::InvalidProviderResponse);
+        }
+        Ok(())
     }
     async fn exchange_code(&self, code: &str, verifier: &str) -> Result<TokenGrant, AuthError> {
         self.token(
@@ -253,6 +263,8 @@ mod tests {
                     "Bearer sb_publishable_abcdefghijklmnopqrstuvwxyz",
                 )
                 .header("content-type", "application/json")
+                .header("x-supabase-api-version", "2024-01-01")
+                .header("x-client-info", "orchestrat-desktop-auth/1.0")
         };
         let otp = s.mock(|when, then| {
             headers(when.method(POST).path("/auth/v1/otp").query_param(
@@ -260,7 +272,7 @@ mod tests {
                 "dev.orchestrat.app://auth/callback?sb_flow_id=flow_identifier_123",
             ))
             .json_body_obj(&serde_json::json!({
-                "email": "person@example.com", "data": {}, "create_user": true,
+                "email": "person@example.com", "data": {}, "gotrue_meta_security": {}, "create_user": true,
                 "code_challenge": "challenge", "code_challenge_method": "s256"
             }));
             then.status(200).body("{}");
@@ -356,6 +368,26 @@ mod tests {
         ));
         slow.assert();
     }
+    #[tokio::test]
+    async fn otp_success_requires_a_json_object_response() {
+        for body in ["", "not-json", "[]", "null"] {
+            let server = MockServer::start();
+            let otp = server.mock(|when, then| {
+                when.method(POST).path("/auth/v1/otp");
+                then.status(200).body(body);
+            });
+            let result = SupabaseAuthTransport::new(config(&server))
+                .send_magic_link(
+                    "person@example.com",
+                    "dev.orchestrat.app://auth/callback",
+                    "challenge",
+                )
+                .await;
+            assert!(matches!(result, Err(AuthError::InvalidProviderResponse)));
+            otp.assert();
+        }
+    }
+
     #[tokio::test]
     async fn missing_rotated_refresh_is_terminal_invalid_response() {
         let s = MockServer::start();

@@ -27,6 +27,8 @@ pub struct AuthService {
     transport: Arc<dyn AuthTransport>,
     lifecycle: Arc<AsyncMutex<()>>,
     current_access: Arc<Mutex<Option<String>>>,
+    pending_logout_access: Arc<Mutex<Option<String>>>,
+    session_unusable: Arc<Mutex<bool>>,
 }
 impl AuthService {
     pub fn new(
@@ -40,6 +42,8 @@ impl AuthService {
             transport,
             lifecycle: Arc::new(AsyncMutex::new(())),
             current_access: Arc::new(Mutex::new(None)),
+            pending_logout_access: Arc::new(Mutex::new(None)),
+            session_unusable: Arc::new(Mutex::new(false)),
         }
     }
     fn pending(
@@ -68,6 +72,7 @@ impl AuthService {
     }
     pub(crate) async fn begin_github(&self, now: u64) -> Result<AuthorizationRequest, AuthError> {
         let _guard = self.lifecycle.lock().await;
+        self.ensure_session_usable()?;
         let (pkce, pending) = self.pending(PendingKind::Github, now)?;
         let redirect = self.redirect_for(&pending.flow_id);
         let mut url = self.config.authorize_url();
@@ -85,6 +90,7 @@ impl AuthService {
     }
     pub async fn send_magic_link(&self, value: &str, now: u64) -> Result<(), AuthError> {
         let _guard = self.lifecycle.lock().await;
+        self.ensure_session_usable()?;
         let email = normalize_email(value).ok_or(AuthError::InvalidEmail)?;
         let (pkce, pending) = self.pending(PendingKind::MagicLink, now)?;
         let redirect = self.redirect_for(&pending.flow_id);
@@ -114,6 +120,7 @@ impl AuthService {
     }
     pub async fn complete(&self, callback: &str, now: u64) -> Result<AccessGrant, AuthError> {
         let _guard = self.lifecycle.lock().await;
+        self.ensure_session_usable()?;
         let raw = self
             .store
             .get(PENDING_ACCOUNT)?
@@ -148,6 +155,7 @@ impl AuthService {
     }
     pub async fn restore(&self, now: u64) -> Result<Option<AccessGrant>, AuthError> {
         let _guard = self.lifecycle.lock().await;
+        self.ensure_session_usable()?;
         let Some(token) = self.store.get(REFRESH_ACCOUNT)? else {
             return Ok(None);
         };
@@ -162,6 +170,7 @@ impl AuthService {
     }
     pub async fn refresh(&self, now: u64) -> Result<AccessGrant, AuthError> {
         let _guard = self.lifecycle.lock().await;
+        self.ensure_session_usable()?;
         let token = self
             .store
             .get(REFRESH_ACCOUNT)?
@@ -185,17 +194,29 @@ impl AuthService {
             self.clear_session_locked()?;
             return Err(AuthError::InvalidProviderResponse);
         }
-        if let Err(error) = self.store.set(REFRESH_ACCOUNT, &grant.refresh_token) {
-            let _ = self.store.delete(REFRESH_ACCOUNT);
+        if self
+            .store
+            .set(REFRESH_ACCOUNT, &grant.refresh_token)
+            .is_err()
+        {
             *self
                 .current_access
                 .lock()
                 .map_err(|_| AuthError::CredentialStore)? = None;
-            return Err(error);
+            let cleanup = self.store.delete(REFRESH_ACCOUNT);
+            self.set_session_unusable(cleanup.is_err())?;
+            return Err(AuthError::CredentialStore);
         }
-        if consume_pending {
-            self.store.delete(PENDING_ACCOUNT)?;
+        if consume_pending && self.store.delete(PENDING_ACCOUNT).is_err() {
+            *self
+                .current_access
+                .lock()
+                .map_err(|_| AuthError::CredentialStore)? = None;
+            let cleanup = self.store.delete(REFRESH_ACCOUNT);
+            self.set_session_unusable(cleanup.is_err())?;
+            return Err(AuthError::CredentialStore);
         }
+        self.set_session_unusable(false)?;
         let result = access_grant(grant.access_token.clone(), grant.expires_in, now);
         *self
             .current_access
@@ -214,31 +235,78 @@ impl AuthService {
             .lock()
             .map_err(|_| AuthError::CredentialStore)?
             .take();
-        let local = self.delete_both();
-        let remote = match access {
+        if let Some(token) = access {
+            let mut pending = self
+                .pending_logout_access
+                .lock()
+                .map_err(|_| AuthError::CredentialStore)?;
+            if pending.is_none() {
+                *pending = Some(token);
+            }
+        }
+        self.set_session_unusable(true)?;
+        if self.delete_both().is_err() {
+            return Err(AuthError::CredentialStore);
+        }
+        self.set_session_unusable(false)?;
+        let access = self
+            .pending_logout_access
+            .lock()
+            .map_err(|_| AuthError::CredentialStore)?
+            .take();
+        match access {
             Some(token) => self.transport.logout(&token).await,
             None => Ok(()),
-        };
-        local.and(remote)
+        }
     }
     fn delete_both(&self) -> Result<(), AuthError> {
         let pending = self.store.delete(PENDING_ACCOUNT);
         let refresh = self.store.delete(REFRESH_ACCOUNT);
         pending.and(refresh)
     }
+    fn ensure_session_usable(&self) -> Result<(), AuthError> {
+        if *self
+            .session_unusable
+            .lock()
+            .map_err(|_| AuthError::CredentialStore)?
+        {
+            Err(AuthError::CredentialStore)
+        } else {
+            Ok(())
+        }
+    }
+    fn set_session_unusable(&self, value: bool) -> Result<(), AuthError> {
+        *self
+            .session_unusable
+            .lock()
+            .map_err(|_| AuthError::CredentialStore)? = value;
+        Ok(())
+    }
     fn clear_all_locked(&self) -> Result<(), AuthError> {
         *self
             .current_access
             .lock()
             .map_err(|_| AuthError::CredentialStore)? = None;
-        self.delete_both()
+        self.set_session_unusable(true)?;
+        if self.delete_both().is_err() {
+            return Err(AuthError::CredentialStore);
+        }
+        self.pending_logout_access
+            .lock()
+            .map_err(|_| AuthError::CredentialStore)?
+            .take();
+        self.set_session_unusable(false)
     }
     fn clear_session_locked(&self) -> Result<(), AuthError> {
         *self
             .current_access
             .lock()
             .map_err(|_| AuthError::CredentialStore)? = None;
-        self.store.delete(REFRESH_ACCOUNT)
+        self.set_session_unusable(true)?;
+        if self.store.delete(REFRESH_ACCOUNT).is_err() {
+            return Err(AuthError::CredentialStore);
+        }
+        self.set_session_unusable(false)
     }
     #[cfg(test)]
     fn access_for_test(&self) -> Option<String> {
@@ -253,23 +321,67 @@ fn access_grant(access_token: String, expires: u64, now: u64) -> AccessGrant {
 }
 fn normalize_email(value: &str) -> Option<String> {
     let email = value.trim().to_ascii_lowercase();
-    if email.is_empty()
-        || email.len() > 254
-        || !email.is_ascii()
-        || email.bytes().any(|byte| byte.is_ascii_whitespace())
-        || email.chars().any(char::is_control)
+    if email.is_empty() || email.len() > 254 || !email.is_ascii() {
+        return None;
+    }
+    let mut parts = email.split('@');
+    let (Some(local), Some(domain), None) = (parts.next(), parts.next(), parts.next()) else {
+        return None;
+    };
+    let allowed_local = |byte: u8| {
+        byte.is_ascii_alphanumeric()
+            || matches!(
+                byte,
+                b'.' | b'!'
+                    | b'#'
+                    | b'$'
+                    | b'%'
+                    | b'&'
+                    | b'\''
+                    | b'*'
+                    | b'+'
+                    | b'-'
+                    | b'/'
+                    | b'='
+                    | b'?'
+                    | b'^'
+                    | b'_'
+                    | b'`'
+                    | b'{'
+                    | b'|'
+                    | b'}'
+                    | b'~'
+            )
+    };
+    if local.is_empty()
+        || local.len() > 64
+        || local.starts_with('.')
+        || local.ends_with('.')
+        || local.contains("..")
+        || !local.bytes().all(allowed_local)
     {
         return None;
     }
-    let (mut local, mut domain) = ("", "");
-    if let Some((l, d)) = email.split_once('@') {
-        local = l;
-        domain = d;
+    if domain.is_empty() || domain.len() > 253 {
+        return None;
     }
-    if local.is_empty()
-        || domain.is_empty()
-        || !domain.contains('.')
-        || email.matches('@').count() != 1
+    let labels: Vec<&str> = domain.split('.').collect();
+    if labels.len() < 2
+        || labels.iter().any(|label| {
+            label.is_empty()
+                || label.len() > 63
+                || !label
+                    .as_bytes()
+                    .first()
+                    .is_some_and(u8::is_ascii_alphanumeric)
+                || !label
+                    .as_bytes()
+                    .last()
+                    .is_some_and(u8::is_ascii_alphanumeric)
+                || !label
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        })
     {
         return None;
     }
@@ -285,19 +397,27 @@ mod tests {
     use url::Url;
     struct Fake {
         exchange_error: StdMutex<Option<AuthError>>,
+        exchange_calls: StdMutex<usize>,
         refresh_error: StdMutex<Option<AuthError>>,
+        refresh_calls: StdMutex<usize>,
         refresh: StdMutex<String>,
         logout: StdMutex<Vec<String>>,
+        logout_error: StdMutex<Option<AuthError>>,
         magic: StdMutex<Vec<(String, String)>>,
+        magic_error: StdMutex<Option<AuthError>>,
     }
     impl Fake {
         fn new() -> Self {
             Self {
                 exchange_error: Default::default(),
+                exchange_calls: Default::default(),
                 refresh_error: Default::default(),
+                refresh_calls: Default::default(),
                 refresh: StdMutex::new("refresh-one".into()),
                 logout: Default::default(),
+                logout_error: Default::default(),
                 magic: Default::default(),
+                magic_error: Default::default(),
             }
         }
     }
@@ -305,9 +425,13 @@ mod tests {
     impl AuthTransport for Fake {
         async fn send_magic_link(&self, e: &str, r: &str, _: &str) -> Result<(), AuthError> {
             self.magic.lock().unwrap().push((e.into(), r.into()));
-            Ok(())
+            match self.magic_error.lock().unwrap().take() {
+                Some(error) => Err(error),
+                None => Ok(()),
+            }
         }
         async fn exchange_code(&self, _: &str, _: &str) -> Result<TokenGrant, AuthError> {
+            *self.exchange_calls.lock().unwrap() += 1;
             if let Some(e) = self.exchange_error.lock().unwrap().take() {
                 return Err(e);
             }
@@ -318,6 +442,7 @@ mod tests {
             })
         }
         async fn refresh(&self, _: &str) -> Result<TokenGrant, AuthError> {
+            *self.refresh_calls.lock().unwrap() += 1;
             if let Some(e) = self.refresh_error.lock().unwrap().take() {
                 return Err(e);
             }
@@ -329,6 +454,9 @@ mod tests {
         }
         async fn logout(&self, a: &str) -> Result<(), AuthError> {
             self.logout.lock().unwrap().push(a.into());
+            if let Some(error) = self.logout_error.lock().unwrap().take() {
+                return Err(error);
+            }
             Ok(())
         }
     }
@@ -451,6 +579,17 @@ mod tests {
         assert!(t.magic.lock().unwrap()[0].1.contains("sb_flow_id="));
     }
     #[tokio::test]
+    async fn invalid_otp_provider_response_rolls_back_pending() {
+        let (service, store, transport) = fixture();
+        *transport.magic_error.lock().unwrap() = Some(AuthError::InvalidProviderResponse);
+        assert!(matches!(
+            service.send_magic_link("person@example.com", 1_000).await,
+            Err(AuthError::InvalidProviderResponse)
+        ));
+        assert!(store.get(PENDING_ACCOUNT).unwrap().is_none());
+    }
+
+    #[tokio::test]
     async fn transient_exchange_preserves_pending_but_terminal_and_success_consume() {
         let (s, store, t) = fixture();
         let r = s.begin_github(1000).await.unwrap();
@@ -536,17 +675,22 @@ mod tests {
 
     #[tokio::test]
     async fn malformed_and_mismatched_callbacks_preserve_pending() {
-        let (service, store, _) = fixture();
+        let (service, store, transport) = fixture();
         let request = service.begin_github(1_000).await.unwrap();
         for callback in [
             "dev.orchestrat.app://auth/callback?code=x&sb_flow_id=wrong_identifier_123",
             "dev.orchestrat.app://auth/callback?code=x&sb_flow_id=wrong_identifier_123&unknown=x",
             "https://evil.test/auth/callback?code=x&sb_flow_id=wrong_identifier_123",
+            "dev.orchestrat.app://auth/callback?code=%ZZ&sb_flow_id=wrong_identifier_123",
+            "dev.orchestrat.app://auth/callback?code=%FF&sb_flow_id=wrong_identifier_123",
+            "dev.orchestrat.app://auth/callback?code=%E2%82&sb_flow_id=wrong_identifier_123",
         ] {
             assert!(service.complete(callback, 1_100).await.is_err());
             assert!(store.get(PENDING_ACCOUNT).unwrap().is_some());
         }
+        assert_eq!(*transport.exchange_calls.lock().unwrap(), 0);
         service.complete(&callback(&request), 1_100).await.unwrap();
+        assert_eq!(*transport.exchange_calls.lock().unwrap(), 1);
         assert!(store.get(PENDING_ACCOUNT).unwrap().is_none());
     }
 
@@ -569,14 +713,98 @@ mod tests {
     #[tokio::test]
     async fn invalid_email_never_creates_a_pending_flow() {
         let (service, store, transport) = fixture();
-        for email in ["", "missing-at.example.com", "a@b", "a@\nb.com", "a @b.com"] {
+        for email in [
+            "",
+            "missing-at.example.com",
+            "a@b",
+            "a@\nb.com",
+            "a @b.com",
+            "a@.com",
+            "a@b..com",
+            ".a@example.com",
+            "a.@example.com",
+            "a..b@example.com",
+            "a@-example.com",
+            "a@example-.com",
+            "a@éxample.com",
+            "K@example.com",
+        ] {
             assert!(matches!(
                 service.send_magic_link(email, 1_000).await,
                 Err(AuthError::InvalidEmail)
             ));
         }
+        for email in [
+            format!("{}@example.com", "a".repeat(65)),
+            format!("a@{}.com", "b".repeat(64)),
+        ] {
+            assert!(matches!(
+                service.send_magic_link(&email, 1_000).await,
+                Err(AuthError::InvalidEmail)
+            ));
+        }
         assert!(store.get(PENDING_ACCOUNT).unwrap().is_none());
         assert!(transport.magic.lock().unwrap().is_empty());
+        service
+            .send_magic_link("  User.Name+tag@Sub.Example.COM  ", 1_001)
+            .await
+            .unwrap();
+        assert_eq!(
+            transport.magic.lock().unwrap()[0].0,
+            "user.name+tag@sub.example.com"
+        );
+    }
+
+    #[tokio::test]
+    async fn rotation_set_and_delete_failure_blocks_restore_until_explicit_cleanup() {
+        let (service, store, transport) = fixture();
+        store.set(REFRESH_ACCOUNT, "old").unwrap();
+        store.fail_set_for(REFRESH_ACCOUNT, true);
+        store.fail_delete_for(REFRESH_ACCOUNT, true);
+        assert!(matches!(
+            service.refresh(1_000).await,
+            Err(AuthError::CredentialStore)
+        ));
+        assert_eq!(store.get(REFRESH_ACCOUNT).unwrap().as_deref(), Some("old"));
+        assert!(matches!(
+            service.restore(1_001).await,
+            Err(AuthError::CredentialStore)
+        ));
+        assert_eq!(*transport.refresh_calls.lock().unwrap(), 1);
+
+        store.fail_set_for(REFRESH_ACCOUNT, false);
+        store.fail_delete_for(REFRESH_ACCOUNT, false);
+        service.expire().await.unwrap();
+        assert!(service.restore(1_002).await.unwrap().is_none());
+        assert_eq!(*transport.refresh_calls.lock().unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn signout_retries_failed_local_deletion_before_remote_and_never_resurrects() {
+        let (service, store, transport) = fixture();
+        let request = service.begin_github(1_000).await.unwrap();
+        service.complete(&callback(&request), 1_100).await.unwrap();
+        store.fail_delete_for(REFRESH_ACCOUNT, true);
+        assert!(matches!(
+            service.sign_out().await,
+            Err(AuthError::CredentialStore)
+        ));
+        assert!(transport.logout.lock().unwrap().is_empty());
+        assert!(service.access_for_test().is_none());
+        assert!(matches!(
+            service.restore(1_101).await,
+            Err(AuthError::CredentialStore)
+        ));
+
+        store.fail_delete_for(REFRESH_ACCOUNT, false);
+        *transport.logout_error.lock().unwrap() = Some(AuthError::ProviderTransient);
+        assert!(matches!(
+            service.sign_out().await,
+            Err(AuthError::ProviderTransient)
+        ));
+        assert_eq!(*transport.logout.lock().unwrap(), vec!["access-one"]);
+        assert!(store.get(REFRESH_ACCOUNT).unwrap().is_none());
+        assert!(service.restore(1_102).await.unwrap().is_none());
     }
 
     #[tokio::test]

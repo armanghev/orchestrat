@@ -43,11 +43,44 @@ fn safe_identifier(value: &str, max: usize) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.'))
 }
 
+fn valid_raw_percent_encoding(input: &str) -> bool {
+    fn hex(byte: u8) -> Option<u8> {
+        match byte {
+            b'0'..=b'9' => Some(byte - b'0'),
+            b'a'..=b'f' => Some(byte - b'a' + 10),
+            b'A'..=b'F' => Some(byte - b'A' + 10),
+            _ => None,
+        }
+    }
+    let bytes = input.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            if index + 2 >= bytes.len() {
+                return false;
+            }
+            let (Some(high), Some(low)) = (hex(bytes[index + 1]), hex(bytes[index + 2])) else {
+                return false;
+            };
+            decoded.push((high << 4) | low);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+    std::str::from_utf8(&decoded).is_ok()
+}
+
 pub fn parse_callback(
     input: &str,
     pending: &PendingAuthorization,
     now_ms: u64,
 ) -> Result<ValidatedCallback, AuthError> {
+    if !valid_raw_percent_encoding(input) {
+        return Err(AuthError::InvalidCallback);
+    }
     if pending.version != 1
         || !Pkce::is_valid_flow_id(&pending.flow_id)
         || !Pkce::is_valid_verifier(&pending.verifier)
@@ -161,6 +194,22 @@ mod tests {
             601001
         )
         .is_ok());
+    }
+
+    #[test]
+    fn rejects_malformed_percent_escapes_and_invalid_decoded_utf8() {
+        for input in [
+            "dev.orchestrat.app://auth/callback?code=%ZZ&sb_flow_id=flow_identifier_123",
+            "dev.orchestrat.app://auth/callback?code=%&sb_flow_id=flow_identifier_123",
+            "dev.orchestrat.app://auth/callback?code=%FF&sb_flow_id=flow_identifier_123",
+            "dev.orchestrat.app://auth/callback?code=%E2%82&sb_flow_id=flow_identifier_123",
+            "dev.orchestrat.app://auth/callback?code=ok%FFmixed&sb_flow_id=flow_identifier_123",
+        ] {
+            assert!(matches!(
+                parse_callback(input, &p(PendingKind::Github), 1_100),
+                Err(AuthError::InvalidCallback)
+            ));
+        }
     }
 
     #[test]
