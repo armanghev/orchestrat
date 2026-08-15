@@ -38,7 +38,8 @@ function fixture(restored: Session | null = null) {
     signInWithOtp: vi.fn(async () => ({ data: { user: null, session: null, messageId: "accepted" }, error: null })),
     exchangeCodeForSession: vi.fn(async () => ({ data: { session: session(), user: session().user }, error: null })),
     refreshSession: vi.fn(async () => ({ data: { session: session("refreshed-access"), user: session().user }, error: null })),
-    signOut: vi.fn(async () => ({ error: null }))
+    signOut: vi.fn(async () => ({ error: null })),
+    dispose: vi.fn(async () => undefined)
   };
   const client = new WebAuthClient(auth as WebAuthApi, callbackUrl);
   return { auth, client, unsubscribe, emit: (event: AuthChangeEvent, value: Session | null) => authChange?.(event, value) };
@@ -88,6 +89,36 @@ describe("WebAuthClient", () => {
     f.emit("SIGNED_OUT", null);
     expect(f.unsubscribe).toHaveBeenCalledOnce();
     expect(listener).toHaveBeenCalledTimes(2);
+  });
+
+
+  it("disposes the owned auth port once after wrapper unsubscribe and is idempotent", async () => {
+    const f = fixture();
+    const cleanupOrder: string[] = [];
+    f.unsubscribe.mockImplementation(() => { cleanupOrder.push("wrapper-unsubscribe"); });
+    f.auth.dispose.mockImplementation(async () => { cleanupOrder.push("auth-dispose"); });
+    await f.client.initialize();
+    f.client.dispose();
+    f.client.dispose();
+    await Promise.resolve();
+    expect(cleanupOrder).toEqual(["wrapper-unsubscribe", "auth-dispose"]);
+    expect(f.unsubscribe).toHaveBeenCalledOnce();
+    expect(f.auth.dispose).toHaveBeenCalledOnce();
+  });
+
+  it("handles auth-port disposal rejection without logging or an unhandled rejection", async () => {
+    const f = fixture();
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const consoleLog = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    f.auth.dispose.mockRejectedValueOnce(new Error("secret provider disposal detail"));
+    f.client.dispose();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(f.auth.dispose).toHaveBeenCalledOnce();
+    expect(consoleError).not.toHaveBeenCalled();
+    expect(consoleLog).not.toHaveBeenCalled();
+    consoleError.mockRestore();
+    consoleLog.mockRestore();
   });
 
   it("starts GitHub OAuth once with the exact configured callback", async () => {
@@ -226,6 +257,42 @@ describe("WebAuthClient", () => {
     expect(f.auth.exchangeCodeForSession).toHaveBeenCalledTimes(2);
     expect(f.client.getSnapshot()).toEqual({ status: "signedIn" });
   });
+
+
+  it.each(["signOut", "expireSession"] as const)(
+    "keeps a failed accepted callback terminal after %s",
+    async (clearMethod) => {
+      const f = fixture();
+      f.auth.exchangeCodeForSession.mockResolvedValueOnce({
+        data: { session: null, user: null }, error: new Error("first exchange failure")
+      } as never);
+      const acceptedCallback = `${callbackUrl}?code=failed-before-clear`;
+      await f.client.completeSignIn(acceptedCallback);
+      await f.client[clearMethod]();
+      await f.client.completeSignIn(acceptedCallback);
+      expect(f.auth.exchangeCodeForSession).toHaveBeenCalledOnce();
+    }
+  );
+
+  it.each(["github", "magic"] as const)(
+    "does not reset callback terminality when a new %s flow fails to start",
+    async (flow) => {
+      const f = fixture();
+      f.auth.exchangeCodeForSession.mockResolvedValueOnce({
+        data: { session: null, user: null }, error: new Error("first exchange failure")
+      } as never);
+      await f.client.completeSignIn(`${callbackUrl}?code=failed-before-new-flow`);
+      if (flow === "github") {
+        f.auth.signInWithOAuth.mockResolvedValueOnce({ data: { provider: "github", url: null }, error: new Error("OAuth start failed") } as never);
+        await f.client.signInWithGitHub();
+      } else {
+        f.auth.signInWithOtp.mockResolvedValueOnce({ data: { user: null, session: null }, error: new Error("OTP start failed") } as never);
+        await f.client.sendMagicLink("person@example.com");
+      }
+      await f.client.completeSignIn(`${callbackUrl}?code=must-remain-terminal`);
+      expect(f.auth.exchangeCodeForSession).toHaveBeenCalledOnce();
+    }
+  );
 
   it("keeps an auth event authoritative over a callback exchange failure", async () => {
     const f = fixture();
@@ -372,6 +439,8 @@ describe("createBrowserWebAuthClient", () => {
       createClient as unknown as Parameters<typeof createBrowserWebAuthClient>[4]
     );
     expect(client).toBeInstanceOf(WebAuthClient);
+    client.dispose();
+    expect(auth.dispose).toHaveBeenCalledOnce();
     expect(createClient).toHaveBeenCalledOnce();
     expect(createClient).toHaveBeenCalledWith(
       "https://project.supabase.co", "sb_publishable_test",

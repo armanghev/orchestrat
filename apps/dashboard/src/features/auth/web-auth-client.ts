@@ -20,6 +20,7 @@ export type WebAuthApi = {
   exchangeCodeForSession(code: string): AuthResult<{ session: Session | null; user: unknown }>;
   refreshSession(): AuthResult<{ session: Session | null; user: unknown }>;
   signOut(options: { scope: "local" }): Promise<{ error: unknown }>;
+  dispose(): Promise<void>;
 };
 
 const webCapabilities: AuthCapabilities = Object.freeze({ github: true, magicLink: true });
@@ -158,8 +159,9 @@ export class WebAuthClient implements AuthClient {
     this.generation += 1;
     this.operationEpoch += 1;
     this.session = null;
-    this.authUnsubscribe?.();
+    try { this.authUnsubscribe?.(); } catch { /* Cleanup must continue without exposing provider details. */ }
     this.authUnsubscribe = null;
+    try { void this.auth.dispose().catch(() => undefined); } catch { /* Cleanup is best-effort and intentionally silent. */ }
     this.listeners.clear();
   }
 
@@ -175,11 +177,11 @@ export class WebAuthClient implements AuthClient {
     if (this.disposed) return Promise.resolve();
     if (this.githubOperation) return this.githubOperation;
     const context = this.beginOperation();
-    this.callbackAttempted = false;
     this.setSnapshot({ status: "signingIn" });
     const operation = this.auth.signInWithOAuth({ provider: "github", options: { redirectTo: this.callbackUrl } })
       .then((result) => {
         if (result.error) throw result.error;
+        if (this.canCommit(context)) this.callbackAttempted = false;
       })
       .catch(() => {
         if (this.canCommit(context)) {
@@ -200,14 +202,16 @@ export class WebAuthClient implements AuthClient {
       return Promise.resolve();
     }
     const context = this.beginOperation();
-    this.callbackAttempted = false;
     this.setSnapshot({ status: "sendingMagicLink", email });
     const operation = this.auth.signInWithOtp({
       email,
       options: { emailRedirectTo: this.callbackUrl, shouldCreateUser: true }
     }).then((result) => {
       if (result.error) throw result.error;
-      if (this.canCommit(context)) this.setSnapshot({ status: "magicLinkSent", email });
+      if (this.canCommit(context)) {
+        this.callbackAttempted = false;
+        this.setSnapshot({ status: "magicLinkSent", email });
+      }
     }).catch(() => {
       if (this.canCommit(context)) {
         this.setSnapshot({ status: "error", code: "magic_link_failed", message: "The sign-in link could not be sent. Try again." });
@@ -269,7 +273,6 @@ export class WebAuthClient implements AuthClient {
     this.githubOperation = null;
     this.magicLinkOperation = null;
     this.callbackOperation = null;
-    this.callbackAttempted = false;
     this.setSnapshot({ status: "signedOut" });
     const operation = this.auth.signOut({ scope: "local" })
       .then(() => undefined, () => undefined)
@@ -342,5 +345,5 @@ export function createBrowserWebAuthClient(
       storage: new ProviderTokenStrippingStorage(storage)
     }
   }) as SupabaseClient;
-  return new WebAuthClient(client.auth as unknown as WebAuthApi, callbackUrl);
+  return new WebAuthClient(client.auth, callbackUrl);
 }
