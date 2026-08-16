@@ -10,6 +10,7 @@ import { ContextSidebar } from "./context-sidebar";
 import { TopToolbar } from "./top-toolbar";
 import { CommandMenu } from "./command-menu";
 import { ConnectivityBanner } from "@/features/connectivity/connectivity-banner";
+import { cn } from "@/lib/cn";
 
 export type AppShellProps = {
   catalog: ProjectCatalog;
@@ -74,7 +75,12 @@ export function AppShell({ catalog, activeProjectId, activeRoute = "overview", n
     closeMobileNavigation();
     setOpenCommandsAfterMobileNavigation(true);
   };
-  return <div className={`grid h-dvh grid-cols-[minmax(0,1fr)] overflow-hidden bg-background md:grid-cols-[64px_${preferences.contextSidebarCollapsed ? "0px" : "240px"}_minmax(0,1fr)]`}>
+  return <div className={cn(
+    "grid h-dvh grid-cols-[minmax(0,1fr)] overflow-hidden bg-background",
+    preferences.contextSidebarCollapsed
+      ? "md:grid-cols-[64px_0px_minmax(0,1fr)]"
+      : "md:grid-cols-[64px_240px_minmax(0,1fr)]"
+  )}>
     <GlobalRail catalog={catalog} activeProjectId={activeProjectId} onOpenProject={selectProject} onOpenCommands={openCommands} onOpenPreferences={openPreferences} onTogglePin={togglePin} />
     <ContextSidebar catalog={catalog} activeProjectId={activeProjectId} activeRoute={activeRoute} collapsed={preferences.contextSidebarCollapsed} onNavigate={navigateToRoute} />
     <div className="grid min-w-0 grid-rows-[56px_minmax(0,1fr)] md:grid-rows-[48px_minmax(0,1fr)]"><TopToolbar context={current} collapsed={preferences.contextSidebarCollapsed} onToggleSidebar={toggleSidebar} onOpenCommands={openCommands} onOpenMobileNavigation={() => setMobileNavigationOpen(true)} commandTriggerRef={defaultCommandTriggerRef} />
