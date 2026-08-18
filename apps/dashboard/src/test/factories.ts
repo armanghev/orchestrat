@@ -9,7 +9,9 @@ import {
 
 const timestamp = "2024-01-01T00:00:00.000Z";
 
-export function organization(overrides: Partial<Organization> = {}): Organization {
+export function organization(
+  overrides: Partial<Organization> = {}
+): Organization {
   return organizationSchema.parse({
     id: "00000000-0000-4000-8000-000000000001",
     name: "Acme Corporation",

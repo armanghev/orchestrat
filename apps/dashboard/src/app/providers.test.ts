@@ -9,9 +9,15 @@ function authFixture(initial: AuthSnapshot) {
   return {
     auth: {
       getSnapshot: () => snapshot,
-      subscribe: (listener: () => void) => { listeners.add(listener); return () => listeners.delete(listener); }
+      subscribe: (listener: () => void) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      }
     },
-    emit(next: AuthSnapshot) { snapshot = next; listeners.forEach((listener) => listener()); }
+    emit(next: AuthSnapshot) {
+      snapshot = next;
+      listeners.forEach((listener) => listener());
+    }
   };
 }
 
@@ -32,7 +38,9 @@ describe("watchAuthSessionBoundaries", () => {
     const f = authFixture({ status: "signedIn", identityKey: "same-user" });
     const queryClient = createDashboardQueryClient();
     queryClient.setQueryData(["private"], "retained");
-    const stop = watchAuthSessionBoundaries(f.auth, queryClient, { navigate: vi.fn() });
+    const stop = watchAuthSessionBoundaries(f.auth, queryClient, {
+      navigate: vi.fn()
+    });
     f.emit({ status: "signedIn", identityKey: "same-user" });
     expect(queryClient.getQueryData(["private"])).toBe("retained");
     stop();

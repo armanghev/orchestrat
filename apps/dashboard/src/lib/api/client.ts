@@ -55,7 +55,10 @@ type RequestOptions = {
 export class ApiClient {
   private readonly baseUrl: string;
 
-  constructor(baseUrl: string, private readonly auth: ApiTokenSource) {
+  constructor(
+    baseUrl: string,
+    private readonly auth: ApiTokenSource
+  ) {
     try {
       this.baseUrl = new URL(baseUrl).toString().replace(/\/$/, "");
     } catch {
@@ -155,14 +158,16 @@ export class ApiClient {
     }
 
     const headers: HeadersInit = { Authorization: `Bearer ${token}` };
-    if (options.body !== undefined) headers["Content-Type"] = "application/json";
+    if (options.body !== undefined)
+      headers["Content-Type"] = "application/json";
 
     let response: Response;
     try {
       response = await fetch(`${this.baseUrl}${path}`, {
         method: options.method,
         headers,
-        body: options.body === undefined ? undefined : JSON.stringify(options.body)
+        body:
+          options.body === undefined ? undefined : JSON.stringify(options.body)
       });
     } catch {
       throw new DashboardApiError(
@@ -180,7 +185,8 @@ export class ApiClient {
         return this.send(path, options, schema, true);
       }
 
-      if (response.status === 401 && forceRefresh) await this.auth.expireSession();
+      if (response.status === 401 && forceRefresh)
+        await this.auth.expireSession();
       throw error;
     }
 
@@ -204,7 +210,10 @@ export class ApiClient {
     }
   }
 
-  private errorFromResponse(response: Response, data: unknown): DashboardApiError {
+  private errorFromResponse(
+    response: Response,
+    data: unknown
+  ): DashboardApiError {
     const parsed = apiErrorSchema.safeParse(data);
     if (parsed.success) {
       return new DashboardApiError(
@@ -217,7 +226,9 @@ export class ApiClient {
     }
 
     return new DashboardApiError(
-      response.status === 401 ? "Authentication is required." : "Dashboard API request failed.",
+      response.status === 401
+        ? "Authentication is required."
+        : "Dashboard API request failed.",
       response.status === 401 ? "UNAUTHENTICATED" : "INTERNAL_ERROR",
       response.status,
       response.headers.get("x-request-id")

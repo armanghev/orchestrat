@@ -5,7 +5,8 @@ export const AuthContext = createContext<AuthClient | null>(null);
 
 export function useAuthClient(): AuthClient {
   const client = useContext(AuthContext);
-  if (!client) throw new Error("useAuthClient must be used within AuthContext.");
+  if (!client)
+    throw new Error("useAuthClient must be used within AuthContext.");
   return client;
 }
 

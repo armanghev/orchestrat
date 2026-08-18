@@ -45,17 +45,19 @@ export async function renderDashboardRoute({
     <PlatformProvider value={platform}>
       <PreferencesProvider store={preferenceStore}>
         <ThemeProvider>
-      <AuthContext.Provider value={auth}>
-        <QueryClientProvider client={queryClient}>
-          <TooltipProvider>
-            <RouterProvider router={router} context={context} />
-          </TooltipProvider>
-        </QueryClientProvider>
-      </AuthContext.Provider>
+          <AuthContext.Provider value={auth}>
+            <QueryClientProvider client={queryClient}>
+              <TooltipProvider>
+                <RouterProvider router={router} context={context} />
+              </TooltipProvider>
+            </QueryClientProvider>
+          </AuthContext.Provider>
         </ThemeProvider>
       </PreferencesProvider>
     </PlatformProvider>
   );
-  await act(async () => { await router.load(); });
+  await act(async () => {
+    await router.load();
+  });
   return { ...view, router, queryClient, auth, platform };
 }

@@ -18,9 +18,22 @@ describe("orderProjects", () => {
   });
 
   it("caps persisted pins and recents to accessible unique IDs", () => {
-    const accessible = Array.from({ length: 25 }, (_, index) => `project-${index}`);
+    const accessible = Array.from(
+      { length: 25 },
+      (_, index) => `project-${index}`
+    );
     const result = orderProjects(accessible, {
-      pinnedProjectIds: ["project-0", "project-1", "project-2", "project-3", "project-4", "project-5", "project-6", "project-7", "project-8"],
+      pinnedProjectIds: [
+        "project-0",
+        "project-1",
+        "project-2",
+        "project-3",
+        "project-4",
+        "project-5",
+        "project-6",
+        "project-7",
+        "project-8"
+      ],
       recentProjectIds: ["project-0", ...accessible.slice(8), "missing"]
     });
 

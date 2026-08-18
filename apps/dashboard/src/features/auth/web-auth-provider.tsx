@@ -4,8 +4,20 @@ import { AuthContext } from "./auth-context";
 import { createBrowserWebAuthClient } from "./web-auth-client";
 
 type WebAuthProviderProps =
-  | { children: ReactNode; client: AuthClient; supabaseUrl?: never; supabasePublishableKey?: never; callbackUrl?: never }
-  | { children: ReactNode; client?: never; supabaseUrl: string; supabasePublishableKey: string; callbackUrl: string };
+  | {
+      children: ReactNode;
+      client: AuthClient;
+      supabaseUrl?: never;
+      supabasePublishableKey?: never;
+      callbackUrl?: never;
+    }
+  | {
+      children: ReactNode;
+      client?: never;
+      supabaseUrl: string;
+      supabasePublishableKey: string;
+      callbackUrl: string;
+    };
 
 type AuthLeaseEntry = {
   client: AuthClient;
@@ -23,7 +35,11 @@ function disposeClient(client: AuthClient): void {
   if (typeof disposable.dispose === "function") disposable.dispose();
 }
 
-function productionSignature(supabaseUrl: string, supabasePublishableKey: string, callbackUrl: string): string {
+function productionSignature(
+  supabaseUrl: string,
+  supabasePublishableKey: string,
+  callbackUrl: string
+): string {
   return JSON.stringify([supabaseUrl, supabasePublishableKey, callbackUrl]);
 }
 
@@ -36,11 +52,18 @@ function getProductionEntry(
   const existing = productionEntries.get(signature);
   if (existing) return existing;
   const entry: AuthLeaseEntry = {
-    client: createBrowserWebAuthClient(supabaseUrl, supabasePublishableKey, callbackUrl),
+    client: createBrowserWebAuthClient(
+      supabaseUrl,
+      supabasePublishableKey,
+      callbackUrl
+    ),
     initialization: null,
     leases: 0,
     pendingDisposal: null,
-    remove: () => { if (productionEntries.get(signature) === entry) productionEntries.delete(signature); }
+    remove: () => {
+      if (productionEntries.get(signature) === entry)
+        productionEntries.delete(signature);
+    }
   };
   productionEntries.set(signature, entry);
   return entry;
@@ -54,13 +77,18 @@ function getInjectedEntry(client: AuthClient): AuthLeaseEntry {
     initialization: null,
     leases: 0,
     pendingDisposal: null,
-    remove: () => { if (injectedEntries.get(client) === entry) injectedEntries.delete(client); }
+    remove: () => {
+      if (injectedEntries.get(client) === entry) injectedEntries.delete(client);
+    }
   };
   injectedEntries.set(client, entry);
   return entry;
 }
 
-function acquire(entry: AuthLeaseEntry, ready: (client: AuthClient) => void): () => void {
+function acquire(
+  entry: AuthLeaseEntry,
+  ready: (client: AuthClient) => void
+): () => void {
   if (entry.pendingDisposal) {
     clearTimeout(entry.pendingDisposal);
     entry.pendingDisposal = null;
@@ -69,8 +97,12 @@ function acquire(entry: AuthLeaseEntry, ready: (client: AuthClient) => void): ()
   if (!entry.initialization) entry.initialization = entry.client.initialize();
   let active = true;
   void entry.initialization.then(
-    () => { if (active) ready(entry.client); },
-    () => { if (active) ready(entry.client); }
+    () => {
+      if (active) ready(entry.client);
+    },
+    () => {
+      if (active) ready(entry.client);
+    }
   );
   return () => {
     if (!active) return;
@@ -89,17 +121,38 @@ function acquire(entry: AuthLeaseEntry, ready: (client: AuthClient) => void): ()
 export function WebAuthProvider(props: WebAuthProviderProps) {
   const signature = props.client
     ? props.client
-    : productionSignature(props.supabaseUrl, props.supabasePublishableKey, props.callbackUrl);
-  const [ready, setReady] = useState<{ signature: string | AuthClient; client: AuthClient } | null>(null);
+    : productionSignature(
+        props.supabaseUrl,
+        props.supabasePublishableKey,
+        props.callbackUrl
+      );
+  const [ready, setReady] = useState<{
+    signature: string | AuthClient;
+    client: AuthClient;
+  } | null>(null);
 
   useEffect(() => {
-    setReady((current) => current?.signature === signature ? current : null);
+    setReady((current) => (current?.signature === signature ? current : null));
     const entry = props.client
       ? getInjectedEntry(props.client)
-      : getProductionEntry(signature as string, props.supabaseUrl, props.supabasePublishableKey, props.callbackUrl);
+      : getProductionEntry(
+          signature as string,
+          props.supabaseUrl,
+          props.supabasePublishableKey,
+          props.callbackUrl
+        );
     return acquire(entry, (client) => setReady({ signature, client }));
-  }, [props.callbackUrl, props.client, props.supabasePublishableKey, props.supabaseUrl, signature]);
+  }, [
+    props.callbackUrl,
+    props.client,
+    props.supabasePublishableKey,
+    props.supabaseUrl,
+    signature
+  ]);
 
-  const client = ready?.signature === signature ? ready.client : loadingAuthClient;
-  return <AuthContext.Provider value={client}>{props.children}</AuthContext.Provider>;
+  const client =
+    ready?.signature === signature ? ready.client : loadingAuthClient;
+  return (
+    <AuthContext.Provider value={client}>{props.children}</AuthContext.Provider>
+  );
 }

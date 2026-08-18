@@ -9,7 +9,8 @@ export type AuthSnapshot =
   | { status: "error"; code: string; message: string };
 
 export type AuthCapabilities = { github: boolean; magicLink: boolean };
-export type AuthCompletionResult = { status: "success"; identityKey: string } | { status: "error" };
+export type AuthCompletionResult =
+  { status: "success"; identityKey: string } | { status: "error" };
 export type TokenOptions = { forceRefresh?: boolean };
 
 export interface AuthClient {
@@ -28,7 +29,10 @@ export interface AuthClient {
 export type AccessGrant = { accessToken: string; expiresAtMs: number };
 
 export const loadingAuthSnapshot: AuthSnapshot = { status: "loading" };
-export const noAuthCapabilities: AuthCapabilities = Object.freeze({ github: false, magicLink: false });
+export const noAuthCapabilities: AuthCapabilities = Object.freeze({
+  github: false,
+  magicLink: false
+});
 
 export const loadingAuthClient: AuthClient = {
   capabilities: noAuthCapabilities,
@@ -37,8 +41,12 @@ export const loadingAuthClient: AuthClient = {
   subscribe: () => () => undefined,
   async signInWithGitHub() {},
   async sendMagicLink() {},
-  async completeSignIn() { return { status: "error" } as const; },
+  async completeSignIn() {
+    return { status: "error" } as const;
+  },
   async signOut() {},
   async expireSession() {},
-  async getAccessToken() { return null; }
+  async getAccessToken() {
+    return null;
+  }
 };

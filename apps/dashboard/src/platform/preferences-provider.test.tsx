@@ -71,15 +71,29 @@ function renderPreferences(
 
 describe("PreferencesProvider", () => {
   it("loads the selected preference store once when provider props rerender", async () => {
-    const first: PreferenceStore = { load: vi.fn(async () => defaults), save: vi.fn(async () => undefined) };
-    const second: PreferenceStore = { load: vi.fn(async () => defaults), save: vi.fn(async () => undefined) };
+    const first: PreferenceStore = {
+      load: vi.fn(async () => defaults),
+      save: vi.fn(async () => undefined)
+    };
+    const second: PreferenceStore = {
+      load: vi.fn(async () => defaults),
+      save: vi.fn(async () => undefined)
+    };
     const view = render(
-      <PlatformProvider value={platform(first)}><PreferencesProvider store={first}><Probe /></PreferencesProvider></PlatformProvider>
+      <PlatformProvider value={platform(first)}>
+        <PreferencesProvider store={first}>
+          <Probe />
+        </PreferencesProvider>
+      </PlatformProvider>
     );
     await waitFor(() => expect(first.load).toHaveBeenCalledTimes(1));
 
     view.rerender(
-      <PlatformProvider value={platform(second)}><PreferencesProvider store={second}><Probe /></PreferencesProvider></PlatformProvider>
+      <PlatformProvider value={platform(second)}>
+        <PreferencesProvider store={second}>
+          <Probe />
+        </PreferencesProvider>
+      </PlatformProvider>
     );
 
     expect(first.load).toHaveBeenCalledTimes(1);

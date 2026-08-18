@@ -55,7 +55,9 @@ describe("ApiClient", () => {
         `${apiUrl}/api/v1/organizations/${expected.organization_id}/workspaces`,
         async ({ request }) => {
           expect(request.method).toBe("POST");
-          expect(request.headers.get("authorization")).toBe("Bearer test-token");
+          expect(request.headers.get("authorization")).toBe(
+            "Bearer test-token"
+          );
           expect(request.headers.get("content-type")).toBe("application/json");
           await expect(request.json()).resolves.toEqual(input);
           return HttpResponse.json(expected, { status: 201 });
@@ -64,9 +66,9 @@ describe("ApiClient", () => {
     );
     const api = new ApiClient(apiUrl, authTokenFixture(["test-token"]));
 
-    await expect(api.createWorkspace(expected.organization_id, input)).resolves.toEqual(
-      expected
-    );
+    await expect(
+      api.createWorkspace(expected.organization_id, input)
+    ).resolves.toEqual(expected);
   });
 
   it("posts the exact project JSON to its workspace endpoint", async () => {
@@ -81,7 +83,9 @@ describe("ApiClient", () => {
         `${apiUrl}/api/v1/workspaces/${expected.workspace_id}/projects`,
         async ({ request }) => {
           expect(request.method).toBe("POST");
-          expect(request.headers.get("authorization")).toBe("Bearer test-token");
+          expect(request.headers.get("authorization")).toBe(
+            "Bearer test-token"
+          );
           expect(request.headers.get("content-type")).toBe("application/json");
           await expect(request.json()).resolves.toEqual(input);
           return HttpResponse.json(expected, { status: 201 });
@@ -90,9 +94,9 @@ describe("ApiClient", () => {
     );
     const api = new ApiClient(apiUrl, authTokenFixture(["test-token"]));
 
-    await expect(api.createProject(expected.workspace_id, input)).resolves.toEqual(
-      expected
-    );
+    await expect(
+      api.createProject(expected.workspace_id, input)
+    ).resolves.toEqual(expected);
   });
 
   it("retains a protocol error envelope", async () => {
@@ -168,7 +172,9 @@ describe("ApiClient", () => {
             { status: 401 }
           );
         }
-        expect(request.headers.get("authorization")).toBe("Bearer refreshed-token");
+        expect(request.headers.get("authorization")).toBe(
+          "Bearer refreshed-token"
+        );
         return HttpResponse.json({ organizations: [organization()] });
       })
     );
@@ -193,13 +199,24 @@ describe("ApiClient", () => {
       http.get(`${apiUrl}/api/v1/organizations`, ({ request }) => {
         requests += 1;
         if (requests === 1) {
-          expect(request.headers.get("authorization")).toBe("Bearer old-native-token");
+          expect(request.headers.get("authorization")).toBe(
+            "Bearer old-native-token"
+          );
           return HttpResponse.json(
-            { error: { code: "UNAUTHENTICATED", message: "Expired", details: {}, request_id: "req_old" } },
+            {
+              error: {
+                code: "UNAUTHENTICATED",
+                message: "Expired",
+                details: {},
+                request_id: "req_old"
+              }
+            },
             { status: 401 }
           );
         }
-        expect(request.headers.get("authorization")).toBe("Bearer recovered-native-token");
+        expect(request.headers.get("authorization")).toBe(
+          "Bearer recovered-native-token"
+        );
         return HttpResponse.json({ organizations: [organization()] });
       })
     );
@@ -207,11 +224,24 @@ describe("ApiClient", () => {
     const bridge = {
       beginGitHub: vi.fn(async () => undefined),
       sendMagicLink: vi.fn(async () => undefined),
-      complete: vi.fn(async () => ({ accessToken: "unused", expiresAtMs: 90_000 })),
-      refresh: vi.fn()
-        .mockRejectedValueOnce({ code: "provider_unavailable", message: "Try again." })
-        .mockResolvedValueOnce({ accessToken: "recovered-native-token", expiresAtMs: 90_000 }),
-      restore: vi.fn(async () => ({ accessToken: "old-native-token", expiresAtMs: 60_000 })),
+      complete: vi.fn(async () => ({
+        accessToken: "unused",
+        expiresAtMs: 90_000
+      })),
+      refresh: vi
+        .fn()
+        .mockRejectedValueOnce({
+          code: "provider_unavailable",
+          message: "Try again."
+        })
+        .mockResolvedValueOnce({
+          accessToken: "recovered-native-token",
+          expiresAtMs: 90_000
+        }),
+      restore: vi.fn(async () => ({
+        accessToken: "old-native-token",
+        expiresAtMs: 60_000
+      })),
       expire: vi.fn(async () => undefined),
       signOut: vi.fn(async () => undefined)
     };
@@ -226,15 +256,20 @@ describe("ApiClient", () => {
     const api = new ApiClient(apiUrl, auth);
 
     await expect(api.listOrganizations()).rejects.toMatchObject({
-      kind: "UNAUTHENTICATED", status: null
+      kind: "UNAUTHENTICATED",
+      status: null
     } satisfies Partial<DashboardApiError>);
     expect(requests).toBe(1);
     expect(bridge.refresh).toHaveBeenCalledOnce();
     expect(bridge.expire).not.toHaveBeenCalled();
 
     now += 1_000;
-    await expect(auth.getAccessToken({ forceRefresh: true })).resolves.toBe("recovered-native-token");
-    await expect(api.listOrganizations()).resolves.toEqual({ organizations: [organization()] });
+    await expect(auth.getAccessToken({ forceRefresh: true })).resolves.toBe(
+      "recovered-native-token"
+    );
+    await expect(api.listOrganizations()).resolves.toEqual({
+      organizations: [organization()]
+    });
     expect(requests).toBe(2);
     auth.dispose();
   });

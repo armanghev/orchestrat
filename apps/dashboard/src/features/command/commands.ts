@@ -10,7 +10,14 @@ export type AppCommand = {
 };
 
 export const navigationDestinations = [
-  "overview", "tasks", "agents", "documents", "messages", "activity", "integrations", "settings"
+  "overview",
+  "tasks",
+  "agents",
+  "documents",
+  "messages",
+  "activity",
+  "integrations",
+  "settings"
 ] as const;
 export type NavigationDestination = (typeof navigationDestinations)[number];
 
@@ -18,7 +25,10 @@ export type BuildCommandsOptions = {
   catalog: ProjectCatalog;
   activeProjectId?: string;
   navigateToProject: (projectId: string) => void | Promise<void>;
-  navigateToRoute: (route: NavigationDestination, projectId?: string) => void | Promise<void>;
+  navigateToRoute: (
+    route: NavigationDestination,
+    projectId?: string
+  ) => void | Promise<void>;
   setTheme: (theme: Theme) => void | Promise<void>;
   toggleSidebar: () => void | Promise<void>;
   openPreferences: () => void | Promise<void>;
@@ -28,15 +38,28 @@ export type BuildCommandsOptions = {
 const title = (route: string) => route[0].toUpperCase() + route.slice(1);
 
 export function buildCommands({
-  catalog, activeProjectId, navigateToProject, navigateToRoute, setTheme,
-  toggleSidebar, openPreferences, signOut
+  catalog,
+  activeProjectId,
+  navigateToProject,
+  navigateToRoute,
+  setTheme,
+  toggleSidebar,
+  openPreferences,
+  signOut
 }: BuildCommandsOptions): AppCommand[] {
   return [
     ...catalog.projects.map(({ project, workspace, organization }) => ({
       id: `project:${project.id}`,
       group: "Projects" as const,
       label: `Open ${project.name}`,
-      keywords: ["project", "workspace", "organization", project.name, workspace.name, organization.name],
+      keywords: [
+        "project",
+        "workspace",
+        "organization",
+        project.name,
+        workspace.name,
+        organization.name
+      ],
       run: () => navigateToProject(project.id)
     })),
     ...navigationDestinations.map((route) => ({
@@ -53,8 +76,26 @@ export function buildCommands({
       keywords: ["theme", "appearance", theme],
       run: () => setTheme(theme)
     })),
-    { id: "sidebar:toggle", group: "Appearance" as const, label: "Toggle sidebar", keywords: ["sidebar", "collapse"], run: toggleSidebar },
-    { id: "preferences:open", group: "Application" as const, label: "Open preferences", keywords: ["preferences", "settings"], run: openPreferences },
-    { id: "auth:sign-out", group: "Application" as const, label: "Sign out", keywords: ["auth", "account", "logout"], run: signOut }
+    {
+      id: "sidebar:toggle",
+      group: "Appearance" as const,
+      label: "Toggle sidebar",
+      keywords: ["sidebar", "collapse"],
+      run: toggleSidebar
+    },
+    {
+      id: "preferences:open",
+      group: "Application" as const,
+      label: "Open preferences",
+      keywords: ["preferences", "settings"],
+      run: openPreferences
+    },
+    {
+      id: "auth:sign-out",
+      group: "Application" as const,
+      label: "Sign out",
+      keywords: ["auth", "account", "logout"],
+      run: signOut
+    }
   ];
 }

@@ -19,6 +19,14 @@
   --muted-foreground: oklch(0.49 0.012 55);
   --accent: oklch(0.92 0.025 58);
   --accent-foreground: oklch(0.25 0.02 52);
+  --highlight: oklch(0.95 0.06 78);
+  --highlight-foreground: oklch(0.3 0.06 58);
+  --success: oklch(0.62 0.16 145);
+  --success-foreground: oklch(0.98 0.01 145);
+  --warning: oklch(0.78 0.16 85);
+  --warning-foreground: oklch(0.28 0.06 65);
+  --info: oklch(0.62 0.14 245);
+  --info-foreground: oklch(0.98 0.01 245);
   --destructive: oklch(0.56 0.21 28);
   --destructive-foreground: oklch(0.98 0.005 65);
   --border: oklch(0.875 0.008 60);
@@ -26,7 +34,10 @@
   --ring: oklch(0.65 0.15 54);
   --rail: oklch(0.94 0.007 62);
   --sidebar: oklch(0.958 0.006 63);
+  --sidebar-accent: oklch(0.92 0.025 58);
+  --sidebar-accent-foreground: oklch(0.25 0.02 52);
   --surface-raised: oklch(0.995 0.003 65);
+  --overlay: oklch(0.205 0.01 55 / 0.12);
   --radius: 0.5rem;
 }
 
@@ -46,6 +57,14 @@
   --muted-foreground: oklch(0.66 0.01 62);
   --accent: oklch(0.265 0.025 52);
   --accent-foreground: oklch(0.94 0.008 65);
+  --highlight: oklch(0.34 0.07 72);
+  --highlight-foreground: oklch(0.96 0.02 78);
+  --success: oklch(0.68 0.15 145);
+  --success-foreground: oklch(0.16 0.03 145);
+  --warning: oklch(0.8 0.15 85);
+  --warning-foreground: oklch(0.2 0.05 65);
+  --info: oklch(0.72 0.13 245);
+  --info-foreground: oklch(0.16 0.03 245);
   --destructive: oklch(0.55 0.2 28);
   --destructive-foreground: oklch(0.98 0.005 65);
   --border: oklch(0.29 0.009 55);
@@ -53,11 +72,15 @@
   --ring: oklch(0.72 0.16 54);
   --rail: oklch(0.135 0.007 55);
   --sidebar: oklch(0.175 0.008 55);
+  --sidebar-accent: oklch(0.265 0.025 52);
+  --sidebar-accent-foreground: oklch(0.94 0.008 65);
   --surface-raised: oklch(0.205 0.009 55);
+  --overlay: oklch(0.98 0.005 65 / 0.12);
 }
 
 @theme inline {
-  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", sans-serif;
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", sans-serif;
   --font-mono: "SFMono-Regular", "SF Mono", ui-monospace, monospace;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -74,6 +97,14 @@
   --color-muted-foreground: var(--muted-foreground);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
+  --color-highlight: var(--highlight);
+  --color-highlight-foreground: var(--highlight-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
@@ -81,7 +112,10 @@
   --color-ring: var(--ring);
   --color-rail: var(--rail);
   --color-sidebar: var(--sidebar);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-surface-raised: var(--surface-raised);
+  --color-overlay: var(--overlay);
   --radius-sm: calc(var(--radius) - 2px);
   --radius-md: var(--radius);
   --radius-lg: calc(var(--radius) + 4px);

@@ -25,7 +25,9 @@ describe("UI primitive class contracts", () => {
     expect(scrollArea).toContain("data-[orientation=vertical]:");
     expect(separator).toContain("data-[orientation=horizontal]:h-px");
     expect(separator).toContain("data-[orientation=vertical]:w-px");
-    expect(`${scrollArea}${separator}`).not.toMatch(/data-(?:horizontal|vertical):/);
+    expect(`${scrollArea}${separator}`).not.toMatch(
+      /data-(?:horizontal|vertical):/
+    );
   });
 
   it("uses true-valued cmdk selection variants", () => {
@@ -36,7 +38,6 @@ describe("UI primitive class contracts", () => {
     expect(command).not.toContain(["data", "selected:"].join("-"));
     expect(command).not.toContain(["group", "data", "selected:"].join("-"));
   });
-
 
   it("uses explicit state variants for dropdown menus and tooltips", () => {
     const dropdownMenu = primitiveSource("dropdown-menu.tsx");

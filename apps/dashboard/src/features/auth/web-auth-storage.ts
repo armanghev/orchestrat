@@ -9,37 +9,56 @@ function sanitizedJson(value: string): string | null {
   if (value.length === 0 || value.length > maxSerializedLength) return null;
   try {
     const parsed: unknown = JSON.parse(value);
-    const stack: Array<{ value: unknown; depth: number }> = [{ value: parsed, depth: 0 }];
+    const stack: Array<{ value: unknown; depth: number }> = [
+      { value: parsed, depth: 0 }
+    ];
     let nodes = 0;
     while (stack.length > 0) {
       const current = stack.pop();
-      if (!current || ++nodes > maxNodes || current.depth > maxDepth) return null;
+      if (!current || ++nodes > maxNodes || current.depth > maxDepth)
+        return null;
       if (current.value === null || typeof current.value !== "object") continue;
       if (Array.isArray(current.value)) {
-        for (const child of current.value) stack.push({ value: child, depth: current.depth + 1 });
+        for (const child of current.value)
+          stack.push({ value: child, depth: current.depth + 1 });
         continue;
       }
       for (const key of Object.keys(current.value)) {
         if (providerTokenKeys.has(key)) {
           delete (current.value as Record<string, unknown>)[key];
         } else {
-          stack.push({ value: (current.value as Record<string, unknown>)[key], depth: current.depth + 1 });
+          stack.push({
+            value: (current.value as Record<string, unknown>)[key],
+            depth: current.depth + 1
+          });
         }
       }
     }
     const serialized = JSON.stringify(parsed);
-    return typeof serialized === "string" && serialized.length <= maxSerializedLength ? serialized : null;
+    return typeof serialized === "string" &&
+      serialized.length <= maxSerializedLength
+      ? serialized
+      : null;
   } catch {
     return null;
   }
 }
 
 export class ProviderTokenStrippingStorage implements SupportedStorage {
-  constructor(private readonly storage: Pick<Storage, "getItem" | "setItem" | "removeItem">) {}
+  constructor(
+    private readonly storage: Pick<
+      Storage,
+      "getItem" | "setItem" | "removeItem"
+    >
+  ) {}
 
   getItem(key: string): string | null {
     let value: string | null;
-    try { value = this.storage.getItem(key); } catch { return null; }
+    try {
+      value = this.storage.getItem(key);
+    } catch {
+      return null;
+    }
     if (value === null) return null;
     const safeValue = sanitizedJson(value);
     if (safeValue === null) {
@@ -61,7 +80,11 @@ export class ProviderTokenStrippingStorage implements SupportedStorage {
       this.quarantine(key);
       return;
     }
-    try { this.storage.setItem(key, safeValue); } catch { this.quarantine(key); }
+    try {
+      this.storage.setItem(key, safeValue);
+    } catch {
+      this.quarantine(key);
+    }
   }
 
   removeItem(key: string): void {
@@ -69,6 +92,10 @@ export class ProviderTokenStrippingStorage implements SupportedStorage {
   }
 
   private quarantine(key: string): void {
-    try { this.storage.removeItem(key); } catch { /* Storage cleanup is best-effort and contains no auth value. */ }
+    try {
+      this.storage.removeItem(key);
+    } catch {
+      /* Storage cleanup is best-effort and contains no auth value. */
+    }
   }
 }

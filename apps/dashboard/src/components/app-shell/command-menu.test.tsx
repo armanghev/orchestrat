@@ -48,7 +48,11 @@ describe("CommandMenu", () => {
     render(<MenuHarness run={run} />);
     const trigger = screen.getByRole("button", { name: "Open palette" });
     await user.click(trigger);
-    expect(within(screen.getByRole("dialog")).getByRole("heading", { name: "Command Palette" })).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("dialog")).getByRole("heading", {
+        name: "Command Palette"
+      })
+    ).toBeInTheDocument();
     await user.click(screen.getByText("Run test command"));
     await waitFor(() =>
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument()

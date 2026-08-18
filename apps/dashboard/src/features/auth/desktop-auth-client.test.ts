@@ -6,7 +6,10 @@ const grant = { accessToken: "access-1", expiresAtMs: 60_000 };
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason: unknown) => void;
-  const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; });
+  const promise = new Promise<T>((done, fail) => {
+    resolve = done;
+    reject = fail;
+  });
   return { promise, resolve, reject };
 }
 
@@ -15,7 +18,10 @@ function fixture(restored: typeof grant | null = null) {
   const bridge = {
     beginGitHub: vi.fn(async () => undefined),
     sendMagicLink: vi.fn(async () => undefined),
-    complete: vi.fn(async (callback: string) => { void callback; return grant; }),
+    complete: vi.fn(async (callback: string) => {
+      void callback;
+      return grant;
+    }),
     refresh: vi.fn(async () => ({ ...grant, accessToken: "access-2" })),
     restore: vi.fn(async () => restored),
     expire: vi.fn(async () => undefined),
@@ -27,7 +33,9 @@ function fixture(restored: typeof grant | null = null) {
     openExternal: vi.fn(async () => undefined),
     onAuthCallback: vi.fn(async (handler: (url: URL) => void) => {
       callback = handler;
-      return () => { callback = undefined; };
+      return () => {
+        callback = undefined;
+      };
     })
   };
   return { bridge, platform, getCallback: () => callback };
@@ -51,9 +59,15 @@ describe("DesktopAuthClient", () => {
     );
     expect(client.getSnapshot()).toMatchObject({ status: "signedIn" });
     expect(await client.getAccessToken()).toBe("access-1");
-    const identityBeforeRefresh = (client.getSnapshot() as { identityKey: string }).identityKey;
-    expect(await client.getAccessToken({ forceRefresh: true })).toBe("access-2");
-    expect((client.getSnapshot() as { identityKey: string }).identityKey).toBe(identityBeforeRefresh);
+    const identityBeforeRefresh = (
+      client.getSnapshot() as { identityKey: string }
+    ).identityKey;
+    expect(await client.getAccessToken({ forceRefresh: true })).toBe(
+      "access-2"
+    );
+    expect((client.getSnapshot() as { identityKey: string }).identityKey).toBe(
+      identityBeforeRefresh
+    );
 
     await client.signOut();
     expect(client.getSnapshot()).toEqual({ status: "signedOut" });
@@ -78,13 +92,14 @@ describe("DesktopAuthClient", () => {
     });
   });
 
-
   it("lets a cold callback synchronously own auth before subscription and restore settle", async () => {
     const f = fixture({ accessToken: "old-restored", expiresAtMs: 60_000 });
     const subscription = deferred<() => void>();
     const completion = deferred<typeof grant>();
     f.platform.onAuthCallback.mockImplementation((handler) => {
-      handler(new URL("dev.orchestrat.app://auth/callback?code=cold&sb_flow_id=fresh"));
+      handler(
+        new URL("dev.orchestrat.app://auth/callback?code=cold&sb_flow_id=fresh")
+      );
       return subscription.promise;
     });
     f.bridge.complete.mockReturnValueOnce(completion.promise);
@@ -100,7 +115,9 @@ describe("DesktopAuthClient", () => {
     expect(client.getSnapshot()).toEqual({ status: "signingIn" });
 
     completion.resolve({ accessToken: "callback-new", expiresAtMs: 60_000 });
-    await vi.waitFor(() => expect(client.getSnapshot()).toMatchObject({ status: "signedIn" }));
+    await vi.waitFor(() =>
+      expect(client.getSnapshot()).toMatchObject({ status: "signedIn" })
+    );
     expect(await client.getAccessToken()).toBe("callback-new");
   });
 
@@ -109,7 +126,11 @@ describe("DesktopAuthClient", () => {
     const subscription = deferred<() => void>();
     const completion = deferred<typeof grant>();
     f.platform.onAuthCallback.mockImplementation((handler) => {
-      handler(new URL("dev.orchestrat.app://auth/callback?code=cold-failure&sb_flow_id=fresh"));
+      handler(
+        new URL(
+          "dev.orchestrat.app://auth/callback?code=cold-failure&sb_flow_id=fresh"
+        )
+      );
       return subscription.promise;
     });
     f.bridge.complete.mockReturnValueOnce(completion.promise);
@@ -118,7 +139,13 @@ describe("DesktopAuthClient", () => {
     subscription.resolve(vi.fn());
     await initializing;
     completion.reject({ code: "callback_failed", message: "Try again." });
-    await vi.waitFor(() => expect(client.getSnapshot()).toEqual({ status: "error", code: "callback_failed", message: "Try again." }));
+    await vi.waitFor(() =>
+      expect(client.getSnapshot()).toEqual({
+        status: "error",
+        code: "callback_failed",
+        message: "Try again."
+      })
+    );
     expect(f.bridge.restore).not.toHaveBeenCalled();
     expect(await client.getAccessToken()).toBeNull();
   });
@@ -131,21 +158,29 @@ describe("DesktopAuthClient", () => {
         vi.setSystemTime(1_000);
         const f = fixture(grant);
         const active = deferred<undefined>();
-        if (method === "github") f.bridge.beginGitHub.mockReturnValueOnce(active.promise);
+        if (method === "github")
+          f.bridge.beginGitHub.mockReturnValueOnce(active.promise);
         else f.bridge.sendMagicLink.mockReturnValueOnce(active.promise);
         f.bridge.complete.mockRejectedValueOnce({
-          code: "flow_mismatch", message: "The callback flow does not match."
+          code: "flow_mismatch",
+          message: "The callback flow does not match."
         });
         const client = new DesktopAuthClient(f.platform, f.bridge, Date.now);
         await client.initialize();
-        const identity = (client.getSnapshot() as { identityKey: string }).identityKey;
+        const identity = (client.getSnapshot() as { identityKey: string })
+          .identityKey;
         if (method === "github") void client.signInWithGitHub();
         else void client.sendMagicLink("person@example.com");
 
-        await expect(client.completeSignIn(
-          `dev.orchestrat.app://auth/callback?code=bad-${method}&sb_flow_id=wrong-${method}`
-        )).resolves.toEqual({ status: "error" });
-        expect(client.getSnapshot()).toEqual({ status: "signedIn", identityKey: identity });
+        await expect(
+          client.completeSignIn(
+            `dev.orchestrat.app://auth/callback?code=bad-${method}&sb_flow_id=wrong-${method}`
+          )
+        ).resolves.toEqual({ status: "error" });
+        expect(client.getSnapshot()).toEqual({
+          status: "signedIn",
+          identityKey: identity
+        });
         expect(await client.getAccessToken()).toBe("access-1");
         await vi.advanceTimersByTimeAsync(28_999);
         expect(f.bridge.refresh).not.toHaveBeenCalled();
@@ -155,7 +190,9 @@ describe("DesktopAuthClient", () => {
         await Promise.resolve();
         client.dispose();
       }
-    } finally { vi.useRealTimers(); }
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("preserves a warm grant until a correlated account switch succeeds", async () => {
@@ -167,13 +204,19 @@ describe("DesktopAuthClient", () => {
     const first = client.getSnapshot();
     expect(first).toMatchObject({ status: "signedIn" });
 
-    f.getCallback()?.(new URL("dev.orchestrat.app://auth/callback?code=switch&sb_flow_id=fresh"));
+    f.getCallback()?.(
+      new URL("dev.orchestrat.app://auth/callback?code=switch&sb_flow_id=fresh")
+    );
     expect(client.getSnapshot()).toEqual(first);
     expect(await client.getAccessToken()).toBe("access-1");
     completion.resolve({ accessToken: "account-b", expiresAtMs: 60_000 });
-    await vi.waitFor(() => expect(client.getSnapshot()).toMatchObject({ status: "signedIn" }));
+    await vi.waitFor(() =>
+      expect(client.getSnapshot()).toMatchObject({ status: "signedIn" })
+    );
     expect(await client.getAccessToken()).toBe("account-b");
-    expect((client.getSnapshot() as { identityKey: string }).identityKey).not.toBe((first as { identityKey: string }).identityKey);
+    expect(
+      (client.getSnapshot() as { identityKey: string }).identityKey
+    ).not.toBe((first as { identityKey: string }).identityKey);
   });
 
   it("keeps a warm token and identity after a mismatched untrusted callback", async () => {
@@ -225,36 +268,56 @@ describe("DesktopAuthClient", () => {
     try {
       const f = fixture({ accessToken: "account-a", expiresAtMs: 61_000 });
       f.bridge.complete
-        .mockRejectedValueOnce({ code: "provider_unavailable", message: "Try again." })
-        .mockResolvedValueOnce({ accessToken: "account-b", expiresAtMs: 300_000 });
+        .mockRejectedValueOnce({
+          code: "provider_unavailable",
+          message: "Try again."
+        })
+        .mockResolvedValueOnce({
+          accessToken: "account-b",
+          expiresAtMs: 300_000
+        });
       const client = new DesktopAuthClient(f.platform, f.bridge, Date.now);
       await client.initialize();
-      const identityA = (client.getSnapshot() as { identityKey: string }).identityKey;
+      const identityA = (client.getSnapshot() as { identityKey: string })
+        .identityKey;
 
-      await expect(client.completeSignIn(
-        "dev.orchestrat.app://auth/callback?code=uncertain&sb_flow_id=flow-a"
-      )).resolves.toEqual({ status: "error" });
+      await expect(
+        client.completeSignIn(
+          "dev.orchestrat.app://auth/callback?code=uncertain&sb_flow_id=flow-a"
+        )
+      ).resolves.toEqual({ status: "error" });
       expect(await client.getAccessToken()).toBe("account-a");
       expect(await client.getAccessToken({ forceRefresh: true })).toBeNull();
       await vi.advanceTimersByTimeAsync(120_000);
       expect(f.bridge.refresh).not.toHaveBeenCalled();
       expect(await client.getAccessToken()).toBeNull();
       expect(client.getSnapshot()).toEqual({
-        status: "error", code: "provider_unavailable", message: "Try again."
+        status: "error",
+        code: "provider_unavailable",
+        message: "Try again."
       });
 
-      await expect(client.completeSignIn(
-        "dev.orchestrat.app://auth/callback?code=retry&sb_flow_id=flow-a"
-      )).resolves.toMatchObject({ status: "success" });
+      await expect(
+        client.completeSignIn(
+          "dev.orchestrat.app://auth/callback?code=retry&sb_flow_id=flow-a"
+        )
+      ).resolves.toMatchObject({ status: "success" });
       expect(await client.getAccessToken()).toBe("account-b");
-      expect((client.getSnapshot() as { identityKey: string }).identityKey).not.toBe(identityA);
+      expect(
+        (client.getSnapshot() as { identityKey: string }).identityKey
+      ).not.toBe(identityA);
       client.dispose();
-    } finally { vi.useRealTimers(); }
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("expires the native session when refresh fails terminally", async () => {
     const f = fixture({ ...grant, expiresAtMs: 1_001 });
-    f.bridge.refresh.mockRejectedValue({ code: "provider_rejected", message: "Sign in again." });
+    f.bridge.refresh.mockRejectedValue({
+      code: "provider_rejected",
+      message: "Sign in again."
+    });
     const client = new DesktopAuthClient(f.platform, f.bridge, () => 1_000);
     await client.initialize();
 
@@ -269,16 +332,29 @@ describe("DesktopAuthClient", () => {
     try {
       const f = fixture({ accessToken: "old-access", expiresAtMs: 20_000 });
       f.bridge.refresh
-        .mockRejectedValueOnce({ code: "provider_unavailable", message: "Try again." })
-        .mockRejectedValueOnce({ code: "provider_unavailable", message: "Try again." })
-        .mockResolvedValueOnce({ accessToken: "recovered", expiresAtMs: 80_000 });
+        .mockRejectedValueOnce({
+          code: "provider_unavailable",
+          message: "Try again."
+        })
+        .mockRejectedValueOnce({
+          code: "provider_unavailable",
+          message: "Try again."
+        })
+        .mockResolvedValueOnce({
+          accessToken: "recovered",
+          expiresAtMs: 80_000
+        });
       const client = new DesktopAuthClient(f.platform, f.bridge, Date.now);
       await client.initialize();
-      const identity = (client.getSnapshot() as { identityKey: string }).identityKey;
+      const identity = (client.getSnapshot() as { identityKey: string })
+        .identityKey;
 
       await vi.advanceTimersByTimeAsync(1_000);
       expect(f.bridge.refresh).toHaveBeenCalledTimes(1);
-      expect(client.getSnapshot()).toEqual({ status: "signedIn", identityKey: identity });
+      expect(client.getSnapshot()).toEqual({
+        status: "signedIn",
+        identityKey: identity
+      });
       expect(await client.getAccessToken({ forceRefresh: true })).toBeNull();
       expect(f.bridge.refresh).toHaveBeenCalledTimes(1);
 
@@ -291,10 +367,15 @@ describe("DesktopAuthClient", () => {
       await vi.advanceTimersByTimeAsync(1);
       expect(f.bridge.refresh).toHaveBeenCalledTimes(3);
       expect(await client.getAccessToken()).toBe("recovered");
-      expect(client.getSnapshot()).toEqual({ status: "signedIn", identityKey: identity });
+      expect(client.getSnapshot()).toEqual({
+        status: "signedIn",
+        identityKey: identity
+      });
       expect(f.bridge.expire).not.toHaveBeenCalled();
       client.dispose();
-    } finally { vi.useRealTimers(); }
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("returns no expired token during transient cooldown and later recovers the same identity", async () => {
@@ -303,11 +384,18 @@ describe("DesktopAuthClient", () => {
     try {
       const f = fixture({ accessToken: "old-access", expiresAtMs: 2_500 });
       f.bridge.refresh
-        .mockRejectedValueOnce({ code: "provider_unavailable", message: "Try again." })
-        .mockResolvedValueOnce({ accessToken: "recovered", expiresAtMs: 80_000 });
+        .mockRejectedValueOnce({
+          code: "provider_unavailable",
+          message: "Try again."
+        })
+        .mockResolvedValueOnce({
+          accessToken: "recovered",
+          expiresAtMs: 80_000
+        });
       const client = new DesktopAuthClient(f.platform, f.bridge, Date.now);
       await client.initialize();
-      const identity = (client.getSnapshot() as { identityKey: string }).identityKey;
+      const identity = (client.getSnapshot() as { identityKey: string })
+        .identityKey;
 
       await vi.advanceTimersByTimeAsync(1_000);
       expect(f.bridge.refresh).toHaveBeenCalledOnce();
@@ -315,26 +403,38 @@ describe("DesktopAuthClient", () => {
       expect(await client.getAccessToken()).toBeNull();
       expect(f.bridge.refresh).toHaveBeenCalledOnce();
       expect(client.getSnapshot()).toEqual({
-        status: "error", code: "provider_unavailable", message: "Try again."
+        status: "error",
+        code: "provider_unavailable",
+        message: "Try again."
       });
       expect(f.bridge.expire).not.toHaveBeenCalled();
 
       await vi.advanceTimersByTimeAsync(500);
       expect(f.bridge.refresh).toHaveBeenCalledTimes(2);
       expect(await client.getAccessToken()).toBe("recovered");
-      expect(client.getSnapshot()).toEqual({ status: "signedIn", identityKey: identity });
+      expect(client.getSnapshot()).toEqual({
+        status: "signedIn",
+        identityKey: identity
+      });
       client.dispose();
-    } finally { vi.useRealTimers(); }
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("makes restore failures recoverable errors", async () => {
     const f = fixture();
-    f.bridge.restore.mockRejectedValue({ code: "restore_failed", message: "Try again." });
+    f.bridge.restore.mockRejectedValue({
+      code: "restore_failed",
+      message: "Try again."
+    });
     const client = new DesktopAuthClient(f.platform, f.bridge, () => 1_000);
 
     await client.initialize();
     expect(client.getSnapshot()).toEqual({
-      status: "error", code: "restore_failed", message: "Try again."
+      status: "error",
+      code: "restore_failed",
+      message: "Try again."
     });
     await client.signInWithGitHub();
     expect(f.bridge.beginGitHub).toHaveBeenCalledOnce();
@@ -347,14 +447,19 @@ describe("DesktopAuthClient", () => {
     const callback = f.getCallback();
     expect(callback).toBeDefined();
 
-    callback?.(new URL("dev.orchestrat.app://auth/callback?code=a&sb_flow_id=b"));
-    await vi.waitFor(() => expect(client.getSnapshot()).toMatchObject({ status: "signedIn" }));
+    callback?.(
+      new URL("dev.orchestrat.app://auth/callback?code=a&sb_flow_id=b")
+    );
+    await vi.waitFor(() =>
+      expect(client.getSnapshot()).toMatchObject({ status: "signedIn" })
+    );
     await new Promise((resolve) => setTimeout(resolve, 0));
-    callback?.(new URL("dev.orchestrat.app://auth/callback?code=a&sb_flow_id=b"));
+    callback?.(
+      new URL("dev.orchestrat.app://auth/callback?code=a&sb_flow_id=b")
+    );
     await Promise.resolve();
     expect(f.bridge.complete).toHaveBeenCalledOnce();
   });
-
 
   it("accepts a new GitHub callback after a local sign-out", async () => {
     const f = fixture();
@@ -362,8 +467,12 @@ describe("DesktopAuthClient", () => {
     await client.initialize();
     await client.signOut();
     await client.signInWithGitHub();
-    f.getCallback()?.(new URL("dev.orchestrat.app://auth/callback?code=new&sb_flow_id=fresh"));
-    await vi.waitFor(() => expect(client.getSnapshot()).toMatchObject({ status: "signedIn" }));
+    f.getCallback()?.(
+      new URL("dev.orchestrat.app://auth/callback?code=new&sb_flow_id=fresh")
+    );
+    await vi.waitFor(() =>
+      expect(client.getSnapshot()).toMatchObject({ status: "signedIn" })
+    );
     expect(f.bridge.complete).toHaveBeenCalledOnce();
   });
 
@@ -374,7 +483,9 @@ describe("DesktopAuthClient", () => {
     const callback = f.getCallback();
 
     client.dispose();
-    callback?.(new URL("dev.orchestrat.app://auth/callback?code=a&sb_flow_id=b"));
+    callback?.(
+      new URL("dev.orchestrat.app://auth/callback?code=a&sb_flow_id=b")
+    );
     await Promise.resolve();
 
     expect(f.bridge.complete).not.toHaveBeenCalled();
@@ -384,9 +495,12 @@ describe("DesktopAuthClient", () => {
     let resolveSubscription: ((unlisten: () => void) => void) | undefined;
     const unlisten = vi.fn();
     const f = fixture();
-    f.platform.onAuthCallback.mockImplementation(() => new Promise((resolve) => {
-      resolveSubscription = resolve;
-    }));
+    f.platform.onAuthCallback.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveSubscription = resolve;
+        })
+    );
     const client = new DesktopAuthClient(f.platform, f.bridge, () => 1_000);
     const initializing = client.initialize();
 
@@ -397,7 +511,6 @@ describe("DesktopAuthClient", () => {
     expect(unlisten).toHaveBeenCalledOnce();
   });
 
-
   it("normalizes, coalesces, and reports an accepted native magic link", async () => {
     const f = fixture();
     const sending = deferred<undefined>();
@@ -407,11 +520,17 @@ describe("DesktopAuthClient", () => {
     const first = client.sendMagicLink("  Person@Example.COM  ");
     const second = client.sendMagicLink("person@example.com");
     expect(first).toBe(second);
-    expect(client.getSnapshot()).toEqual({ status: "sendingMagicLink", email: "person@example.com" });
+    expect(client.getSnapshot()).toEqual({
+      status: "sendingMagicLink",
+      email: "person@example.com"
+    });
     expect(f.bridge.sendMagicLink).toHaveBeenCalledWith("person@example.com");
     sending.resolve(undefined);
     await first;
-    expect(client.getSnapshot()).toEqual({ status: "magicLinkSent", email: "person@example.com" });
+    expect(client.getSnapshot()).toEqual({
+      status: "magicLinkSent",
+      email: "person@example.com"
+    });
   });
 
   it("clears the Rust-owned refresh session when the API expires auth", async () => {
@@ -438,9 +557,10 @@ describe("DesktopAuthClient", () => {
       refreshed.resolve({ accessToken: "access-2", expiresAtMs: 120_000 });
       expect(await forced).toBe("access-2");
       client.dispose();
-    } finally { vi.useRealTimers(); }
+    } finally {
+      vi.useRealTimers();
+    }
   });
-
 
   it("backs off repeated short-lived proactive grants and refreshes expired grants on demand", async () => {
     vi.useFakeTimers();
@@ -462,15 +582,27 @@ describe("DesktopAuthClient", () => {
       await vi.advanceTimersByTimeAsync(4_000);
       expect(f.bridge.refresh).toHaveBeenCalledTimes(5);
 
-      const expired = fixture({ accessToken: "expired", expiresAtMs: Date.now() - 1 });
-      expired.bridge.refresh.mockResolvedValue({ accessToken: "recovered", expiresAtMs: Date.now() + 60_000 });
-      const expiredClient = new DesktopAuthClient(expired.platform, expired.bridge, Date.now);
+      const expired = fixture({
+        accessToken: "expired",
+        expiresAtMs: Date.now() - 1
+      });
+      expired.bridge.refresh.mockResolvedValue({
+        accessToken: "recovered",
+        expiresAtMs: Date.now() + 60_000
+      });
+      const expiredClient = new DesktopAuthClient(
+        expired.platform,
+        expired.bridge,
+        Date.now
+      );
       await expiredClient.initialize();
       expect(await expiredClient.getAccessToken()).toBe("recovered");
       expect(expired.bridge.refresh).toHaveBeenCalledOnce();
       client.dispose();
       expiredClient.dispose();
-    } finally { vi.useRealTimers(); }
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("keeps exchange lock when a transient distinct callback settles before a mismatch", async () => {
@@ -481,7 +613,9 @@ describe("DesktopAuthClient", () => {
       const uncertain = deferred<typeof grant>();
       const mismatch = deferred<typeof grant>();
       f.bridge.complete.mockImplementation((callback) =>
-        callback.includes("sb_flow_id=uncertain") ? uncertain.promise : mismatch.promise
+        callback.includes("sb_flow_id=uncertain")
+          ? uncertain.promise
+          : mismatch.promise
       );
       const client = new DesktopAuthClient(f.platform, f.bridge, Date.now);
       await client.initialize();
@@ -500,25 +634,35 @@ describe("DesktopAuthClient", () => {
       await vi.advanceTimersByTimeAsync(60_000);
       expect(f.bridge.refresh).not.toHaveBeenCalled();
       client.dispose();
-    } finally { vi.useRealTimers(); }
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("dispatches distinct in-flight flows, coalesces an identical flow, and lets the valid flow win", async () => {
     const f = fixture();
     const wrong = deferred<typeof grant>();
     const valid = deferred<typeof grant>();
-    f.bridge.complete.mockImplementation((callback) => callback.includes("sb_flow_id=wrong") ? wrong.promise : valid.promise);
+    f.bridge.complete.mockImplementation((callback) =>
+      callback.includes("sb_flow_id=wrong") ? wrong.promise : valid.promise
+    );
     const client = new DesktopAuthClient(f.platform, f.bridge, () => 1_000);
     await client.initialize();
 
-    const wrongResult = client.completeSignIn("dev.orchestrat.app://auth/callback?code=wrong-code&sb_flow_id=wrong");
-    const validUrl = "dev.orchestrat.app://auth/callback?code=valid-code&sb_flow_id=valid";
+    const wrongResult = client.completeSignIn(
+      "dev.orchestrat.app://auth/callback?code=wrong-code&sb_flow_id=wrong"
+    );
+    const validUrl =
+      "dev.orchestrat.app://auth/callback?code=valid-code&sb_flow_id=valid";
     const validResult = client.completeSignIn(validUrl);
     const duplicate = client.completeSignIn(validUrl);
     expect(duplicate).toBe(validResult);
     expect(f.bridge.complete).toHaveBeenCalledTimes(2);
 
-    wrong.reject({ code: "flow_mismatch", message: "The callback flow does not match." });
+    wrong.reject({
+      code: "flow_mismatch",
+      message: "The callback flow does not match."
+    });
     expect(await wrongResult).toEqual({ status: "error" });
     expect(client.getSnapshot()).toEqual({ status: "signingIn" });
     valid.resolve({ accessToken: "valid-access", expiresAtMs: 60_000 });
@@ -531,14 +675,27 @@ describe("DesktopAuthClient", () => {
     const client = new DesktopAuthClient(f.platform, f.bridge, () => 1_000);
     await client.initialize();
     for (const invalid of [
-      "a@.com", "a@b..com", ".a@example.com", "a.@example.com", "a..b@example.com",
-      "a@example", "a@-example.com", "a@example-.com", "a b@example.com", "a@éxample.com", "K@example.com",
-      `${"a".repeat(65)}@example.com`, `a@${"b".repeat(64)}.com`
-    ]) await client.sendMagicLink(invalid);
+      "a@.com",
+      "a@b..com",
+      ".a@example.com",
+      "a.@example.com",
+      "a..b@example.com",
+      "a@example",
+      "a@-example.com",
+      "a@example-.com",
+      "a b@example.com",
+      "a@éxample.com",
+      "K@example.com",
+      `${"a".repeat(65)}@example.com`,
+      `a@${"b".repeat(64)}.com`
+    ])
+      await client.sendMagicLink(invalid);
     expect(f.bridge.sendMagicLink).not.toHaveBeenCalled();
 
     await client.sendMagicLink("  User.Name+tag@Sub.Example.COM  ");
-    expect(f.bridge.sendMagicLink).toHaveBeenCalledWith("user.name+tag@sub.example.com");
+    expect(f.bridge.sendMagicLink).toHaveBeenCalledWith(
+      "user.name+tag@sub.example.com"
+    );
   });
 
   it("clears proactive refresh timers on sign-out, expiry, and disposal", async () => {
@@ -554,7 +711,8 @@ describe("DesktopAuthClient", () => {
         await vi.advanceTimersByTimeAsync(30_000);
         expect(f.bridge.refresh).not.toHaveBeenCalled();
       }
-    } finally { vi.useRealTimers(); }
+    } finally {
+      vi.useRealTimers();
+    }
   });
-
 });

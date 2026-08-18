@@ -11,11 +11,18 @@ export type ProjectOrder = {
   recentProjectIds: string[];
 };
 
-function cleanIds(ids: string[], accessible: Set<string>, excluded = new Set<string>()) {
+function cleanIds(
+  ids: string[],
+  accessible: Set<string>,
+  excluded = new Set<string>()
+) {
   const seen = new Set<string>();
   return ids.filter(
     (id) =>
-      accessible.has(id) && !excluded.has(id) && !seen.has(id) && (seen.add(id), true)
+      accessible.has(id) &&
+      !excluded.has(id) &&
+      !seen.has(id) &&
+      (seen.add(id), true)
   );
 }
 
@@ -25,11 +32,22 @@ export function orderProjects(
 ): ProjectOrder {
   const accessibleIds = [...new Set(accessibleProjectIds)];
   const accessible = new Set(accessibleIds);
-  const pinnedProjectIds = cleanIds(input.pinnedProjectIds, accessible).slice(0, 8);
+  const pinnedProjectIds = cleanIds(input.pinnedProjectIds, accessible).slice(
+    0,
+    8
+  );
   const pinned = new Set(pinnedProjectIds);
-  let recentProjectIds = cleanIds(input.recentProjectIds, accessible, pinned).slice(0, 12);
+  let recentProjectIds = cleanIds(
+    input.recentProjectIds,
+    accessible,
+    pinned
+  ).slice(0, 12);
 
-  if (input.selectedProjectId && accessible.has(input.selectedProjectId) && !pinned.has(input.selectedProjectId)) {
+  if (
+    input.selectedProjectId &&
+    accessible.has(input.selectedProjectId) &&
+    !pinned.has(input.selectedProjectId)
+  ) {
     recentProjectIds = [
       input.selectedProjectId,
       ...recentProjectIds.filter((id) => id !== input.selectedProjectId)

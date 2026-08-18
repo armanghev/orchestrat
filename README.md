@@ -87,6 +87,7 @@ pnpm format:check
 - ⚠️ Packaging check in this environment cannot complete macOS DMG signing/bundling; verify `pnpm --filter @orchestrat/dashboard build:desktop` in a full macOS runner.
 
 Known external limitations:
+
 - JS install/build command gates are blocked here by missing network and missing binaries in `node_modules` (`turbo`, `vitest`, `playwright`, `tauri`).
 - `cargo test` transport-path tests that require local socket binding report permission failures under this sandbox, so only shared/native state-machine suites are fully reliable in this runner.
 

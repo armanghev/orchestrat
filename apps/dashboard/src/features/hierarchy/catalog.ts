@@ -29,8 +29,7 @@ type WorkspaceResult =
   | { failure: CatalogFailure };
 
 type ProjectResult =
-  | { projects: ProjectContext[] }
-  | { failure: CatalogFailure };
+  { projects: ProjectContext[] } | { failure: CatalogFailure };
 
 function failure(
   scope: CatalogFailure["scope"],
@@ -40,7 +39,8 @@ function failure(
   return {
     scope,
     parentId,
-    message: error instanceof Error ? error.message : "Unable to load hierarchy data."
+    message:
+      error instanceof Error ? error.message : "Unable to load hierarchy data."
   };
 }
 
@@ -70,7 +70,10 @@ export async function loadProjectCatalog(
   );
   const successfulWorkspaces = workspaceResults.flatMap((result) =>
     "workspaces" in result
-      ? result.workspaces.map((workspace) => ({ organization: result.organization, workspace }))
+      ? result.workspaces.map((workspace) => ({
+          organization: result.organization,
+          workspace
+        }))
       : []
   );
 
@@ -81,7 +84,11 @@ export async function loadProjectCatalog(
           projectsQueryOptions(api, workspace.id)
         );
         return {
-          projects: projects.map((project) => ({ organization, workspace, project }))
+          projects: projects.map((project) => ({
+            organization,
+            workspace,
+            project
+          }))
         };
       } catch (error) {
         return { failure: failure("projects", workspace.id, error) };
@@ -90,7 +97,9 @@ export async function loadProjectCatalog(
   );
 
   failures.push(
-    ...projectResults.flatMap((result) => ("failure" in result ? [result.failure] : []))
+    ...projectResults.flatMap((result) =>
+      "failure" in result ? [result.failure] : []
+    )
   );
   const projects = projectResults
     .flatMap((result) => ("projects" in result ? result.projects : []))

@@ -27,16 +27,22 @@ export const handlers = [
     assertJsonRequest(request);
     return HttpResponse.json(organization(), { status: 201 });
   }),
-  http.get(`${apiUrl}/organizations/:organizationId/workspaces`, ({ request }) => {
-    assertAuthorization(request);
-    assertBodylessRequest(request);
-    return HttpResponse.json({ workspaces: [workspace()] });
-  }),
-  http.post(`${apiUrl}/organizations/:organizationId/workspaces`, ({ request }) => {
-    assertAuthorization(request);
-    assertJsonRequest(request);
-    return HttpResponse.json(workspace(), { status: 201 });
-  }),
+  http.get(
+    `${apiUrl}/organizations/:organizationId/workspaces`,
+    ({ request }) => {
+      assertAuthorization(request);
+      assertBodylessRequest(request);
+      return HttpResponse.json({ workspaces: [workspace()] });
+    }
+  ),
+  http.post(
+    `${apiUrl}/organizations/:organizationId/workspaces`,
+    ({ request }) => {
+      assertAuthorization(request);
+      assertJsonRequest(request);
+      return HttpResponse.json(workspace(), { status: 201 });
+    }
+  ),
   http.get(`${apiUrl}/workspaces/:workspaceId/projects`, ({ request }) => {
     assertAuthorization(request);
     assertBodylessRequest(request);

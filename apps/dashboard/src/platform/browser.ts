@@ -19,7 +19,10 @@ export function createBrowserPlatform(): Platform {
       },
       async save(value) {
         const preferences = preferencesSchema.parse(value);
-        window.localStorage.setItem(preferencesKey, JSON.stringify(preferences));
+        window.localStorage.setItem(
+          preferencesKey,
+          JSON.stringify(preferences)
+        );
       }
     },
     async openExternal(url) {

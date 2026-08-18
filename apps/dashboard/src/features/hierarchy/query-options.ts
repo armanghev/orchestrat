@@ -8,7 +8,12 @@ export const hierarchyKeys = {
   all: ["hierarchy"] as const,
   organizations: () => [...hierarchyKeys.all, "organizations"] as const,
   workspaces: (organizationId: string) =>
-    [...hierarchyKeys.all, "organizations", organizationId, "workspaces"] as const,
+    [
+      ...hierarchyKeys.all,
+      "organizations",
+      organizationId,
+      "workspaces"
+    ] as const,
   projects: (workspaceId: string) =>
     [...hierarchyKeys.all, "workspaces", workspaceId, "projects"] as const,
   catalog: () => [...hierarchyKeys.all, "catalog"] as const

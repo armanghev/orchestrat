@@ -16,7 +16,8 @@ const legacyNoneKey = [
 const webConfig = {
   VITE_API_URL: "http://localhost:3001",
   VITE_SUPABASE_URL: "https://project.supabase.co",
-  VITE_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_abcdefghijklmnopqrstuvwxyz123456",
+  VITE_SUPABASE_PUBLISHABLE_KEY:
+    "sb_publishable_abcdefghijklmnopqrstuvwxyz123456",
   VITE_WEB_AUTH_CALLBACK_URL: "https://dashboard.example.com/auth/callback"
 };
 
@@ -33,7 +34,9 @@ describe("parsePublicConfig", () => {
   });
 
   it("does not require browser auth settings for desktop", () => {
-    expect(parsePublicConfig({ VITE_API_URL: "https://api.example.com" }, "desktop")).toEqual({
+    expect(
+      parsePublicConfig({ VITE_API_URL: "https://api.example.com" }, "desktop")
+    ).toEqual({
       apiUrl: "https://api.example.com",
       supabaseUrl: null,
       supabasePublishableKey: null,
@@ -42,7 +45,6 @@ describe("parsePublicConfig", () => {
       runtime: "desktop"
     });
   });
-
 
   it.each([
     "http://api.example.com",
@@ -55,13 +57,20 @@ describe("parsePublicConfig", () => {
     "ftp://api.example.com/",
     "javascript:alert(1)"
   ])("rejects an unsafe API URL for bearer transport: %s", (apiUrl) => {
-    expect(() => parsePublicConfig({ ...webConfig, VITE_API_URL: apiUrl }, "web"))
-      .toThrow("Dashboard configuration is invalid");
+    expect(() =>
+      parsePublicConfig({ ...webConfig, VITE_API_URL: apiUrl }, "web")
+    ).toThrow("Dashboard configuration is invalid");
   });
 
-  it.each(["http://localhost:3001", "http://127.0.0.1:3001", "http://[::1]:3001", "https://api.example.com/"])(
-    "allows secure or loopback root API URLs: %s",
-    (apiUrl) => expect(parsePublicConfig({ ...webConfig, VITE_API_URL: apiUrl }, "web").apiUrl).toBe(apiUrl)
+  it.each([
+    "http://localhost:3001",
+    "http://127.0.0.1:3001",
+    "http://[::1]:3001",
+    "https://api.example.com/"
+  ])("allows secure or loopback root API URLs: %s", (apiUrl) =>
+    expect(
+      parsePublicConfig({ ...webConfig, VITE_API_URL: apiUrl }, "web").apiUrl
+    ).toBe(apiUrl)
   );
 
   it.each([
@@ -72,8 +81,9 @@ describe("parsePublicConfig", () => {
     "https://project.supabase.co?debug=1",
     "https://project.supabase.co#fragment"
   ])("rejects an unsafe Supabase project URL: %s", (supabaseUrl) => {
-    expect(() => parsePublicConfig({ ...webConfig, VITE_SUPABASE_URL: supabaseUrl }, "web"))
-      .toThrow("Dashboard configuration is invalid");
+    expect(() =>
+      parsePublicConfig({ ...webConfig, VITE_SUPABASE_URL: supabaseUrl }, "web")
+    ).toThrow("Dashboard configuration is invalid");
   });
 
   it.each([
@@ -84,8 +94,12 @@ describe("parsePublicConfig", () => {
     "https://dashboard.example.com/auth/callback?code=x",
     "https://dashboard.example.com/auth/callback#fragment"
   ])("rejects an unsafe web callback URL: %s", (callbackUrl) => {
-    expect(() => parsePublicConfig({ ...webConfig, VITE_WEB_AUTH_CALLBACK_URL: callbackUrl }, "web"))
-      .toThrow("Dashboard configuration is invalid");
+    expect(() =>
+      parsePublicConfig(
+        { ...webConfig, VITE_WEB_AUTH_CALLBACK_URL: callbackUrl },
+        "web"
+      )
+    ).toThrow("Dashboard configuration is invalid");
   });
 
   it.each([
@@ -93,22 +107,37 @@ describe("parsePublicConfig", () => {
     "http://127.0.0.1:5173/auth/callback",
     "http://[::1]:5173/auth/callback"
   ])("allows loopback HTTP callbacks: %s", (callbackUrl) => {
-    expect(parsePublicConfig({ ...webConfig, VITE_WEB_AUTH_CALLBACK_URL: callbackUrl }, "web").webAuthCallbackUrl)
-      .toBe(callbackUrl);
+    expect(
+      parsePublicConfig(
+        { ...webConfig, VITE_WEB_AUTH_CALLBACK_URL: callbackUrl },
+        "web"
+      ).webAuthCallbackUrl
+    ).toBe(callbackUrl);
   });
 
-  it.each(["service_role", "sb_publishable_service_role_abcdefghijklmnopqrstuvwxyz", "sb_secret_example", "sk_test_secret", "supabase-service-role-key", "eyJhbGciOiJIUzI1NiJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIn0.signature"])(
-    "rejects an obvious secret key form: %s",
-    (key) => {
-      expect(() => parsePublicConfig({ ...webConfig, VITE_SUPABASE_PUBLISHABLE_KEY: key }, "web"))
-        .toThrow("Dashboard configuration is invalid");
-    }
-  );
-
+  it.each([
+    "service_role",
+    "sb_publishable_service_role_abcdefghijklmnopqrstuvwxyz",
+    "sb_secret_example",
+    "sk_test_secret",
+    "supabase-service-role-key",
+    "eyJhbGciOiJIUzI1NiJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIn0.signature"
+  ])("rejects an obvious secret key form: %s", (key) => {
+    expect(() =>
+      parsePublicConfig(
+        { ...webConfig, VITE_SUPABASE_PUBLISHABLE_KEY: key },
+        "web"
+      )
+    ).toThrow("Dashboard configuration is invalid");
+  });
 
   it("accepts a structurally valid legacy anon JWT as a build-time guardrail", () => {
-    expect(parsePublicConfig({ ...webConfig, VITE_SUPABASE_PUBLISHABLE_KEY: legacyAnonKey }, "web").supabasePublishableKey)
-      .toBe(legacyAnonKey);
+    expect(
+      parsePublicConfig(
+        { ...webConfig, VITE_SUPABASE_PUBLISHABLE_KEY: legacyAnonKey },
+        "web"
+      ).supabasePublishableKey
+    ).toBe(legacyAnonKey);
   });
 
   it.each([
@@ -122,12 +151,17 @@ describe("parsePublicConfig", () => {
     ".eyJyb2xlIjoiYW5vbiJ9.signature",
     legacyNoneKey
   ])("rejects unsupported or malformed public key formats: %s", (key) => {
-    expect(() => parsePublicConfig({ ...webConfig, VITE_SUPABASE_PUBLISHABLE_KEY: key }, "web"))
-      .toThrow("Dashboard configuration is invalid");
+    expect(() =>
+      parsePublicConfig(
+        { ...webConfig, VITE_SUPABASE_PUBLISHABLE_KEY: key },
+        "web"
+      )
+    ).toThrow("Dashboard configuration is invalid");
   });
 
   it("rejects invalid common config", () => {
-    expect(() => parsePublicConfig({ VITE_API_URL: "not-a-url" }, "desktop"))
-      .toThrow("Dashboard configuration is invalid");
+    expect(() =>
+      parsePublicConfig({ VITE_API_URL: "not-a-url" }, "desktop")
+    ).toThrow("Dashboard configuration is invalid");
   });
 });

@@ -18,11 +18,17 @@ export default defineConfig({
   projects: [
     {
       name: "macos-default",
-      use: { ...devices["Desktop Safari"], viewport: { width: 1280, height: 800 } }
+      use: {
+        ...devices["Desktop Safari"],
+        viewport: { width: 1280, height: 800 }
+      }
     },
     {
       name: "macos-compact",
-      use: { ...devices["Desktop Safari"], viewport: { width: 960, height: 640 } }
+      use: {
+        ...devices["Desktop Safari"],
+        viewport: { width: 960, height: 640 }
+      }
     },
     {
       name: "phone-auth",

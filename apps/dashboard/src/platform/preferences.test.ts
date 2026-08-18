@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { cleanPreferences, defaultPreferences, parsePreferences } from "./preferences";
+import {
+  cleanPreferences,
+  defaultPreferences,
+  parsePreferences
+} from "./preferences";
 
 describe("preferences", () => {
   it("falls back from corrupt values and removes inaccessible project IDs", () => {

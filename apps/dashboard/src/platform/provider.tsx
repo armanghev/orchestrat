@@ -14,10 +14,7 @@ interface PlatformProviderProps {
   value?: Platform;
 }
 
-export function PlatformProvider({
-  children,
-  value
-}: PlatformProviderProps) {
+export function PlatformProvider({ children, value }: PlatformProviderProps) {
   return (
     <PlatformContext.Provider value={value ?? defaultPlatform}>
       {children}
@@ -27,6 +24,7 @@ export function PlatformProvider({
 
 export function usePlatform(): Platform {
   const platform = useContext(PlatformContext);
-  if (!platform) throw new Error("usePlatform must be used within PlatformProvider.");
+  if (!platform)
+    throw new Error("usePlatform must be used within PlatformProvider.");
   return platform;
 }

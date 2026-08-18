@@ -5,20 +5,35 @@ const preferencesKey = "preferences";
 const callbackDedupeWindowMs = 30_000;
 
 export function normalizeAuthCallback(input: string): URL {
-  const invalid = () => { throw new Error("Unexpected authentication callback."); };
+  const invalid = () => {
+    throw new Error("Unexpected authentication callback.");
+  };
   let url: URL;
   try {
     // URLSearchParams decodes malformed percent escapes lossily, so validate the raw URL first.
     decodeURI(input);
     url = new URL(input);
-  } catch { return invalid(); }
+  } catch {
+    return invalid();
+  }
   if (
-    url.protocol !== "dev.orchestrat.app:" || url.hostname !== "auth" ||
-    url.port !== "" || url.username !== "" || url.password !== "" ||
-    url.pathname !== "/callback" || url.hash !== ""
-  ) return invalid();
+    url.protocol !== "dev.orchestrat.app:" ||
+    url.hostname !== "auth" ||
+    url.port !== "" ||
+    url.username !== "" ||
+    url.password !== "" ||
+    url.pathname !== "/callback" ||
+    url.hash !== ""
+  )
+    return invalid();
 
-  const allowed = new Set(["sb_flow_id", "code", "error", "error_code", "error_description"]);
+  const allowed = new Set([
+    "sb_flow_id",
+    "code",
+    "error",
+    "error_code",
+    "error_description"
+  ]);
   const values = new Map<string, string[]>();
   for (const [key, value] of url.searchParams) {
     if (!allowed.has(key)) return invalid();
@@ -26,11 +41,24 @@ export function normalizeAuthCallback(input: string): URL {
     entries.push(value);
     values.set(key, entries);
   }
-  const one = (key: string, maximum: number, pattern?: RegExp): string | null => {
+  const one = (
+    key: string,
+    maximum: number,
+    pattern?: RegExp
+  ): string | null => {
     const entries = values.get(key);
     if (!entries) return null;
-    if (entries.length !== 1 || entries[0].length === 0 || entries[0].length > maximum ||
-        [...entries[0]].some((character) => { const code = character.charCodeAt(0); return code <= 31 || code === 127; }) || (pattern && !pattern.test(entries[0]))) invalid();
+    if (
+      entries.length !== 1 ||
+      entries[0].length === 0 ||
+      entries[0].length > maximum ||
+      [...entries[0]].some((character) => {
+        const code = character.charCodeAt(0);
+        return code <= 31 || code === 127;
+      }) ||
+      (pattern && !pattern.test(entries[0]))
+    )
+      invalid();
     return entries[0];
   };
   const flow = one("sb_flow_id", 128, /^[A-Za-z0-9_-]+$/u);
@@ -38,8 +66,12 @@ export function normalizeAuthCallback(input: string): URL {
   const error = one("error", 128, /^[A-Za-z0-9._-]+$/u);
   one("error_code", 128, /^[A-Za-z0-9._-]+$/u);
   one("error_description", 512);
-  if (!flow || (Boolean(code) === Boolean(error)) ||
-      (code && (values.has("error_code") || values.has("error_description")))) return invalid();
+  if (
+    !flow ||
+    Boolean(code) === Boolean(error) ||
+    (code && (values.has("error_code") || values.has("error_description")))
+  )
+    return invalid();
   return url;
 }
 
@@ -71,9 +103,8 @@ export function createTauriPlatform(): Platform {
       await openUrl(url);
     },
     async onAuthCallback(handler): Promise<Unsubscribe> {
-      const { getCurrent, onOpenUrl } = await import(
-        "@tauri-apps/plugin-deep-link"
-      );
+      const { getCurrent, onOpenUrl } =
+        await import("@tauri-apps/plugin-deep-link");
       const seen = new Map<string, number>();
 
       const handle = (input: string) => {

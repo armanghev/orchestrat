@@ -60,7 +60,9 @@ describe("AuthProvider", () => {
 
     await screen.findByText("signedOut");
     expect(platform.onAuthCallback).toHaveBeenCalledOnce();
-    callback?.(new URL("dev.orchestrat.app://auth/callback?code=a&sb_flow_id=b"));
+    callback?.(
+      new URL("dev.orchestrat.app://auth/callback?code=a&sb_flow_id=b")
+    );
 
     await waitFor(() => expect(mockedBridge.complete).toHaveBeenCalledOnce());
     expect(screen.getByText("signedIn")).toBeInTheDocument();
@@ -87,7 +89,9 @@ describe("AuthProvider", () => {
 
     view.unmount();
     await waitFor(() => expect(unlisten).toHaveBeenCalledOnce());
-    callback?.(new URL("dev.orchestrat.app://auth/callback?code=a&sb_flow_id=b"));
+    callback?.(
+      new URL("dev.orchestrat.app://auth/callback?code=a&sb_flow_id=b")
+    );
     await Promise.resolve();
 
     expect(mockedBridge.complete).not.toHaveBeenCalled();

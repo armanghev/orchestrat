@@ -22,7 +22,8 @@ describe("Tauri auth callbacks", () => {
   it("receives a warm callback delivered while cold-start URLs are loading", async () => {
     let resolveCurrent: (urls: string[] | null) => void = () => undefined;
     deepLink.getCurrent.mockImplementation(
-      () => new Promise<string[] | null>((resolve) => (resolveCurrent = resolve))
+      () =>
+        new Promise<string[] | null>((resolve) => (resolveCurrent = resolve))
     );
     let listener: ((urls: string[]) => void) | undefined;
     deepLink.onOpenUrl.mockImplementation(async (callbackListener) => {
@@ -51,7 +52,9 @@ describe("Tauri auth callbacks", () => {
       return unlisten;
     });
     const received: string[] = [];
-    await createTauriPlatform().onAuthCallback((url) => received.push(url.toString()));
+    await createTauriPlatform().onAuthCallback((url) =>
+      received.push(url.toString())
+    );
     listener?.([
       "dev.orchestrat.app://auth/callback?code=%FF&sb_flow_id=valid",
       "dev.orchestrat.app://auth/callback?code=wrong&sb_flow_id=wrong",
@@ -68,7 +71,9 @@ describe("Tauri auth callbacks", () => {
     const error = new Error("cold-start failed");
     deepLink.getCurrent.mockRejectedValue(error);
 
-    await expect(createTauriPlatform().onAuthCallback(vi.fn())).rejects.toThrow(error);
+    await expect(createTauriPlatform().onAuthCallback(vi.fn())).rejects.toThrow(
+      error
+    );
     expect(deepLink.onOpenUrl).toHaveBeenCalledOnce();
     expect(unlisten).toHaveBeenCalledOnce();
   });
