@@ -63,6 +63,11 @@ export function CommandMenu({
                   <CommandItem
                     key={command.id}
                     value={`${command.label} ${command.keywords.join(" ")}`}
+                    className={
+                      command.destructive
+                        ? "text-destructive data-[selected=true]:text-destructive data-[selected=true]:*:[svg]:text-destructive"
+                        : undefined
+                    }
                     onSelect={() => {
                       onOpenChange(false);
                       try {

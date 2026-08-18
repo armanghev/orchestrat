@@ -6,6 +6,7 @@ export type AppCommand = {
   group: "Projects" | "Navigate" | "Appearance" | "Application";
   label: string;
   keywords: string[];
+  destructive?: boolean;
   run(): void | Promise<void>;
 };
 
@@ -93,6 +94,7 @@ export function buildCommands({
       group: "Application" as const,
       label: "Sign out",
       keywords: ["auth", "account", "logout"],
+      destructive: true,
       run: signOut
     }
   ];
