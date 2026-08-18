@@ -6,7 +6,6 @@ import { Label } from "@/components/ui/label";
 import { useTheme } from "@/features/theme/theme-provider";
 import type { Theme } from "@/features/theme/theme";
 import type { ApiClient } from "@/lib/api/client";
-import { usePreferences } from "@/platform/preferences-provider";
 
 type ProfileSettingsProfile = Profile & {
   provider?: string | null;
@@ -27,7 +26,6 @@ export function ProfileSettingsPage({
   onProfileUpdated
 }: ProfileSettingsPageProps) {
   const { theme, setTheme } = useTheme();
-  const { preferences, update } = usePreferences();
   const heading = useRef<HTMLHeadingElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const [username, setUsername] = useState(profile.username ?? "");
@@ -112,21 +110,6 @@ export function ProfileSettingsPage({
       await setTheme(value);
     } catch {
       setError("Appearance preferences could not be saved.");
-    } finally {
-      setAppearanceSaving(false);
-    }
-  };
-
-  const changeSidebar = async () => {
-    setAppearanceSaving(true);
-    setStatus(null);
-    setError(null);
-    try {
-      await update({
-        contextSidebarCollapsed: !preferences.contextSidebarCollapsed
-      });
-    } catch {
-      setError("Navigation preferences could not be saved.");
     } finally {
       setAppearanceSaving(false);
     }
@@ -288,17 +271,6 @@ export function ProfileSettingsPage({
             </label>
           ))}
         </fieldset>
-        <label className="mt-5 flex items-center justify-between gap-4 text-sm">
-          <span>Contextual sidebar</span>
-          <input
-            type="checkbox"
-            role="switch"
-            aria-label="Contextual sidebar"
-            checked={!preferences.contextSidebarCollapsed}
-            disabled={appearanceSaving}
-            onChange={() => void changeSidebar()}
-          />
-        </label>
       </section>
 
       {status ? (
