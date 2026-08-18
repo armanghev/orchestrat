@@ -274,7 +274,10 @@ export function ContextSidebar({
                   Profile settings
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={onSignOut}>
+              <DropdownMenuItem
+                className="text-destructive focus:text-destructive"
+                onSelect={onSignOut}
+              >
                   <LogOut />
                   Sign out
                 </DropdownMenuItem>

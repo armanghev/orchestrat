@@ -5,7 +5,7 @@ import { ProfileSettingsPage } from "@/features/settings/profile-settings-page";
 
 function ProfileRoute() {
   const router = useRouter();
-  const { api, queryClient } = router.options.context;
+  const { api, auth, queryClient } = router.options.context;
   const profileQuery = useQuery({
     queryKey: ["profile"],
     queryFn: () => api.getProfile()
@@ -37,6 +37,7 @@ function ProfileRoute() {
         profile={profileQuery.data}
         api={api}
         onProfileUpdated={(profile) => queryClient.setQueryData(["profile"], profile)}
+        onSignOut={() => auth.signOut()}
       />
     </AuthenticatedSettingsShell>
   );

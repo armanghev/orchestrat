@@ -16,6 +16,7 @@ type ProfileSettingsPageProps = {
   profile: ProfileSettingsProfile;
   api: ApiClient;
   onProfileUpdated?: (profile: Profile) => void;
+  onSignOut: () => void | Promise<void>;
 };
 
 const usernamePattern = /^[a-zA-Z0-9_]{3,32}$/;
@@ -23,7 +24,8 @@ const usernamePattern = /^[a-zA-Z0-9_]{3,32}$/;
 export function ProfileSettingsPage({
   profile,
   api,
-  onProfileUpdated
+  onProfileUpdated,
+  onSignOut
 }: ProfileSettingsPageProps) {
   const { theme, setTheme } = useTheme();
   const heading = useRef<HTMLHeadingElement>(null);
@@ -288,6 +290,19 @@ export function ProfileSettingsPage({
           User ID: {profile.user_id}
         </p>
       ) : null}
+      <section className="mt-8 border-t pt-6" aria-labelledby="profile-session-heading">
+        <h2 id="profile-session-heading" className="font-medium">
+          Session
+        </h2>
+        <Button
+          type="button"
+          variant="destructive"
+          className="mt-4"
+          onClick={() => void onSignOut()}
+        >
+          Sign out
+        </Button>
+      </section>
     </div>
   );
 }
