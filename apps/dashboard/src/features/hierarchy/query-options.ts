@@ -7,15 +7,8 @@ const hierarchyStaleTime = 2 * 60 * 1000;
 export const hierarchyKeys = {
   all: ["hierarchy"] as const,
   organizations: () => [...hierarchyKeys.all, "organizations"] as const,
-  workspaces: (organizationId: string) =>
-    [
-      ...hierarchyKeys.all,
-      "organizations",
-      organizationId,
-      "workspaces"
-    ] as const,
-  projects: (workspaceId: string) =>
-    [...hierarchyKeys.all, "workspaces", workspaceId, "projects"] as const,
+  projects: (organizationId: string) =>
+    [...hierarchyKeys.all, "organizations", organizationId, "projects"] as const,
   catalog: () => [...hierarchyKeys.all, "catalog"] as const
 };
 
@@ -27,18 +20,10 @@ export function organizationsQueryOptions(api: ApiClient) {
   });
 }
 
-export function workspacesQueryOptions(api: ApiClient, organizationId: string) {
+export function projectsQueryOptions(api: ApiClient, organizationId: string) {
   return queryOptions({
-    queryKey: hierarchyKeys.workspaces(organizationId),
-    queryFn: () => api.listWorkspaces(organizationId),
-    staleTime: hierarchyStaleTime
-  });
-}
-
-export function projectsQueryOptions(api: ApiClient, workspaceId: string) {
-  return queryOptions({
-    queryKey: hierarchyKeys.projects(workspaceId),
-    queryFn: () => api.listProjects(workspaceId),
+    queryKey: hierarchyKeys.projects(organizationId),
+    queryFn: () => api.listProjects(organizationId),
     staleTime: hierarchyStaleTime
   });
 }

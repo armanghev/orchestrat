@@ -42,7 +42,7 @@ export function TopToolbar({
         />
         <p className="hidden truncate text-sm text-muted-foreground md:block">
           {context
-            ? `${context.organization.name} / ${context.workspace.name} / ${context.project.name}`
+            ? `${context.organization.name} / ${context.project.name}`
             : ""}
         </p>
         <Button

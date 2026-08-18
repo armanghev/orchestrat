@@ -8,6 +8,7 @@ import {
   useNavigate,
   useRouter
 } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
 import { AppShell } from "@/components/app-shell/app-shell";
 import type { NavigationDestination } from "@/features/command/commands";
 import {
@@ -197,6 +198,11 @@ function ProjectLayout() {
   const { preferences, update } = usePreferences();
   const navigate = useNavigate();
   const router = useRouter();
+  const { api } = router.options.context;
+  const profileQuery = useQuery({
+    queryKey: ["profile"],
+    queryFn: () => api.getProfile()
+  });
   const location = useLocation();
   const route = location.pathname.split("/").at(-1) as NavigationDestination;
   useEffect(() => {
@@ -250,6 +256,7 @@ function ProjectLayout() {
       navigateToRoute={navigateToRoute}
       openPreferences={() => navigate({ to: "/preferences" })}
       signOut={() => router.options.context.auth.signOut()}
+      profile={profileQuery.data}
       retryCatalog={() => reloadHierarchy(router)}
     >
       <Outlet />

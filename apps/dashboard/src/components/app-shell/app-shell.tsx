@@ -31,6 +31,12 @@ export type AppShellProps = {
   ) => void | Promise<void>;
   openPreferences: () => void | Promise<void>;
   signOut: () => void | Promise<void>;
+  profile?: {
+    username: string | null;
+    full_name: string | null;
+    email: string;
+    avatar_url: string | null;
+  };
   retryCatalog?: () => void | Promise<void>;
   children: ReactNode;
 };
@@ -43,6 +49,7 @@ export function AppShell({
   navigateToRoute,
   openPreferences,
   signOut,
+  profile,
   retryCatalog,
   children
 }: AppShellProps) {
@@ -133,6 +140,8 @@ export function AppShell({
         onSelectProject={selectProject}
         onOpenCommands={openCommands}
         onOpenPreferences={openPreferences}
+        onSignOut={signOut}
+        profile={profile}
       />
       <div className="pointer-events-none fixed inset-x-0 top-0 z-50 hidden h-10 md:block">
         <SidebarTrigger

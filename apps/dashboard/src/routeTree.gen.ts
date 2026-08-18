@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
+import { Route as AuthenticatedOnboardingRouteImport } from './routes/_authenticated.onboarding'
 import { Route as AuthenticatedPreferencesRouteImport } from './routes/_authenticated.preferences'
 import { Route as AuthenticatedSetupRouteImport } from './routes/_authenticated.setup'
 import { Route as AuthCallbackRouteImport } from './routes/auth.callback'
@@ -33,6 +34,11 @@ const IndexRoute = IndexRouteImport.update({
 const AuthenticatedRoute = AuthenticatedRouteImport.update({
   id: '/_authenticated',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AuthenticatedOnboardingRoute = AuthenticatedOnboardingRouteImport.update({
+  id: '/onboarding',
+  path: '/onboarding',
+  getParentRoute: () => AuthenticatedRoute,
 } as any)
 const AuthenticatedPreferencesRoute =
   AuthenticatedPreferencesRouteImport.update({
@@ -113,6 +119,7 @@ const AuthenticatedProjectsProjectIdTasksRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/onboarding': typeof AuthenticatedOnboardingRoute
   '/preferences': typeof AuthenticatedPreferencesRoute
   '/setup': typeof AuthenticatedSetupRoute
   '/auth/callback': typeof AuthCallbackRoute
@@ -129,6 +136,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/onboarding': typeof AuthenticatedOnboardingRoute
   '/preferences': typeof AuthenticatedPreferencesRoute
   '/setup': typeof AuthenticatedSetupRoute
   '/auth/callback': typeof AuthCallbackRoute
@@ -146,6 +154,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteWithChildren
+  '/_authenticated/onboarding': typeof AuthenticatedOnboardingRoute
   '/_authenticated/preferences': typeof AuthenticatedPreferencesRoute
   '/_authenticated/setup': typeof AuthenticatedSetupRoute
   '/auth/callback': typeof AuthCallbackRoute
@@ -164,6 +173,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/onboarding'
     | '/preferences'
     | '/setup'
     | '/auth/callback'
@@ -180,6 +190,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/onboarding'
     | '/preferences'
     | '/setup'
     | '/auth/callback'
@@ -196,6 +207,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/_authenticated'
+    | '/_authenticated/onboarding'
     | '/_authenticated/preferences'
     | '/_authenticated/setup'
     | '/auth/callback'
@@ -232,6 +244,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/'
       preLoaderRoute: typeof AuthenticatedRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_authenticated/onboarding': {
+      id: '/_authenticated/onboarding'
+      path: '/onboarding'
+      fullPath: '/onboarding'
+      preLoaderRoute: typeof AuthenticatedOnboardingRouteImport
+      parentRoute: typeof AuthenticatedRoute
     }
     '/_authenticated/preferences': {
       id: '/_authenticated/preferences'
@@ -367,12 +386,14 @@ const AuthenticatedProjectsProjectIdRouteWithChildren =
   )
 
 interface AuthenticatedRouteChildren {
+  AuthenticatedOnboardingRoute: typeof AuthenticatedOnboardingRoute
   AuthenticatedPreferencesRoute: typeof AuthenticatedPreferencesRoute
   AuthenticatedSetupRoute: typeof AuthenticatedSetupRoute
   AuthenticatedProjectsProjectIdRoute: typeof AuthenticatedProjectsProjectIdRouteWithChildren
 }
 
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
+  AuthenticatedOnboardingRoute: AuthenticatedOnboardingRoute,
   AuthenticatedPreferencesRoute: AuthenticatedPreferencesRoute,
   AuthenticatedSetupRoute: AuthenticatedSetupRoute,
   AuthenticatedProjectsProjectIdRoute:

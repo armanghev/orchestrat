@@ -2,7 +2,7 @@ import { Link } from "@tanstack/react-router";
 import type { ProjectContext } from "@/features/hierarchy/catalog";
 
 export function ProjectSettingsPage({ context }: { context: ProjectContext }) {
-  const { organization, workspace, project } = context;
+  const { organization, project } = context;
   return (
     <section
       className="mx-auto w-full max-w-3xl p-6 md:p-8"
@@ -36,10 +36,6 @@ export function ProjectSettingsPage({ context }: { context: ProjectContext }) {
           <dd className="break-all font-mono text-sm sm:col-span-2">
             {project.id}
           </dd>
-        </div>
-        <div className="grid gap-1 py-4 sm:grid-cols-3">
-          <dt className="text-sm text-muted-foreground">Workspace</dt>
-          <dd className="text-sm sm:col-span-2">{workspace.name}</dd>
         </div>
         <div className="grid gap-1 py-4 sm:grid-cols-3">
           <dt className="text-sm text-muted-foreground">Organization</dt>

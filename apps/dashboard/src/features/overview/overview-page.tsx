@@ -2,7 +2,7 @@ import { Archive } from "lucide-react";
 import type { ProjectContext } from "@/features/hierarchy/catalog";
 
 export function OverviewPage({ context }: { context: ProjectContext }) {
-  const { organization, workspace, project } = context;
+  const { organization, project } = context;
   const archived = project.status === "archived";
   return (
     <section
@@ -32,12 +32,6 @@ export function OverviewPage({ context }: { context: ProjectContext }) {
               Access
             </dt>
             <dd className="mt-1 text-sm capitalize">{organization.role}</dd>
-          </div>
-          <div>
-            <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Workspace
-            </dt>
-            <dd className="mt-1 text-sm">{workspace.name}</dd>
           </div>
         </dl>
         <dl className="space-y-5 p-5 md:p-6">

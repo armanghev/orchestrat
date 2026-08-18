@@ -48,16 +48,14 @@ export function buildCommands({
   signOut
 }: BuildCommandsOptions): AppCommand[] {
   return [
-    ...catalog.projects.map(({ project, workspace, organization }) => ({
+    ...catalog.projects.map(({ project, organization }) => ({
       id: `project:${project.id}`,
       group: "Projects" as const,
       label: `Open ${project.name}`,
       keywords: [
         "project",
-        "workspace",
         "organization",
         project.name,
-        workspace.name,
         organization.name
       ],
       run: () => navigateToProject(project.id)
