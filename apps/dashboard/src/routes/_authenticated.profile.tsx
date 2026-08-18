@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
-import { AuthenticatedSettingsShell } from "@/features/settings/authenticated-settings-shell";
 import { ProfileSettingsPage } from "@/features/settings/profile-settings-page";
+import { ProfileSettingsShell } from "@/features/settings/profile-settings-shell";
 
 function ProfileRoute() {
   const router = useRouter();
@@ -32,14 +32,14 @@ function ProfileRoute() {
     );
 
   return (
-    <AuthenticatedSettingsShell>
+    <ProfileSettingsShell>
       <ProfileSettingsPage
         profile={profileQuery.data}
         api={api}
         onProfileUpdated={(profile) => queryClient.setQueryData(["profile"], profile)}
         onSignOut={() => auth.signOut()}
       />
-    </AuthenticatedSettingsShell>
+    </ProfileSettingsShell>
   );
 }
 
