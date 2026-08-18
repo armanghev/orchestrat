@@ -33,6 +33,7 @@ export const users = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     authProvider: text("auth_provider").notNull(),
     authSubject: text("auth_subject").notNull(),
+    username: text("username"),
     name: text("name").notNull(),
     email: text("email").notNull(),
     avatarUrl: text("avatar_url"),
@@ -43,6 +44,7 @@ export const users = pgTable(
       table.authProvider,
       table.authSubject
     ),
+    uniqueIndex("users_username_unique").on(table.username),
     index("users_email_idx").on(table.email),
     check(
       "users_email_normalized",
@@ -82,33 +84,13 @@ export const organizationMembers = pgTable(
   ]
 );
 
-export const workspaces = pgTable(
-  "workspaces",
+export const projects = pgTable(
+  "projects",
   {
     id: uuid("id").defaultRandom().primaryKey(),
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    name: text("name").notNull(),
-    slug: text("slug").notNull(),
-    ...timestamps
-  },
-  (table) => [
-    uniqueIndex("workspaces_organization_slug_unique").on(
-      table.organizationId,
-      table.slug
-    ),
-    index("workspaces_organization_id_idx").on(table.organizationId)
-  ]
-);
-
-export const projects = pgTable(
-  "projects",
-  {
-    id: uuid("id").defaultRandom().primaryKey(),
-    workspaceId: uuid("workspace_id")
-      .notNull()
-      .references(() => workspaces.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     slug: text("slug").notNull(),
     description: text("description"),
@@ -117,11 +99,11 @@ export const projects = pgTable(
     archivedAt: timestamp("archived_at", { withTimezone: true })
   },
   (table) => [
-    uniqueIndex("projects_workspace_slug_unique").on(
-      table.workspaceId,
+    uniqueIndex("projects_organization_slug_unique").on(
+      table.organizationId,
       table.slug
     ),
-    index("projects_workspace_status_idx").on(table.workspaceId, table.status),
+    index("projects_organization_status_idx").on(table.organizationId, table.status),
     check(
       "projects_archive_state_consistent",
       sql`(${table.status} = 'active' and ${table.archivedAt} is null) or (${table.status} = 'archived' and ${table.archivedAt} is not null)`

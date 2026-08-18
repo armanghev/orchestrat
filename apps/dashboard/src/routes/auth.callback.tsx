@@ -32,7 +32,7 @@ function AuthCallbackRoute() {
     void navigate({ to: "/auth/callback", search: {}, replace: true });
   }, [navigate]);
   const handleSuccess = useCallback(() => {
-    void navigate({ to: "/setup", replace: true });
+    void navigate({ to: "/onboarding", replace: true });
   }, [navigate]);
 
   return (

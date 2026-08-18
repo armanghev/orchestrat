@@ -16,11 +16,27 @@ const auth = createSupabaseAuth({
   audience: config.ORCHESTRAT_SUPABASE_JWT_AUDIENCE,
   supabaseUrl: config.ORCHESTRAT_SUPABASE_URL
 });
+const avatarBucket = process.env.SUPABASE_AVATAR_BUCKET;
+const s3Endpoint = process.env.SUPABASE_S3_ENDPOINT;
+const s3Region = process.env.SUPABASE_S3_REGION;
+const s3AccessKeyId = process.env.SUPABASE_S3_ACCESS_KEY_ID;
+const s3SecretAccessKey = process.env.SUPABASE_S3_SECRET_ACCESS_KEY;
 const app = buildApp({
   allowedOrigins: config.ORCHESTRAT_ALLOWED_ORIGINS,
   auth,
   closeDatabase: () => pool.end(),
-  db
+  db,
+  avatarStorage:
+    avatarBucket && s3Endpoint && s3Region && s3AccessKeyId && s3SecretAccessKey
+      ? {
+          bucket: avatarBucket,
+          endpoint: s3Endpoint,
+          region: s3Region,
+          accessKeyId: s3AccessKeyId,
+          secretAccessKey: s3SecretAccessKey,
+          publicUrlBase: `${s3Endpoint.replace(/\/storage\/v1\/s3\/?$/, "")}/storage/v1/object/public/${avatarBucket}`
+        }
+      : undefined
 });
 
 try {

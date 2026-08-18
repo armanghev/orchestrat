@@ -13,7 +13,8 @@ function IndexRoute() {
       </main>
     );
   }
-  if (snapshot.status === "signedIn") return <Navigate to="/setup" replace />;
+  if (snapshot.status === "signedIn")
+    return <Navigate to="/onboarding" replace />;
   return <SignInScreen />;
 }
 

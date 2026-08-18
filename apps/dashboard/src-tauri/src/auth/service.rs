@@ -71,16 +71,14 @@ impl AuthService {
         )?;
         Ok((pkce, pending))
     }
-    fn redirect_for(&self, flow: &str) -> String {
-        let mut url = self.config.redirect_uri.clone();
-        url.query_pairs_mut().append_pair("sb_flow_id", flow);
-        url.into()
+    fn redirect_for(&self) -> String {
+        self.config.redirect_uri.to_string()
     }
     pub(crate) async fn begin_github(&self, now: u64) -> Result<AuthorizationRequest, AuthError> {
         let _guard = self.lifecycle.lock().await;
         self.prepare_new_flow()?;
         let (pkce, pending) = self.pending(PendingKind::Github, now)?;
-        let redirect = self.redirect_for(&pending.flow_id);
+        let redirect = self.redirect_for();
         let mut url = self.config.authorize_url();
         {
             let mut q = url.query_pairs_mut();
@@ -99,7 +97,7 @@ impl AuthService {
         let email = normalize_email(value).ok_or(AuthError::InvalidEmail)?;
         self.prepare_new_flow()?;
         let (pkce, pending) = self.pending(PendingKind::MagicLink, now)?;
-        let redirect = self.redirect_for(&pending.flow_id);
+        let redirect = self.redirect_for();
         let result = self
             .transport
             .send_magic_link(&email, &redirect, &pkce.challenge)
@@ -705,6 +703,10 @@ mod tests {
             u.query_pairs().find(|(k, _)| k == "provider").unwrap().1,
             "github"
         );
+        assert_eq!(
+            u.query_pairs().find(|(k, _)| k == "redirect_to").unwrap().1,
+            REDIRECT_URI
+        );
         for forbidden in [
             "client_id",
             "response_type",
@@ -732,7 +734,7 @@ mod tests {
         let raw = store.get(PENDING_ACCOUNT).unwrap().unwrap();
         let p: PendingAuthorization = serde_json::from_str(&raw).unwrap();
         assert_eq!(p.kind, PendingKind::MagicLink);
-        assert!(t.magic.lock().unwrap()[0].1.contains("sb_flow_id="));
+        assert_eq!(t.magic.lock().unwrap()[0].1, REDIRECT_URI);
     }
     #[tokio::test]
     async fn invalid_otp_provider_response_rolls_back_pending() {

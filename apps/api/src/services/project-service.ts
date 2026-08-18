@@ -3,17 +3,14 @@ import {
   organizationMembers,
   organizations,
   projects,
-  workspaces,
   type Database
 } from "@orchestrat/db";
 import type {
   CreateOrganizationRequest,
   CreateProjectRequest,
-  CreateWorkspaceRequest,
   Organization,
   Project,
-  UpdateProjectRequest,
-  Workspace
+  UpdateProjectRequest
 } from "@orchestrat/protocol";
 import { and, asc, eq } from "drizzle-orm";
 import { ApiError } from "./api-error.js";
@@ -41,20 +38,9 @@ const organizationJson = (
   updated_at: organization.updatedAt.toISOString()
 });
 
-const workspaceJson = (
-  workspace: typeof workspaces.$inferSelect
-): Workspace => ({
-  id: workspace.id,
-  organization_id: workspace.organizationId,
-  name: workspace.name,
-  slug: workspace.slug,
-  created_at: workspace.createdAt.toISOString(),
-  updated_at: workspace.updatedAt.toISOString()
-});
-
 const projectJson = (project: typeof projects.$inferSelect): Project => ({
   id: project.id,
-  workspace_id: project.workspaceId,
+  organization_id: project.organizationId,
   name: project.name,
   slug: project.slug,
   description: project.description,
@@ -112,57 +98,26 @@ export class ProjectService {
     return organizationJson(record.organization, record.role);
   }
 
-  async listWorkspaces(userId: string, organizationId: string) {
+  async listProjects(userId: string, organizationId: string) {
     await this.permissions.organization(userId, organizationId);
-    const rows = await this.db.query.workspaces.findMany({
-      orderBy: asc(workspaces.name),
-      where: eq(workspaces.organizationId, organizationId)
-    });
-    return { workspaces: rows.map(workspaceJson) };
-  }
-
-  async createWorkspace(
-    userId: string,
-    organizationId: string,
-    input: CreateWorkspaceRequest
-  ) {
-    await this.permissions.organization(userId, organizationId);
-    const [workspace] = await this.db
-      .insert(workspaces)
-      .values({
-        id: randomUUID(),
-        organizationId,
-        name: input.name,
-        slug: input.slug ?? slugify(input.name)
-      })
-      .returning();
-    return workspaceJson(workspace);
-  }
-
-  async getWorkspace(userId: string, workspaceId: string) {
-    return workspaceJson(await this.permissions.workspace(userId, workspaceId));
-  }
-
-  async listProjects(userId: string, workspaceId: string) {
-    await this.permissions.workspace(userId, workspaceId);
     const rows = await this.db.query.projects.findMany({
       orderBy: asc(projects.name),
-      where: eq(projects.workspaceId, workspaceId)
+      where: eq(projects.organizationId, organizationId)
     });
     return { projects: rows.map(projectJson) };
   }
 
   async createProject(
     userId: string,
-    workspaceId: string,
+    organizationId: string,
     input: CreateProjectRequest
   ) {
-    await this.permissions.workspace(userId, workspaceId);
+    await this.permissions.organization(userId, organizationId);
     const [project] = await this.db
       .insert(projects)
       .values({
         id: randomUUID(),
-        workspaceId,
+        organizationId,
         name: input.name,
         slug: input.slug ?? slugify(input.name),
         description: input.description ?? null
@@ -193,7 +148,6 @@ export class ProjectService {
   async archiveProject(userId: string, projectId: string) {
     const current = await this.permissions.project(userId, projectId);
     if (current.status === "archived") return projectJson(current);
-
     const now = new Date();
     const [project] = await this.db
       .update(projects)

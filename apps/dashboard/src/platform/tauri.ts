@@ -61,13 +61,12 @@ export function normalizeAuthCallback(input: string): URL {
       invalid();
     return entries[0];
   };
-  const flow = one("sb_flow_id", 128, /^[A-Za-z0-9_-]+$/u);
+  one("sb_flow_id", 128, /^[A-Za-z0-9_-]+$/u);
   const code = one("code", 2048);
   const error = one("error", 128, /^[A-Za-z0-9._-]+$/u);
   one("error_code", 128, /^[A-Za-z0-9._-]+$/u);
   one("error_description", 512);
   if (
-    !flow ||
     Boolean(code) === Boolean(error) ||
     (code && (values.has("error_code") || values.has("error_description")))
   )
@@ -120,7 +119,7 @@ export function createTauriPlatform(): Platform {
           if (now - receivedAt >= callbackDedupeWindowMs) seen.delete(value);
         }
         // Retain only the nonsecret correlation identifier for dedupe; never retain auth codes.
-        const key = url.searchParams.get("sb_flow_id") as string;
+        const key = url.searchParams.get("sb_flow_id") ?? "current";
         if (seen.has(key)) return;
         seen.set(key, now);
         handler(url);

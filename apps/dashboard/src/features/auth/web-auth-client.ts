@@ -43,6 +43,7 @@ const webCapabilities: AuthCapabilities = Object.freeze({
   github: true,
   magicLink: true
 });
+
 const invalidCallbackError: AuthSnapshot = {
   status: "error",
   code: "invalid_callback",

@@ -15,6 +15,20 @@
       "when": 1786763813185,
       "tag": "0001_old_squirrel_girl",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1787022152765,
+      "tag": "0002_great_rage",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1787090000000,
+      "tag": "0003_remove_workspaces",
+      "breakpoints": true
     }
   ]
 }

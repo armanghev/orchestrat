@@ -2,19 +2,16 @@ import {
   apiErrorSchema,
   organizationSchema,
   organizationsResponseSchema,
+  profileSchema,
   projectSchema,
   projectsResponseSchema,
-  workspaceSchema,
-  workspacesResponseSchema,
   type CreateOrganizationRequest,
   type CreateProjectRequest,
-  type CreateWorkspaceRequest,
   type Organization,
   type OrganizationsResponse,
+  type Profile,
   type Project,
   type ProjectsResponse,
-  type Workspace,
-  type WorkspacesResponse
 } from "@orchestrat/protocol";
 import type { ZodType } from "zod";
 
@@ -48,7 +45,7 @@ export interface ApiTokenSource {
 }
 
 type RequestOptions = {
-  method: "GET" | "POST";
+  method: "GET" | "POST" | "PATCH";
   body?: unknown;
 };
 
@@ -79,6 +76,32 @@ export class ApiClient {
     );
   }
 
+  getProfile(): Promise<Profile> {
+    return this.request("/api/v1/profile", { method: "GET" }, profileSchema);
+  }
+
+  updateProfile(input: {
+    username: string;
+    full_name: string;
+    avatar_url: string | null;
+  }): Promise<Profile> {
+    return this.request(
+      "/api/v1/profile",
+      { method: "PATCH", body: input },
+      profileSchema
+    );
+  }
+
+  uploadAvatar(file: File): Promise<Profile> {
+    const body = new FormData();
+    body.set("avatar", file);
+    return this.request(
+      "/api/v1/profile/avatar",
+      { method: "POST", body },
+      profileSchema
+    );
+  }
+
   createOrganization(input: CreateOrganizationRequest): Promise<Organization> {
     return this.request(
       "/api/v1/organizations",
@@ -87,39 +110,20 @@ export class ApiClient {
     );
   }
 
-  listWorkspaces(organizationId: string): Promise<WorkspacesResponse> {
+  listProjects(organizationId: string): Promise<ProjectsResponse> {
     return this.request(
-      `/api/v1/organizations/${encodeURIComponent(organizationId)}/workspaces`,
-      { method: "GET" },
-      workspacesResponseSchema
-    );
-  }
-
-  createWorkspace(
-    organizationId: string,
-    input: CreateWorkspaceRequest
-  ): Promise<Workspace> {
-    return this.request(
-      `/api/v1/organizations/${encodeURIComponent(organizationId)}/workspaces`,
-      { method: "POST", body: input },
-      workspaceSchema
-    );
-  }
-
-  listProjects(workspaceId: string): Promise<ProjectsResponse> {
-    return this.request(
-      `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/projects`,
+      `/api/v1/organizations/${encodeURIComponent(organizationId)}/projects`,
       { method: "GET" },
       projectsResponseSchema
     );
   }
 
   createProject(
-    workspaceId: string,
+    organizationId: string,
     input: CreateProjectRequest
   ): Promise<Project> {
     return this.request(
-      `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/projects`,
+      `/api/v1/organizations/${encodeURIComponent(organizationId)}/projects`,
       { method: "POST", body: input },
       projectSchema
     );
@@ -158,7 +162,7 @@ export class ApiClient {
     }
 
     const headers: HeadersInit = { Authorization: `Bearer ${token}` };
-    if (options.body !== undefined)
+    if (options.body !== undefined && !(options.body instanceof FormData))
       headers["Content-Type"] = "application/json";
 
     let response: Response;
@@ -167,7 +171,9 @@ export class ApiClient {
         method: options.method,
         headers,
         body:
-          options.body === undefined ? undefined : JSON.stringify(options.body)
+          options.body === undefined || options.body instanceof FormData
+            ? options.body
+            : JSON.stringify(options.body)
       });
     } catch {
       throw new DashboardApiError(

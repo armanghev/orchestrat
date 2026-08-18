@@ -7,8 +7,7 @@ import {
   organizationMembers,
   organizations,
   projects,
-  users,
-  workspaces
+  users
 } from "./schema.js";
 
 config({ path: "../../.env" });
@@ -64,30 +63,11 @@ try {
       })
       .onConflictDoNothing();
 
-    const [workspace] = await tx
-      .insert(workspaces)
-      .values({
-        id: randomUUID(),
-        organizationId: activeOrganization.id,
-        name: "Default workspace",
-        slug: "default"
-      })
-      .onConflictDoNothing()
-      .returning();
-    const activeWorkspace =
-      workspace ??
-      (await tx.query.workspaces.findFirst({
-        where: and(
-          eq(workspaces.organizationId, activeOrganization.id),
-          eq(workspaces.slug, "default")
-        )
-      }))!;
-
     const [project] = await tx
       .insert(projects)
       .values({
         id: randomUUID(),
-        workspaceId: activeWorkspace.id,
+        organizationId: activeOrganization.id,
         name: "Demo project",
         slug: "demo"
       })
@@ -97,14 +77,13 @@ try {
       project ??
       (await tx.query.projects.findFirst({
         where: and(
-          eq(projects.workspaceId, activeWorkspace.id),
+          eq(projects.organizationId, activeOrganization.id),
           eq(projects.slug, "demo")
         )
       }))!;
 
     return {
       organization: activeOrganization.id,
-      workspace: activeWorkspace.id,
       project: activeProject.id
     };
   });

@@ -4,18 +4,24 @@ import type { HumanAuth } from "@orchestrat/auth";
 import type { Database } from "@orchestrat/db";
 import { logger } from "@orchestrat/logger";
 import type { ApiErrorResponse, ErrorCode } from "@orchestrat/protocol";
+import multipart from "@fastify/multipart";
 import Fastify from "fastify";
 import { healthRoutes } from "./routes/health.js";
 import { v1Routes } from "./routes/v1.js";
 import { ApiError } from "./services/api-error.js";
 import { IdentityService } from "./services/identity-service.js";
 import { ProjectService } from "./services/project-service.js";
+import {
+  ProfileService,
+  type AvatarStorageConfig
+} from "./services/profile-service.js";
 
 type AppOptions = {
   allowedOrigins: string[];
   auth: HumanAuth;
   closeDatabase?: () => Promise<void>;
   db: Database;
+  avatarStorage?: AvatarStorageConfig;
 };
 
 const errorResponse = (
@@ -38,12 +44,19 @@ const rawHeaderEntries = (rawHeaders: string[]) => {
 export function buildApp(options: AppOptions) {
   const app = Fastify({
     genReqId: () => `req_${randomUUID()}`,
-    logger: false
+    logger: true
   });
   const identities = new IdentityService(options.db);
   const projects = new ProjectService(options.db);
+  const profiles = new ProfileService(options.db, options.avatarStorage);
 
-  app.register(cors, { origin: options.allowedOrigins });
+  app.register(cors, {
+    origin: options.allowedOrigins,
+    methods: ["GET", "HEAD", "POST", "PATCH", "DELETE"]
+  });
+  app.register(multipart, {
+    limits: { fileSize: 2 * 1024 * 1024, files: 1 }
+  });
   app.addHook("onRequest", (request, reply, done) => {
     reply.header("x-request-id", request.id);
     done();
@@ -69,8 +82,12 @@ export function buildApp(options: AppOptions) {
       name?: string;
       statusCode?: number;
     };
-    if (caught.name === "ZodError" || caught.statusCode === 400) {
-      return reply.code(400).send(
+    if (
+      caught.name === "ZodError" ||
+      caught.statusCode === 400 ||
+      caught.statusCode === 413
+    ) {
+      return reply.code(caught.statusCode === 413 ? 413 : 400).send(
         errorResponse(
           request.id,
           "VALIDATION_ERROR",
@@ -132,7 +149,7 @@ export function buildApp(options: AppOptions) {
         }
         request.userId = await identities.resolveUserId(principal);
       });
-      api.register(v1Routes, { projects });
+      api.register(v1Routes, { projects, profiles });
     },
     { prefix: "/api/v1" }
   );

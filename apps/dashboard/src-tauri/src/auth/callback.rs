@@ -113,8 +113,10 @@ pub fn parse_callback(
             _ => return Err(AuthError::InvalidCallback),
         }
     }
-    if flow.len() != 1
-        || !Pkce::is_valid_flow_id(&flow[0])
+    if flow.len() > 1
+        || flow
+            .first()
+            .is_some_and(|value| !Pkce::is_valid_flow_id(value))
         || code.len() > 1
         || error.len() > 1
         || error_code.len() > 1
@@ -122,7 +124,10 @@ pub fn parse_callback(
     {
         return Err(AuthError::InvalidCallback);
     }
-    if flow[0] != pending.flow_id {
+    if flow
+        .first()
+        .is_some_and(|value| value != &pending.flow_id)
+    {
         return Err(AuthError::FlowMismatch);
     }
     if now_ms < pending.created_at_ms || now_ms - pending.created_at_ms > pending.kind.ttl_ms() {
@@ -166,7 +171,7 @@ mod tests {
     #[test]
     fn callback_contract_and_ttls() {
         assert!(parse_callback(
-            "dev.orchestrat.app://auth/callback?code=x&sb_flow_id=flow_identifier_123",
+            "dev.orchestrat.app://auth/callback?code=x",
             &p(PendingKind::Github),
             1100
         )

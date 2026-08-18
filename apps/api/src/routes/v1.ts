@@ -1,19 +1,39 @@
 import {
   createOrganizationRequestSchema,
   createProjectRequestSchema,
-  createWorkspaceRequestSchema,
   idParamsSchema,
   organizationParamsSchema,
   updateProjectRequestSchema,
-  workspaceParamsSchema
+  updateProfileRequestSchema
 } from "@orchestrat/protocol";
 import type { FastifyInstance } from "fastify";
 import type { ProjectService } from "../services/project-service.js";
+import type { ProfileService } from "../services/profile-service.js";
 
 export async function v1Routes(
   app: FastifyInstance,
-  options: { projects: ProjectService }
+  options: { projects: ProjectService; profiles: ProfileService }
 ) {
+  app.get("/profile", (request) => options.profiles.get(request.userId));
+
+  app.patch("/profile", (request) =>
+    options.profiles.update(
+      request.userId,
+      updateProfileRequestSchema.parse(request.body)
+    )
+  );
+
+  app.post("/profile/avatar", async (request) => {
+    const file = await request.file();
+    if (!file) throw new Error("An avatar image is required.");
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.mimetype))
+      throw new Error("Avatars must be JPEG, PNG, or WebP images.");
+    return options.profiles.updateAvatar(request.userId, {
+      mimetype: file.mimetype,
+      buffer: await file.toBuffer()
+    });
+  });
+
   app.get("/organizations", (request) =>
     options.projects.listOrganizations(request.userId)
   );
@@ -33,47 +53,24 @@ export async function v1Routes(
     )
   );
 
-  app.get("/organizations/:organizationId/workspaces", (request) =>
-    options.projects.listWorkspaces(
+  app.get("/organizations/:organizationId/projects", (request) =>
+    options.projects.listProjects(
       request.userId,
       organizationParamsSchema.parse(request.params).organizationId
     )
   );
 
   app.post(
-    "/organizations/:organizationId/workspaces",
+    "/organizations/:organizationId/projects",
     async (request, reply) => {
-      const result = await options.projects.createWorkspace(
+      const result = await options.projects.createProject(
         request.userId,
         organizationParamsSchema.parse(request.params).organizationId,
-        createWorkspaceRequestSchema.parse(request.body)
+        createProjectRequestSchema.parse(request.body)
       );
       return reply.code(201).send(result);
     }
   );
-
-  app.get("/workspaces/:id", (request) =>
-    options.projects.getWorkspace(
-      request.userId,
-      idParamsSchema.parse(request.params).id
-    )
-  );
-
-  app.get("/workspaces/:workspaceId/projects", (request) =>
-    options.projects.listProjects(
-      request.userId,
-      workspaceParamsSchema.parse(request.params).workspaceId
-    )
-  );
-
-  app.post("/workspaces/:workspaceId/projects", async (request, reply) => {
-    const result = await options.projects.createProject(
-      request.userId,
-      workspaceParamsSchema.parse(request.params).workspaceId,
-      createProjectRequestSchema.parse(request.body)
-    );
-    return reply.code(201).send(result);
-  });
 
   app.get("/projects/:id", (request) =>
     options.projects.getProject(
