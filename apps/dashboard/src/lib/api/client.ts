@@ -1,17 +1,25 @@
 import {
   apiErrorSchema,
   organizationSchema,
+  organizationMemberSchema,
+  organizationMembersResponseSchema,
   organizationsResponseSchema,
   profileSchema,
   projectSchema,
   projectsResponseSchema,
+  deleteResourceResponseSchema,
   type CreateOrganizationRequest,
   type CreateProjectRequest,
+  type DeleteResourceResponse,
   type Organization,
+  type OrganizationMember,
+  type OrganizationMembersResponse,
   type OrganizationsResponse,
   type Profile,
   type Project,
   type ProjectsResponse,
+  type UpdateOrganizationRequest,
+  type UpdateProjectRequest,
 } from "@orchestrat/protocol";
 import type { ZodType } from "zod";
 
@@ -45,7 +53,7 @@ export interface ApiTokenSource {
 }
 
 type RequestOptions = {
-  method: "GET" | "POST" | "PATCH";
+  method: "GET" | "POST" | "PATCH" | "DELETE";
   body?: unknown;
 };
 
@@ -102,11 +110,82 @@ export class ApiClient {
     );
   }
 
+  removeAvatar(): Promise<Profile> {
+    return this.request(
+      "/api/v1/profile/avatar",
+      { method: "DELETE" },
+      profileSchema
+    );
+  }
+
   createOrganization(input: CreateOrganizationRequest): Promise<Organization> {
     return this.request(
       "/api/v1/organizations",
       { method: "POST", body: input },
       organizationSchema
+    );
+  }
+
+  updateOrganization(
+    organizationId: string,
+    input: UpdateOrganizationRequest
+  ): Promise<Organization> {
+    return this.request(
+      `/api/v1/organizations/${encodeURIComponent(organizationId)}`,
+      { method: "PATCH", body: input },
+      organizationSchema
+    );
+  }
+
+  deleteOrganization(
+    organizationId: string,
+    name: string
+  ): Promise<DeleteResourceResponse> {
+    return this.request(
+      `/api/v1/organizations/${encodeURIComponent(organizationId)}`,
+      { method: "DELETE", body: { name } },
+      deleteResourceResponseSchema
+    );
+  }
+
+  listOrganizationMembers(
+    organizationId: string
+  ): Promise<OrganizationMembersResponse> {
+    return this.request(
+      `/api/v1/organizations/${encodeURIComponent(organizationId)}/members`,
+      { method: "GET" },
+      organizationMembersResponseSchema
+    );
+  }
+
+  updateOrganizationMember(
+    organizationId: string,
+    userId: string,
+    role: OrganizationMember["role"]
+  ): Promise<OrganizationMember> {
+    return this.request(
+      `/api/v1/organizations/${encodeURIComponent(organizationId)}/members/${encodeURIComponent(userId)}`,
+      { method: "PATCH", body: { role } },
+      organizationMemberSchema
+    );
+  }
+
+  removeOrganizationMember(
+    organizationId: string,
+    userId: string
+  ): Promise<DeleteResourceResponse> {
+    return this.request(
+      `/api/v1/organizations/${encodeURIComponent(organizationId)}/members/${encodeURIComponent(userId)}`,
+      { method: "DELETE" },
+      deleteResourceResponseSchema
+    );
+  }
+
+  leaveOrganization(organizationId: string): Promise<DeleteResourceResponse> {
+    return this.request(
+      `/api/v1/organizations/${encodeURIComponent(organizationId)}/members/leave`,
+      { method: "POST" },
+      deleteResourceResponseSchema
     );
   }
 
@@ -134,6 +213,44 @@ export class ApiClient {
       `/api/v1/projects/${encodeURIComponent(projectId)}`,
       { method: "GET" },
       projectSchema
+    );
+  }
+
+  updateProject(
+    projectId: string,
+    input: UpdateProjectRequest
+  ): Promise<Project> {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}`,
+      { method: "PATCH", body: input },
+      projectSchema
+    );
+  }
+
+  archiveProject(projectId: string): Promise<Project> {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/archive`,
+      { method: "POST" },
+      projectSchema
+    );
+  }
+
+  reactivateProject(projectId: string): Promise<Project> {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/reactivate`,
+      { method: "POST" },
+      projectSchema
+    );
+  }
+
+  deleteProject(
+    projectId: string,
+    name: string
+  ): Promise<DeleteResourceResponse> {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}`,
+      { method: "DELETE", body: { name } },
+      deleteResourceResponseSchema
     );
   }
 
