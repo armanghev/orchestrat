@@ -8,3 +8,4 @@ coverage
 *.tsbuildinfo
 local/
 .worktrees/
+.DS_Store*
