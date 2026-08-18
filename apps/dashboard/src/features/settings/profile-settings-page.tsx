@@ -79,6 +79,7 @@ export function ProfileSettingsPage({
     setError(null);
     try {
       let nextAvatarUrl = removeAvatar ? null : avatarUrl;
+      if (removeAvatar) await api.removeAvatar();
       if (avatarFile) {
         const uploaded = await api.uploadAvatar(avatarFile);
         nextAvatarUrl = uploaded.avatar_url;
