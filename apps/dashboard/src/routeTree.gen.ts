@@ -13,9 +13,11 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
 import { Route as AuthenticatedOnboardingRouteImport } from './routes/_authenticated.onboarding'
 import { Route as AuthenticatedPreferencesRouteImport } from './routes/_authenticated.preferences'
+import { Route as AuthenticatedProfileRouteImport } from './routes/_authenticated.profile'
 import { Route as AuthenticatedSetupRouteImport } from './routes/_authenticated.setup'
 import { Route as AuthCallbackRouteImport } from './routes/auth.callback'
 import { Route as AuthenticatedProjectsProjectIdRouteImport } from './routes/_authenticated.projects.$projectId'
+import { Route as AuthenticatedOrganizationsOrganizationIdSettingsRouteImport } from './routes/_authenticated.organizations.$organizationId.settings'
 import { Route as AuthenticatedProjectsProjectIdIndexRouteImport } from './routes/_authenticated.projects.$projectId.index'
 import { Route as AuthenticatedProjectsProjectIdActivityRouteImport } from './routes/_authenticated.projects.$projectId.activity'
 import { Route as AuthenticatedProjectsProjectIdAgentsRouteImport } from './routes/_authenticated.projects.$projectId.agents'
@@ -46,6 +48,11 @@ const AuthenticatedPreferencesRoute =
     path: '/preferences',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
+const AuthenticatedProfileRoute = AuthenticatedProfileRouteImport.update({
+  id: '/profile',
+  path: '/profile',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
 const AuthenticatedSetupRoute = AuthenticatedSetupRouteImport.update({
   id: '/setup',
   path: '/setup',
@@ -60,6 +67,12 @@ const AuthenticatedProjectsProjectIdRoute =
   AuthenticatedProjectsProjectIdRouteImport.update({
     id: '/projects/$projectId',
     path: '/projects/$projectId',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
+const AuthenticatedOrganizationsOrganizationIdSettingsRoute =
+  AuthenticatedOrganizationsOrganizationIdSettingsRouteImport.update({
+    id: '/organizations/$organizationId/settings',
+    path: '/organizations/$organizationId/settings',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
 const AuthenticatedProjectsProjectIdIndexRoute =
@@ -121,9 +134,11 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/onboarding': typeof AuthenticatedOnboardingRoute
   '/preferences': typeof AuthenticatedPreferencesRoute
+  '/profile': typeof AuthenticatedProfileRoute
   '/setup': typeof AuthenticatedSetupRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/projects/$projectId': typeof AuthenticatedProjectsProjectIdRouteWithChildren
+  '/organizations/$organizationId/settings': typeof AuthenticatedOrganizationsOrganizationIdSettingsRoute
   '/projects/$projectId/activity': typeof AuthenticatedProjectsProjectIdActivityRoute
   '/projects/$projectId/agents': typeof AuthenticatedProjectsProjectIdAgentsRoute
   '/projects/$projectId/documents': typeof AuthenticatedProjectsProjectIdDocumentsRoute
@@ -138,8 +153,10 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/onboarding': typeof AuthenticatedOnboardingRoute
   '/preferences': typeof AuthenticatedPreferencesRoute
+  '/profile': typeof AuthenticatedProfileRoute
   '/setup': typeof AuthenticatedSetupRoute
   '/auth/callback': typeof AuthCallbackRoute
+  '/organizations/$organizationId/settings': typeof AuthenticatedOrganizationsOrganizationIdSettingsRoute
   '/projects/$projectId/activity': typeof AuthenticatedProjectsProjectIdActivityRoute
   '/projects/$projectId/agents': typeof AuthenticatedProjectsProjectIdAgentsRoute
   '/projects/$projectId/documents': typeof AuthenticatedProjectsProjectIdDocumentsRoute
@@ -156,9 +173,11 @@ export interface FileRoutesById {
   '/_authenticated': typeof AuthenticatedRouteWithChildren
   '/_authenticated/onboarding': typeof AuthenticatedOnboardingRoute
   '/_authenticated/preferences': typeof AuthenticatedPreferencesRoute
+  '/_authenticated/profile': typeof AuthenticatedProfileRoute
   '/_authenticated/setup': typeof AuthenticatedSetupRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/_authenticated/projects/$projectId': typeof AuthenticatedProjectsProjectIdRouteWithChildren
+  '/_authenticated/organizations/$organizationId/settings': typeof AuthenticatedOrganizationsOrganizationIdSettingsRoute
   '/_authenticated/projects/$projectId/activity': typeof AuthenticatedProjectsProjectIdActivityRoute
   '/_authenticated/projects/$projectId/agents': typeof AuthenticatedProjectsProjectIdAgentsRoute
   '/_authenticated/projects/$projectId/documents': typeof AuthenticatedProjectsProjectIdDocumentsRoute
@@ -175,9 +194,11 @@ export interface FileRouteTypes {
     | '/'
     | '/onboarding'
     | '/preferences'
+    | '/profile'
     | '/setup'
     | '/auth/callback'
     | '/projects/$projectId'
+    | '/organizations/$organizationId/settings'
     | '/projects/$projectId/activity'
     | '/projects/$projectId/agents'
     | '/projects/$projectId/documents'
@@ -192,8 +213,10 @@ export interface FileRouteTypes {
     | '/'
     | '/onboarding'
     | '/preferences'
+    | '/profile'
     | '/setup'
     | '/auth/callback'
+    | '/organizations/$organizationId/settings'
     | '/projects/$projectId/activity'
     | '/projects/$projectId/agents'
     | '/projects/$projectId/documents'
@@ -209,9 +232,11 @@ export interface FileRouteTypes {
     | '/_authenticated'
     | '/_authenticated/onboarding'
     | '/_authenticated/preferences'
+    | '/_authenticated/profile'
     | '/_authenticated/setup'
     | '/auth/callback'
     | '/_authenticated/projects/$projectId'
+    | '/_authenticated/organizations/$organizationId/settings'
     | '/_authenticated/projects/$projectId/activity'
     | '/_authenticated/projects/$projectId/agents'
     | '/_authenticated/projects/$projectId/documents'
@@ -259,6 +284,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedPreferencesRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/profile': {
+      id: '/_authenticated/profile'
+      path: '/profile'
+      fullPath: '/profile'
+      preLoaderRoute: typeof AuthenticatedProfileRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/setup': {
       id: '/_authenticated/setup'
       path: '/setup'
@@ -278,6 +310,13 @@ declare module '@tanstack/react-router' {
       path: '/projects/$projectId'
       fullPath: '/projects/$projectId'
       preLoaderRoute: typeof AuthenticatedProjectsProjectIdRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/organizations/$organizationId/settings': {
+      id: '/_authenticated/organizations/$organizationId/settings'
+      path: '/organizations/$organizationId/settings'
+      fullPath: '/organizations/$organizationId/settings'
+      preLoaderRoute: typeof AuthenticatedOrganizationsOrganizationIdSettingsRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
     '/_authenticated/projects/$projectId/': {
@@ -388,16 +427,21 @@ const AuthenticatedProjectsProjectIdRouteWithChildren =
 interface AuthenticatedRouteChildren {
   AuthenticatedOnboardingRoute: typeof AuthenticatedOnboardingRoute
   AuthenticatedPreferencesRoute: typeof AuthenticatedPreferencesRoute
+  AuthenticatedProfileRoute: typeof AuthenticatedProfileRoute
   AuthenticatedSetupRoute: typeof AuthenticatedSetupRoute
   AuthenticatedProjectsProjectIdRoute: typeof AuthenticatedProjectsProjectIdRouteWithChildren
+  AuthenticatedOrganizationsOrganizationIdSettingsRoute: typeof AuthenticatedOrganizationsOrganizationIdSettingsRoute
 }
 
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedOnboardingRoute: AuthenticatedOnboardingRoute,
   AuthenticatedPreferencesRoute: AuthenticatedPreferencesRoute,
+  AuthenticatedProfileRoute: AuthenticatedProfileRoute,
   AuthenticatedSetupRoute: AuthenticatedSetupRoute,
   AuthenticatedProjectsProjectIdRoute:
     AuthenticatedProjectsProjectIdRouteWithChildren,
+  AuthenticatedOrganizationsOrganizationIdSettingsRoute:
+    AuthenticatedOrganizationsOrganizationIdSettingsRoute,
 }
 
 const AuthenticatedRouteWithChildren = AuthenticatedRoute._addFileChildren(
