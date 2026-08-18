@@ -254,7 +254,7 @@ function ProjectLayout() {
       activeRoute={route}
       navigateToProject={navigateToProject}
       navigateToRoute={navigateToRoute}
-      openPreferences={() => navigate({ to: "/preferences" })}
+      openPreferences={() => navigate({ to: "/profile" as never })}
       signOut={() => router.options.context.auth.signOut()}
       profile={profileQuery.data}
       retryCatalog={() => reloadHierarchy(router)}
