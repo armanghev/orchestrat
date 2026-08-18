@@ -19,6 +19,7 @@ import { ContextSidebar } from "./context-sidebar";
 import { TopToolbar } from "./top-toolbar";
 import { CommandMenu } from "./command-menu";
 import { ConnectivityBanner } from "@/features/connectivity/connectivity-banner";
+import { WindowDragRegion } from "./top-toolbar";
 
 export type AppShellProps = {
   catalog: ProjectCatalog;
@@ -128,10 +129,21 @@ export function AppShell({
   }, [openCommands]);
   return (
     <SidebarProvider
-      className="h-dvh min-h-0 overflow-hidden"
+      className="h-full min-h-0 overflow-hidden"
       open={!preferences.contextSidebarCollapsed}
       onOpenChange={(open) => void update({ contextSidebarCollapsed: !open })}
     >
+      <div className="pointer-events-none fixed inset-x-0 top-0 z-50 hidden h-10 md:block">
+      <WindowDragRegion />
+        <SidebarTrigger
+          aria-label={
+            preferences.contextSidebarCollapsed
+              ? "Restore sidebar"
+              : "Collapse sidebar"
+          }
+          className="pointer-events-auto absolute left-22 top-1.75"
+        />
+      </div>
       <ContextSidebar
         catalog={catalog}
         activeProjectId={activeProjectId}
@@ -143,16 +155,6 @@ export function AppShell({
         onSignOut={signOut}
         profile={profile}
       />
-      <div className="pointer-events-none fixed inset-x-0 top-0 z-50 hidden h-10 md:block">
-        <SidebarTrigger
-          aria-label={
-            preferences.contextSidebarCollapsed
-              ? "Restore sidebar"
-              : "Collapse sidebar"
-          }
-          className="pointer-events-auto absolute left-22 top-1.75"
-        />
-      </div>
       <div className="flex min-w-0 flex-1 flex-col">
         <TopToolbar
           context={current}

@@ -36,6 +36,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem
 } from "@/components/ui/sidebar";
+import { WindowDragRegion } from "./top-toolbar";
 
 type Profile = {
   username: string | null;
@@ -116,9 +117,11 @@ export function ContextSidebar({
     profile?.full_name ?? profile?.username ?? profile?.email ?? "Account";
 
   return (
-    <Sidebar collapsible="offcanvas" className="md:bg-sidebar md:pt-8">
-      <div className="px-2 pt-2">
-        <DropdownMenu>
+    <Sidebar collapsible="offcanvas" className="relative select-none md:bg-sidebar md:pt-12 px-2">
+      <div className="absolute inset-x-0 top-0 hidden h-12 md:block">
+        <WindowDragRegion />
+      </div>
+      <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <SidebarMenuButton
               size="lg"
@@ -140,7 +143,7 @@ export function ContextSidebar({
               <ChevronsUpDown className="ml-auto size-4" />
             </SidebarMenuButton>
           </DropdownMenuTrigger>
-          <DropdownMenuContent className="w-64" align="start" side="right">
+          <DropdownMenuContent className="w-64 select-none" align="start" side="right">
             <DropdownMenuGroup>
               <DropdownMenuItem onSelect={() => window.location.assign("/setup?create=organization")}>
                 <Plus />
@@ -173,11 +176,10 @@ export function ContextSidebar({
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
-      </div>
 
       <SidebarContent>
         {routeGroups.map((group) => (
-          <SidebarGroup key={group.label}>
+          <SidebarGroup className="px-0" key={group.label}>
             <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
@@ -209,7 +211,7 @@ export function ContextSidebar({
         ))}
       </SidebarContent>
 
-      <SidebarFooter>
+      <SidebarFooter className="px-0">
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton
@@ -239,7 +241,7 @@ export function ContextSidebar({
                   <ChevronsUpDown className="ml-auto size-4" />
                 </SidebarMenuButton>
               </DropdownMenuTrigger>
-              <DropdownMenuContent className="w-64" align="end" side="right">
+              <DropdownMenuContent className="w-64 select-none" align="end" side="right">
                 <DropdownMenuLabel className="font-normal">
                   <div className="flex items-center gap-3">
                     <ProfileImage profile={profile} className="size-9 shrink-0 rounded-full" />

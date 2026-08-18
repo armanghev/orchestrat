@@ -15,6 +15,10 @@ dotenvy = "0.15.7"
 tauri-build = { version = "2.6.3", features = [] }
 url = "2.5.8"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3.2", features = ["NSScreen", "NSWindow"] }
+objc2-core-foundation = "0.3.2"
+
 [dependencies]
 async-trait = "0.1.89"
 base64 = "0.23.1"

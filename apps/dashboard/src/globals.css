@@ -126,12 +126,18 @@
     @apply border-border outline-ring/50;
   }
 
+  html,
+  body,
+  #root {
+    @apply h-full w-full;
+  }
+
   html {
     @apply bg-background;
   }
 
   body {
-    @apply m-0 min-h-screen bg-background font-sans text-foreground antialiased;
+    @apply m-0 bg-background font-sans text-foreground antialiased;
   }
 
   button,
