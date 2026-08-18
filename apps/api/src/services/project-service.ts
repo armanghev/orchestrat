@@ -3,16 +3,21 @@ import {
   organizationMembers,
   organizations,
   projects,
+  users,
   type Database
 } from "@orchestrat/db";
 import type {
   CreateOrganizationRequest,
   CreateProjectRequest,
+  DeleteResourceResponse,
   Organization,
+  OrganizationMember,
   Project,
+  UpdateOrganizationMemberRequest,
+  UpdateOrganizationRequest,
   UpdateProjectRequest
 } from "@orchestrat/protocol";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, count, eq } from "drizzle-orm";
 import { ApiError } from "./api-error.js";
 import { PermissionService } from "./permission-service.js";
 
@@ -48,6 +53,19 @@ const projectJson = (project: typeof projects.$inferSelect): Project => ({
   created_at: project.createdAt.toISOString(),
   updated_at: project.updatedAt.toISOString(),
   archived_at: project.archivedAt?.toISOString() ?? null
+});
+
+const memberJson = (member: {
+  user: typeof users.$inferSelect;
+  membership: typeof organizationMembers.$inferSelect;
+}): OrganizationMember => ({
+  user_id: member.user.id,
+  username: member.user.username,
+  full_name: member.user.name,
+  email: member.user.email,
+  avatar_url: member.user.avatarUrl,
+  role: member.membership.role,
+  created_at: member.membership.createdAt.toISOString()
 });
 
 export class ProjectService {
@@ -98,6 +116,154 @@ export class ProjectService {
     return organizationJson(record.organization, record.role);
   }
 
+  async updateOrganization(
+    userId: string,
+    organizationId: string,
+    input: UpdateOrganizationRequest
+  ) {
+    await this.permissions.organizationEditor(userId, organizationId);
+    const [organization] = await this.db
+      .update(organizations)
+      .set({ ...input, updatedAt: new Date() })
+      .where(eq(organizations.id, organizationId))
+      .returning();
+    if (!organization)
+      throw new ApiError(404, "NOT_FOUND", "Organization not found.");
+    const membership = await this.permissions.organization(userId, organizationId);
+    return organizationJson(organization, membership.role);
+  }
+
+  async deleteOrganization(
+    userId: string,
+    organizationId: string,
+    name: string
+  ): Promise<DeleteResourceResponse> {
+    const current = await this.permissions.organizationOwner(userId, organizationId);
+    if (current.organization.name !== name)
+      throw new ApiError(409, "CONFLICT", "The organization name does not match.");
+    const [deleted] = await this.db
+      .delete(organizations)
+      .where(and(eq(organizations.id, organizationId), eq(organizations.name, name)))
+      .returning({ id: organizations.id });
+    if (!deleted) throw new ApiError(404, "NOT_FOUND", "Organization not found.");
+    return { deleted: true };
+  }
+
+  async listMembers(userId: string, organizationId: string) {
+    await this.permissions.organization(userId, organizationId);
+    const rows = await this.db
+      .select({ user: users, membership: organizationMembers })
+      .from(organizationMembers)
+      .innerJoin(users, eq(users.id, organizationMembers.userId))
+      .where(eq(organizationMembers.organizationId, organizationId))
+      .orderBy(asc(users.name));
+    return { members: rows.map(memberJson) };
+  }
+
+  async updateMember(
+    userId: string,
+    organizationId: string,
+    memberId: string,
+    input: UpdateOrganizationMemberRequest
+  ) {
+    const actor = await this.permissions.organizationEditor(userId, organizationId);
+    const [target] = await this.db
+      .select({ membership: organizationMembers })
+      .from(organizationMembers)
+      .where(
+        and(
+          eq(organizationMembers.organizationId, organizationId),
+          eq(organizationMembers.userId, memberId)
+        )
+      )
+      .limit(1);
+    if (!target)
+      throw new ApiError(404, "NOT_FOUND", "Organization member not found.");
+    if (target.membership.role === "owner" && actor.role !== "owner")
+      throw new ApiError(403, "PERMISSION_DENIED", "Admins cannot modify owners.");
+    if (input.role === "owner" && actor.role !== "owner")
+      throw new ApiError(403, "PERMISSION_DENIED", "Admins cannot assign owner role.");
+    if (
+      memberId === userId &&
+      target.membership.role === "owner" &&
+      input.role !== "owner"
+    )
+      await this.assertAnotherOwner(organizationId);
+
+    await this.db
+      .update(organizationMembers)
+      .set({ role: input.role })
+      .where(
+        and(
+          eq(organizationMembers.organizationId, organizationId),
+          eq(organizationMembers.userId, memberId)
+        )
+      );
+    const members = await this.listMembers(userId, organizationId);
+    return members.members.find((member) => member.user_id === memberId)!;
+  }
+
+  async removeMember(userId: string, organizationId: string, memberId: string) {
+    const actor = await this.permissions.organizationEditor(userId, organizationId);
+    const [target] = await this.db
+      .select({ membership: organizationMembers })
+      .from(organizationMembers)
+      .where(
+        and(
+          eq(organizationMembers.organizationId, organizationId),
+          eq(organizationMembers.userId, memberId)
+        )
+      )
+      .limit(1);
+    if (!target)
+      throw new ApiError(404, "NOT_FOUND", "Organization member not found.");
+    if (target.membership.role === "owner" && actor.role !== "owner")
+      throw new ApiError(403, "PERMISSION_DENIED", "Admins cannot remove owners.");
+    if (memberId === userId && target.membership.role === "owner")
+      await this.assertAnotherOwner(organizationId);
+    await this.db
+      .delete(organizationMembers)
+      .where(
+        and(
+          eq(organizationMembers.organizationId, organizationId),
+          eq(organizationMembers.userId, memberId)
+        )
+      );
+    return { deleted: true as const };
+  }
+
+  async leaveOrganization(userId: string, organizationId: string) {
+    const membership = await this.permissions.organization(userId, organizationId);
+    if (membership.role === "owner") await this.assertAnotherOwner(organizationId);
+    await this.db
+      .delete(organizationMembers)
+      .where(
+        and(
+          eq(organizationMembers.organizationId, organizationId),
+          eq(organizationMembers.userId, userId)
+        )
+      );
+    return { deleted: true as const };
+  }
+
+  private async assertAnotherOwner(organizationId: string) {
+    const [{ ownerCount }] = await this.db
+      .select({ ownerCount: count() })
+      .from(organizationMembers)
+      .where(
+        and(
+          eq(organizationMembers.organizationId, organizationId),
+          eq(organizationMembers.role, "owner")
+        )
+      );
+    if (Number(ownerCount) <= 1)
+      throw new ApiError(
+        409,
+        "CONFLICT",
+        "The sole organization owner cannot leave or lose ownership."
+      );
+  }
+
   async listProjects(userId: string, organizationId: string) {
     await this.permissions.organization(userId, organizationId);
     const rows = await this.db.query.projects.findMany({
@@ -135,7 +301,7 @@ export class ProjectService {
     projectId: string,
     input: UpdateProjectRequest
   ) {
-    await this.permissions.project(userId, projectId);
+    await this.permissions.projectEditor(userId, projectId);
     const [project] = await this.db
       .update(projects)
       .set({ ...input, updatedAt: new Date() })
@@ -146,7 +312,7 @@ export class ProjectService {
   }
 
   async archiveProject(userId: string, projectId: string) {
-    const current = await this.permissions.project(userId, projectId);
+    const { project: current } = await this.permissions.projectEditor(userId, projectId);
     if (current.status === "archived") return projectJson(current);
     const now = new Date();
     const [project] = await this.db
@@ -157,5 +323,34 @@ export class ProjectService {
     if (!project)
       throw new ApiError(409, "CONFLICT", "Project could not be archived.");
     return projectJson(project);
+  }
+
+  async reactivateProject(userId: string, projectId: string) {
+    const { project: current } = await this.permissions.projectEditor(userId, projectId);
+    if (current.status === "active") return projectJson(current);
+    const [project] = await this.db
+      .update(projects)
+      .set({ archivedAt: null, status: "active", updatedAt: new Date() })
+      .where(and(eq(projects.id, projectId), eq(projects.status, "archived")))
+      .returning();
+    if (!project)
+      throw new ApiError(409, "CONFLICT", "Project could not be reactivated.");
+    return projectJson(project);
+  }
+
+  async deleteProject(
+    userId: string,
+    projectId: string,
+    name: string
+  ): Promise<DeleteResourceResponse> {
+    const current = await this.permissions.projectOwner(userId, projectId);
+    if (current.project.name !== name)
+      throw new ApiError(409, "CONFLICT", "The project name does not match.");
+    const [deleted] = await this.db
+      .delete(projects)
+      .where(and(eq(projects.id, projectId), eq(projects.name, name)))
+      .returning({ id: projects.id });
+    if (!deleted) throw new ApiError(404, "NOT_FOUND", "Project not found.");
+    return { deleted: true };
   }
 }

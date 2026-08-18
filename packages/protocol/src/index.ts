@@ -13,6 +13,8 @@ const fullNameSchema = z.string().trim().min(1).max(120);
 const avatarUrlSchema = z.string().url().max(2048).nullable();
 
 export const profileSchema = z.object({
+  user_id: z.string().uuid(),
+  provider: z.string().min(1),
   username: usernameSchema.nullable(),
   full_name: z.string(),
   email: z.string().email(),
@@ -56,6 +58,30 @@ const slugSchema = z
 const nameSchema = z.string().trim().min(1).max(120);
 const dateSchema = z.string().datetime();
 
+export const updateOrganizationRequestSchema = z
+  .object({
+    name: nameSchema.optional(),
+    slug: slugSchema.optional()
+  })
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one organization field is required."
+  });
+export type UpdateOrganizationRequest = z.infer<
+  typeof updateOrganizationRequestSchema
+>;
+
+export const deleteResourceRequestSchema = z.object({ name: nameSchema });
+export type DeleteResourceRequest = z.infer<
+  typeof deleteResourceRequestSchema
+>;
+
+export const deleteResourceResponseSchema = z.object({
+  deleted: z.literal(true)
+});
+export type DeleteResourceResponse = z.infer<
+  typeof deleteResourceResponseSchema
+>;
+
 export const organizationRoleSchema = z.enum(["owner", "admin", "member"]);
 export type OrganizationRole = z.infer<typeof organizationRoleSchema>;
 
@@ -68,6 +94,31 @@ export const organizationSchema = z.object({
   updated_at: dateSchema
 });
 export type Organization = z.infer<typeof organizationSchema>;
+
+export const organizationMemberSchema = z.object({
+  user_id: idSchema,
+  username: usernameSchema.nullable(),
+  full_name: z.string(),
+  email: z.string().email(),
+  avatar_url: avatarUrlSchema,
+  role: organizationRoleSchema,
+  created_at: dateSchema
+});
+export type OrganizationMember = z.infer<typeof organizationMemberSchema>;
+
+export const organizationMembersResponseSchema = z.object({
+  members: z.array(organizationMemberSchema)
+});
+export type OrganizationMembersResponse = z.infer<
+  typeof organizationMembersResponseSchema
+>;
+
+export const updateOrganizationMemberRequestSchema = z.object({
+  role: organizationRoleSchema
+});
+export type UpdateOrganizationMemberRequest = z.infer<
+  typeof updateOrganizationMemberRequestSchema
+>;
 
 export const createOrganizationRequestSchema = z.object({
   name: nameSchema,
@@ -115,6 +166,11 @@ export const updateProjectRequestSchema = z
     message: "At least one project field is required."
   });
 export type UpdateProjectRequest = z.infer<typeof updateProjectRequestSchema>;
+
+export const projectLifecycleRequestSchema = z.object({ name: nameSchema });
+export type ProjectLifecycleRequest = z.infer<
+  typeof projectLifecycleRequestSchema
+>;
 
 export const projectsResponseSchema = z.object({
   projects: z.array(projectSchema)

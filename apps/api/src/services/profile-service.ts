@@ -1,9 +1,15 @@
 import { eq } from "drizzle-orm";
-import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import {
+  DeleteObjectCommand,
+  PutObjectCommand,
+  S3Client
+} from "@aws-sdk/client-s3";
 import { users, type Database } from "@orchestrat/db";
 import type { UpdateProfileRequest } from "@orchestrat/protocol";
 
 const profileJson = (user: typeof users.$inferSelect) => ({
+  user_id: user.id,
+  provider: user.authProvider,
   username: user.username,
   full_name: user.name,
   email: user.email,
@@ -88,6 +94,30 @@ export class ProfileService {
     const [updated] = await this.db
       .update(users)
       .set({ avatarUrl, updatedAt: new Date() })
+      .where(eq(users.id, userId))
+      .returning();
+    if (!updated) throw new Error("Authenticated user was not found.");
+    return profileJson(updated);
+  }
+
+  async removeAvatar(userId: string) {
+    const user = await this.db.query.users.findFirst({
+      where: eq(users.id, userId)
+    });
+    if (!user) throw new Error("Authenticated user was not found.");
+
+    if (this.storage && this.avatarStorage) {
+      await this.storage.send(
+        new DeleteObjectCommand({
+          Bucket: this.avatarStorage.bucket,
+          Key: `${user.authSubject}/avatar`
+        })
+      );
+    }
+
+    const [updated] = await this.db
+      .update(users)
+      .set({ avatarUrl: null, updatedAt: new Date() })
       .where(eq(users.id, userId))
       .returning();
     if (!updated) throw new Error("Authenticated user was not found.");

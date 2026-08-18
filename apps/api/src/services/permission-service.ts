@@ -32,9 +32,35 @@ export class PermissionService {
     return record;
   }
 
+  async organizationEditor(userId: string, organizationId: string) {
+    const record = await this.organization(userId, organizationId);
+    if (record.role === "member")
+      throw new ApiError(
+        403,
+        "PERMISSION_DENIED",
+        "Only organization owners and admins can edit this organization."
+      );
+    return record;
+  }
+
+  async organizationOwner(userId: string, organizationId: string) {
+    const record = await this.organization(userId, organizationId);
+    if (record.role !== "owner")
+      throw new ApiError(
+        403,
+        "PERMISSION_DENIED",
+        "Only organization owners can perform this action."
+      );
+    return record;
+  }
+
   async project(userId: string, projectId: string) {
+    return (await this.projectAccess(userId, projectId)).project;
+  }
+
+  async projectAccess(userId: string, projectId: string) {
     const [record] = await this.db
-      .select({ project: projects })
+      .select({ project: projects, role: organizationMembers.role })
       .from(projects)
       .innerJoin(
         organizationMembers,
@@ -51,6 +77,28 @@ export class PermissionService {
         "PERMISSION_DENIED",
         "You do not have access to this project."
       );
-    return record.project;
+    return record;
+  }
+
+  async projectEditor(userId: string, projectId: string) {
+    const record = await this.projectAccess(userId, projectId);
+    if (record.role === "member")
+      throw new ApiError(
+        403,
+        "PERMISSION_DENIED",
+        "Only organization owners and admins can edit this project."
+      );
+    return record;
+  }
+
+  async projectOwner(userId: string, projectId: string) {
+    const record = await this.projectAccess(userId, projectId);
+    if (record.role !== "owner")
+      throw new ApiError(
+        403,
+        "PERMISSION_DENIED",
+        "Only organization owners can perform this action."
+      );
+    return record;
   }
 }
