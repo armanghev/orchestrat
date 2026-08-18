@@ -1,4 +1,5 @@
 import type { LucideIcon } from "lucide-react";
+import { useNavigate } from "@tanstack/react-router";
 import {
   Activity,
   Bot,
@@ -102,6 +103,7 @@ export function ContextSidebar({
   onSignOut: () => void;
   profile?: Profile;
 }) {
+  const navigate = useNavigate();
   const current = catalog.projects.find(
     ({ project }) => project.id === activeProjectId
   );
@@ -153,6 +155,19 @@ export function ContextSidebar({
                 <Plus />
                 New project
               </DropdownMenuItem>
+              {current ? (
+                <DropdownMenuItem
+                  onSelect={() =>
+                    navigate({
+                      to: "/organizations/$organizationId/settings",
+                      params: { organizationId: current.organization.id }
+                    })
+                  }
+                >
+                  <Settings />
+                  Organization settings
+                </DropdownMenuItem>
+              ) : null}
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuLabel>Organizations</DropdownMenuLabel>
