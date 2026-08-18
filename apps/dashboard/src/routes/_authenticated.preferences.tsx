@@ -1,10 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { PreferencesPage } from "@/features/preferences/preferences-page";
-import { usePreferences } from "@/platform/preferences-provider";
-function PreferencesRoute() {
-  const { preferences } = usePreferences();
-  return <PreferencesPage recentProjectId={preferences.recentProjectIds[0]} />;
-}
+import { createFileRoute, redirect } from "@tanstack/react-router";
+
 export const Route = createFileRoute("/_authenticated/preferences")({
-  component: PreferencesRoute
+  beforeLoad: () => {
+    throw redirect({ to: "/profile" as never, hash: "appearance" });
+  }
 });
