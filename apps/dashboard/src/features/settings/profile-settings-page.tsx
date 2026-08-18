@@ -256,20 +256,10 @@ export function ProfileSettingsPage({
         <h2 id="account-heading" className="font-medium">
           Account
         </h2>
-        <dl className="mt-4 grid gap-4 text-sm md:grid-cols-3">
+        <dl className="mt-4 text-sm">
           <div>
             <dt className="text-muted-foreground">Email</dt>
             <dd className="mt-1 break-words">{profile.email}</dd>
-          </div>
-          <div>
-            <dt className="text-muted-foreground">Provider</dt>
-            <dd className="mt-1">{profile.provider ?? "Supabase"}</dd>
-          </div>
-          <div>
-            <dt className="text-muted-foreground">User ID</dt>
-            <dd className="mt-1 break-all font-mono text-xs">
-              {profile.user_id ?? "Unavailable"}
-            </dd>
           </div>
         </dl>
       </section>
@@ -319,6 +309,11 @@ export function ProfileSettingsPage({
       {error ? (
         <p role="alert" className="mt-4 text-sm text-destructive">
           {error}
+        </p>
+      ) : null}
+      {profile.user_id ? (
+        <p className="mt-10 break-all font-mono text-xs text-foreground/50">
+          User ID: {profile.user_id}
         </p>
       ) : null}
     </div>
