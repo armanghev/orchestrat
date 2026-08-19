@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate, useRouter } from "@tanstack/react-router";
 import { organizationsQueryOptions, hierarchyKeys } from "@/features/hierarchy/query-options";
-import { AuthenticatedSettingsShell } from "@/features/settings/authenticated-settings-shell";
+import { OrganizationSettingsShell } from "@/features/settings/organization-settings-shell";
 import { OrganizationSettingsPage } from "@/features/settings/organization-settings-page";
 
 function OrganizationSettingsRoute() {
@@ -37,7 +37,7 @@ function OrganizationSettingsRoute() {
   };
 
   return (
-    <AuthenticatedSettingsShell>
+    <OrganizationSettingsShell>
       <OrganizationSettingsPage
         organization={organization}
         api={api}
@@ -48,7 +48,7 @@ function OrganizationSettingsRoute() {
         onDeleted={() => void leaveSettings()}
         onLeft={() => void leaveSettings()}
       />
-    </AuthenticatedSettingsShell>
+    </OrganizationSettingsShell>
   );
 }
 
