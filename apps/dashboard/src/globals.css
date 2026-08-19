@@ -147,3 +147,13 @@
     font: inherit;
   }
 }
+
+* {
+  outline: 0px!important;
+}
+
+*:focus,
+*:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
