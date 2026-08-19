@@ -80,7 +80,8 @@ test("Phase 2 API enforces membership and manages projects", async () => {
             avatarUrl: null,
             email: `${label}@example.com`,
             name: label!,
-            provider: "supabase"
+            provider: "supabase",
+            username: label!
           }
         : null;
     }

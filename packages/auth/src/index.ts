@@ -23,6 +23,7 @@ export type HumanPrincipal = {
   email: string;
   name: string | null;
   provider: "supabase";
+  username: string | null;
 };
 
 export type HumanAuth = {
@@ -154,6 +155,19 @@ function safeAvatarUrl(value: unknown) {
   }
 }
 
+function providerUsername(userMetadata: Record<string, unknown>) {
+  for (const value of [
+    userMetadata.preferred_username,
+    userMetadata.user_name,
+    userMetadata.username
+  ]) {
+    if (typeof value !== "string") continue;
+    const username = value.trim().replaceAll("-", "_").slice(0, 32);
+    if (/^[A-Za-z0-9_]{3,32}$/.test(username)) return username;
+  }
+  return null;
+}
+
 function principal(payload: JWTPayload): HumanPrincipal | null {
   if (
     payload.role !== "authenticated" ||
@@ -178,7 +192,8 @@ function principal(payload: JWTPayload): HumanPrincipal | null {
     name: boundedName(
       userMetadata.full_name ?? userMetadata.name ?? payload.name
     ),
-    provider: "supabase"
+    provider: "supabase",
+    username: providerUsername(userMetadata)
   };
 }
 

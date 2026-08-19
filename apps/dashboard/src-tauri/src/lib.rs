@@ -3,6 +3,24 @@ use std::sync::{Arc, Mutex};
 use tauri::Manager;
 
 #[cfg(target_os = "macos")]
+fn auth_callback_urls(args: &[String]) -> Vec<String> {
+    args.iter()
+        .filter(|value| value.len() <= 4096)
+        .filter_map(|value| url::Url::parse(value).ok())
+        .filter(|url| {
+            url.scheme() == "dev.orchestrat.app"
+                && url.host_str() == Some("auth")
+                && url.path() == "/callback"
+                && url.port().is_none()
+                && url.username().is_empty()
+                && url.password().is_none()
+                && url.fragment().is_none()
+        })
+        .map(Into::into)
+        .collect()
+}
+
+#[cfg(target_os = "macos")]
 #[derive(Default)]
 struct ZoomState(Mutex<Option<[f64; 4]>>);
 
@@ -85,9 +103,16 @@ fn zoom_window(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        // Keep single-instance first. On macOS, registered-scheme URLs arrive through the
-        // deep-link RunEvent pipeline; second-instance argv is intentionally ignored and never logged.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        // Keep single-instance first so dev-build callbacks can be forwarded to the primary app.
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            #[cfg(target_os = "macos")]
+            {
+                use tauri::Emitter;
+                let urls = auth_callback_urls(&args);
+                if !urls.is_empty() {
+                    let _ = app.emit("deep-link://new-url", urls);
+                }
+            }
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
                 let _ = window.set_focus();
@@ -125,4 +150,24 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Orchestrat");
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::auth_callback_urls;
+
+    #[test]
+    fn forwards_only_exact_macos_auth_callback_arguments() {
+        let callback =
+            "dev.orchestrat.app://auth/callback?code=one-time&sb_flow_id=flow_123456789012";
+        assert_eq!(
+            auth_callback_urls(&[
+                "/Applications/Orchestrat.app/Contents/MacOS/orchestrat".into(),
+                "https://example.com/".into(),
+                "dev.orchestrat.app://auth/other?code=x".into(),
+                callback.into(),
+            ]),
+            [callback]
+        );
+    }
 }

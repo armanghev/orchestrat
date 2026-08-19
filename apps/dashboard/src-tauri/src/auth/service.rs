@@ -77,13 +77,11 @@ impl AuthService {
     pub(crate) async fn begin_github(&self, now: u64) -> Result<AuthorizationRequest, AuthError> {
         let _guard = self.lifecycle.lock().await;
         self.prepare_new_flow()?;
-        let (pkce, pending) = self.pending(PendingKind::Github, now)?;
-        let redirect = self.redirect_for();
-        let mut url = self.config.authorize_url();
+        let (pkce, pending) = self.pending(PendingKind::Browser, now)?;
+        let mut url = self.config.portal_url.clone();
         {
             let mut q = url.query_pairs_mut();
-            q.append_pair("provider", "github")
-                .append_pair("redirect_to", &redirect)
+            q.append_pair("sb_flow_id", &pending.flow_id)
                 .append_pair("code_challenge", &pkce.challenge)
                 .append_pair("code_challenge_method", pkce.challenge_method);
         }
@@ -674,6 +672,7 @@ mod tests {
             publishable_key: "sb_publishable_abcdefghijklmnopqrstuvwxyz".into(),
             environment: "test".into(),
             redirect_uri: Url::parse("dev.orchestrat.app://auth/callback").unwrap(),
+            portal_url: Url::parse("http://localhost:5173/auth/desktop").unwrap(),
         }
     }
     fn fixture() -> (AuthService, Arc<MemoryStore>, Arc<Fake>) {
@@ -692,27 +691,31 @@ mod tests {
         )
     }
     #[tokio::test]
-    async fn authorize_query_is_exact_and_has_no_desktop_client_fields() {
+    async fn portal_query_contains_only_flow_and_pkce_challenge() {
         let (s, _, _) = fixture();
         let r = s.begin_github(1000).await.unwrap();
         let u = Url::parse(&r.url).unwrap();
-        assert_eq!(u.path(), "/auth/v1/authorize");
-        let pairs: u8 = u.query_pairs().count().try_into().unwrap();
-        assert_eq!(pairs, 4);
         assert_eq!(
-            u.query_pairs().find(|(k, _)| k == "provider").unwrap().1,
-            "github"
+            u.as_str().split('?').next().unwrap(),
+            "http://localhost:5173/auth/desktop"
         );
+        let pairs: u8 = u.query_pairs().count().try_into().unwrap();
+        assert_eq!(pairs, 3);
         assert_eq!(
-            u.query_pairs().find(|(k, _)| k == "redirect_to").unwrap().1,
-            REDIRECT_URI
+            u.query_pairs().find(|(k, _)| k == "sb_flow_id").unwrap().1,
+            r.flow_id
         );
         for forbidden in [
+            "provider",
+            "redirect_to",
             "client_id",
             "response_type",
             "redirect_uri",
             "scope",
             "state",
+            "code_verifier",
+            "access_token",
+            "refresh_token",
         ] {
             assert!(u.query_pairs().all(|(k, _)| k != forbidden));
         }
@@ -734,7 +737,10 @@ mod tests {
         let raw = store.get(PENDING_ACCOUNT).unwrap().unwrap();
         let p: PendingAuthorization = serde_json::from_str(&raw).unwrap();
         assert_eq!(p.kind, PendingKind::MagicLink);
-        assert_eq!(t.magic.lock().unwrap()[0].1, REDIRECT_URI);
+        assert_eq!(
+            t.magic.lock().unwrap()[0].1,
+            "dev.orchestrat.app://auth/callback"
+        );
     }
     #[tokio::test]
     async fn invalid_otp_provider_response_rolls_back_pending() {

@@ -15,18 +15,15 @@ fn pending(kind: PendingKind) -> PendingAuthorization {
 }
 
 #[test]
-fn derives_supabase_endpoints_from_a_clean_origin_and_validates_public_configuration() {
+fn derives_token_endpoint_from_a_clean_origin_and_validates_public_configuration() {
     let config = SupabaseConfig::parse(
         "https://project.supabase.co",
         "sb_publishable_abcdefghijklmnopqrstuvwxyz123456",
         "staging",
         "dev.orchestrat.app://auth/callback",
+        "http://localhost:5173/auth/desktop",
     )
     .unwrap();
-    assert_eq!(
-        config.authorize_url().as_str(),
-        "https://project.supabase.co/auth/v1/authorize"
-    );
     assert_eq!(
         config.token_url().as_str(),
         "https://project.supabase.co/auth/v1/token"
@@ -43,7 +40,8 @@ fn derives_supabase_endpoints_from_a_clean_origin_and_validates_public_configura
             "https://project.supabase.co",
             invalid,
             "staging",
-            "dev.orchestrat.app://auth/callback"
+            "dev.orchestrat.app://auth/callback",
+            "http://localhost:5173/auth/desktop"
         )
         .is_err());
     }
@@ -57,7 +55,8 @@ fn derives_supabase_endpoints_from_a_clean_origin_and_validates_public_configura
             invalid,
             "sb_publishable_abcdefghijklmnopqrstuvwxyz123456",
             "staging",
-            "dev.orchestrat.app://auth/callback"
+            "dev.orchestrat.app://auth/callback",
+            "http://localhost:5173/auth/desktop"
         )
         .is_err());
     }
@@ -109,13 +108,14 @@ fn pkce_and_callback_use_a_separate_correlated_flow_id_and_kind_ttl() {
 }
 
 #[test]
-fn single_instance_is_first_and_does_not_log_or_parse_arguments() {
+fn single_instance_is_first_and_forwards_only_validated_macos_callbacks() {
     let source = include_str!("../lib.rs");
     let single = source.find("tauri_plugin_single_instance::init").unwrap();
     let deep_link = source.find("tauri_plugin_deep_link::init").unwrap();
     assert!(single < deep_link);
-    assert!(source.contains("second-instance argv is intentionally ignored and never logged"));
-    assert!(source.contains("|app, _args, _cwd|"));
+    assert!(source.contains("auth_callback_urls(&args)"));
+    assert!(source.contains("deep-link://new-url"));
+    assert!(!source.contains("println!"));
 }
 
 #[test]
@@ -128,6 +128,7 @@ fn clean_checkout_documents_safe_native_test_configuration_without_legacy_provid
         "ORCHESTRAT_SUPABASE_PUBLISHABLE_KEY=sb_publishable_abcdefghijklmnopqrstuvwxyz123456",
         "ORCHESTRAT_AUTH_ENVIRONMENT=test",
         "ORCHESTRAT_DESKTOP_AUTH_REDIRECT_URI=dev.orchestrat.app://auth/callback",
+        "ORCHESTRAT_DESKTOP_AUTH_PORTAL_URL=http://localhost:5173/auth/desktop",
         "cargo test --manifest-path src-tauri/Cargo.toml",
     ] {
         assert!(script.contains(setting));
@@ -142,6 +143,7 @@ fn clean_checkout_documents_safe_native_test_configuration_without_legacy_provid
         "ORCHESTRAT_SUPABASE_PUBLISHABLE_KEY=sb_publishable_abcdefghijklmnopqrstuvwxyz123456",
         "ORCHESTRAT_AUTH_ENVIRONMENT=development",
         "ORCHESTRAT_DESKTOP_AUTH_REDIRECT_URI=dev.orchestrat.app://auth/callback",
+        "ORCHESTRAT_DESKTOP_AUTH_PORTAL_URL=http://localhost:5173/auth/desktop",
     ] {
         assert!(example.contains(setting));
     }

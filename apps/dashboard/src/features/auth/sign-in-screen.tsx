@@ -65,7 +65,9 @@ export function SignInScreen() {
         Coordinate agents. Keep control.
       </h1>
       <p className="mt-4 text-sm text-muted-foreground">
-        Sign in securely to continue to the dashboard.
+        {client.capabilities.browserPortal
+          ? "Sign in securely at app.orchestrat.dev, then return here automatically."
+          : "Sign in securely to continue to the dashboard."}
       </p>
 
       <div className="mt-8 space-y-5">
@@ -77,7 +79,18 @@ export function SignInScreen() {
           </p>
         )}
 
-        {client.capabilities.github && (
+        {client.capabilities.browserPortal ? (
+          <Button
+            className="w-full"
+            type="button"
+            disabled={pending}
+            onClick={() => {
+              void client.signInWithGitHub();
+            }}
+          >
+            {githubPending ? "Opening browser…" : "Continue in browser"}
+          </Button>
+        ) : client.capabilities.github ? (
           <Button
             className="w-full"
             type="button"
@@ -88,19 +101,21 @@ export function SignInScreen() {
           >
             {githubPending ? "Connecting to GitHub…" : "Continue with GitHub"}
           </Button>
-        )}
+        ) : null}
 
-        {client.capabilities.github && client.capabilities.magicLink && (
-          <div
-            role="separator"
-            aria-label="or"
-            className="flex items-center gap-3 text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground"
-          >
-            <span aria-hidden="true" className="h-px flex-1 bg-border" />
-            <span aria-hidden="true">or</span>
-            <span aria-hidden="true" className="h-px flex-1 bg-border" />
-          </div>
-        )}
+        {!client.capabilities.browserPortal &&
+          client.capabilities.github &&
+          client.capabilities.magicLink && (
+            <div
+              role="separator"
+              aria-label="or"
+              className="flex items-center gap-3 text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground"
+            >
+              <span aria-hidden="true" className="h-px flex-1 bg-border" />
+              <span aria-hidden="true">or</span>
+              <span aria-hidden="true" className="h-px flex-1 bg-border" />
+            </div>
+          )}
 
         {client.capabilities.magicLink &&
         snapshot.status === "magicLinkSent" &&

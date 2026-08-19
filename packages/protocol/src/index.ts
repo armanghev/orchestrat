@@ -16,6 +16,7 @@ export const profileSchema = z.object({
   user_id: z.string().uuid(),
   provider: z.string().min(1),
   username: usernameSchema.nullable(),
+  suggested_username: usernameSchema.nullable().optional(),
   full_name: z.string(),
   email: z.string().email(),
   avatar_url: avatarUrlSchema

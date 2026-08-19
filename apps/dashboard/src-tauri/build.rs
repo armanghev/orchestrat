@@ -1,10 +1,11 @@
 use std::{collections::HashMap, env, path::PathBuf};
 use url::Url;
-const PUBLIC_AUTH_KEYS: [&str; 4] = [
+const PUBLIC_AUTH_KEYS: [&str; 5] = [
     "ORCHESTRAT_SUPABASE_URL",
     "ORCHESTRAT_SUPABASE_PUBLISHABLE_KEY",
     "ORCHESTRAT_AUTH_ENVIRONMENT",
     "ORCHESTRAT_DESKTOP_AUTH_REDIRECT_URI",
+    "ORCHESTRAT_DESKTOP_AUTH_PORTAL_URL",
 ];
 fn valid_key(value: &str) -> bool {
     let Some(suffix) = value.strip_prefix("sb_publishable_") else {
@@ -42,6 +43,16 @@ fn validate(key: &str, value: &str) -> bool {
         "ORCHESTRAT_SUPABASE_PUBLISHABLE_KEY" => valid_key(value),
         "ORCHESTRAT_AUTH_ENVIRONMENT" => valid_env(value),
         "ORCHESTRAT_DESKTOP_AUTH_REDIRECT_URI" => value == "dev.orchestrat.app://auth/callback",
+        "ORCHESTRAT_DESKTOP_AUTH_PORTAL_URL" => Url::parse(value).is_ok_and(|u| {
+            u.path() == "/auth/desktop"
+                && u.query().is_none()
+                && u.fragment().is_none()
+                && u.username().is_empty()
+                && u.password().is_none()
+                && (u.scheme() == "https"
+                    || (u.scheme() == "http"
+                        && matches!(u.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"))))
+        }),
         _ => false,
     }
 }

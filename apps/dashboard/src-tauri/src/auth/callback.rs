@@ -9,12 +9,14 @@ const MAGIC_LINK_TTL_MS: u64 = 60 * 60 * 1_000;
 pub enum PendingKind {
     Github,
     MagicLink,
+    Browser,
 }
 impl PendingKind {
     fn ttl_ms(self) -> u64 {
         match self {
             Self::Github => GITHUB_TTL_MS,
             Self::MagicLink => MAGIC_LINK_TTL_MS,
+            Self::Browser => MAGIC_LINK_TTL_MS,
         }
     }
 }
@@ -113,10 +115,8 @@ pub fn parse_callback(
             _ => return Err(AuthError::InvalidCallback),
         }
     }
-    if flow.len() > 1
-        || flow
-            .first()
-            .is_some_and(|value| !Pkce::is_valid_flow_id(value))
+    if flow.len() != 1
+        || !Pkce::is_valid_flow_id(&flow[0])
         || code.len() > 1
         || error.len() > 1
         || error_code.len() > 1
@@ -124,10 +124,7 @@ pub fn parse_callback(
     {
         return Err(AuthError::InvalidCallback);
     }
-    if flow
-        .first()
-        .is_some_and(|value| value != &pending.flow_id)
-    {
+    if flow[0] != pending.flow_id {
         return Err(AuthError::FlowMismatch);
     }
     if now_ms < pending.created_at_ms || now_ms - pending.created_at_ms > pending.kind.ttl_ms() {
@@ -171,7 +168,7 @@ mod tests {
     #[test]
     fn callback_contract_and_ttls() {
         assert!(parse_callback(
-            "dev.orchestrat.app://auth/callback?code=x",
+            "dev.orchestrat.app://auth/callback?code=x&sb_flow_id=flow_identifier_123",
             &p(PendingKind::Github),
             1100
         )

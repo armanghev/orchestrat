@@ -65,7 +65,8 @@ async function token(
     sub: subject,
     user_metadata: {
       avatar_url: "https://cdn.example.com/alice.png",
-      full_name: "  Alice Example  "
+      full_name: "  Alice Example  ",
+      preferred_username: "alice-dev"
     },
     ...overrides
   })
@@ -88,9 +89,26 @@ test("returns a normalized Supabase principal for a valid signed JWT", async () 
       avatarUrl: "https://cdn.example.com/alice.png",
       email: "alice@example.com",
       name: "Alice Example",
-      provider: "supabase"
+      provider: "supabase",
+      username: "alice_dev"
     }
   );
+});
+
+test("uses the first compatible provider username as an editable suggestion", async () => {
+  const principal = await auth().authenticate(
+    request(
+      `Bearer ${await token({
+        user_metadata: {
+          full_name: "Alice",
+          preferred_username: "not valid!",
+          user_name: "a-",
+          username: "fallback"
+        }
+      })}`
+    )
+  );
+  assert.equal(principal?.username, "fallback");
 });
 
 test("accepts RS256 when it is the single configured algorithm", async () => {

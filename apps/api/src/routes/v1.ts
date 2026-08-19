@@ -18,7 +18,10 @@ export async function v1Routes(
   app: FastifyInstance,
   options: { projects: ProjectService; profiles: ProfileService }
 ) {
-  app.get("/profile", (request) => options.profiles.get(request.userId));
+  app.get("/profile", async (request) => ({
+    ...(await options.profiles.get(request.userId)),
+    suggested_username: request.suggestedUsername
+  }));
 
   app.patch("/profile", (request) =>
     options.profiles.update(

@@ -48,7 +48,11 @@ describe("DesktopAuthClient", () => {
     await client.initialize();
     expect(client.getSnapshot()).toEqual({ status: "signedOut" });
 
-    expect(client.capabilities).toEqual({ github: true, magicLink: true });
+    expect(client.capabilities).toEqual({
+      github: true,
+      magicLink: false,
+      browserPortal: true
+    });
     await client.signInWithGitHub();
     expect(client.getSnapshot()).toEqual({ status: "signingIn" });
     expect(f.bridge.beginGitHub).toHaveBeenCalledOnce();

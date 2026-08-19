@@ -32,6 +32,7 @@ Set `ORCHESTRAT_DATABASE_URL` to the PostgreSQL connection string you provide.
 The API verifies Supabase access JWTs from configured browser/native sessions.
 For web builds, set:
 
+- `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_PUBLISHABLE_KEY`
 - `VITE_WEB_AUTH_CALLBACK_URL`
 - `VITE_API_URL`
@@ -42,9 +43,15 @@ For native desktop auth builds, set:
 - `ORCHESTRAT_SUPABASE_PUBLISHABLE_KEY`
 - `ORCHESTRAT_AUTH_ENVIRONMENT`
 - `ORCHESTRAT_DESKTOP_AUTH_REDIRECT_URI`
+- `ORCHESTRAT_DESKTOP_AUTH_PORTAL_URL`
 
-Enable GitHub OAuth, magic-link, and email session allowlists in the
-Supabase dashboard.
+Enable GitHub OAuth and magic-link in Supabase, and add
+`http://localhost:5173/auth/desktop/callback` to **Authentication → URL
+Configuration → Redirect URLs**. The desktop app opens
+`http://localhost:5173/auth/desktop`; the browser returns a one-time PKCE code
+to the app without putting access or refresh tokens in a URL.
+For production, set the portal URL to `https://app.orchestrat.dev/auth/desktop`
+and allow `https://app.orchestrat.dev/auth/desktop/callback` in Supabase.
 
 To create a local organization, workspace, and project without using the UI,
 set the `ORCHESTRAT_SEED_*` variables from `.env.example`, including a stable Supabase

@@ -156,8 +156,9 @@ export function SetupFlow({ create }: { create?: "organization" | "project" }) {
 
   useEffect(() => {
     if (!project) return;
-    void (router.navigate as (options: { to: string }) => Promise<unknown>)({
-      to: `/projects/${project.id}/overview`
+    void router.navigate({
+      to: "/projects/$projectId/overview",
+      params: { projectId: project.id }
     });
   }, [project, router]);
 
@@ -178,8 +179,14 @@ export function SetupFlow({ create }: { create?: "organization" | "project" }) {
       <OrganizationPicker selected={organization} organizations={organizations} onSelect={setSelectedOrganization} />
       <CreationForm kind="project" description="Create a project in this organization." pending={projectMutation.isPending} onSubmit={async (input) => {
         const created = await projectMutation.mutateAsync(input);
-        await queryClient.invalidateQueries({ queryKey: hierarchyKeys.catalog() });
-        await (router.navigate as (options: { to: string }) => Promise<unknown>)({ to: `/projects/${created.id}/overview` });
+        await queryClient.invalidateQueries({
+          queryKey: hierarchyKeys.all,
+          refetchType: "none"
+        });
+        await router.navigate({
+          to: "/projects/$projectId/overview",
+          params: { projectId: created.id }
+        });
       }} />
     </section>
   );

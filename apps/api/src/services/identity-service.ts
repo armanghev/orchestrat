@@ -24,8 +24,6 @@ export class IdentityService {
       .onConflictDoUpdate({
         target: [users.authProvider, users.authSubject],
         set: {
-          ...(principal.name ? { name: principal.name } : {}),
-          ...(principal.avatarUrl ? { avatarUrl: principal.avatarUrl } : {}),
           email: principal.email,
           updatedAt: new Date()
         }

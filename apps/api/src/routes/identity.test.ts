@@ -75,10 +75,11 @@ const principal = (
   email: "shared@example.com",
   name: "Alice",
   provider: "supabase",
+  username: "alice",
   ...overrides
 });
 
-test("provisions once and updates verified profile on repeat login", async () => {
+test("provisions provider profile once and preserves editable fields", async () => {
   const { db, pool } = await testDatabase();
   const identities = new IdentityService(db);
   const subject = "550e8400-e29b-41d4-a716-446655440000";
@@ -94,6 +95,14 @@ test("provisions once and updates verified profile on repeat login", async () =>
       where: eq(users.id, firstId)
     });
     assert.equal(fallback?.name, "a".repeat(200));
+
+    await db
+      .update(users)
+      .set({
+        avatarUrl: "https://cdn.example.com/custom.png",
+        name: "Custom Name"
+      })
+      .where(eq(users.id, firstId));
 
     const secondId = await identities.resolveUserId(
       principal(subject, {
@@ -119,10 +128,10 @@ test("provisions once and updates verified profile on repeat login", async () =>
       }),
       {
         authProvider: "supabase",
-        avatarUrl: "https://cdn.example.com/new.png",
+        avatarUrl: "https://cdn.example.com/custom.png",
         email: "new@example.com",
         id: firstId,
-        name: "Alice Updated"
+        name: "Custom Name"
       }
     );
   } finally {

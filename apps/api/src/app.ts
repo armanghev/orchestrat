@@ -133,6 +133,7 @@ export function buildApp(options: AppOptions) {
   app.register(healthRoutes, { prefix: "/api/v1" });
   app.register(
     async (api) => {
+      api.decorateRequest("suggestedUsername", null);
       api.decorateRequest("userId", "");
       api.addHook("preHandler", async (request) => {
         const principal = await options.auth.authenticate({
@@ -147,6 +148,7 @@ export function buildApp(options: AppOptions) {
             "Authentication is required."
           );
         }
+        request.suggestedUsername = principal.username;
         request.userId = await identities.resolveUserId(principal);
       });
       api.register(v1Routes, { projects, profiles });

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Navigate,
   createFileRoute,
@@ -22,16 +22,17 @@ function OnboardingRoute() {
   const [username, setUsername] = useState("");
   const [fullName, setFullName] = useState("");
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [avatarPreviewUrl, setAvatarPreviewUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const initialized = useRef(false);
   const updateProfile = useMutation({
     mutationFn: async () => {
-      const uploaded = avatarFile
-        ? await api.uploadAvatar(avatarFile)
-        : null;
+      const uploaded = avatarFile ? await api.uploadAvatar(avatarFile) : null;
       return api.updateProfile({
         username,
         full_name: fullName,
-        avatar_url: uploaded?.avatar_url ?? null
+        avatar_url:
+          uploaded?.avatar_url ?? profileQuery.data?.avatar_url ?? null
       });
     },
     onSuccess: async () => {
@@ -48,10 +49,23 @@ function OnboardingRoute() {
   });
 
   useEffect(() => {
-    if (!profileQuery.data) return;
-    setUsername(profileQuery.data.username ?? "");
-    setFullName(profileQuery.data.username ? profileQuery.data.full_name : "");
+    if (!profileQuery.data || initialized.current) return;
+    initialized.current = true;
+    setUsername(
+      profileQuery.data.username ?? profileQuery.data.suggested_username ?? ""
+    );
+    setFullName(profileQuery.data.full_name);
   }, [profileQuery.data]);
+
+  useEffect(() => {
+    if (!avatarFile) {
+      setAvatarPreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(avatarFile);
+    setAvatarPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [avatarFile]);
 
   if (profileQuery.isPending) {
     return (
@@ -111,7 +125,16 @@ function OnboardingRoute() {
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="onboarding-avatar">Profile picture (optional)</Label>
+            <Label htmlFor="onboarding-avatar">
+              Profile picture (optional)
+            </Label>
+            {avatarPreviewUrl || profileQuery.data?.avatar_url ? (
+              <img
+                src={avatarPreviewUrl ?? profileQuery.data?.avatar_url ?? ""}
+                alt=""
+                className="size-16 rounded-full object-cover ring-1 ring-border"
+              />
+            ) : null}
             <Input
               id="onboarding-avatar"
               type="file"

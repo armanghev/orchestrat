@@ -34,12 +34,14 @@ export async function loadProjectCatalog(
   );
   return {
     projects: results
-      .flatMap((result) => ("projects" in result ? result.projects : []))
+      .flatMap((result) => result.projects ?? [])
       .sort(
         (left, right) =>
           left.organization.name.localeCompare(right.organization.name) ||
           left.project.name.localeCompare(right.project.name)
       ),
-    failures: results.flatMap((result) => ("failure" in result ? [result.failure] : []))
+    failures: results.flatMap((result) =>
+      result.failure ? [result.failure] : []
+    )
   };
 }

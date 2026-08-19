@@ -275,7 +275,7 @@ describe("dashboard routes", () => {
     const projects = options.projects ?? [
       project({
         id: projectId,
-        workspace_id: workspaceRecord.id,
+        organization_id: organizationRecord.id,
         name: "Native Dashboard",
         slug: "native-dashboard",
         description: "The dashboard used by the platform team.",
@@ -311,7 +311,7 @@ describe("dashboard routes", () => {
     });
     const projectA = project({
       id: projectId,
-      workspace_id: workspaceA.id,
+      organization_id: organizationA.id,
       name: "Account A Secret Project",
       slug: "account-a-secret"
     });
@@ -497,7 +497,7 @@ describe("dashboard routes", () => {
     });
     const knownProject = project({
       id: projectId,
-      workspace_id: knownWorkspace.id
+      organization_id: organizationRecord.id
     });
     await renderDashboardRoute({
       path: `/projects/${projectId}/overview`,
@@ -631,7 +631,7 @@ describe("dashboard routes", () => {
     });
     const recoveredProject = project({
       id: projectId,
-      workspace_id: recoveredWorkspace.id
+      organization_id: recoveredOrganization.id
     });
     const view = await renderDashboardRoute({
       path: `/projects/${projectId}/overview`,
@@ -680,7 +680,7 @@ describe("dashboard routes", () => {
     });
     const recoveredProject = project({
       id: projectId,
-      workspace_id: workspaceRecord.id
+      organization_id: organizationRecord.id
     });
     let fail = true;
     const view = await renderDashboardRoute({

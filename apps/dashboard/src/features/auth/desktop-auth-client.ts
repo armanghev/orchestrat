@@ -89,7 +89,11 @@ function snapshotsEqual(left: AuthSnapshot, right: AuthSnapshot): boolean {
 }
 
 export class DesktopAuthClient implements AuthClient {
-  readonly capabilities = Object.freeze({ github: true, magicLink: true });
+  readonly capabilities = Object.freeze({
+    github: true,
+    magicLink: false,
+    browserPortal: true
+  });
   private snapshot: AuthSnapshot = loadingAuthSnapshot;
   private grant: AccessGrant | null = null;
   private initialization: Promise<void> | null = null;

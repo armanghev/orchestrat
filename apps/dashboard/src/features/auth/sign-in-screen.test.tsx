@@ -64,6 +64,20 @@ describe("SignInScreen", () => {
     expect(screen.queryByRole("separator")).not.toBeInTheDocument();
   });
 
+  it("sends desktop users to the browser portal instead of showing providers", async () => {
+    const auth = client(
+      { status: "signedOut" },
+      { github: true, magicLink: false, browserPortal: true }
+    );
+    renderScreen(auth);
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "Continue in browser" }));
+    expect(auth.signInWithGitHub).toHaveBeenCalledOnce();
+    expect(screen.queryByLabelText("Email address")).not.toBeInTheDocument();
+    expect(screen.queryByText("Continue with GitHub")).not.toBeInTheDocument();
+  });
+
   it("disables duplicate actions while each request is pending", () => {
     const github = renderScreen(client({ status: "signingIn" }));
     expect(

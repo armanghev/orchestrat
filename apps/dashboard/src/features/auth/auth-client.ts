@@ -8,7 +8,11 @@ export type AuthSnapshot =
   | { status: "signedIn"; identityKey: string }
   | { status: "error"; code: string; message: string };
 
-export type AuthCapabilities = { github: boolean; magicLink: boolean };
+export type AuthCapabilities = {
+  github: boolean;
+  magicLink: boolean;
+  browserPortal?: boolean;
+};
 export type AuthCompletionResult =
   { status: "success"; identityKey: string } | { status: "error" };
 export type TokenOptions = { forceRefresh?: boolean };
