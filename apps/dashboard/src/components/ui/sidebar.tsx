@@ -206,7 +206,7 @@ function Sidebar({
 
   return (
     <div
-      className="group peer hidden text-sidebar-foreground md:block"
+      className="group peer hidden w-(--sidebar-width) text-sidebar-foreground transition-[width] duration-200 ease-linear data-[collapsible=offcanvas]:w-0 md:block"
       data-state={state}
       data-collapsible={state === "collapsed" ? collapsible : ""}
       data-variant={variant}

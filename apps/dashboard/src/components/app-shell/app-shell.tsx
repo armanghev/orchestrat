@@ -155,11 +155,11 @@ export function AppShell({
         onSignOut={signOut}
         profile={profile}
       />
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex w-full min-w-0 flex-1 flex-col">
         <TopToolbar
           context={current}
-          collapsed={preferences.contextSidebarCollapsed}
           onOpenCommands={openCommands}
+          collapsed={preferences.contextSidebarCollapsed}
           commandTriggerRef={defaultCommandTriggerRef}
         />
         <main id="main-content" tabIndex={-1} className="min-h-0 flex-1 overflow-auto">
