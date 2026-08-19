@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import type { Profile } from "@orchestrat/protocol";
+import { Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useTheme } from "@/features/theme/theme-provider";
@@ -138,43 +145,52 @@ export function ProfileSettingsPage({
         <h2 id="profile-heading" className="font-medium">
           Profile details
         </h2>
-        <div className="mt-5 flex items-center gap-4">
-          {previewUrl ? (
-            <img
-              src={previewUrl}
-              alt=""
-              className="size-16 rounded-full object-cover ring-1 ring-border"
-            />
-          ) : (
-            <div
-              aria-hidden="true"
-              className="flex size-16 items-center justify-center rounded-full bg-muted text-lg font-medium"
-            >
-              {(trimmedFullName || trimmedUsername || profile.email)[0]?.toUpperCase()}
-            </div>
-          )}
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => fileInput.current?.click()}
-              disabled={saving}
-            >
-              {avatarFile || avatarUrl ? "Change picture" : "Upload picture"}
-            </Button>
-            {avatarUrl || avatarFile ? (
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={() => {
-                  setRemoveAvatar(true);
-                  setAvatarFile(null);
-                }}
-                disabled={saving}
+        <div className="mt-5 flex items-start gap-6">
+          <div className="relative size-40 shrink-0">
+            {previewUrl ? (
+              <img
+                src={previewUrl}
+                alt=""
+                className="size-40 rounded-full object-cover ring-1 ring-border"
+              />
+            ) : (
+              <div
+                aria-hidden="true"
+                className="flex size-40 items-center justify-center rounded-full bg-muted text-2xl font-medium"
               >
-                Remove
-              </Button>
-            ) : null}
+                {(trimmedFullName || trimmedUsername || profile.email)[0]?.toUpperCase()}
+              </div>
+            )}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon-sm"
+                  className="absolute right-1 bottom-1 rounded-full bg-background shadow-sm"
+                  aria-label="Edit profile picture"
+                  disabled={saving}
+                >
+                  <Pencil aria-hidden="true" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                <DropdownMenuItem onSelect={() => fileInput.current?.click()}>
+                  {avatarFile || avatarUrl ? "Change picture" : "Upload picture"}
+                </DropdownMenuItem>
+                {previewUrl ? (
+                  <DropdownMenuItem
+                    variant="destructive"
+                    onSelect={() => {
+                      setRemoveAvatar(true);
+                      setAvatarFile(null);
+                    }}
+                  >
+                    Remove picture
+                  </DropdownMenuItem>
+                ) : null}
+              </DropdownMenuContent>
+            </DropdownMenu>
             <input
               ref={fileInput}
               className="sr-only"
@@ -191,50 +207,50 @@ export function ProfileSettingsPage({
               }}
             />
           </div>
-        </div>
-        <p className="mt-2 text-sm text-muted-foreground">
-          JPEG, PNG, or WebP up to 2 MB.
-        </p>
-
-        <div className="mt-6 grid gap-5 md:grid-cols-2">
-          <div className="grid gap-2">
-            <Label htmlFor="profile-full-name">Full name</Label>
-            <Input
-              id="profile-full-name"
-              value={fullName}
-              aria-invalid={fullNameError !== null}
-              onChange={(event) => setFullName(event.target.value)}
-              disabled={saving}
-            />
-            {fullNameError ? (
-              <p className="text-sm text-destructive">{fullNameError}</p>
-            ) : null}
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="profile-username">Username</Label>
-            <Input
-              id="profile-username"
-              value={username}
-              aria-invalid={usernameError !== null}
-              onChange={(event) => setUsername(event.target.value)}
-              disabled={saving}
-            />
-            <p className="text-sm text-muted-foreground">
-              Letters, numbers, and underscores only.
-            </p>
-            {usernameError ? (
-              <p className="text-sm text-destructive">{usernameError}</p>
-            ) : null}
+          <div className="ml-auto flex w-3/4 min-w-0 flex-col gap-5">
+            <div className="flex flex-col items-start justify-start gap-2">
+              <Label htmlFor="profile-full-name">Full name</Label>
+              <Input
+                id="profile-full-name"
+                value={fullName}
+                aria-invalid={fullNameError !== null}
+                onChange={(event) => setFullName(event.target.value)}
+                disabled={saving}
+              />
+              {fullNameError ? (
+                <p className="text-sm text-destructive">{fullNameError}</p>
+              ) : null}
+            </div>
+            <div className="flex flex-col items-start justify-start gap-2">
+              <Label htmlFor="profile-username">Username</Label>
+              <Input
+                id="profile-username"
+                value={username}
+                aria-invalid={usernameError !== null}
+                onChange={(event) => setUsername(event.target.value)}
+                disabled={saving}
+              />
+              <p className="text-sm text-muted-foreground">
+                Letters, numbers, and underscores only.
+              </p>
+              {usernameError ? (
+                <p className="text-sm text-destructive">{usernameError}</p>
+              ) : null}
+            </div>
           </div>
         </div>
-        <Button
-          className="mt-6"
-          type="button"
-          onClick={() => void saveProfile()}
-          disabled={!dirty || !valid || saving}
-        >
-          {saving ? "Saving profile…" : "Save profile"}
-        </Button>
+        <div className="mt-6 flex items-center justify-between gap-4">
+          <p className="text-sm text-muted-foreground">
+            JPEG, PNG, or WebP up to 2 MB.
+          </p>
+          <Button
+            type="button"
+            onClick={() => void saveProfile()}
+            disabled={!dirty || !valid || saving}
+          >
+            {saving ? "Saving profile…" : "Save profile"}
+          </Button>
+        </div>
       </section>
 
       <section className="border-b py-6" aria-labelledby="account-heading">
