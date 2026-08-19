@@ -223,13 +223,22 @@ export function ProfileSettingsPage({
             </div>
             <div className="flex flex-col items-start justify-start gap-2">
               <Label htmlFor="profile-username">Username</Label>
-              <Input
-                id="profile-username"
-                value={username}
-                aria-invalid={usernameError !== null}
-                onChange={(event) => setUsername(event.target.value)}
-                disabled={saving}
-              />
+              <div className="relative w-full">
+                <span
+                  aria-hidden="true"
+                  className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 select-none text-muted-foreground"
+                >
+                  @
+                </span>
+                <Input
+                  id="profile-username"
+                  className="pl-7"
+                  value={username}
+                  aria-invalid={usernameError !== null}
+                  onChange={(event) => setUsername(event.target.value)}
+                  disabled={saving}
+                />
+              </div>
               <p className="text-sm text-muted-foreground">
                 Letters, numbers, and underscores only.
               </p>

@@ -32,5 +32,9 @@ describe("ProfileSettingsPage", () => {
     expect(screen.getByRole("menuitem", { name: "Change picture" })).toBeVisible();
     await user.click(screen.getByRole("menuitem", { name: "Remove picture" }));
     expect(container.querySelector("img")).not.toBeInTheDocument();
+
+    const username = screen.getByLabelText("Username");
+    expect(username).toHaveValue("arman");
+    expect(username.parentElement?.querySelector("span")).toHaveClass("select-none");
   });
 });
