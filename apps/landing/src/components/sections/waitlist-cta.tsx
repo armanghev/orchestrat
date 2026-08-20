@@ -131,8 +131,8 @@ export function WaitlistCtaSection() {
                   </p>
                   <p className="text-sm font-light text-zinc-600">
                     We saved your place for{" "}
-                    <span className="text-zinc-400">{email}</span>. We&apos;ll send
-                    an invite when early access is ready.
+                    <span className="text-zinc-400">{email}</span>. We&apos;ll
+                    send an invite when early access is ready.
                   </p>
                 </motion.div>
               )}

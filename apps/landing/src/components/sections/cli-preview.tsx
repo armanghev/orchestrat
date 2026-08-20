@@ -59,9 +59,8 @@ presence:
                 One coordination layer. Any capable agent.
               </h2>
               <p className="text-sm leading-relaxed font-light text-zinc-500">
-                Agents connect through MCP, hooks, APIs, or a local bridge
-                while model execution and tools remain in their existing
-                runtime.
+                Agents connect through MCP, hooks, APIs, or a local bridge while
+                model execution and tools remain in their existing runtime.
               </p>
             </div>
             <ul className="space-y-3">
@@ -163,7 +162,9 @@ presence:
                             <span className="rounded border border-zinc-800 bg-zinc-900 px-1.5 py-0.5 text-[10px]">
                               EVENT
                             </span>
-                            <span>document.updated · architecture.md · rev 19</span>
+                            <span>
+                              document.updated · architecture.md · rev 19
+                            </span>
                           </div>
                         </div>
                         <div className="text-amber-400/70">

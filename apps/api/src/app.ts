@@ -4,18 +4,24 @@ import type { HumanAuth } from "@orchestrat/auth";
 import type { Database } from "@orchestrat/db";
 import { logger } from "@orchestrat/logger";
 import type { ApiErrorResponse, ErrorCode } from "@orchestrat/protocol";
+import multipart from "@fastify/multipart";
 import Fastify from "fastify";
 import { healthRoutes } from "./routes/health.js";
 import { v1Routes } from "./routes/v1.js";
 import { ApiError } from "./services/api-error.js";
 import { IdentityService } from "./services/identity-service.js";
 import { ProjectService } from "./services/project-service.js";
+import {
+  ProfileService,
+  type AvatarStorageConfig
+} from "./services/profile-service.js";
 
 type AppOptions = {
   allowedOrigins: string[];
   auth: HumanAuth;
   closeDatabase?: () => Promise<void>;
   db: Database;
+  avatarStorage?: AvatarStorageConfig;
 };
 
 const errorResponse = (
@@ -27,27 +33,30 @@ const errorResponse = (
   error: { code, details, message, request_id: requestId }
 });
 
-const requestHeaders = (
-  headers: Record<string, string | string[] | undefined>
-) => {
-  const result = new Headers();
-  for (const [name, value] of Object.entries(headers)) {
-    if (Array.isArray(value))
-      value.forEach((item) => result.append(name, item));
-    else if (value !== undefined) result.set(name, value);
+const rawHeaderEntries = (rawHeaders: string[]) => {
+  const entries: [string, string][] = [];
+  for (let index = 0; index < rawHeaders.length; index += 2) {
+    entries.push([rawHeaders[index]!, rawHeaders[index + 1]!]);
   }
-  return result;
+  return entries;
 };
 
 export function buildApp(options: AppOptions) {
   const app = Fastify({
     genReqId: () => `req_${randomUUID()}`,
-    logger: false
+    logger: true
   });
-  const identities = new IdentityService(options.db, options.auth);
+  const identities = new IdentityService(options.db);
   const projects = new ProjectService(options.db);
+  const profiles = new ProfileService(options.db, options.avatarStorage);
 
-  app.register(cors, { origin: options.allowedOrigins });
+  app.register(cors, {
+    origin: options.allowedOrigins,
+    methods: ["GET", "HEAD", "POST", "PATCH", "DELETE"]
+  });
+  app.register(multipart, {
+    limits: { fileSize: 2 * 1024 * 1024, files: 1 }
+  });
   app.addHook("onRequest", (request, reply, done) => {
     reply.header("x-request-id", request.id);
     done();
@@ -73,8 +82,12 @@ export function buildApp(options: AppOptions) {
       name?: string;
       statusCode?: number;
     };
-    if (caught.name === "ZodError" || caught.statusCode === 400) {
-      return reply.code(400).send(
+    if (
+      caught.name === "ZodError" ||
+      caught.statusCode === 400 ||
+      caught.statusCode === 413
+    ) {
+      return reply.code(caught.statusCode === 413 ? 413 : 400).send(
         errorResponse(
           request.id,
           "VALIDATION_ERROR",
@@ -120,23 +133,25 @@ export function buildApp(options: AppOptions) {
   app.register(healthRoutes, { prefix: "/api/v1" });
   app.register(
     async (api) => {
+      api.decorateRequest("suggestedUsername", null);
       api.decorateRequest("userId", "");
       api.addHook("preHandler", async (request) => {
-        const authSubject = await options.auth.authenticate({
-          headers: requestHeaders(request.headers),
+        const principal = await options.auth.authenticate({
+          headers: rawHeaderEntries(request.raw.rawHeaders),
           method: request.method,
           url: `http://${request.headers.host ?? "localhost"}${request.url}`
         });
-        if (!authSubject) {
+        if (!principal) {
           throw new ApiError(
             401,
             "UNAUTHENTICATED",
             "Authentication is required."
           );
         }
-        request.userId = await identities.resolveUserId(authSubject);
+        request.suggestedUsername = principal.username;
+        request.userId = await identities.resolveUserId(principal);
       });
-      api.register(v1Routes, { projects });
+      api.register(v1Routes, { projects, profiles });
     },
     { prefix: "/api/v1" }
   );

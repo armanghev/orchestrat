@@ -6,9 +6,9 @@ application boundaries.
 ## Request flow
 
 ```text
-Dashboard + Clerk session token
+Dashboard + Supabase user access token
   -> Fastify /api/v1 route
-  -> Clerk token verification and local user resolution
+  -> Supabase JWT verification and local user resolution
   -> application service
   -> reusable membership check
   -> Drizzle query
@@ -17,7 +17,8 @@ Dashboard + Clerk session token
 
 Routes validate shared Zod contracts from `@orchestrat/protocol` and delegate
 to services under `apps/api/src/services`. PostgreSQL remains authoritative;
-Clerk supplies human identity and persistent browser sessions only.
+Supabase session grants supply durable human identity and persistent browser
+sessions only.
 
 ## Database
 
@@ -28,7 +29,7 @@ keys cascade only when the parent is deleted. The project status/archive
 constraint prevents contradictory archival state.
 
 The `users.auth_subject` column is the only addition to the master plan's user
-fields. It is required to map a Clerk subject to a stable local UUID without
+fields. It is required to map a Supabase subject to a stable local UUID without
 making a vendor ID the database primary key.
 
 ## Authorization
@@ -44,11 +45,11 @@ organization boundary.
 
 ## Authentication
 
-The dashboard is wrapped in Clerk and sends a short-lived session token as a
-Bearer token. The API verifies the token and creates the corresponding local
-user on the first authenticated request using Clerk's primary email and
-profile. Later requests resolve identity from PostgreSQL. Agent authentication
-is not part of this phase.
+The dashboard uses Supabase session grants as short-lived Bearer tokens. The API
+verifies claims (role, issuer, audience, expiry) and creates the corresponding
+local user on the first authenticated request using normalized profile fields.
+Later requests resolve identity from PostgreSQL. Agent authentication is not part
+of this phase.
 
 Every response includes `x-request-id`. API errors use the shared structured
 error envelope and include the same request ID.

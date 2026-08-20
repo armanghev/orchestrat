@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import test from "node:test";
 import type { HumanAuth } from "@orchestrat/auth";
 import { createDatabase } from "@orchestrat/db";
@@ -50,32 +50,40 @@ test("Phase 2 API enforces membership and manages projects", async () => {
   const connect = pool.connect.bind(pool);
   pool.connect = (async () =>
     patchClient(await connect())) as typeof pool.connect;
-  const migration = await readFile(
-    new URL(
-      "../../../../packages/db/drizzle/0000_phase2_core.sql",
-      import.meta.url
-    ),
-    "utf8"
+  const migrations = new URL(
+    "../../../../packages/db/drizzle/",
+    import.meta.url
   );
-  for (const statement of migration.split("--> statement-breakpoint")) {
-    if (statement.trim()) await pool.query(statement);
+  for (const name of (await readdir(migrations))
+    .filter((value) => value.endsWith(".sql"))
+    .sort()) {
+    const migration = await readFile(new URL(name, migrations), "utf8");
+    for (const statement of migration.split("--> statement-breakpoint")) {
+      if (statement.trim()) await pool.query(statement);
+    }
   }
 
+  const subjects: Record<string, string> = {
+    alice: "550e8400-e29b-41d4-a716-446655440000",
+    bob: "9a787b7b-84c1-4d76-83a4-0f76997e5981"
+  };
   const auth: HumanAuth = {
     async authenticate(request) {
-      return (
-        new Headers(request.headers)
-          .get("authorization")
-          ?.replace(/^Bearer\s+/, "") ?? null
-      );
-    },
-    async getProfile(authSubject) {
-      return {
-        authSubject,
-        avatarUrl: null,
-        email: `${authSubject}@example.com`,
-        name: authSubject
-      };
+      const authorization = [
+        ...(request.headers as Iterable<[string, string]>)
+      ].find(([name]) => name.toLowerCase() === "authorization")?.[1];
+      const label = authorization?.replace(/^Bearer\s+/, "");
+      const authSubject = label ? subjects[label] : undefined;
+      return authSubject
+        ? {
+            authSubject,
+            avatarUrl: null,
+            email: `${label}@example.com`,
+            name: label!,
+            provider: "supabase",
+            username: label!
+          }
+        : null;
     }
   };
   const { db } = createDatabase(
@@ -113,27 +121,11 @@ test("Phase 2 API enforces membership and manages projects", async () => {
     assert.equal(forbiddenOrganization.statusCode, 403);
     assert.equal(forbiddenOrganization.json().error.code, "PERMISSION_DENIED");
 
-    const workspaceResponse = await app.inject({
-      headers: authorization("alice"),
-      method: "POST",
-      payload: { name: "Engineering" },
-      url: `/api/v1/organizations/${organization.id}/workspaces`
-    });
-    assert.equal(workspaceResponse.statusCode, 201);
-    const workspace = workspaceResponse.json();
-
-    const forbiddenWorkspace = await app.inject({
-      headers: authorization("bob"),
-      method: "GET",
-      url: `/api/v1/workspaces/${workspace.id}`
-    });
-    assert.equal(forbiddenWorkspace.statusCode, 403);
-
     const projectResponse = await app.inject({
       headers: authorization("alice"),
       method: "POST",
       payload: { description: "Coordination plane", name: "Orchestrat" },
-      url: `/api/v1/workspaces/${workspace.id}/projects`
+      url: `/api/v1/organizations/${organization.id}/projects`
     });
     assert.equal(projectResponse.statusCode, 201);
     const project = projectResponse.json();

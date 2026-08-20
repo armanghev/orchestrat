@@ -13,8 +13,9 @@ export const apiConfigSchema = z.object({
         .filter(Boolean)
     ),
   ORCHESTRAT_DATABASE_URL: z.string().min(1),
-  ORCHESTRAT_CLERK_PUBLISHABLE_KEY: z.string().min(1),
-  ORCHESTRAT_CLERK_SECRET_KEY: z.string().min(1)
+  ORCHESTRAT_SUPABASE_URL: z.string().url(),
+  ORCHESTRAT_SUPABASE_JWT_AUDIENCE: z.string().trim().min(1),
+  ORCHESTRAT_SUPABASE_JWT_ALGORITHM: z.enum(["ES256", "RS256"])
 });
 
 export type ApiConfig = z.infer<typeof apiConfigSchema>;

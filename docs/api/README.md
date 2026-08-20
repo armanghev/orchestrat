@@ -1,6 +1,6 @@
 # API
 
-Phase 2 domain routes live under `/api/v1` and require a Clerk session token:
+Phase 2 domain routes live under `/api/v1` and require a human Supabase access JWT:
 
 ```http
 Authorization: Bearer <session-token>

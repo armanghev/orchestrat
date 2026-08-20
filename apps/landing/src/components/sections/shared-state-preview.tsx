@@ -44,7 +44,8 @@ export function SharedStatePreviewSection() {
       category: "Shared documents",
       icon: Globe,
       severity: "Conflict",
-      problem: "architecture.md is now revision 19; this edit used revision 18.",
+      problem:
+        "architecture.md is now revision 19; this edit used revision 18.",
       explanation:
         "Revision checks prevent one agent from silently overwriting another agent's update. The stale writer reads, merges, and retries.",
       file: "architecture.md · revision 19",
