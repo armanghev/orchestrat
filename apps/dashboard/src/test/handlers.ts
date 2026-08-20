@@ -1,6 +1,6 @@
 import { expect } from "vitest";
 import { http, HttpResponse } from "msw";
-import { organization, project, workspace } from "@/test/factories";
+import { organization, project } from "@/test/factories";
 
 const apiUrl = "http://localhost:3001/api/v1";
 
@@ -28,30 +28,31 @@ export const handlers = [
     return HttpResponse.json(organization(), { status: 201 });
   }),
   http.get(
-    `${apiUrl}/organizations/:organizationId/workspaces`,
+    `${apiUrl}/organizations/:organizationId/projects`,
     ({ request }) => {
       assertAuthorization(request);
       assertBodylessRequest(request);
-      return HttpResponse.json({ workspaces: [workspace()] });
+      return HttpResponse.json({ projects: [project()] });
     }
   ),
   http.post(
-    `${apiUrl}/organizations/:organizationId/workspaces`,
+    `${apiUrl}/organizations/:organizationId/projects`,
     ({ request }) => {
       assertAuthorization(request);
       assertJsonRequest(request);
-      return HttpResponse.json(workspace(), { status: 201 });
+      return HttpResponse.json(project(), { status: 201 });
     }
   ),
-  http.get(`${apiUrl}/workspaces/:workspaceId/projects`, ({ request }) => {
+  http.get(`${apiUrl}/profile`, ({ request }) => {
     assertAuthorization(request);
     assertBodylessRequest(request);
-    return HttpResponse.json({ projects: [project()] });
-  }),
-  http.post(`${apiUrl}/workspaces/:workspaceId/projects`, ({ request }) => {
-    assertAuthorization(request);
-    assertJsonRequest(request);
-    return HttpResponse.json(project(), { status: 201 });
+    return HttpResponse.json({
+      id: "00000000-0000-4000-8000-000000000004",
+      username: "tester",
+      full_name: "Test User",
+      email: "test@example.com",
+      avatar_url: null
+    });
   }),
   http.get(`${apiUrl}/projects/:projectId`, ({ request }) => {
     assertAuthorization(request);

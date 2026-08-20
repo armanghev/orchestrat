@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { buildCommands } from "./commands";
 import type { ProjectCatalog } from "@/features/hierarchy/catalog";
-import { organization, project, workspace } from "@/test/factories";
+import { organization, project } from "@/test/factories";
 
 const alpha = project({ name: "Alpha" });
 const beta = project({ name: "Beta" });
@@ -12,12 +12,10 @@ const catalog: ProjectCatalog = {
   projects: [
     {
       organization: organization({ name: "Acme" }),
-      workspace: workspace({ name: "Platform" }),
       project: alpha
     },
     {
       organization: organization({ name: "Beta Org" }),
-      workspace: workspace({ name: "Studio" }),
       project: beta
     }
   ]
@@ -74,14 +72,7 @@ describe("buildCommands", () => {
     expect(
       commands.find((command) => command.id === "project:alpha")?.keywords
     ).toEqual(
-      expect.arrayContaining([
-        "project",
-        "workspace",
-        "organization",
-        "Alpha",
-        "Platform",
-        "Acme"
-      ])
+      expect.arrayContaining(["project", "organization", "Alpha", "Acme"])
     );
     commands.find((command) => command.id === "navigate:tasks")?.run();
     expect(navigateToRoute).toHaveBeenCalledWith("tasks", "alpha");

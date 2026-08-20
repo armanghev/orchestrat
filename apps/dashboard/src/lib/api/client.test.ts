@@ -6,7 +6,7 @@ import {
   type ApiTokenSource
 } from "@/lib/api/client";
 import { DesktopAuthClient } from "@/features/auth/desktop-auth-client";
-import { organization, project, workspace } from "@/test/factories";
+import { organization, project } from "@/test/factories";
 import { handlers } from "@/test/handlers";
 import { server } from "@/test/msw-server";
 
@@ -47,31 +47,7 @@ describe("ApiClient", () => {
     await expect(api.createOrganization(input)).resolves.toEqual(expected);
   });
 
-  it("posts the exact workspace JSON to its organization endpoint", async () => {
-    const input = { name: "Frontend", slug: "frontend" };
-    const expected = workspace();
-    server.use(
-      http.post(
-        `${apiUrl}/api/v1/organizations/${expected.organization_id}/workspaces`,
-        async ({ request }) => {
-          expect(request.method).toBe("POST");
-          expect(request.headers.get("authorization")).toBe(
-            "Bearer test-token"
-          );
-          expect(request.headers.get("content-type")).toBe("application/json");
-          await expect(request.json()).resolves.toEqual(input);
-          return HttpResponse.json(expected, { status: 201 });
-        }
-      )
-    );
-    const api = new ApiClient(apiUrl, authTokenFixture(["test-token"]));
-
-    await expect(
-      api.createWorkspace(expected.organization_id, input)
-    ).resolves.toEqual(expected);
-  });
-
-  it("posts the exact project JSON to its workspace endpoint", async () => {
+  it("posts the exact project JSON to its organization endpoint", async () => {
     const input = {
       name: "Console",
       slug: "console",
@@ -80,7 +56,7 @@ describe("ApiClient", () => {
     const expected = project();
     server.use(
       http.post(
-        `${apiUrl}/api/v1/workspaces/${expected.workspace_id}/projects`,
+        `${apiUrl}/api/v1/organizations/${expected.organization_id}/projects`,
         async ({ request }) => {
           expect(request.method).toBe("POST");
           expect(request.headers.get("authorization")).toBe(
@@ -95,7 +71,7 @@ describe("ApiClient", () => {
     const api = new ApiClient(apiUrl, authTokenFixture(["test-token"]));
 
     await expect(
-      api.createProject(expected.workspace_id, input)
+      api.createProject(expected.organization_id, input)
     ).resolves.toEqual(expected);
   });
 

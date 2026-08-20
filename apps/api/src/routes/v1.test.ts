@@ -121,27 +121,11 @@ test("Phase 2 API enforces membership and manages projects", async () => {
     assert.equal(forbiddenOrganization.statusCode, 403);
     assert.equal(forbiddenOrganization.json().error.code, "PERMISSION_DENIED");
 
-    const workspaceResponse = await app.inject({
-      headers: authorization("alice"),
-      method: "POST",
-      payload: { name: "Engineering" },
-      url: `/api/v1/organizations/${organization.id}/workspaces`
-    });
-    assert.equal(workspaceResponse.statusCode, 201);
-    const workspace = workspaceResponse.json();
-
-    const forbiddenWorkspace = await app.inject({
-      headers: authorization("bob"),
-      method: "GET",
-      url: `/api/v1/workspaces/${workspace.id}`
-    });
-    assert.equal(forbiddenWorkspace.statusCode, 403);
-
     const projectResponse = await app.inject({
       headers: authorization("alice"),
       method: "POST",
       payload: { description: "Coordination plane", name: "Orchestrat" },
-      url: `/api/v1/workspaces/${workspace.id}/projects`
+      url: `/api/v1/organizations/${organization.id}/projects`
     });
     assert.equal(projectResponse.statusCode, 201);
     const project = projectResponse.json();

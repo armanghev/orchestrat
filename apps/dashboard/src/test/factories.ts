@@ -1,10 +1,8 @@
 import {
   organizationSchema,
   projectSchema,
-  workspaceSchema,
   type Organization,
-  type Project,
-  type Workspace
+  type Project
 } from "@orchestrat/protocol";
 
 const timestamp = "2024-01-01T00:00:00.000Z";
@@ -23,22 +21,10 @@ export function organization(
   });
 }
 
-export function workspace(overrides: Partial<Workspace> = {}): Workspace {
-  return workspaceSchema.parse({
-    id: "00000000-0000-4000-8000-000000000002",
-    organization_id: organization().id,
-    name: "Platform",
-    slug: "platform",
-    created_at: timestamp,
-    updated_at: timestamp,
-    ...overrides
-  });
-}
-
 export function project(overrides: Partial<Project> = {}): Project {
   return projectSchema.parse({
     id: "00000000-0000-4000-8000-000000000003",
-    workspace_id: workspace().id,
+    organization_id: organization().id,
     name: "Dashboard",
     slug: "dashboard",
     description: null,

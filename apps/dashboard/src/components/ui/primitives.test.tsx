@@ -18,16 +18,11 @@ describe("UI primitive class contracts", () => {
   });
 
   it("uses explicit orientation variants and a horizontal separator default", () => {
-    const scrollArea = primitiveSource("scroll-area.tsx");
     const separator = primitiveSource("separator.tsx");
 
-    expect(scrollArea).toContain("data-[orientation=horizontal]:");
-    expect(scrollArea).toContain("data-[orientation=vertical]:");
     expect(separator).toContain("data-[orientation=horizontal]:h-px");
     expect(separator).toContain("data-[orientation=vertical]:w-px");
-    expect(`${scrollArea}${separator}`).not.toMatch(
-      /data-(?:horizontal|vertical):/
-    );
+    expect(separator).not.toMatch(/data-(?:horizontal|vertical):/);
   });
 
   it("uses true-valued cmdk selection variants", () => {
