@@ -15,6 +15,7 @@ import {
   ProfileService,
   type AvatarStorageConfig
 } from "./services/profile-service.js";
+import { TaskService } from "./services/task-service.js";
 
 type AppOptions = {
   allowedOrigins: string[];
@@ -49,6 +50,7 @@ export function buildApp(options: AppOptions) {
   const identities = new IdentityService(options.db);
   const projects = new ProjectService(options.db);
   const profiles = new ProfileService(options.db, options.avatarStorage);
+  const tasks = new TaskService(options.db);
 
   app.register(cors, {
     origin: options.allowedOrigins,
@@ -151,7 +153,7 @@ export function buildApp(options: AppOptions) {
         request.suggestedUsername = principal.username;
         request.userId = await identities.resolveUserId(principal);
       });
-      api.register(v1Routes, { projects, profiles });
+      api.register(v1Routes, { projects, profiles, tasks });
     },
     { prefix: "/api/v1" }
   );

@@ -129,7 +129,10 @@ export class ProjectService {
       .returning();
     if (!organization)
       throw new ApiError(404, "NOT_FOUND", "Organization not found.");
-    const membership = await this.permissions.organization(userId, organizationId);
+    const membership = await this.permissions.organization(
+      userId,
+      organizationId
+    );
     return organizationJson(organization, membership.role);
   }
 
@@ -138,14 +141,24 @@ export class ProjectService {
     organizationId: string,
     name: string
   ): Promise<DeleteResourceResponse> {
-    const current = await this.permissions.organizationOwner(userId, organizationId);
+    const current = await this.permissions.organizationOwner(
+      userId,
+      organizationId
+    );
     if (current.organization.name !== name)
-      throw new ApiError(409, "CONFLICT", "The organization name does not match.");
+      throw new ApiError(
+        409,
+        "CONFLICT",
+        "The organization name does not match."
+      );
     const [deleted] = await this.db
       .delete(organizations)
-      .where(and(eq(organizations.id, organizationId), eq(organizations.name, name)))
+      .where(
+        and(eq(organizations.id, organizationId), eq(organizations.name, name))
+      )
       .returning({ id: organizations.id });
-    if (!deleted) throw new ApiError(404, "NOT_FOUND", "Organization not found.");
+    if (!deleted)
+      throw new ApiError(404, "NOT_FOUND", "Organization not found.");
     return { deleted: true };
   }
 
@@ -166,7 +179,10 @@ export class ProjectService {
     memberId: string,
     input: UpdateOrganizationMemberRequest
   ) {
-    const actor = await this.permissions.organizationEditor(userId, organizationId);
+    const actor = await this.permissions.organizationEditor(
+      userId,
+      organizationId
+    );
     const [target] = await this.db
       .select({ membership: organizationMembers })
       .from(organizationMembers)
@@ -180,9 +196,17 @@ export class ProjectService {
     if (!target)
       throw new ApiError(404, "NOT_FOUND", "Organization member not found.");
     if (target.membership.role === "owner" && actor.role !== "owner")
-      throw new ApiError(403, "PERMISSION_DENIED", "Admins cannot modify owners.");
+      throw new ApiError(
+        403,
+        "PERMISSION_DENIED",
+        "Admins cannot modify owners."
+      );
     if (input.role === "owner" && actor.role !== "owner")
-      throw new ApiError(403, "PERMISSION_DENIED", "Admins cannot assign owner role.");
+      throw new ApiError(
+        403,
+        "PERMISSION_DENIED",
+        "Admins cannot assign owner role."
+      );
     if (
       memberId === userId &&
       target.membership.role === "owner" &&
@@ -204,7 +228,10 @@ export class ProjectService {
   }
 
   async removeMember(userId: string, organizationId: string, memberId: string) {
-    const actor = await this.permissions.organizationEditor(userId, organizationId);
+    const actor = await this.permissions.organizationEditor(
+      userId,
+      organizationId
+    );
     const [target] = await this.db
       .select({ membership: organizationMembers })
       .from(organizationMembers)
@@ -218,7 +245,11 @@ export class ProjectService {
     if (!target)
       throw new ApiError(404, "NOT_FOUND", "Organization member not found.");
     if (target.membership.role === "owner" && actor.role !== "owner")
-      throw new ApiError(403, "PERMISSION_DENIED", "Admins cannot remove owners.");
+      throw new ApiError(
+        403,
+        "PERMISSION_DENIED",
+        "Admins cannot remove owners."
+      );
     if (memberId === userId && target.membership.role === "owner")
       await this.assertAnotherOwner(organizationId);
     await this.db
@@ -233,8 +264,12 @@ export class ProjectService {
   }
 
   async leaveOrganization(userId: string, organizationId: string) {
-    const membership = await this.permissions.organization(userId, organizationId);
-    if (membership.role === "owner") await this.assertAnotherOwner(organizationId);
+    const membership = await this.permissions.organization(
+      userId,
+      organizationId
+    );
+    if (membership.role === "owner")
+      await this.assertAnotherOwner(organizationId);
     await this.db
       .delete(organizationMembers)
       .where(
@@ -286,7 +321,17 @@ export class ProjectService {
         organizationId,
         name: input.name,
         slug: input.slug ?? slugify(input.name),
-        description: input.description ?? null
+        description: input.description ?? null,
+        taskKeyPrefix:
+          input.task_key_prefix ??
+          ((input.slug ?? slugify(input.name))
+            .replace(/[^a-z0-9]/gi, "")
+            .slice(0, 3).length >= 2
+            ? (input.slug ?? slugify(input.name))
+                .replace(/[^a-z0-9]/gi, "")
+                .slice(0, 3)
+                .toUpperCase()
+            : "PRJ")
       })
       .returning();
     return projectJson(project);
@@ -312,7 +357,10 @@ export class ProjectService {
   }
 
   async archiveProject(userId: string, projectId: string) {
-    const { project: current } = await this.permissions.projectEditor(userId, projectId);
+    const { project: current } = await this.permissions.projectEditor(
+      userId,
+      projectId
+    );
     if (current.status === "archived") return projectJson(current);
     const now = new Date();
     const [project] = await this.db
@@ -326,7 +374,10 @@ export class ProjectService {
   }
 
   async reactivateProject(userId: string, projectId: string) {
-    const { project: current } = await this.permissions.projectEditor(userId, projectId);
+    const { project: current } = await this.permissions.projectEditor(
+      userId,
+      projectId
+    );
     if (current.status === "active") return projectJson(current);
     const [project] = await this.db
       .update(projects)
