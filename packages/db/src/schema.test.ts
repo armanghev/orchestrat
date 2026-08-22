@@ -3,7 +3,11 @@ import { readdir, readFile } from "node:fs/promises";
 import test from "node:test";
 import { getTableConfig } from "drizzle-orm/pg-core";
 import {
+  agentCredentials,
+  agentSessions,
+  agents,
   apiIdempotencyKeys,
+  projectEvents,
   projects,
   taskClaims,
   taskComments,
@@ -89,6 +93,23 @@ test("claims and idempotency schema retain their safety constraints", () => {
   assert.equal(taskClaims.agentId.notNull, true);
   assert.equal(taskClaims.sessionId.notNull, true);
   assert.equal(taskClaims.lastHeartbeatAt.hasDefault, true);
+  assert.equal(taskClaims.completedAt.name, "completed_at");
+  assert.ok(
+    claimConfig.checks.find(
+      (check) => check.name === "task_claims_lifecycle_consistent"
+    )
+  );
+  assert.ok(
+    claimConfig.foreignKeys.find(
+      (foreignKey) => foreignKey.getName() === "task_claims_task_project_fk"
+    )
+  );
+  assert.equal(
+    claimConfig.foreignKeys.some(
+      (foreignKey) => foreignKey.getName() === "task_claims_task_id_tasks_id_fk"
+    ),
+    false
+  );
 
   const idempotencyConfig = getTableConfig(apiIdempotencyKeys);
   assert.ok(
@@ -124,5 +145,90 @@ test("tasks migration backfills prefixes and creates same-project blockers", asy
   assert.match(
     sql,
     /"body_markdown" text NOT NULL,\n\t"created_at" timestamp\(3\) with time zone DEFAULT now\(\) NOT NULL/
+  );
+});
+
+test("coordination schema scopes identities, sessions, claims, and events", () => {
+  const agentConfig = getTableConfig(agents);
+  assert.equal(
+    agentConfig.indexes.some(
+      (index) => index.config.name === "agents_project_name_unique"
+    ),
+    false
+  );
+  assert.ok(
+    agentConfig.checks.find(
+      (check) => check.name === "agents_revocation_state_consistent"
+    )
+  );
+
+  const credentialConfig = getTableConfig(agentCredentials);
+  assert.ok(
+    credentialConfig.indexes.find(
+      (index) => index.config.name === "agent_credentials_token_hash_unique"
+    )
+  );
+  assert.equal(agentCredentials.tokenHash.notNull, true);
+  assert.equal(agentCredentials.tokenHash.name, "token_hash");
+
+  const sessionConfig = getTableConfig(agentSessions);
+  assert.ok(
+    sessionConfig.foreignKeys.find(
+      (foreignKey) => foreignKey.getName() === "agent_sessions_agent_project_fk"
+    )
+  );
+  assert.ok(
+    sessionConfig.checks.find(
+      (check) => check.name === "agent_sessions_end_state_consistent"
+    )
+  );
+
+  const eventConfig = getTableConfig(projectEvents);
+  assert.equal(projectEvents.id.name, "id");
+  assert.equal(projectEvents.id.getSQLType(), "serial");
+  assert.ok(
+    eventConfig.indexes.find(
+      (index) => index.config.name === "project_events_project_id_id_idx"
+    )
+  );
+  assert.equal(
+    eventConfig.indexes.some(
+      (index) => index.config.name === "project_events_project_type_id_idx"
+    ),
+    false
+  );
+});
+
+test("coordination migration adds project-scoped claim keys without plaintext tokens", async () => {
+  const sql = await readFile(
+    new URL("../drizzle/0005_coordination_backend.sql", import.meta.url),
+    "utf8"
+  );
+  assert.match(sql, /CREATE TYPE "public"\."agent_status"/);
+  assert.match(sql, /CREATE TABLE "agents"/);
+  assert.match(sql, /CREATE TABLE "agent_credentials"/);
+  assert.match(sql, /CREATE TABLE "agent_sessions"/);
+  assert.match(sql, /CREATE TABLE "project_events"/);
+  assert.match(sql, /"id" serial PRIMARY KEY NOT NULL/);
+  assert.match(sql, /"token_hash" text NOT NULL/);
+  assert.doesNotMatch(sql, /"token" text/);
+  assert.match(
+    sql,
+    /IF EXISTS \(SELECT 1 FROM "task_claims"\).*RAISE EXCEPTION.*task_claims.*empty/s
+  );
+  assert.match(sql, /DROP CONSTRAINT "task_claims_task_id_tasks_id_fk"/);
+  assert.match(sql, /"task_claims" ADD COLUMN "project_id" uuid NOT NULL/);
+  assert.match(sql, /"task_claims" ADD COLUMN "completed_at" timestamp/);
+  assert.doesNotMatch(sql, /task_claims_project_id_projects_id_fk/);
+  assert.match(sql, /task_claims_session_agent_project_fk/);
+  assert.match(sql, /task_claims_lifecycle_consistent/);
+  assert.doesNotMatch(sql, /agents_project_name_unique/);
+  assert.doesNotMatch(sql, /project_events_project_type_id_idx/);
+  assert.match(
+    await readFile(
+      new URL("../drizzle/0004_tasks_api.sql", import.meta.url),
+      "utf8"
+    ),
+    /task_claims_one_active_per_task/
   );
 });

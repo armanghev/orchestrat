@@ -6,6 +6,7 @@ import {
   pgEnum,
   pgTable,
   primaryKey,
+  serial,
   unique,
   jsonb,
   integer,
@@ -53,6 +54,11 @@ export const taskClaimStatus = pgEnum("task_claim_status", [
   "expired",
   "completed",
   "revoked"
+]);
+export const agentStatus = pgEnum("agent_status", ["active", "revoked"]);
+export const agentSessionStatus = pgEnum("agent_session_status", [
+  "active",
+  "closed"
 ]);
 
 export const users = pgTable(
@@ -259,13 +265,151 @@ export const taskDependencies = pgTable(
   ]
 );
 
+export const agents = pgTable(
+  "agents",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    status: agentStatus("status").default("active").notNull(),
+    ...timestamps,
+    revokedAt: timestamp("revoked_at", { withTimezone: true })
+  },
+  (table) => [
+    unique("agents_project_id_id_unique").on(table.projectId, table.id),
+    index("agents_project_status_idx").on(table.projectId, table.status),
+    check("agents_name_not_blank", sql`btrim(${table.name}) <> ''`),
+    check(
+      "agents_revocation_state_consistent",
+      sql`(${table.status} = 'active' and ${table.revokedAt} is null) or (${table.status} = 'revoked' and ${table.revokedAt} is not null)`
+    )
+  ]
+);
+
+export const agentCredentials = pgTable(
+  "agent_credentials",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    agentId: uuid("agent_id").notNull(),
+    tokenHash: text("token_hash").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true })
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.projectId, table.agentId],
+      foreignColumns: [agents.projectId, agents.id],
+      name: "agent_credentials_agent_project_fk"
+    }).onDelete("cascade"),
+    uniqueIndex("agent_credentials_token_hash_unique").on(table.tokenHash),
+    index("agent_credentials_project_agent_idx").on(
+      table.projectId,
+      table.agentId
+    ),
+    check(
+      "agent_credentials_token_hash_not_blank",
+      sql`btrim(${table.tokenHash}) <> ''`
+    )
+  ]
+);
+
+export const agentSessions = pgTable(
+  "agent_sessions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    agentId: uuid("agent_id").notNull(),
+    runtime: text("runtime").notNull(),
+    integration: text("integration").notNull(),
+    externalSessionId: text("external_session_id"),
+    status: agentSessionStatus("status").default("active").notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    lastHeartbeatAt: timestamp("last_heartbeat_at", {
+      withTimezone: true
+    })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    unique("agent_sessions_project_id_id_unique").on(table.projectId, table.id),
+    unique("agent_sessions_project_agent_id_id_unique").on(
+      table.projectId,
+      table.agentId,
+      table.id
+    ),
+    foreignKey({
+      columns: [table.projectId, table.agentId],
+      foreignColumns: [agents.projectId, agents.id],
+      name: "agent_sessions_agent_project_fk"
+    }).onDelete("cascade"),
+    index("agent_sessions_project_agent_status_idx").on(
+      table.projectId,
+      table.agentId,
+      table.status
+    ),
+    check(
+      "agent_sessions_runtime_not_blank",
+      sql`btrim(${table.runtime}) <> ''`
+    ),
+    check(
+      "agent_sessions_integration_not_blank",
+      sql`btrim(${table.integration}) <> ''`
+    ),
+    check(
+      "agent_sessions_end_state_consistent",
+      sql`(${table.status} = 'active' and ${table.endedAt} is null) or (${table.status} = 'closed' and ${table.endedAt} is not null)`
+    )
+  ]
+);
+
+export const projectEvents = pgTable(
+  "project_events",
+  {
+    id: serial("id").primaryKey(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    type: text("type").notNull(),
+    actorAgentId: uuid("actor_agent_id"),
+    actorUserId: uuid("actor_user_id").references(() => users.id, {
+      onDelete: "set null"
+    }),
+    entityId: uuid("entity_id"),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.projectId, table.actorAgentId],
+      foreignColumns: [agents.projectId, agents.id],
+      name: "project_events_actor_agent_project_fk"
+    }),
+    index("project_events_project_id_id_idx").on(table.projectId, table.id),
+    check("project_events_type_not_blank", sql`btrim(${table.type}) <> ''`)
+  ]
+);
+
 export const taskClaims = pgTable(
   "task_claims",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    taskId: uuid("task_id")
-      .notNull()
-      .references(() => tasks.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id").notNull(),
+    taskId: uuid("task_id").notNull(),
     agentId: uuid("agent_id").notNull(),
     sessionId: uuid("session_id").notNull(),
     tokenHash: text("token_hash").notNull(),
@@ -280,10 +424,38 @@ export const taskClaims = pgTable(
       withTimezone: true
     }).notNull(),
     releasedAt: timestamp("released_at", { withTimezone: true }),
-    releaseReason: text("release_reason")
+    releaseReason: text("release_reason"),
+    completedAt: timestamp("completed_at", { withTimezone: true })
   },
   (table) => [
-    // ponytail: agent/session FKs wait for the Agents phase identity tables.
+    foreignKey({
+      columns: [table.projectId, table.agentId],
+      foreignColumns: [agents.projectId, agents.id],
+      name: "task_claims_agent_project_fk"
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.projectId, table.sessionId],
+      foreignColumns: [agentSessions.projectId, agentSessions.id],
+      name: "task_claims_session_project_fk"
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.projectId, table.taskId],
+      foreignColumns: [tasks.projectId, tasks.id],
+      name: "task_claims_task_project_fk"
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.projectId, table.agentId, table.sessionId],
+      foreignColumns: [
+        agentSessions.projectId,
+        agentSessions.agentId,
+        agentSessions.id
+      ],
+      name: "task_claims_session_agent_project_fk"
+    }).onDelete("cascade"),
+    check(
+      "task_claims_lifecycle_consistent",
+      sql`(${table.status} = 'active' and ${table.releasedAt} is null and ${table.releaseReason} is null and ${table.completedAt} is null) or (${table.status} = 'released' and ${table.releasedAt} is not null and ${table.releaseReason} is not null and ${table.completedAt} is null) or (${table.status} = 'expired' and ${table.releasedAt} is not null and ${table.releaseReason} is null and ${table.completedAt} is null) or (${table.status} = 'completed' and ${table.releasedAt} is null and ${table.releaseReason} is null and ${table.completedAt} is not null) or (${table.status} = 'revoked' and ${table.releasedAt} is not null and ${table.releaseReason} is not null and ${table.completedAt} is null)`
+    ),
     uniqueIndex("task_claims_one_active_per_task")
       .on(table.taskId)
       .where(sql`${table.status} = 'active'`),
