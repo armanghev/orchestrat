@@ -133,7 +133,10 @@ export const projects = pgTable(
       table.organizationId,
       table.slug
     ),
-    index("projects_organization_status_idx").on(table.organizationId, table.status),
+    index("projects_organization_status_idx").on(
+      table.organizationId,
+      table.status
+    ),
     check(
       "projects_archive_state_consistent",
       sql`(${table.status} = 'active' and ${table.archivedAt} is null) or (${table.status} = 'archived' and ${table.archivedAt} is not null)`
@@ -172,7 +175,10 @@ export const tasks = pgTable(
   (table) => [
     unique("tasks_project_id_id_unique").on(table.projectId, table.id),
     uniqueIndex("tasks_project_key_unique").on(table.projectId, table.taskKey),
-    uniqueIndex("tasks_project_number_unique").on(table.projectId, table.taskNumber),
+    uniqueIndex("tasks_project_number_unique").on(
+      table.projectId,
+      table.taskNumber
+    ),
     index("tasks_project_board_order_idx").on(
       table.projectId,
       table.status,
@@ -202,8 +208,15 @@ export const taskComments = pgTable(
       .notNull()
   },
   (table) => [
-    index("task_comments_task_created_idx").on(table.taskId, table.createdAt, table.id),
-    check("task_comments_body_not_blank", sql`btrim(${table.bodyMarkdown}) <> ''`)
+    index("task_comments_task_created_idx").on(
+      table.taskId,
+      table.createdAt,
+      table.id
+    ),
+    check(
+      "task_comments_body_not_blank",
+      sql`btrim(${table.bodyMarkdown}) <> ''`
+    )
   ]
 );
 
@@ -231,12 +244,18 @@ export const taskDependencies = pgTable(
       foreignColumns: [tasks.projectId, tasks.id],
       name: "task_dependencies_blocker_project_fk"
     }).onDelete("cascade"),
-    index("task_dependencies_project_task_idx").on(table.projectId, table.taskId),
+    index("task_dependencies_project_task_idx").on(
+      table.projectId,
+      table.taskId
+    ),
     index("task_dependencies_project_blocker_idx").on(
       table.projectId,
       table.dependsOnTaskId
     ),
-    check("task_dependencies_not_self", sql`${table.taskId} <> ${table.dependsOnTaskId}`)
+    check(
+      "task_dependencies_not_self",
+      sql`${table.taskId} <> ${table.dependsOnTaskId}`
+    )
   ]
 );
 
@@ -257,15 +276,17 @@ export const taskClaims = pgTable(
     lastHeartbeatAt: timestamp("last_heartbeat_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
-    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }).notNull(),
+    leaseExpiresAt: timestamp("lease_expires_at", {
+      withTimezone: true
+    }).notNull(),
     releasedAt: timestamp("released_at", { withTimezone: true }),
     releaseReason: text("release_reason")
   },
   (table) => [
     // ponytail: agent/session FKs wait for the Agents phase identity tables.
-    uniqueIndex("task_claims_one_active_per_task").on(table.taskId).where(
-      sql`${table.status} = 'active'`
-    ),
+    uniqueIndex("task_claims_one_active_per_task")
+      .on(table.taskId)
+      .where(sql`${table.status} = 'active'`),
     uniqueIndex("task_claims_token_hash_unique").on(table.tokenHash),
     index("task_claims_lease_expiry_idx").on(table.status, table.leaseExpiresAt)
   ]

@@ -65,12 +65,15 @@ test("task schema keeps Kanban ordering, versions, and project-scoped keys", () 
     config.checks.find((check) => check.name === "tasks_position_non_negative")
   );
   assert.equal(
-    config.indexes.find((index) => index.config.name === "tasks_project_board_order_idx")
-      ?.config.columns.length,
+    config.indexes.find(
+      (index) => index.config.name === "tasks_project_board_order_idx"
+    )?.config.columns.length,
     4
   );
   assert.ok(
-    config.indexes.find((index) => index.config.name === "tasks_project_key_unique")
+    config.indexes.find(
+      (index) => index.config.name === "tasks_project_key_unique"
+    )
   );
 });
 
@@ -102,10 +105,19 @@ test("tasks migration backfills prefixes and creates same-project blockers", asy
   );
   assert.match(sql, /REGEXP_REPLACE\(UPPER\("slug"\)/);
   assert.match(sql, /LEFT\(REGEXP_REPLACE\(UPPER\("slug"\).*?, 3\)/);
-  assert.match(sql, /task_claim_status" AS ENUM\('active', 'released', 'expired', 'completed', 'revoked'\)/);
-  assert.match(sql, /"last_heartbeat_at" timestamp with time zone DEFAULT now\(\) NOT NULL/);
+  assert.match(
+    sql,
+    /task_claim_status" AS ENUM\('active', 'released', 'expired', 'completed', 'revoked'\)/
+  );
+  assert.match(
+    sql,
+    /"last_heartbeat_at" timestamp with time zone DEFAULT now\(\) NOT NULL/
+  );
   assert.match(sql, /"position" integer DEFAULT 0 NOT NULL/);
-  assert.match(sql, /CONSTRAINT "tasks_position_non_negative" CHECK \("position" >= 0\)/);
+  assert.match(
+    sql,
+    /CONSTRAINT "tasks_position_non_negative" CHECK \("position" >= 0\)/
+  );
   assert.match(sql, /CREATE UNIQUE INDEX "task_claims_one_active_per_task"/);
   assert.match(sql, /REFERENCES "public"\."tasks"\("project_id", "id"\)/);
   assert.match(sql, /CREATE TABLE "api_idempotency_keys"/);
