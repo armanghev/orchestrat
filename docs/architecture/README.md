@@ -49,7 +49,14 @@ The dashboard uses Supabase access tokens as Bearer tokens. The API verifies
 the token's issuer, audience, expiry, and authenticated role, then creates the
 corresponding local user on the first authenticated request using normalized
 profile fields. Later requests resolve identity from PostgreSQL. Agent
-authentication is not implemented.
+authentication and task-claim routes are not implemented. The database contains
+a claim schema for a future agent flow, but it is not an API contract.
+
+Tasks are project-scoped and use a monotonically increasing `version` for
+optimistic concurrency. Kanban positions are ordered within each status; moves
+accept an optional `before_task_id` anchor. Comments and dependency edges are
+separate project-local records. Archived projects allow task reads but reject
+task writes.
 
 Every response includes `x-request-id`. API errors use the shared structured
 error envelope and include the same request ID.

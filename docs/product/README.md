@@ -12,5 +12,7 @@ Organization -> Project
 
 A signed-in user can create organizations and projects, switch projects, edit
 their profile, and manage an organization's name, membership, and projects via
-the API. The dashboard currently provides an empty project overview. Task,
-agent, document, message, MCP, hook, and realtime behavior remains deferred.
+the API. The API also exposes human task editing, Kanban moves, comments, and
+project-local blockers with optimistic version checks. The dashboard is not yet
+wired to those task routes. Agent claiming, task deletion, documents, messages,
+MCP, hooks, and realtime behavior remain deferred.
