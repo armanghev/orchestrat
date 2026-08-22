@@ -46,9 +46,24 @@ const taskErrorCodeSchema = z.enum([
   "IDEMPOTENCY_CONFLICT"
 ]);
 
+const coordinationErrorCodeSchema = z.enum([
+  "AGENT_NOT_FOUND",
+  "AGENT_CREDENTIAL_INVALID",
+  "AGENT_CREDENTIAL_REVOKED",
+  "AGENT_SESSION_NOT_FOUND",
+  "AGENT_SESSION_CLOSED",
+  "AGENT_SESSION_STALE",
+  "TASK_NOT_CLAIMABLE",
+  "TASK_ALREADY_CLAIMED",
+  "CLAIM_NOT_FOUND",
+  "CLAIM_TOKEN_INVALID",
+  "CLAIM_NOT_OWNER"
+]);
+
 export const errorCodeSchema = z.union([
   baseErrorCodeSchema,
-  taskErrorCodeSchema
+  taskErrorCodeSchema,
+  coordinationErrorCodeSchema
 ]);
 export type ErrorCode = z.infer<typeof errorCodeSchema>;
 
@@ -388,7 +403,190 @@ export type DeleteTaskDependencyRequest = z.infer<
   typeof deleteTaskDependencyRequestSchema
 >;
 
-// Phase boundaries for future event, MCP, and hook schemas.
+const agentNameSchema = z.string().trim().min(1).max(120);
+const integrationNameSchema = z.string().trim().min(1).max(80);
+const runtimeNameSchema = z.string().trim().min(1).max(80);
+const claimTokenSchema = z.string().trim().min(32).max(512);
+export const agentCredentialTokenSchema = z
+  .string()
+  .trim()
+  .max(512)
+  .regex(/^orch_agent_[A-Za-z0-9_-]{32,}$/);
+const leaseSecondsSchema = z.coerce
+  .number()
+  .int()
+  .min(30)
+  .max(86_400)
+  .default(300);
+
+export const agentStatusSchema = z.enum(["active", "revoked"]);
+export type AgentStatus = z.infer<typeof agentStatusSchema>;
+
+export const agentSchema = z.object({
+  id: idSchema,
+  project_id: idSchema,
+  name: agentNameSchema,
+  status: agentStatusSchema,
+  created_at: dateSchema,
+  updated_at: dateSchema,
+  revoked_at: dateSchema.nullable()
+});
+export type Agent = z.infer<typeof agentSchema>;
+
+export const createAgentRequestSchema = z.object({
+  name: agentNameSchema
+});
+export type CreateAgentRequest = z.infer<typeof createAgentRequestSchema>;
+
+export const agentsResponseSchema = z.object({ agents: z.array(agentSchema) });
+export type AgentsResponse = z.infer<typeof agentsResponseSchema>;
+
+export const agentCredentialSchema = z.object({
+  id: idSchema,
+  agent_id: idSchema,
+  project_id: idSchema,
+  created_at: dateSchema,
+  last_used_at: dateSchema.nullable(),
+  revoked_at: dateSchema.nullable()
+});
+export type AgentCredential = z.infer<typeof agentCredentialSchema>;
+
+export const issueAgentCredentialResponseSchema = z.object({
+  credential: agentCredentialSchema,
+  token: agentCredentialTokenSchema
+});
+export type IssueAgentCredentialResponse = z.infer<
+  typeof issueAgentCredentialResponseSchema
+>;
+
+export const agentSessionStatusSchema = z.enum(["active", "closed"]);
+export type AgentSessionStatus = z.infer<typeof agentSessionStatusSchema>;
+
+export const agentSessionSchema = z.object({
+  id: idSchema,
+  agent_id: idSchema,
+  project_id: idSchema,
+  runtime: runtimeNameSchema,
+  integration: integrationNameSchema,
+  external_session_id: z.string().trim().min(1).max(255).nullable(),
+  status: agentSessionStatusSchema,
+  started_at: dateSchema,
+  ended_at: dateSchema.nullable(),
+  last_heartbeat_at: dateSchema
+});
+export type AgentSession = z.infer<typeof agentSessionSchema>;
+
+export const openAgentSessionRequestSchema = z.object({
+  runtime: runtimeNameSchema,
+  integration: integrationNameSchema,
+  external_session_id: z.string().trim().min(1).max(255).nullable().optional()
+});
+export type OpenAgentSessionRequest = z.infer<
+  typeof openAgentSessionRequestSchema
+>;
+
+export const agentSessionParamsSchema = z.object({ sessionId: idSchema });
+export const agentSessionResponseSchema = z.object({
+  session: agentSessionSchema
+});
+export type AgentSessionResponse = z.infer<typeof agentSessionResponseSchema>;
+
+export const heartbeatRequestSchema = z.object({
+  session_id: idSchema
+});
+export type HeartbeatRequest = z.infer<typeof heartbeatRequestSchema>;
+
+export const heartbeatResponseSchema = z.object({
+  session: agentSessionSchema,
+  renewed_claim_ids: z.array(idSchema)
+});
+export type HeartbeatResponse = z.infer<typeof heartbeatResponseSchema>;
+
+export const claimStatusSchema = z.enum([
+  "active",
+  "released",
+  "completed",
+  "expired",
+  "revoked"
+]);
+export type ClaimStatus = z.infer<typeof claimStatusSchema>;
+
+export const claimSchema = z.object({
+  id: idSchema,
+  project_id: idSchema,
+  task_id: idSchema,
+  agent_id: idSchema,
+  session_id: idSchema,
+  status: claimStatusSchema,
+  claimed_at: dateSchema,
+  lease_expires_at: dateSchema,
+  released_at: dateSchema.nullable(),
+  completed_at: dateSchema.nullable()
+});
+export type Claim = z.infer<typeof claimSchema>;
+
+export const claimTaskRequestSchema = z.object({
+  session_id: idSchema,
+  lease_seconds: leaseSecondsSchema
+});
+export type ClaimTaskRequest = z.infer<typeof claimTaskRequestSchema>;
+
+export const claimResponseSchema = z.object({
+  claim: claimSchema,
+  claim_token: claimTokenSchema
+});
+export type ClaimResponse = z.infer<typeof claimResponseSchema>;
+
+export const claimMutationRequestSchema = z.object({
+  claim_token: claimTokenSchema
+});
+export const releaseClaimRequestSchema = claimMutationRequestSchema;
+export const completeClaimRequestSchema = claimMutationRequestSchema;
+export type ReleaseClaimRequest = z.infer<typeof releaseClaimRequestSchema>;
+export type CompleteClaimRequest = z.infer<typeof completeClaimRequestSchema>;
+
+export const agentPresenceStatusSchema = z.enum(["online", "offline"]);
+export type AgentPresenceStatus = z.infer<typeof agentPresenceStatusSchema>;
+
+export const agentPresenceSchema = z.object({
+  agent_id: idSchema,
+  project_id: idSchema,
+  session_id: idSchema.nullable(),
+  status: agentPresenceStatusSchema,
+  last_heartbeat_at: dateSchema.nullable(),
+  current_task_id: idSchema.nullable()
+});
+export type AgentPresence = z.infer<typeof agentPresenceSchema>;
+
+const eventTypeSchema = z.string().trim().min(1).max(80);
+export const projectEventSchema = z.object({
+  id: z.number().int().positive(),
+  project_id: idSchema,
+  type: eventTypeSchema,
+  actor_agent_id: idSchema.nullable(),
+  actor_user_id: idSchema.nullable(),
+  entity_id: idSchema.nullable(),
+  payload: z.record(z.string(), z.unknown()),
+  occurred_at: dateSchema
+});
+export type ProjectEvent = z.infer<typeof projectEventSchema>;
+
+export const paginationQuerySchema = z.object({
+  limit: limitSchema,
+  after: cursorSchema.optional()
+});
+export type PaginationQuery = z.infer<typeof paginationQuerySchema>;
+
+export const paginationResponseSchema = z.object({
+  next_cursor: cursorSchema.nullable()
+});
+export type PaginationResponse = z.infer<typeof paginationResponseSchema>;
+
+export const projectEventsResponseSchema = paginationResponseSchema.extend({
+  events: z.array(projectEventSchema)
+});
+export type ProjectEventsResponse = z.infer<typeof projectEventsResponseSchema>;
+
 export const eventSchema = z.object({
   type: z.string(),
   occurredAt: z.string().datetime()
