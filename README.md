@@ -1,15 +1,22 @@
 # orchestrat.dev
 
-orchestrat is a developer-first coordination plane for humans and autonomous agents. It provides the shared workspace around agent work; it is not an agent runtime.
+orchestrat is a macOS-first coordination plane for humans and autonomous coding
+agents. It provides shared tasks, exclusive ownership, project knowledge, and
+activity around agent work; it is not an agent runtime.
+
+The private-alpha goal is to connect Codex and Claude Code to the same project
+through a local Orchestrat CLI, let exactly one agent claim shared work, and make
+that coordination visible in the macOS app.
 
 ## Repository layout
 
 - `apps/landing` — Next.js marketing site for `orchestrat.dev`
-- `apps/dashboard` — Vite + React dashboard for web and future Tauri desktop use
+- `apps/dashboard` — shared Vite + React dashboard for web and Tauri macOS
 - `apps/api` — Fastify API for `api.orchestrat.dev`
-- `packages/protocol` — shared Zod schemas, types, errors, events, and future MCP/hook contracts
+- `packages/protocol` — shared Zod schemas, types, errors, and transport contracts
 - `packages/ui` — small shared React primitives
-- `packages/{sdk,db,mcp,auth,config,logger,testing}` — phase-ready shared package boundaries
+- `packages/{sdk,db,mcp,auth,config,logger,testing}` — shared package boundaries;
+  MCP and SDK are currently placeholders
 - `docs/` — architecture, product, and API documentation
 
 ## Prerequisites
@@ -18,6 +25,27 @@ orchestrat is a developer-first coordination plane for humans and autonomous age
 - pnpm 10+
 - a PostgreSQL connection string
 - a Supabase project configured for the dashboard sign-in methods you use
+
+## Current product status
+
+Implemented:
+
+- Supabase human authentication for web and Tauri, including native Keychain
+  session ownership, GitHub OAuth, magic links, and deep-link callbacks
+- organization and project management
+- the human Tasks API, including comments, dependencies, idempotent creation,
+  and optimistic concurrency
+- the shared web/Tauri dashboard shell
+
+Still required for the private alpha:
+
+- agent credentials, sessions, heartbeat, presence, and exclusive claim leases
+- persistent setup CLI and local stdio MCP bridge for Codex and Claude Code
+- Markdown documents with revision conflicts
+- durable activity events and project-scoped realtime delivery
+- real Tasks, Agents, Documents, Activity, and Overview dashboard data
+- integration setup/status, minimal hooks, native notifications, deployment,
+  and DMG acceptance
 
 ## Install and run
 
@@ -116,10 +144,12 @@ Known external limitations:
 
 ## Architecture
 
-The dashboard and future desktop app share `apps/dashboard`. API transports
-remain thin and delegate to application services. PostgreSQL is the durable
-source of truth, Drizzle owns the reviewed migration workflow, and shared API
-contracts live in `@orchestrat/protocol`. Supabase identifies humans; local
-organization membership controls project access.
+The web and macOS apps share `apps/dashboard`. A persistent local CLI will host
+the generic stdio MCP bridge and lightweight hooks, storing separate agent
+credentials in macOS Keychain. API transports remain thin and delegate to
+application services. PostgreSQL is the durable source of truth, Drizzle owns
+the reviewed migration workflow, and shared contracts live in
+`@orchestrat/protocol`. Supabase identifies humans; local organization
+membership controls project access.
 
 See [architecture documentation](docs/architecture/README.md), [product documentation](docs/product/README.md), and [API documentation](docs/api/README.md).
