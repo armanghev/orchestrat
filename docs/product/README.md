@@ -3,12 +3,14 @@
 orchestrat is a shared coordination layer for humans and autonomous agents.
 It is not an agent runtime.
 
-Phase 2 gives humans an authenticated dashboard and the durable hierarchy:
+The current foundation gives humans an authenticated dashboard and the durable
+hierarchy:
 
 ```text
-Organization -> Workspace -> Project
+Organization -> Project
 ```
 
-A signed-in user can create and select each level, switch projects, and open
-an empty project overview. Task, agent, document, message, MCP, hook, and
-realtime behavior remains deferred to its dedicated phase.
+A signed-in user can create organizations and projects, switch projects, edit
+their profile, and manage an organization's name, membership, and projects via
+the API. The dashboard currently provides an empty project overview. Task,
+agent, document, message, MCP, hook, and realtime behavior remains deferred.
