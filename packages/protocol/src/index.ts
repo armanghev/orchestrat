@@ -36,6 +36,10 @@ export const errorCodeSchema = z.enum([
   "VALIDATION_ERROR",
   "NOT_FOUND",
   "CONFLICT",
+  "PROJECT_ARCHIVED",
+  "TASK_VERSION_CONFLICT",
+  "TASK_DEPENDENCY_CYCLE",
+  "IDEMPOTENCY_CONFLICT",
   "INTERNAL_ERROR"
 ]);
 export type ErrorCode = z.infer<typeof errorCodeSchema>;
@@ -153,7 +157,15 @@ export type Project = z.infer<typeof projectSchema>;
 export const createProjectRequestSchema = z.object({
   name: nameSchema,
   slug: slugSchema.optional(),
-  description: z.string().trim().max(4000).nullable().optional()
+  description: z.string().trim().max(4000).nullable().optional(),
+  task_key_prefix: z
+    .string()
+    .trim()
+    .min(2)
+    .max(8)
+    .regex(/^[a-zA-Z0-9]+$/)
+    .transform((value) => value.toUpperCase())
+    .optional()
 });
 export type CreateProjectRequest = z.infer<typeof createProjectRequestSchema>;
 
@@ -182,6 +194,180 @@ export const idParamsSchema = z.object({ id: idSchema });
 export const organizationParamsSchema = z.object({
   organizationId: idSchema
 });
+
+export const taskPrioritySchema = z.enum([
+  "urgent",
+  "high",
+  "medium",
+  "low",
+  "none"
+]);
+export type TaskPriority = z.infer<typeof taskPrioritySchema>;
+
+export const taskStatusSchema = z.enum([
+  "backlog",
+  "ready",
+  "claimed",
+  "in_progress",
+  "blocked",
+  "review",
+  "done",
+  "cancelled"
+]);
+export type TaskStatus = z.infer<typeof taskStatusSchema>;
+
+// Human mutations intentionally cannot select the agent-owned claimed state.
+export const humanTaskStatusSchema = taskStatusSchema.exclude(["claimed"]);
+export type HumanTaskStatus = z.infer<typeof humanTaskStatusSchema>;
+
+const markdownSchema = z.string().trim().min(1).max(100000);
+const taskTitleSchema = z.string().trim().min(1).max(240);
+const taskKeySchema = z.string().regex(/^[A-Z0-9]{2,8}-[1-9][0-9]*$/);
+const cursorSchema = z.string().trim().min(1).max(2048);
+const limitSchema = z.coerce.number().int().min(1).max(100).default(50);
+const expectedVersionSchema = z.number().int().min(1);
+export const idempotencyKeySchema = z.string().trim().min(1).max(128);
+
+export const taskSchema = z.object({
+  id: idSchema,
+  project_id: idSchema,
+  key: taskKeySchema,
+  title: taskTitleSchema,
+  description: z.string().nullable(),
+  priority: taskPrioritySchema,
+  status: taskStatusSchema,
+  position: z.number().int().min(0),
+  version: z.number().int().min(1),
+  created_by_user_id: idSchema,
+  created_at: dateSchema,
+  updated_at: dateSchema,
+  started_at: dateSchema.nullable(),
+  completed_at: dateSchema.nullable(),
+  cancelled_at: dateSchema.nullable()
+});
+export type Task = z.infer<typeof taskSchema>;
+
+export const taskCardSchema = taskSchema.extend({
+  comment_count: z.number().int().min(0),
+  unresolved_blocker_count: z.number().int().min(0)
+});
+export type TaskCard = z.infer<typeof taskCardSchema>;
+
+export const createTaskRequestSchema = z.object({
+  title: taskTitleSchema,
+  description: z.string().trim().max(100000).nullable().optional(),
+  priority: taskPrioritySchema.optional(),
+  status: humanTaskStatusSchema.optional()
+});
+export type CreateTaskRequest = z.infer<typeof createTaskRequestSchema>;
+
+export const taskListQuerySchema = z.object({
+  status: taskStatusSchema.optional(),
+  priority: taskPrioritySchema.optional(),
+  limit: limitSchema,
+  cursor: cursorSchema.optional()
+});
+export type TaskListQuery = z.infer<typeof taskListQuerySchema>;
+
+export const taskListResponseSchema = z.object({
+  tasks: z.array(taskCardSchema),
+  total: z.number().int().min(0),
+  next_cursor: cursorSchema.nullable()
+});
+export type TaskListResponse = z.infer<typeof taskListResponseSchema>;
+
+export const taskIdParamsSchema = z.object({ id: idSchema });
+export const projectTaskParamsSchema = z.object({ projectId: idSchema });
+
+export const updateTaskRequestSchema = z
+  .object({
+    title: taskTitleSchema.optional(),
+    description: z.string().trim().max(100000).nullable().optional(),
+    priority: taskPrioritySchema.optional(),
+    expected_version: expectedVersionSchema
+  })
+  .refine(
+    (value) =>
+      value.title !== undefined ||
+      value.description !== undefined ||
+      value.priority !== undefined,
+    { message: "At least one task field is required." }
+  );
+export type UpdateTaskRequest = z.infer<typeof updateTaskRequestSchema>;
+
+export const moveTaskRequestSchema = z.object({
+  status: humanTaskStatusSchema,
+  before_task_id: idSchema.nullable().optional(),
+  expected_version: expectedVersionSchema
+});
+export type MoveTaskRequest = z.infer<typeof moveTaskRequestSchema>;
+
+export const taskCommentSchema = z.object({
+  id: idSchema,
+  task_id: idSchema,
+  author: z.object({
+    user_id: idSchema,
+    username: usernameSchema.nullable(),
+    full_name: z.string(),
+    avatar_url: avatarUrlSchema
+  }),
+  body_markdown: markdownSchema,
+  created_at: dateSchema
+});
+export type TaskComment = z.infer<typeof taskCommentSchema>;
+
+export const taskCommentsQuerySchema = z.object({
+  limit: limitSchema,
+  cursor: cursorSchema.optional()
+});
+export type TaskCommentsQuery = z.infer<typeof taskCommentsQuerySchema>;
+
+export const taskCommentsResponseSchema = z.object({
+  comments: z.array(taskCommentSchema),
+  next_cursor: cursorSchema.nullable()
+});
+export type TaskCommentsResponse = z.infer<typeof taskCommentsResponseSchema>;
+
+export const createTaskCommentRequestSchema = z.object({
+  body_markdown: markdownSchema
+});
+export type CreateTaskCommentRequest = z.infer<
+  typeof createTaskCommentRequestSchema
+>;
+
+export const taskDependencySchema = z.object({
+  task_id: idSchema,
+  depends_on_task_id: idSchema,
+  created_at: dateSchema
+});
+export type TaskDependency = z.infer<typeof taskDependencySchema>;
+
+export const taskDependenciesResponseSchema = z.object({
+  depends_on: z.array(taskSchema),
+  blocks: z.array(taskSchema)
+});
+export type TaskDependenciesResponse = z.infer<
+  typeof taskDependenciesResponseSchema
+>;
+
+export const createTaskDependencyRequestSchema = z.object({
+  depends_on_task_id: idSchema,
+  expected_version: expectedVersionSchema
+});
+export type CreateTaskDependencyRequest = z.infer<
+  typeof createTaskDependencyRequestSchema
+>;
+
+export const deleteTaskDependencyParamsSchema = z.object({
+  id: idSchema,
+  dependsOnTaskId: idSchema
+});
+export const deleteTaskDependencyRequestSchema = z.object({
+  expected_version: expectedVersionSchema
+});
+export type DeleteTaskDependencyRequest = z.infer<
+  typeof deleteTaskDependencyRequestSchema
+>;
 
 // Phase boundaries for future event, MCP, and hook schemas.
 export const eventSchema = z.object({
