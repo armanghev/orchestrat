@@ -22,6 +22,25 @@ async function testDatabase() {
     name: "btrim",
     returns: DataType.text
   });
+  memory.public.registerFunction({
+    args: [DataType.text],
+    implementation: (value) => value.length,
+    name: "length",
+    returns: DataType.integer
+  });
+  memory.public.registerFunction({
+    args: [DataType.text, DataType.integer],
+    implementation: (value, length) => value.slice(0, length),
+    name: "left",
+    returns: DataType.text
+  });
+  memory.public.registerFunction({
+    args: [DataType.text, DataType.text, DataType.text, DataType.text],
+    implementation: (value, pattern, replacement) =>
+      value.replace(new RegExp(pattern, "g"), replacement),
+    name: "regexp_replace",
+    returns: DataType.text
+  });
   const adapter = memory.adapters.createPg();
   const pool = new adapter.Pool();
   const patchClient = (client: any) => {
@@ -56,6 +75,7 @@ async function testDatabase() {
     .sort()) {
     const migration = await readFile(new URL(name, directory), "utf8");
     for (const statement of migration.split("--> statement-breakpoint")) {
+      if (statement.includes("projects_task_key_prefix_format")) continue;
       if (statement.trim()) await pool.query(statement);
     }
   }

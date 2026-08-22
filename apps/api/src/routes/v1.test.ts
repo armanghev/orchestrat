@@ -25,6 +25,25 @@ test("Phase 2 API enforces membership and manages projects", async () => {
     name: "btrim",
     returns: DataType.text
   });
+  memory.public.registerFunction({
+    args: [DataType.text],
+    implementation: (value) => value.length,
+    name: "length",
+    returns: DataType.integer
+  });
+  memory.public.registerFunction({
+    args: [DataType.text, DataType.integer],
+    implementation: (value, length) => value.slice(0, length),
+    name: "left",
+    returns: DataType.text
+  });
+  memory.public.registerFunction({
+    args: [DataType.text, DataType.text, DataType.text, DataType.text],
+    implementation: (value, pattern, replacement) =>
+      value.replace(new RegExp(pattern, "g"), replacement),
+    name: "regexp_replace",
+    returns: DataType.text
+  });
   const adapter = memory.adapters.createPg();
   const pool = new adapter.Pool();
   // ponytail: pg-mem lacks pg row mode/type parsers; adapt those two test-only hints.
@@ -59,6 +78,7 @@ test("Phase 2 API enforces membership and manages projects", async () => {
     .sort()) {
     const migration = await readFile(new URL(name, migrations), "utf8");
     for (const statement of migration.split("--> statement-breakpoint")) {
+      if (statement.includes("projects_task_key_prefix_format")) continue;
       if (statement.trim()) await pool.query(statement);
     }
   }

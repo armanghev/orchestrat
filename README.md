@@ -17,7 +17,7 @@ orchestrat is a developer-first coordination plane for humans and autonomous age
 - Node.js 20.19+ (or 22.12+)
 - pnpm 10+
 - a PostgreSQL connection string
-- a Supabase project with GitHub OAuth and email magic-link enabled
+- a Supabase project configured for the dashboard sign-in methods you use
 
 ## Install and run
 
@@ -30,6 +30,12 @@ pnpm dev
 
 Set `ORCHESTRAT_DATABASE_URL` to the PostgreSQL connection string you provide.
 The API verifies Supabase access JWTs from configured browser/native sessions.
+It also requires these server-only values:
+
+- `ORCHESTRAT_SUPABASE_URL`
+- `ORCHESTRAT_SUPABASE_JWT_AUDIENCE`
+- `ORCHESTRAT_SUPABASE_JWT_ALGORITHM` (`ES256` or `RS256`)
+
 For web builds, set:
 
 - `VITE_SUPABASE_URL`
@@ -53,9 +59,9 @@ to the app without putting access or refresh tokens in a URL.
 For production, set the portal URL to `https://app.orchestrat.dev/auth/desktop`
 and allow `https://app.orchestrat.dev/auth/desktop/callback` in Supabase.
 
-To create a local organization, workspace, and project without using the UI,
-set the `ORCHESTRAT_SEED_*` variables from `.env.example`, including a stable Supabase
-`auth_subject` UUID, then run:
+To create a local user, organization, and project without using the UI, set the
+`ORCHESTRAT_SEED_*` variables from `.env.example`, including a stable Supabase
+user UUID for `ORCHESTRAT_SEED_AUTH_SUBJECT`, then run:
 
 ```bash
 pnpm db:seed
@@ -114,6 +120,6 @@ The dashboard and future desktop app share `apps/dashboard`. API transports
 remain thin and delegate to application services. PostgreSQL is the durable
 source of truth, Drizzle owns the reviewed migration workflow, and shared API
 contracts live in `@orchestrat/protocol`. Supabase identifies humans; local
-organization membership controls workspace and project access.
+organization membership controls project access.
 
 See [architecture documentation](docs/architecture/README.md), [product documentation](docs/product/README.md), and [API documentation](docs/api/README.md).

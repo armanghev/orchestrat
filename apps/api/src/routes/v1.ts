@@ -8,15 +8,31 @@ import {
   updateOrganizationMemberRequestSchema,
   updateOrganizationRequestSchema,
   updateProjectRequestSchema,
-  updateProfileRequestSchema
+  updateProfileRequestSchema,
+  createTaskRequestSchema,
+  taskListQuerySchema,
+  taskIdParamsSchema,
+  projectTaskParamsSchema,
+  updateTaskRequestSchema,
+  moveTaskRequestSchema,
+  taskCommentsQuerySchema,
+  createTaskCommentRequestSchema,
+  createTaskDependencyRequestSchema,
+  deleteTaskDependencyParamsSchema,
+  deleteTaskDependencyRequestSchema
 } from "@orchestrat/protocol";
 import type { FastifyInstance } from "fastify";
 import type { ProjectService } from "../services/project-service.js";
 import type { ProfileService } from "../services/profile-service.js";
+import type { TaskService } from "../services/task-service.js";
 
 export async function v1Routes(
   app: FastifyInstance,
-  options: { projects: ProjectService; profiles: ProfileService }
+  options: {
+    projects: ProjectService;
+    profiles: ProfileService;
+    tasks: TaskService;
+  }
 ) {
   app.get("/profile", async (request) => ({
     ...(await options.profiles.get(request.userId)),
@@ -172,4 +188,82 @@ export async function v1Routes(
       projectLifecycleRequestSchema.parse(request.body).name
     )
   );
+
+  app.post("/projects/:projectId/tasks", async (request, reply) => {
+    const result = await options.tasks.create(
+      request.userId,
+      projectTaskParamsSchema.parse(request.params).projectId,
+      createTaskRequestSchema.parse(request.body),
+      request.headers["idempotency-key"] as string | undefined
+    );
+    return reply.code(result.status).send(result.body);
+  });
+  app.get("/projects/:projectId/tasks", (request) =>
+    options.tasks.list(
+      request.userId,
+      projectTaskParamsSchema.parse(request.params).projectId,
+      taskListQuerySchema.parse(request.query)
+    )
+  );
+  app.get("/tasks/:id", (request) =>
+    options.tasks.get(
+      request.userId,
+      taskIdParamsSchema.parse(request.params).id
+    )
+  );
+  app.patch("/tasks/:id", (request) =>
+    options.tasks.update(
+      request.userId,
+      taskIdParamsSchema.parse(request.params).id,
+      updateTaskRequestSchema.parse(request.body)
+    )
+  );
+  app.post("/tasks/:id/move", (request) =>
+    options.tasks.move(
+      request.userId,
+      taskIdParamsSchema.parse(request.params).id,
+      moveTaskRequestSchema.parse(request.body)
+    )
+  );
+  app.get("/tasks/:id/comments", (request) => {
+    const query = taskCommentsQuerySchema.parse(request.query);
+    return options.tasks.comments(
+      request.userId,
+      taskIdParamsSchema.parse(request.params).id,
+      query.limit,
+      query.cursor
+    );
+  });
+  app.post("/tasks/:id/comments", async (request, reply) => {
+    const result = await options.tasks.createComment(
+      request.userId,
+      taskIdParamsSchema.parse(request.params).id,
+      createTaskCommentRequestSchema.parse(request.body),
+      request.headers["idempotency-key"] as string | undefined
+    );
+    return reply.code(result.status).send(result.body);
+  });
+  app.get("/tasks/:id/dependencies", (request) =>
+    options.tasks.dependencies(
+      request.userId,
+      taskIdParamsSchema.parse(request.params).id
+    )
+  );
+  app.post("/tasks/:id/dependencies", (request) =>
+    options.tasks.addDependency(
+      request.userId,
+      taskIdParamsSchema.parse(request.params).id,
+      createTaskDependencyRequestSchema.parse(request.body)
+    )
+  );
+  app.delete("/tasks/:id/dependencies/:dependsOnTaskId", (request) => {
+    const params = deleteTaskDependencyParamsSchema.parse(request.params);
+    const body = deleteTaskDependencyRequestSchema.parse(request.body);
+    return options.tasks.removeDependency(
+      request.userId,
+      params.id,
+      params.dependsOnTaskId,
+      body.expected_version
+    );
+  });
 }
