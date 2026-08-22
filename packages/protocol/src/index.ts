@@ -30,21 +30,29 @@ export const updateProfileRequestSchema = z.object({
 });
 export type UpdateProfileRequest = z.infer<typeof updateProfileRequestSchema>;
 
-export const errorCodeSchema = z.enum([
+const baseErrorCodeSchema = z.enum([
   "UNAUTHENTICATED",
   "PERMISSION_DENIED",
   "VALIDATION_ERROR",
   "NOT_FOUND",
   "CONFLICT",
+  "INTERNAL_ERROR"
+]);
+
+const taskErrorCodeSchema = z.enum([
   "PROJECT_ARCHIVED",
   "TASK_VERSION_CONFLICT",
   "TASK_DEPENDENCY_CYCLE",
-  "IDEMPOTENCY_CONFLICT",
-  "INTERNAL_ERROR"
+  "IDEMPOTENCY_CONFLICT"
+]);
+
+export const errorCodeSchema = z.union([
+  baseErrorCodeSchema,
+  taskErrorCodeSchema
 ]);
 export type ErrorCode = z.infer<typeof errorCodeSchema>;
 
-export const apiErrorSchema = z.object({
+export const apiErrorResponseSchema = z.object({
   error: z.object({
     code: errorCodeSchema,
     message: z.string(),
@@ -52,7 +60,20 @@ export const apiErrorSchema = z.object({
     request_id: z.string()
   })
 });
-export type ApiErrorResponse = z.infer<typeof apiErrorSchema>;
+export type ApiErrorResponse = z.infer<typeof apiErrorResponseSchema>;
+
+// The dashboard's existing error union predates task-specific errors. Keep
+// that parser source-compatible by making the deliberate fallback explicit.
+export const apiErrorSchema = apiErrorResponseSchema.transform((response) => {
+  const baseCode = baseErrorCodeSchema.safeParse(response.error.code);
+  return {
+    ...response,
+    error: {
+      ...response.error,
+      code: baseCode.success ? baseCode.data : "INTERNAL_ERROR"
+    }
+  };
+});
 
 const idSchema = z.string().uuid();
 const slugSchema = z
@@ -76,9 +97,7 @@ export type UpdateOrganizationRequest = z.infer<
 >;
 
 export const deleteResourceRequestSchema = z.object({ name: nameSchema });
-export type DeleteResourceRequest = z.infer<
-  typeof deleteResourceRequestSchema
->;
+export type DeleteResourceRequest = z.infer<typeof deleteResourceRequestSchema>;
 
 export const deleteResourceResponseSchema = z.object({
   deleted: z.literal(true)
