@@ -23,6 +23,13 @@ import {
 } from "./services/profile-service.js";
 import { TaskService } from "./services/task-service.js";
 import { DocumentService } from "./services/document-service.js";
+import { CliSetupService } from "./services/cli-setup-service.js";
+import { cliSetupRoutes } from "./routes/cli-setup.js";
+import { CliAuthorizationService } from "./services/cli-authorization-service.js";
+import {
+  cliAuthorizationHumanRoutes,
+  cliAuthorizationPublicRoutes
+} from "./routes/cli-authorization.js";
 
 type AppOptions = {
   allowedOrigins: string[];
@@ -61,6 +68,8 @@ export function buildApp(options: AppOptions) {
   const agents = new AgentService(options.db);
   const claims = new TaskClaimService(options.db);
   const documents = new DocumentService(options.db);
+  const cliAuthorization = new CliAuthorizationService(options.db);
+  const cliSetup = new CliSetupService(options.db);
 
   app.register(cors, {
     origin: options.allowedOrigins,
@@ -143,6 +152,11 @@ export function buildApp(options: AppOptions) {
 
   app.register(healthRoutes);
   app.register(healthRoutes, { prefix: "/api/v1" });
+  app.register(cliAuthorizationPublicRoutes, {
+    prefix: "/api/v1",
+    authorization: cliAuthorization
+  });
+  app.register(cliSetupRoutes, { prefix: "/api/v1", setup: cliSetup });
   app.decorateRequest("agentPrincipal", null);
   app.register(
     async (api) => {
@@ -180,6 +194,9 @@ export function buildApp(options: AppOptions) {
       api.register(v1Routes, { projects, profiles, tasks });
       api.register(documentRoutes, { documents });
       api.register(agentManagementRoutes, { agents });
+      api.register(cliAuthorizationHumanRoutes, {
+        authorization: cliAuthorization
+      });
     },
     { prefix: "/api/v1" }
   );

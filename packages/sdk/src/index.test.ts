@@ -139,6 +139,40 @@ test("retries only a safe GET transport failure", async () => {
   assert.equal(attempts, 1);
 });
 
+test("ingests lifecycle hooks with agent auth and idempotency", async () => {
+  const calls: RequestInit[] = [];
+  const client = new AgentApiClient({
+    baseUrl: "https://api.test",
+    token,
+    fetch: async (_url, init) => {
+      calls.push(init ?? {});
+      return new Response(JSON.stringify({ event_id: 7, session }), {
+        status: 200
+      });
+    }
+  });
+  await client.ingestLifecycle(
+    {
+      event: "session.started",
+      session_id: id,
+      runtime: "codex",
+      integration: "codex",
+      external_session_id: "provider-session"
+    },
+    "retry-key"
+  );
+  const headers = calls[0]!.headers as Record<string, string>;
+  assert.equal(headers["idempotency-key"], "retry-key");
+  assert.equal(headers.authorization, `Bearer ${token}`);
+  assert.deepEqual(JSON.parse(String(calls[0]!.body)), {
+    event: "session.started",
+    session_id: id,
+    runtime: "codex",
+    integration: "codex",
+    external_session_id: "provider-session"
+  });
+});
+
 test("maps typed agent document routes and sends revision preconditions", async () => {
   const document = {
     id,

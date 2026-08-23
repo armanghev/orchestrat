@@ -3,6 +3,7 @@ import { readdir, readFile } from "node:fs/promises";
 import test from "node:test";
 import { getTableConfig } from "drizzle-orm/pg-core";
 import {
+  agentLifecycleEvents,
   agentCredentials,
   agentSessions,
   agents,
@@ -17,6 +18,42 @@ import {
   tasks,
   users
 } from "./schema.js";
+
+test("agent lifecycle idempotency is project/agent scoped and hash-only", async () => {
+  const config = getTableConfig(agentLifecycleEvents);
+  assert.equal(agentLifecycleEvents.requestHash.notNull, true);
+  assert.equal(agentLifecycleEvents.eventId.notNull, false);
+  assert.equal(agentLifecycleEvents.sessionId.notNull, false);
+  assert.ok(
+    config.indexes.find(
+      (index) => index.config.name === "agent_lifecycle_events_scope_unique"
+    )
+  );
+  assert.deepEqual(
+    config.foreignKeys.map((foreignKey) => foreignKey.getName()).sort(),
+    [
+      "agent_lifecycle_events_agent_project_fk",
+      "agent_lifecycle_events_event_id_fk",
+      "agent_lifecycle_events_project_id_projects_id_fk",
+      "agent_lifecycle_events_session_project_fk"
+    ]
+  );
+  const sql = await readFile(
+    new URL("../drizzle/0008_agent_lifecycle_events.sql", import.meta.url),
+    "utf8"
+  );
+  assert.match(sql, /request_hash/);
+  assert.match(sql, /agent_lifecycle_events_scope_unique/);
+  assert.match(sql, /agent_lifecycle_events_event_id_fk/);
+  assert.doesNotMatch(sql, /"token"\s+text/);
+  const journal = JSON.parse(
+    await readFile(
+      new URL("../drizzle/meta/_journal.json", import.meta.url),
+      "utf8"
+    )
+  ) as { entries: { tag: string }[] };
+  assert.equal(journal.entries.at(-1)?.tag, "0008_agent_lifecycle_events");
+});
 
 test("users have provider-qualified identity and non-unique email indexes", () => {
   const config = getTableConfig(users);

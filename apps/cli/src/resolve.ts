@@ -35,7 +35,9 @@ export async function resolveInvocation(input: Invocation) {
       `No ${input.integration} project mapping found for ${input.cwd}`
     );
   if (!input.credentials) throw new Error("Credential reader is unavailable");
-  const credential = await input.credentials.read(input.integration);
+  const credential =
+    (await input.credentials.read(`agent:${input.integration}`)) ??
+    (await input.credentials.read(input.integration));
   if (!credential)
     throw new Error(`No ${input.integration} credential found in Keychain`);
   return { mapping, credential, public: publicMapping(mapping) };

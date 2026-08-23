@@ -1,4 +1,5 @@
 mod auth;
+mod integrations;
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
 
@@ -139,6 +140,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            local_integration_status,
             auth::commands::auth_begin_github,
             auth::commands::auth_send_magic_link,
             auth::commands::auth_restore,
@@ -150,6 +152,24 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Orchestrat");
+}
+
+#[tauri::command]
+fn local_integration_status(
+    project_id: String,
+) -> Result<integrations::LocalIntegrationStatus, String> {
+    let home = std::env::var_os("HOME").ok_or_else(|| "HOME is unavailable".to_string())?;
+    let service = "dev.orchestrat.cli.agent";
+    Ok(integrations::inspect_local(
+        std::path::Path::new(&home),
+        &project_id,
+        |account| {
+            keyring::Entry::new(service, account)
+                .ok()
+                .and_then(|entry| entry.get_password().ok())
+                .is_some()
+        },
+    ))
 }
 
 #[cfg(all(test, target_os = "macos"))]

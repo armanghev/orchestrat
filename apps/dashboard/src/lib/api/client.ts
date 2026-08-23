@@ -53,7 +53,9 @@ import {
   type UpdateTaskRequest,
   type TaskComment,
   type DocumentRevision,
-  type ErrorCode
+  type ErrorCode,
+  cliAuthorizationPollResponseSchema,
+  type CliAuthorizationPollResponse
 } from "@orchestrat/protocol";
 import { z, type ZodType } from "zod";
 
@@ -488,6 +490,27 @@ export class ApiClient {
       `/api/v1/documents/${encodeURIComponent(documentId)}/revisions/${revision}`,
       { method: "GET" },
       documentRevisionsResponseSchema.shape.revisions.element
+    );
+  }
+
+  approveCliAuthorization(
+    attemptId: string,
+    projectId: string
+  ): Promise<CliAuthorizationPollResponse> {
+    return this.request(
+      `/api/v1/cli/authorization/attempts/${encodeURIComponent(attemptId)}/approve`,
+      { method: "POST", body: { project_id: projectId } },
+      cliAuthorizationPollResponseSchema
+    );
+  }
+
+  denyCliAuthorization(
+    attemptId: string
+  ): Promise<CliAuthorizationPollResponse> {
+    return this.request(
+      `/api/v1/cli/authorization/attempts/${encodeURIComponent(attemptId)}/deny`,
+      { method: "POST", body: {} },
+      cliAuthorizationPollResponseSchema
     );
   }
 
