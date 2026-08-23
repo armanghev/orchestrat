@@ -4,7 +4,12 @@ import { setTimeout as wait } from "node:timers/promises";
 import websocket from "@fastify/websocket";
 import Fastify from "fastify";
 import test from "node:test";
-import { RealtimeRegistry, RealtimeTicketStore } from "../realtime/realtime.js";
+import {
+  RealtimeRegistry,
+  RealtimeTicketStore,
+  recordProjectEvent,
+  withRealtimePublisher
+} from "../realtime/realtime.js";
 import { realtimeSocketRoutes, realtimeTicketRoutes } from "./realtime.js";
 
 class FakeSocket extends EventEmitter {
@@ -64,6 +69,44 @@ test("registry broadcasts and cleans sockets independently", () => {
   second.emit("error", new Error("socket failed"));
   assert.equal(second.terminated, true);
   assert.equal(registry.size("project-a"), 0);
+});
+
+test("committed project events publish once, rollback publishes zero, and failures are non-fatal", async () => {
+  const projectId = "550e8400-e29b-41d4-a716-446655440000";
+  const tx = {};
+  let shouldRollback = false;
+  const db = {
+    async transaction(callback: (value: typeof tx) => Promise<unknown>) {
+      const result = await callback(tx);
+      if (shouldRollback) throw new Error("rollback");
+      return result;
+    }
+  };
+  const published: number[] = [];
+  const wrapped = withRealtimePublisher(db as never, (event) => {
+    published.push(event.sequence);
+    if (event.sequence === 2) throw new Error("socket failure");
+  });
+  const event = (id: number) =>
+    recordProjectEvent(tx as never, {
+      id,
+      projectId,
+      type: "task.updated",
+      actorAgentId: null,
+      actorUserId: null,
+      entityId: null,
+      payload: {},
+      occurredAt: new Date()
+    });
+
+  await wrapped.transaction(async (value) => {
+    event(1);
+    assert.equal(value, tx);
+  });
+  await wrapped.transaction(async () => event(2));
+  shouldRollback = true;
+  await assert.rejects(() => wrapped.transaction(async () => event(3)));
+  assert.deepEqual(published, [1, 2]);
 });
 
 test("registry pings and terminates sockets that miss the next pong", async () => {

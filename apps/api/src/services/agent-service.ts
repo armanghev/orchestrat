@@ -21,6 +21,7 @@ import { agentCredentialTokenSchema } from "@orchestrat/protocol";
 import { and, asc, desc, eq, gt, isNull } from "drizzle-orm";
 import { ApiError } from "./api-error.js";
 import { PermissionService } from "./permission-service.js";
+import { recordProjectEvent } from "../realtime/realtime.js";
 
 export type AgentPrincipal = {
   agentId: string;
@@ -75,14 +76,18 @@ export async function insertProjectEvent(
     payload?: Record<string, unknown>;
   }
 ) {
-  await tx.insert(projectEvents).values({
-    projectId: value.projectId,
-    type: value.type,
-    actorAgentId: value.actorAgentId ?? null,
-    actorUserId: value.actorUserId ?? null,
-    entityId: value.entityId ?? null,
-    payload: value.payload ?? {}
-  });
+  const [event] = await tx
+    .insert(projectEvents)
+    .values({
+      projectId: value.projectId,
+      type: value.type,
+      actorAgentId: value.actorAgentId ?? null,
+      actorUserId: value.actorUserId ?? null,
+      entityId: value.entityId ?? null,
+      payload: value.payload ?? {}
+    })
+    .returning();
+  recordProjectEvent(tx, event);
 }
 
 export class AgentService {

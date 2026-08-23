@@ -1,9 +1,65 @@
 import { randomBytes } from "node:crypto";
+import type { projectEvents, Database } from "@orchestrat/db";
 import type { RealtimeEventEnvelope } from "@orchestrat/protocol";
 import type { WebSocket } from "ws";
 
 type Clock = () => number;
 type Random = (size: number) => Buffer;
+type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+type ProjectEvent = typeof projectEvents.$inferSelect;
+
+const entityTypes = new Set([
+  "task",
+  "claim",
+  "agent",
+  "credential",
+  "session",
+  "document",
+  "hook"
+]);
+const pendingEvents = new WeakMap<object, ProjectEvent[]>();
+
+export function recordProjectEvent(tx: Transaction, event: ProjectEvent) {
+  const events = pendingEvents.get(tx) ?? [];
+  events.push(event);
+  pendingEvents.set(tx, events);
+}
+
+export function withRealtimePublisher(
+  db: Database,
+  publish: (envelope: RealtimeEventEnvelope) => void
+): Database {
+  return new Proxy(db, {
+    get(target, property, receiver) {
+      if (property !== "transaction")
+        return Reflect.get(target, property, receiver);
+      return async (callback: (tx: Transaction) => Promise<unknown>) => {
+        let events: ProjectEvent[] = [];
+        const result = await target.transaction(async (tx) => {
+          events = [];
+          pendingEvents.set(tx, events);
+          return await callback(tx);
+        });
+        for (const event of events) {
+          const [entityType] = event.type.split(".");
+          if (!entityTypes.has(entityType)) continue;
+          try {
+            publish({
+              project_id: event.projectId,
+              sequence: event.id,
+              event_type: event.type,
+              entity_type: entityType as RealtimeEventEnvelope["entity_type"],
+              entity_id: event.entityId
+            });
+          } catch {
+            // Realtime is best effort and must never fail a committed mutation.
+          }
+        }
+        return result;
+      };
+    }
+  });
+}
 
 export type RealtimeTicket = {
   projectId: string;

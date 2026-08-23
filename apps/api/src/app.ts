@@ -28,7 +28,11 @@ import {
   realtimeSocketRoutes,
   realtimeTicketRoutes
 } from "./routes/realtime.js";
-import { RealtimeRegistry, RealtimeTicketStore } from "./realtime/realtime.js";
+import {
+  RealtimeRegistry,
+  RealtimeTicketStore,
+  withRealtimePublisher
+} from "./realtime/realtime.js";
 
 type AppOptions = {
   allowedOrigins: string[];
@@ -60,15 +64,18 @@ export function buildApp(options: AppOptions) {
     genReqId: () => `req_${randomUUID()}`,
     logger: true
   });
-  const identities = new IdentityService(options.db);
-  const projects = new ProjectService(options.db);
-  const profiles = new ProfileService(options.db, options.avatarStorage);
-  const tasks = new TaskService(options.db);
-  const agents = new AgentService(options.db);
-  const claims = new TaskClaimService(options.db);
-  const documents = new DocumentService(options.db);
   const realtimeTickets = new RealtimeTicketStore();
   const realtimeRegistry = new RealtimeRegistry();
+  const db = withRealtimePublisher(options.db, (event) =>
+    realtimeRegistry.publish(event)
+  );
+  const identities = new IdentityService(db);
+  const projects = new ProjectService(db);
+  const profiles = new ProfileService(db, options.avatarStorage);
+  const tasks = new TaskService(db);
+  const agents = new AgentService(db);
+  const claims = new TaskClaimService(db);
+  const documents = new DocumentService(db);
 
   app.register(cors, {
     origin: options.allowedOrigins,
