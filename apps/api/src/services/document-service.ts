@@ -282,6 +282,32 @@ export class DocumentService {
           }
         );
       const revisionNumber = document.currentRevision + 1;
+      const [updated] = await tx
+        .update(documents)
+        .set({ currentRevision: revisionNumber, updatedAt: new Date() })
+        .where(
+          and(
+            eq(documents.id, id),
+            eq(documents.currentRevision, input.base_revision)
+          )
+        )
+        .returning();
+      if (!updated) {
+        const [current] = await tx
+          .select({ currentRevision: documents.currentRevision })
+          .from(documents)
+          .where(eq(documents.id, id));
+        throw new ApiError(
+          409,
+          "DOCUMENT_CONFLICT",
+          "Document revision is stale.",
+          {
+            current_revision:
+              current?.currentRevision ?? document.currentRevision,
+            base_revision: input.base_revision
+          }
+        );
+      }
       const [revision] = await tx
         .insert(documentRevisions)
         .values({
@@ -294,11 +320,6 @@ export class DocumentService {
             ? { authorUserId: authorId }
             : { authorAgentId: authorId })
         })
-        .returning();
-      const [updated] = await tx
-        .update(documents)
-        .set({ currentRevision: revisionNumber, updatedAt: new Date() })
-        .where(eq(documents.id, id))
         .returning();
       await insertProjectEvent(tx, {
         projectId,
