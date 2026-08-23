@@ -20,6 +20,8 @@ import {
   type ProjectsResponse,
   type UpdateOrganizationRequest,
   type UpdateProjectRequest,
+  cliAuthorizationPollResponseSchema,
+  type CliAuthorizationPollResponse
 } from "@orchestrat/protocol";
 import type { ZodType } from "zod";
 
@@ -251,6 +253,27 @@ export class ApiClient {
       `/api/v1/projects/${encodeURIComponent(projectId)}`,
       { method: "DELETE", body: { name } },
       deleteResourceResponseSchema
+    );
+  }
+
+  approveCliAuthorization(
+    attemptId: string,
+    projectId: string
+  ): Promise<CliAuthorizationPollResponse> {
+    return this.request(
+      `/api/v1/cli/authorization/attempts/${encodeURIComponent(attemptId)}/approve`,
+      { method: "POST", body: { project_id: projectId } },
+      cliAuthorizationPollResponseSchema
+    );
+  }
+
+  denyCliAuthorization(
+    attemptId: string
+  ): Promise<CliAuthorizationPollResponse> {
+    return this.request(
+      `/api/v1/cli/authorization/attempts/${encodeURIComponent(attemptId)}/deny`,
+      { method: "POST", body: {} },
+      cliAuthorizationPollResponseSchema
     );
   }
 

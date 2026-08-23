@@ -44,7 +44,7 @@ async function setupHome() {
   const command = join(home, ".local", "bin", "orchestrat");
   const source = join(home, "source");
   await mkdir(join(home, ".local", "bin"), { recursive: true });
-  await writeFile(source, "#!/bin/sh\n");
+  await writeFile(source, "#!/bin/sh\nprintf '0.1.0\\n'\n");
   await chmod(source, 0o700);
   await symlink(source, command);
   const codexMcp = `${mergeToml(undefined, "codex", command)}[mcp_servers.unrelated]\ncommand = "keep"\n`;
@@ -483,6 +483,46 @@ test("status and doctor redact credentials and report partial backend failure", 
     );
   } finally {
     await rm(fixture.home, { recursive: true, force: true });
+  }
+});
+
+test("doctor rejects a persistent launcher with an unresolvable version", async () => {
+  const fixture = await setupHome();
+  try {
+    await writeFile(fixture.source, "#!/bin/sh\nexit 0\n");
+    const result = await runDoctor({
+      home: fixture.home,
+      cwd: fixture.project,
+      credentials: fixture.store,
+      api: "https://api.test",
+      sourceCommand: fixture.source,
+      fetch: async () => new Response(JSON.stringify({ project_id: id(1) }))
+    });
+    assert.equal(result.checks.launcher?.ok, false);
+    assert.equal(result.checks.launcher?.detail, "conflict or invalid");
+  } finally {
+    await rm(fixture.home, { recursive: true, force: true });
+  }
+});
+
+test("doctor safely rejects nonzero and timed-out launcher versions", async () => {
+  for (const script of ["#!/bin/sh\nexit 7\n", "#!/bin/sh\nsleep 2\n"]) {
+    const fixture = await setupHome();
+    try {
+      await writeFile(fixture.source, script);
+      const result = await runDoctor({
+        home: fixture.home,
+        cwd: fixture.project,
+        credentials: fixture.store,
+        api: "https://api.test",
+        sourceCommand: fixture.source,
+        fetch: async () => new Response(JSON.stringify({ project_id: id(1) }))
+      });
+      assert.equal(result.checks.launcher?.ok, false);
+      assert.equal(result.checks.launcher?.detail, "conflict or invalid");
+    } finally {
+      await rm(fixture.home, { recursive: true, force: true });
+    }
   }
 });
 

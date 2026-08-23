@@ -133,8 +133,12 @@ export const cliAuthorizationAttemptParamsSchema = z.object({
 export const cliAuthorizationPollRequestSchema = z.object({
   secret: z.string().min(32).max(128)
 });
-export const cliAuthorizationApprovalRequestSchema =
-  cliAuthorizationPollRequestSchema.extend({ project_id: idSchema });
+export const cliAuthorizationApprovalRequestSchema = z
+  .object({
+    project_id: idSchema
+  })
+  .strict();
+export const cliAuthorizationDenyRequestSchema = z.object({}).strict();
 
 export const updateOrganizationRequestSchema = z
   .object({

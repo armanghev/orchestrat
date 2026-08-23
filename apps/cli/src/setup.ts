@@ -108,7 +108,7 @@ export async function authorizeCli(
     expires_at: string;
   };
   await transport.open(
-    `https://app.orchestrat.dev/cli/authorize?attempt=${encodeURIComponent(attempt.attempt_id)}&secret=${encodeURIComponent(attempt.secret)}`
+    `https://app.orchestrat.dev/cli/authorize?attempt=${encodeURIComponent(attempt.attempt_id)}`
   );
   for (;;) {
     if (Date.now() >= Date.parse(attempt.expires_at))

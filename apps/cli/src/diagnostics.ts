@@ -20,8 +20,11 @@ import { inspectLauncher } from "./setup.js";
 import { access, lstat, readlink, rm } from "node:fs/promises";
 import { constants } from "node:fs";
 import { join } from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 
 const redacted = (ok: boolean, detail: string) => ({ ok, detail });
+const execFileAsync = promisify(execFile);
 
 export async function runStatus(input: {
   home: string;
@@ -123,10 +126,16 @@ export async function runDoctor(input: {
       if ((launcherStat.mode & 0o111) === 0)
         throw new Error("launcher is not executable");
       const launcher = await inspectLauncher(input.home, input.sourceCommand);
-      checks.launcher = redacted(
-        !launcher.changed,
-        launcher.changed ? "missing" : "present"
-      );
+      if (launcher.changed) throw new Error("launcher missing");
+      const version = await execFileAsync(launcher.path, ["--version"], {
+        timeout: 1500,
+        maxBuffer: 1024,
+        windowsHide: true
+      });
+      const versionText = version.stdout.trim();
+      if (!/^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/.test(versionText))
+        throw new Error("launcher version unavailable");
+      checks.launcher = redacted(true, `present (${versionText})`);
     } catch {
       checks.launcher = redacted(false, "conflict or invalid");
     }

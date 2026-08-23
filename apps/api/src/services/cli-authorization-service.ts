@@ -41,12 +41,7 @@ export class CliAuthorizationService {
     };
   }
 
-  async approve(
-    userId: string,
-    attemptId: string,
-    secret: string,
-    projectId: string
-  ) {
+  async approve(userId: string, attemptId: string, projectId: string) {
     await this.permissions.projectAccess(userId, projectId);
     await this.db.transaction(async (tx) => {
       const [attempt] = await tx
@@ -55,7 +50,7 @@ export class CliAuthorizationService {
         .where(
           and(
             eq(cliAuthorizationAttempts.id, attemptId),
-            eq(cliAuthorizationAttempts.secretHash, hash(secret))
+            eq(cliAuthorizationAttempts.status, "pending")
           )
         )
         .for("update");
@@ -77,7 +72,7 @@ export class CliAuthorizationService {
     return { status: "approved" as const };
   }
 
-  async deny(attemptId: string, secret: string) {
+  async deny(attemptId: string) {
     await this.db.transaction(async (tx) => {
       const [attempt] = await tx
         .select()
@@ -85,7 +80,7 @@ export class CliAuthorizationService {
         .where(
           and(
             eq(cliAuthorizationAttempts.id, attemptId),
-            eq(cliAuthorizationAttempts.secretHash, hash(secret))
+            eq(cliAuthorizationAttempts.status, "pending")
           )
         )
         .for("update");

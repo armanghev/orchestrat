@@ -3,6 +3,7 @@ import type { CliAuthorizationService } from "../services/cli-authorization-serv
 import {
   cliAuthorizationApprovalRequestSchema,
   cliAuthorizationAttemptParamsSchema,
+  cliAuthorizationDenyRequestSchema,
   cliAuthorizationPollRequestSchema
 } from "@orchestrat/protocol";
 
@@ -32,14 +33,13 @@ export async function cliAuthorizationHumanRoutes(
       return options.authorization.approve(
         request.userId,
         params.attemptId,
-        body.secret,
         body.project_id
       );
     }
   );
   app.post("/cli/authorization/attempts/:attemptId/deny", async (request) => {
-    const body = cliAuthorizationPollRequestSchema.parse(request.body);
+    cliAuthorizationDenyRequestSchema.parse(request.body);
     const params = cliAuthorizationAttemptParamsSchema.parse(request.params);
-    return options.authorization.deny(params.attemptId, body.secret);
+    return options.authorization.deny(params.attemptId);
   });
 }

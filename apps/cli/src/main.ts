@@ -10,16 +10,23 @@ import { KeychainCredentialStore } from "./keychain.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { resolve } from "node:path";
+import { readFileSync } from "node:fs";
 const openUrl = promisify(execFile);
+const packageVersion = JSON.parse(
+  readFileSync(new URL("../package.json", import.meta.url), "utf8")
+).version as string;
 import { KeychainCredentialReader } from "./keychain.js";
 import { resolveInvocation } from "./resolve.js";
 import { readBoundedStdin, runHook } from "./hooks.js";
 import { disconnectLocal, runDoctor, runStatus } from "./diagnostics.js";
 
 export function parseInvocationArgs(argv: string[]): {
-  command: "status" | "mcp" | "setup" | "hook" | "doctor" | "disconnect";
+  command:
+    "status" | "mcp" | "setup" | "hook" | "doctor" | "disconnect" | "version";
   integration?: "codex" | "claude-code" | "all";
 } {
+  if (argv.length === 1 && (argv[0] === "--version" || argv[0] === "-v"))
+    return { command: "version" };
   const { positionals, values } = parseArgs({
     args: argv,
     options: { integration: { type: "string" } },
@@ -88,6 +95,10 @@ function usage(): never {
 
 export async function main(argv = process.argv.slice(2)): Promise<void> {
   const { command, integration } = parseInvocationArgs(argv);
+  if (command === "version") {
+    process.stdout.write(`${packageVersion}\n`);
+    return;
+  }
   if (command === "hook") {
     const payload = await readBoundedStdin();
     await runHook({

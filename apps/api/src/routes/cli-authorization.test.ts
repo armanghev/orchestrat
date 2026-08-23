@@ -59,11 +59,25 @@ test("CLI authorization stores only hashes, denies access, expires, and exchange
         payload: { name: "Project" }
       })
     ).json();
+    const secretOnApprove = await app.inject({
+      method: "POST",
+      url: `/api/v1/cli/authorization/attempts/${attempt.attempt_id}/approve`,
+      headers: { authorization: "Bearer alice" },
+      payload: { project_id: project.id, secret: attempt.secret }
+    });
+    assert.equal(secretOnApprove.statusCode, 400);
+    const unknownOnDeny = await app.inject({
+      method: "POST",
+      url: `/api/v1/cli/authorization/attempts/${attempt.attempt_id}/deny`,
+      headers: { authorization: "Bearer alice" },
+      payload: { unknown: true }
+    });
+    assert.equal(unknownOnDeny.statusCode, 400);
     const denied = await app.inject({
       method: "POST",
       url: `/api/v1/cli/authorization/attempts/${attempt.attempt_id}/deny`,
       headers: { authorization: "Bearer alice" },
-      payload: { secret: attempt.secret }
+      payload: {}
     });
     assert.equal(denied.statusCode, 200);
     const deniedPoll = await app.inject({
@@ -85,10 +99,7 @@ test("CLI authorization stores only hashes, denies access, expires, and exchange
       method: "POST",
       url: `/api/v1/cli/authorization/attempts/${unauthorisedAttempt.attempt_id}/approve`,
       headers: { authorization: "Bearer alice" },
-      payload: {
-        secret: unauthorisedAttempt.secret,
-        project_id: "00000000-0000-4000-8000-000000000000"
-      }
+      payload: { project_id: "00000000-0000-4000-8000-000000000000" }
     });
     assert.equal(deniedApproval.statusCode, 403);
     assert.ok(project.id);
@@ -169,12 +180,7 @@ test("approved attempts expire without issuing credentials and exchange only onc
       .where(eq(users.email, "alice@example.com"));
     assert.ok(user);
     const expiring = await service.createAttempt();
-    await service.approve(
-      user.id,
-      expiring.attempt_id,
-      expiring.secret,
-      project.id
-    );
+    await service.approve(user.id, expiring.attempt_id, project.id);
     now = new Date(now.getTime() + 10 * 60_000 + 1);
     assert.deepEqual(await service.poll(expiring.attempt_id, expiring.secret), {
       status: "expired"
@@ -183,12 +189,7 @@ test("approved attempts expire without issuing credentials and exchange only onc
 
     now = new Date("2026-08-22T00:00:00.000Z");
     const exchange = await service.createAttempt();
-    await service.approve(
-      user.id,
-      exchange.attempt_id,
-      exchange.secret,
-      project.id
-    );
+    await service.approve(user.id, exchange.attempt_id, project.id);
     const first = await service.poll(exchange.attempt_id, exchange.secret);
     assert.equal(first.status, "approved");
     assert.match(first.credential!, /^orch_cli_/);

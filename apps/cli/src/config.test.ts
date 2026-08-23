@@ -3,10 +3,15 @@ import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { execFile } from "node:child_process";
+import { readFile } from "node:fs/promises";
+import { promisify } from "node:util";
 import { findMapping, findProject, parseConfig } from "./config.js";
 import { MemoryCredentialReader } from "./keychain.js";
 import { parseInvocationArgs } from "./main.js";
 import { resolveInvocation } from "./resolve.js";
+
+const execFileAsync = promisify(execFile);
 
 test("finds the nearest explicit project mapping", () => {
   const cwd = "/tmp/orchestrat-project/packages/app";
@@ -54,6 +59,17 @@ test("accepts only the two supported command shapes", () => {
   assert.throws(() =>
     parseInvocationArgs(["mcp", "--integration", "codex", "--other"])
   );
+});
+
+test("built CLI --version matches package metadata", async () => {
+  const { stdout } = await execFileAsync(process.execPath, [
+    new URL("./main.js", import.meta.url).pathname,
+    "--version"
+  ]);
+  const metadata = JSON.parse(
+    await readFile(new URL("../package.json", import.meta.url), "utf8")
+  ) as { version: string };
+  assert.equal(stdout.trim(), metadata.version);
 });
 
 test("resolves credentials without exposing them in the public result", async () => {
