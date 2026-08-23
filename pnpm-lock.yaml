@@ -298,7 +298,15 @@ importers:
         specifier: ^4.1.5
         version: 4.4.3
 
-  packages/sdk: {}
+  packages/sdk:
+    dependencies:
+      '@orchestrat/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+    devDependencies:
+      '@types/node':
+        specifier: ^24.3.0
+        version: 24.13.3
 
   packages/testing: {}
 
