@@ -186,4 +186,55 @@ describe("dashboard routes", () => {
     expect(await screen.findByDisplayValue("Latest title")).toBeVisible();
     expect(detailRequests).toBeGreaterThanOrEqual(2);
   });
+
+  it("paginates activity without rendering duplicate events", async () => {
+    const expectedProject = project();
+    const event = (id: number, type: string) => ({
+      id,
+      project_id: expectedProject.id,
+      type,
+      actor_agent_id: null,
+      actor_user_id: null,
+      entity_id: null,
+      payload: {},
+      occurred_at: "2024-01-01T00:00:00.000Z"
+    });
+    const activityHandlers = [
+      http.get(
+        `http://localhost:3001/api/v1/projects/${expectedProject.id}/events`,
+        ({ request }) =>
+          request.url.includes("after=1")
+            ? HttpResponse.json({
+                events: [event(2, "task.updated"), event(3, "task.done")],
+                next_cursor: null
+              })
+            : HttpResponse.json({
+                events: [
+                  event(1, "task.created"),
+                  event(2, "task.updated"),
+                  event(4, "tool.call")
+                ],
+                next_cursor: "1"
+              })
+      ),
+      ...handlers
+    ];
+    await renderDashboardRoute({
+      path: `/projects/${expectedProject.id}/activity`,
+      auth: new FakeAuthClient({
+        status: "signedIn",
+        identityKey: "test-user"
+      }),
+      platform: platform(),
+      handlers: activityHandlers
+    });
+    const user = userEvent.setup();
+    expect(await screen.findByText("Task Created")).toBeVisible();
+    expect(screen.queryByText("Tool Call")).not.toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "Load more activity" })
+    );
+    await screen.findByText("Task Done");
+    expect(screen.getAllByText("Task Updated")).toHaveLength(1);
+  });
 });
