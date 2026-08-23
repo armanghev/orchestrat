@@ -6,6 +6,9 @@ import {
   apiErrorResponseSchema,
   apiErrorSchema,
   claimResponseSchema,
+  createDocumentRequestSchema,
+  documentConflictDetailsSchema,
+  documentPathSchema,
   eventSchema,
   heartbeatRequestSchema,
   projectEventsResponseSchema
@@ -103,4 +106,26 @@ test("preserves the legacy event schema", () => {
   };
 
   assert.deepEqual(eventSchema.parse(event), event);
+});
+
+test("accepts normalized document paths and revision conflicts", () => {
+  assert.equal(documentPathSchema.parse("docs/README.md"), "docs/README.md");
+  assert.throws(() => documentPathSchema.parse("/README.md"));
+  assert.throws(() => documentPathSchema.parse("docs//README.md"));
+  assert.throws(() => documentPathSchema.parse("docs/../README.md"));
+  assert.throws(() => documentPathSchema.parse("docs/\0README.md"));
+  assert.throws(() => documentPathSchema.parse("docs\\README.md"));
+
+  assert.deepEqual(
+    documentConflictDetailsSchema.parse({
+      current_revision: 19,
+      base_revision: 18
+    }),
+    { current_revision: 19, base_revision: 18 }
+  );
+  assert.equal(
+    createDocumentRequestSchema.parse({ path: "README.md", content: "# Notes" })
+      .content,
+    "# Notes"
+  );
 });

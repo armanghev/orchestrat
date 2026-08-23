@@ -60,10 +60,13 @@ const coordinationErrorCodeSchema = z.enum([
   "CLAIM_NOT_OWNER"
 ]);
 
+const documentErrorCodeSchema = z.enum(["DOCUMENT_CONFLICT"]);
+
 export const errorCodeSchema = z.union([
   baseErrorCodeSchema,
   taskErrorCodeSchema,
-  coordinationErrorCodeSchema
+  coordinationErrorCodeSchema,
+  documentErrorCodeSchema
 ]);
 export type ErrorCode = z.infer<typeof errorCodeSchema>;
 
@@ -586,6 +589,135 @@ export const projectEventsResponseSchema = paginationResponseSchema.extend({
   events: z.array(projectEventSchema)
 });
 export type ProjectEventsResponse = z.infer<typeof projectEventsResponseSchema>;
+
+const documentPathSegmentSchema = z
+  .string()
+  .min(1)
+  .refine((segment) => segment !== "." && segment !== "..", {
+    message: "Document paths cannot contain dot segments."
+  });
+
+/** A normalized, project-relative POSIX path (for example, docs/README.md). */
+export const documentPathSchema = z
+  .string()
+  .min(1)
+  .max(1024)
+  .refine((path) => !path.startsWith("/"), {
+    message: "Document paths must be project-relative."
+  })
+  .refine((path) => !path.includes("\\") && !path.includes("\0"), {
+    message: "Document paths must use POSIX separators and cannot contain NULs."
+  })
+  .refine(
+    (path) =>
+      path
+        .split("/")
+        .every(
+          (segment) => documentPathSegmentSchema.safeParse(segment).success
+        ),
+    { message: "Document paths cannot contain empty or dot segments." }
+  );
+export type DocumentPath = z.infer<typeof documentPathSchema>;
+
+export const documentAuthorTypeSchema = z.enum(["human", "agent"]);
+export type DocumentAuthorType = z.infer<typeof documentAuthorTypeSchema>;
+export const documentContentSchema = z.string().max(1_000_000);
+
+const documentAuthorSchema = z.object({
+  type: documentAuthorTypeSchema,
+  id: idSchema
+});
+
+export const documentSchema = z.object({
+  id: idSchema,
+  project_id: idSchema,
+  path: documentPathSchema,
+  current_revision: z.number().int().min(1),
+  created_by: documentAuthorSchema.nullable(),
+  created_at: dateSchema,
+  updated_at: dateSchema
+});
+export type Document = z.infer<typeof documentSchema>;
+
+export const documentRevisionSchema = z.object({
+  id: idSchema,
+  document_id: idSchema,
+  revision_number: z.number().int().min(1),
+  content: documentContentSchema,
+  author: z.object({
+    type: documentAuthorTypeSchema,
+    id: idSchema
+  }),
+  created_at: dateSchema
+});
+export type DocumentRevision = z.infer<typeof documentRevisionSchema>;
+
+export const documentDetailSchema = z.object({
+  document: documentSchema,
+  revision: documentRevisionSchema
+});
+export type DocumentDetail = z.infer<typeof documentDetailSchema>;
+export const documentResponseSchema = documentDetailSchema;
+export type DocumentResponse = z.infer<typeof documentResponseSchema>;
+
+export const documentListQuerySchema = z.object({
+  limit: limitSchema,
+  cursor: cursorSchema.optional()
+});
+export type DocumentListQuery = z.infer<typeof documentListQuerySchema>;
+
+export const documentsResponseSchema = z.object({
+  documents: z.array(documentSchema),
+  next_cursor: cursorSchema.nullable()
+});
+export type DocumentsResponse = z.infer<typeof documentsResponseSchema>;
+export const documentListResponseSchema = documentsResponseSchema;
+export type DocumentListResponse = z.infer<typeof documentListResponseSchema>;
+
+export const createDocumentRequestSchema = z.object({
+  path: documentPathSchema,
+  content: documentContentSchema
+});
+export type CreateDocumentRequest = z.infer<typeof createDocumentRequestSchema>;
+
+export const createDocumentResponseSchema = documentDetailSchema;
+export type CreateDocumentResponse = z.infer<
+  typeof createDocumentResponseSchema
+>;
+
+export const updateDocumentRequestSchema = z.object({
+  content: documentContentSchema,
+  base_revision: z.number().int().min(1)
+});
+export type UpdateDocumentRequest = z.infer<typeof updateDocumentRequestSchema>;
+
+export const updateDocumentResponseSchema = documentDetailSchema;
+export type UpdateDocumentResponse = z.infer<
+  typeof updateDocumentResponseSchema
+>;
+
+export const documentIdParamsSchema = z.object({ id: idSchema });
+export const projectDocumentParamsSchema = z.object({ projectId: idSchema });
+export const documentRevisionParamsSchema = z.object({
+  id: idSchema,
+  revision: z.coerce.number().int().min(1)
+});
+
+export const documentRevisionsResponseSchema = z.object({
+  revisions: z.array(documentRevisionSchema),
+  next_cursor: cursorSchema.nullable()
+});
+export type DocumentRevisionsResponse = z.infer<
+  typeof documentRevisionsResponseSchema
+>;
+
+export const documentConflictDetailsSchema = z.object({
+  current_revision: z.number().int().min(1),
+  base_revision: z.number().int().min(1)
+});
+export type DocumentConflictDetails = z.infer<
+  typeof documentConflictDetailsSchema
+>;
 
 export const eventSchema = z.object({
   type: z.string(),
