@@ -7,6 +7,8 @@ import {
   agentSessions,
   agents,
   apiIdempotencyKeys,
+  documentRevisions,
+  documents,
   projectEvents,
   projects,
   taskClaims,
@@ -231,4 +233,55 @@ test("coordination migration adds project-scoped claim keys without plaintext to
     ),
     /task_claims_one_active_per_task/
   );
+});
+
+test("documents enforce project paths, revisions, and coherent authors", () => {
+  assert.equal(documents.path.notNull, true);
+  assert.equal(documents.currentRevision.hasDefault, true);
+  assert.ok(
+    getTableConfig(documents).indexes.find(
+      (index) => index.config.name === "documents_project_path_unique"
+    )
+  );
+  assert.ok(
+    getTableConfig(documents).checks.find(
+      (check) => check.name === "documents_author_consistent"
+    )
+  );
+
+  const revisionConfig = getTableConfig(documentRevisions);
+  assert.equal(documentRevisions.contentMarkdown.notNull, true);
+  assert.ok(
+    revisionConfig.indexes.find(
+      (index) =>
+        index.config.name === "document_revisions_document_id_revision_unique"
+    )
+  );
+  assert.ok(
+    revisionConfig.foreignKeys.find(
+      (foreignKey) =>
+        foreignKey.getName() === "document_revisions_document_project_fk"
+    )
+  );
+  assert.ok(
+    revisionConfig.checks.find(
+      (check) => check.name === "document_revisions_author_consistent"
+    )
+  );
+});
+
+test("documents migration creates immutable Markdown revision storage", async () => {
+  const sql = await readFile(
+    new URL("../drizzle/0006_documents.sql", import.meta.url),
+    "utf8"
+  );
+  assert.match(sql, /CREATE TYPE "public"\."document_author_type"/);
+  assert.match(sql, /CREATE TABLE "documents"/);
+  assert.match(sql, /CREATE TABLE "document_revisions"/);
+  assert.match(sql, /"content_markdown" text NOT NULL/);
+  assert.match(sql, /documents_project_path_unique/);
+  assert.match(sql, /document_revisions_document_id_revision_unique/);
+  assert.match(sql, /document_revisions_document_project_fk/);
+  assert.match(sql, /documents_author_consistent/);
+  assert.match(sql, /document_revisions_author_consistent/);
 });
