@@ -80,10 +80,89 @@ describe("dashboard routes", () => {
       }),
       platform: platform()
     });
-    expect(
-      await screen.findByRole("heading", { name: "Overview" })
-    ).toBeVisible();
+    await screen.findByText("Online agents");
+    expect(screen.getByRole("heading", { name: "Overview" })).toBeVisible();
     expect(screen.getByText(expected.slug)).toBeVisible();
+  });
+
+  it("renders mission-control summaries and only MVP navigation", async () => {
+    const expected = project();
+    const currentTask = taskCard({
+      project_id: expected.id,
+      status: "in_progress",
+      title: "Compile release"
+    });
+    const agentId = "00000000-0000-4000-8000-000000000009";
+    const agent = {
+      id: agentId,
+      project_id: expected.id,
+      name: "Codex",
+      status: "active",
+      created_at: "2024-01-01T00:00:00.000Z",
+      updated_at: "2024-01-01T00:00:00.000Z",
+      revoked_at: null
+    };
+    const overviewHandlers = [
+      http.get(
+        `http://localhost:3001/api/v1/projects/${expected.id}/tasks`,
+        () =>
+          HttpResponse.json({
+            tasks: [currentTask],
+            total: 1,
+            next_cursor: null
+          })
+      ),
+      http.get(
+        `http://localhost:3001/api/v1/projects/${expected.id}/agents`,
+        () => HttpResponse.json({ agents: [agent] })
+      ),
+      http.get(
+        `http://localhost:3001/api/v1/projects/${expected.id}/presence`,
+        () =>
+          HttpResponse.json({
+            agents: [
+              {
+                agent_id: agentId,
+                project_id: expected.id,
+                session_id: "00000000-0000-4000-8000-000000000010",
+                status: "online",
+                last_heartbeat_at: "2024-01-01T00:00:00.000Z",
+                current_task_id: currentTask.id
+              }
+            ]
+          })
+      ),
+      http.get(
+        `http://localhost:3001/api/v1/projects/${expected.id}/events`,
+        () => HttpResponse.json({ events: [], next_cursor: null })
+      ),
+      ...handlers
+    ];
+    await renderDashboardRoute({
+      path: `/projects/${expected.id}/overview`,
+      auth: new FakeAuthClient({
+        status: "signedIn",
+        identityKey: "test-user"
+      }),
+      platform: platform(),
+      handlers: overviewHandlers
+    });
+    expect(await screen.findByText("Online agents")).toBeVisible();
+    expect(screen.getByText("Codex")).toBeVisible();
+    expect(screen.getByText("DASH-1 · Compile release")).toBeVisible();
+    expect(screen.getByText("1", { selector: "dd" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Overview" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Tasks" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Agents" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Documents" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Activity" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Settings" })).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "Messages" })
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Integrations" })
+    ).not.toBeInTheDocument();
   });
 
   it("creates a task and shows it in the task board", async () => {

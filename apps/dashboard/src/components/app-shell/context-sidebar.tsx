@@ -9,11 +9,9 @@ import {
   FolderKanban,
   Gauge,
   LogOut,
-  MessageSquare,
   Plus,
   Search,
-  Settings,
-  Workflow
+  Settings
 } from "lucide-react";
 import type { NavigationDestination } from "@/features/command/commands";
 import type { ProjectCatalog } from "@/features/hierarchy/catalog";
@@ -51,15 +49,13 @@ const routeIcons: Record<NavigationDestination, LucideIcon> = {
   tasks: FolderKanban,
   agents: Bot,
   documents: FileText,
-  messages: MessageSquare,
   activity: Activity,
-  integrations: Workflow,
   settings: Settings
 };
 const routeGroups: { label: string; routes: NavigationDestination[] }[] = [
   { label: "Workspace", routes: ["overview", "tasks", "agents"] },
-  { label: "Knowledge", routes: ["documents", "messages", "activity"] },
-  { label: "Administration", routes: ["integrations", "settings"] }
+  { label: "Knowledge", routes: ["documents", "activity"] },
+  { label: "Administration", routes: ["settings"] }
 ];
 
 function ProfileImage({
