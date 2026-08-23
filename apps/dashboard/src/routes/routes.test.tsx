@@ -1,8 +1,11 @@
 import { screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { http, HttpResponse } from "msw";
 import type { AuthClient, AuthSnapshot } from "@/features/auth/auth-client";
-import { project } from "@/test/factories";
+import { project, taskCard } from "@/test/factories";
 import { renderDashboardRoute } from "@/test/render";
+import { handlers } from "@/test/handlers";
 
 class FakeAuthClient implements AuthClient {
   readonly capabilities = { github: true, magicLink: true };
@@ -81,5 +84,106 @@ describe("dashboard routes", () => {
       await screen.findByRole("heading", { name: "Overview" })
     ).toBeVisible();
     expect(screen.getByText(expected.slug)).toBeVisible();
+  });
+
+  it("creates a task and shows it in the task board", async () => {
+    const expectedProject = project();
+    const created = taskCard({
+      project_id: expectedProject.id,
+      title: "Created task"
+    });
+    let tasks = [] as (typeof created)[];
+    const taskHandlers = [
+      http.get(
+        `http://localhost:3001/api/v1/projects/${expectedProject.id}/tasks`,
+        () =>
+          HttpResponse.json({ tasks, total: tasks.length, next_cursor: null })
+      ),
+      http.post(
+        `http://localhost:3001/api/v1/projects/${expectedProject.id}/tasks`,
+        async () => {
+          tasks = [created];
+          return HttpResponse.json(created, { status: 201 });
+        }
+      ),
+      ...handlers
+    ];
+    await renderDashboardRoute({
+      path: `/projects/${expectedProject.id}/tasks`,
+      auth: new FakeAuthClient({
+        status: "signedIn",
+        identityKey: "test-user"
+      }),
+      platform: platform(),
+      handlers: taskHandlers
+    });
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText("Title"), "Created task");
+    await user.click(screen.getByRole("button", { name: "Create task" }));
+    expect(await screen.findByText("DASH-1")).toBeVisible();
+  });
+
+  it("refetches and replaces stale task data after a version conflict", async () => {
+    const expectedProject = project();
+    const stale = taskCard({
+      project_id: expectedProject.id,
+      title: "Stale title",
+      version: 1
+    });
+    const latest = taskCard({
+      project_id: expectedProject.id,
+      title: "Latest title",
+      version: 2
+    });
+    let detailRequests = 0;
+    const taskHandlers = [
+      http.get(
+        `http://localhost:3001/api/v1/projects/${expectedProject.id}/tasks`,
+        () => HttpResponse.json({ tasks: [stale], total: 1, next_cursor: null })
+      ),
+      http.get(`http://localhost:3001/api/v1/tasks/${stale.id}`, () => {
+        detailRequests += 1;
+        return HttpResponse.json(detailRequests === 1 ? stale : latest);
+      }),
+      http.get(`http://localhost:3001/api/v1/tasks/${stale.id}/comments`, () =>
+        HttpResponse.json({ comments: [], next_cursor: null })
+      ),
+      http.get(
+        `http://localhost:3001/api/v1/tasks/${stale.id}/dependencies`,
+        () => HttpResponse.json({ depends_on: [], blocks: [] })
+      ),
+      http.patch(`http://localhost:3001/api/v1/tasks/${stale.id}`, () =>
+        HttpResponse.json(
+          {
+            error: {
+              code: "TASK_VERSION_CONFLICT",
+              message: "Task changed.",
+              details: { current_version: 2 },
+              request_id: "req_conflict"
+            }
+          },
+          { status: 409 }
+        )
+      ),
+      ...handlers
+    ];
+    await renderDashboardRoute({
+      path: `/projects/${expectedProject.id}/tasks`,
+      auth: new FakeAuthClient({
+        status: "signedIn",
+        identityKey: "test-user"
+      }),
+      platform: platform(),
+      handlers: taskHandlers
+    });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: /DASH-1/ }));
+    await screen.findByRole("heading", { name: "Stale title" });
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "changed elsewhere"
+    );
+    expect(await screen.findByDisplayValue("Latest title")).toBeVisible();
+    expect(detailRequests).toBeGreaterThanOrEqual(2);
   });
 });
