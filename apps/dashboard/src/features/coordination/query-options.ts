@@ -1,5 +1,32 @@
 import { queryOptions, type QueryClient } from "@tanstack/react-query";
+import type { RealtimeEventEnvelope } from "@orchestrat/protocol";
 import type { ApiClient } from "@/lib/api/client";
+
+const knownRealtimeEventTypes = new Set([
+  "task.created",
+  "task.updated",
+  "task.moved",
+  "task.comment_created",
+  "task.dependency_added",
+  "task.dependency_removed",
+  "claim.created",
+  "claim.expired",
+  "claim.revoked",
+  "agent.created",
+  "agent.revoked",
+  "credential.issued",
+  "credential.revoked",
+  "session.opened",
+  "session.closed",
+  "session.started",
+  "session.ended",
+  "session.stopped",
+  "session.heartbeat",
+  "document.created",
+  "document.updated",
+  "hook.triggered",
+  "run.failed"
+]);
 
 export const coordinationKeys = {
   all: ["coordination"] as const,
@@ -8,8 +35,10 @@ export const coordinationKeys = {
   task: (taskId: string) => [...coordinationKeys.all, "task", taskId] as const,
   comments: (taskId: string) =>
     [...coordinationKeys.all, "comments", taskId] as const,
+  commentsAll: () => [...coordinationKeys.all, "comments"] as const,
   dependencies: (taskId: string) =>
     [...coordinationKeys.all, "dependencies", taskId] as const,
+  dependenciesAll: () => [...coordinationKeys.all, "dependencies"] as const,
   agents: (projectId: string) =>
     [...coordinationKeys.all, "agents", projectId] as const,
   presence: (projectId: string) =>
@@ -108,6 +137,65 @@ export function invalidateCoordinationQueries(
     }),
     queryClient.invalidateQueries({
       queryKey: coordinationKeys.documents(projectId)
+    })
+  ]);
+}
+
+export function invalidateRealtimeEvent(
+  queryClient: QueryClient,
+  projectId: string,
+  event: RealtimeEventEnvelope
+) {
+  if (!knownRealtimeEventTypes.has(event.event_type))
+    return invalidateCoordinationQueries(queryClient, projectId);
+  const entity = event.entity_type;
+  if (["run", "hook"].includes(entity))
+    return invalidateCoordinationQueries(queryClient, projectId);
+  const keys =
+    entity === "claim"
+      ? [
+          coordinationKeys.tasks(projectId),
+          coordinationKeys.presence(projectId)
+        ]
+      : entity === "task"
+        ? event.event_type === "task.comment_created"
+          ? [coordinationKeys.tasks(projectId), coordinationKeys.commentsAll()]
+          : event.event_type.startsWith("task.dependency_")
+            ? [
+                coordinationKeys.tasks(projectId),
+                ...(event.entity_id
+                  ? [
+                      coordinationKeys.task(event.entity_id),
+                      coordinationKeys.dependencies(event.entity_id)
+                    ]
+                  : [coordinationKeys.dependenciesAll()])
+              ]
+            : [
+                coordinationKeys.tasks(projectId),
+                ...(event.entity_id
+                  ? [coordinationKeys.task(event.entity_id)]
+                  : [])
+              ]
+        : entity === "agent" || entity === "credential" || entity === "session"
+          ? [
+              coordinationKeys.agents(projectId),
+              coordinationKeys.presence(projectId)
+            ]
+          : entity === "document"
+            ? [
+                coordinationKeys.documents(projectId),
+                ...(event.entity_id
+                  ? [
+                      coordinationKeys.document(event.entity_id),
+                      coordinationKeys.revisions(event.entity_id)
+                    ]
+                  : [])
+              ]
+            : [];
+  return Promise.all([
+    ...keys.map((queryKey) => queryClient.invalidateQueries({ queryKey })),
+    queryClient.invalidateQueries({
+      queryKey: coordinationKeys.events(projectId)
     })
   ]);
 }

@@ -54,6 +54,8 @@ import {
   type TaskComment,
   type DocumentRevision,
   type ErrorCode,
+  realtimeTicketResponseSchema,
+  type RealtimeTicketResponse,
   cliAuthorizationPollResponseSchema,
   type CliAuthorizationPollResponse
 } from "@orchestrat/protocol";
@@ -429,6 +431,24 @@ export class ApiClient {
       { method: "GET" },
       projectEventsResponseSchema
     );
+  }
+
+  createRealtimeTicket(projectId: string): Promise<RealtimeTicketResponse> {
+    return this.request(
+      "/api/v1/realtime/tickets",
+      { method: "POST", body: { project_id: projectId } },
+      realtimeTicketResponseSchema
+    );
+  }
+
+  realtimeSocketUrl(projectId: string, ticket: string): string {
+    const url = new URL(
+      `/api/v1/realtime/projects/${encodeURIComponent(projectId)}`,
+      this.baseUrl
+    );
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    url.searchParams.set("ticket", ticket);
+    return url.toString();
   }
 
   listDocuments(
