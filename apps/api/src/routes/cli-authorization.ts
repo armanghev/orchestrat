@@ -1,0 +1,45 @@
+import type { FastifyInstance } from "fastify";
+import type { CliAuthorizationService } from "../services/cli-authorization-service.js";
+import {
+  cliAuthorizationApprovalRequestSchema,
+  cliAuthorizationAttemptParamsSchema,
+  cliAuthorizationPollRequestSchema
+} from "@orchestrat/protocol";
+
+export async function cliAuthorizationPublicRoutes(
+  app: FastifyInstance,
+  options: { authorization: CliAuthorizationService }
+) {
+  app.post("/cli/authorization/attempts", async (_request, reply) =>
+    reply.code(201).send(await options.authorization.createAttempt())
+  );
+  app.post("/cli/authorization/attempts/:attemptId/poll", async (request) => {
+    const params = cliAuthorizationAttemptParamsSchema.parse(request.params);
+    const body = cliAuthorizationPollRequestSchema.parse(request.body);
+    return options.authorization.poll(params.attemptId, body.secret);
+  });
+}
+
+export async function cliAuthorizationHumanRoutes(
+  app: FastifyInstance,
+  options: { authorization: CliAuthorizationService }
+) {
+  app.post(
+    "/cli/authorization/attempts/:attemptId/approve",
+    async (request) => {
+      const body = cliAuthorizationApprovalRequestSchema.parse(request.body);
+      const params = cliAuthorizationAttemptParamsSchema.parse(request.params);
+      return options.authorization.approve(
+        request.userId,
+        params.attemptId,
+        body.secret,
+        body.project_id
+      );
+    }
+  );
+  app.post("/cli/authorization/attempts/:attemptId/deny", async (request) => {
+    const body = cliAuthorizationPollRequestSchema.parse(request.body);
+    const params = cliAuthorizationAttemptParamsSchema.parse(request.params);
+    return options.authorization.deny(params.attemptId, body.secret);
+  });
+}

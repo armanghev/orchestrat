@@ -325,6 +325,60 @@ export const agentCredentials = pgTable(
   ]
 );
 
+export const cliAuthorizationAttempts = pgTable(
+  "cli_authorization_attempts",
+  {
+    id: text("id").primaryKey(),
+    secretHash: text("secret_hash").notNull(),
+    status: text("status").notNull(),
+    projectId: uuid("project_id").references(() => projects.id, {
+      onDelete: "cascade"
+    }),
+    approvedByUserId: uuid("approved_by_user_id").references(() => users.id, {
+      onDelete: "set null"
+    }),
+    credentialHash: text("credential_hash"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    exchangedAt: timestamp("exchanged_at", { withTimezone: true })
+  },
+  (table) => [
+    index("cli_authorization_attempts_expires_idx").on(table.expiresAt),
+    check(
+      "cli_authorization_attempts_status_valid",
+      sql`${table.status} in ('pending', 'approved', 'denied', 'expired', 'exchanged')`
+    ),
+    check(
+      "cli_authorization_attempts_secret_hash_not_blank",
+      sql`btrim(${table.secretHash}) <> ''`
+    )
+  ]
+);
+
+export const cliCredentials = pgTable(
+  "cli_credentials",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true })
+  },
+  (table) => [
+    uniqueIndex("cli_credentials_token_hash_unique").on(table.tokenHash),
+    index("cli_credentials_project_idx").on(table.projectId)
+  ]
+);
+
 export const agentSessions = pgTable(
   "agent_sessions",
   {
