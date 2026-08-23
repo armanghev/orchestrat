@@ -90,6 +90,7 @@ export class DocumentService {
       .select()
       .from(projects)
       .where(eq(projects.id, projectId))
+      // ponytail: project-wide serialization is sufficient for private-alpha document write volume; document/advisory locks are the upgrade when per-project throughput matters.
       .for("update");
     if (!project) throw new ApiError(404, "NOT_FOUND", "Project not found.");
     if (project.status === "archived")
