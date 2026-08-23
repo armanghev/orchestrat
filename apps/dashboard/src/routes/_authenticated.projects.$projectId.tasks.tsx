@@ -26,16 +26,11 @@ const statuses: HumanTaskStatus[] = [
   "done",
   "cancelled"
 ];
-const boardStatuses = [
-  "backlog",
-  "ready",
+const boardStatuses: Task["status"][] = [
+  ...statuses.slice(0, 2),
   "claimed",
-  "in_progress",
-  "blocked",
-  "review",
-  "done",
-  "cancelled"
-] as const;
+  ...statuses.slice(2)
+];
 const priorities: TaskPriority[] = ["urgent", "high", "medium", "low", "none"];
 
 function TasksRoute() {
