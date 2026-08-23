@@ -138,3 +138,55 @@ test("retries only a safe GET transport failure", async () => {
   await assert.rejects(() => noRetry.closeSession(id), /API request failed/);
   assert.equal(attempts, 1);
 });
+
+test("maps typed agent document routes and sends revision preconditions", async () => {
+  const document = {
+    id,
+    project_id: id,
+    path: "docs/README.md",
+    current_revision: 1,
+    created_by: { type: "agent", id },
+    created_at: timestamp,
+    updated_at: timestamp
+  };
+  const revision = {
+    id,
+    document_id: id,
+    revision_number: 1,
+    content: "hello",
+    author: { type: "agent", id },
+    created_at: timestamp
+  };
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const client = new AgentApiClient({
+    baseUrl: "https://api.test",
+    token,
+    fetch: async (url, init) => {
+      calls.push({ url: String(url), init });
+      return new Response(
+        JSON.stringify(
+          init?.method === "GET" &&
+            new URL(String(url)).pathname.endsWith("/documents")
+            ? { documents: [document], next_cursor: null }
+            : { document, revision }
+        ),
+        { status: 200 }
+      );
+    }
+  });
+  await client.listDocuments({ limit: 1 });
+  await client.readDocument(id);
+  await client.createDocument({ path: "docs/README.md", content: "hello" });
+  await client.updateDocument(id, { content: "updated", base_revision: 1 });
+  assert.equal(
+    calls[0]!.url,
+    "https://api.test/api/v1/agent/documents?limit=1"
+  );
+  assert.equal(calls[1]!.url, `https://api.test/api/v1/agent/documents/${id}`);
+  assert.equal(calls[2]!.init?.method, "POST");
+  assert.equal(calls[3]!.init?.method, "PATCH");
+  assert.deepEqual(JSON.parse(String(calls[3]!.init?.body)), {
+    content: "updated",
+    base_revision: 1
+  });
+});

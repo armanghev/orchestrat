@@ -69,6 +69,23 @@ test("opens, heartbeats, and closes one session", async () => {
     },
     async listEvents() {
       return {};
+    },
+    async listDocuments() {
+      return { documents: [], next_cursor: null };
+    },
+    async readDocument() {
+      return {};
+    },
+    async createDocument() {
+      return { document: {}, revision: {} };
+    },
+    async updateDocument() {
+      throw new AgentApiError(
+        409,
+        "DOCUMENT_CONFLICT",
+        "Document revision is stale.",
+        { current_revision: 2, base_revision: 1 }
+      );
     }
   };
   const bridge = new McpBridge({
@@ -117,6 +134,25 @@ test("invokes a registered tool over the official in-memory transport", async ()
     },
     async listEvents() {
       return {};
+    },
+    async listDocuments() {
+      return { documents: [], next_cursor: null };
+    },
+    async readDocument() {
+      return {};
+    },
+    async createDocument(input: unknown) {
+      calls.push({ create: input });
+      return { document: {}, revision: {} };
+    },
+    async updateDocument(_documentId: string, input: unknown) {
+      calls.push({ update: input });
+      throw new AgentApiError(
+        409,
+        "DOCUMENT_CONFLICT",
+        "Document revision is stale.",
+        { current_revision: 2, base_revision: 1 }
+      );
     }
   };
   const bridge = new McpBridge({
@@ -158,6 +194,28 @@ test("invokes a registered tool over the official in-memory transport", async ()
   });
   assert.deepEqual(calls, [{ limit: 3 }]);
   assert.equal(result.result.isError, undefined);
+  const created = await request({
+    jsonrpc: "2.0",
+    id: 3,
+    method: "tools/call",
+    params: {
+      name: "create_document",
+      arguments: { path: "docs/README.md", content: "hello" }
+    }
+  });
+  assert.equal(created.result.isError, undefined);
+  const stale = await request({
+    jsonrpc: "2.0",
+    id: 4,
+    method: "tools/call",
+    params: {
+      name: "update_document",
+      arguments: { document_id: id, content: "overwrite", base_revision: 1 }
+    }
+  });
+  assert.equal(stale.result.isError, true);
+  assert.match(stale.result.content[0].text, /DOCUMENT_CONFLICT/);
+  assert.match(stale.result.content[0].text, /current_revision/);
   await clientTransport.close();
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.deepEqual(calls.at(-1), "close");

@@ -1,6 +1,12 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 import { AgentApiClient, AgentApiError } from "@orchestrat/sdk";
+import {
+  createDocumentRequestSchema,
+  documentConflictDetailsSchema,
+  documentListQuerySchema,
+  updateDocumentRequestSchema
+} from "@orchestrat/protocol";
 import { z } from "zod";
 
 export const mcpPackage = "@orchestrat/mcp";
@@ -16,6 +22,10 @@ type Client = Pick<
   | "releaseClaim"
   | "completeClaim"
   | "listEvents"
+  | "listDocuments"
+  | "readDocument"
+  | "createDocument"
+  | "updateDocument"
 >;
 export type BridgeOptions = {
   client: Client;
@@ -46,6 +56,11 @@ export class ClaimTokenStore {
 export function mapMcpError(error: unknown) {
   const known = error instanceof AgentApiError;
   const requestId = known ? error.requestId : undefined;
+  const parsedDetails =
+    known && error.code === "DOCUMENT_CONFLICT"
+      ? documentConflictDetailsSchema.safeParse(error.details)
+      : undefined;
+  const details = parsedDetails?.success ? parsedDetails.data : undefined;
   return {
     isError: true,
     content: [
@@ -55,6 +70,7 @@ export function mapMcpError(error: unknown) {
           error: {
             code: known ? error.code : "INTERNAL_ERROR",
             message: known ? error.message : "The Orchestrat request failed.",
+            ...(details ? { details } : {}),
             ...(requestId ? { request_id: requestId } : {})
           }
         })
@@ -235,6 +251,69 @@ export class McpBridge {
       },
       async () =>
         this.call(() => this.options.client.heartbeat(this.requireSession()))
+    );
+    this.server.registerTool(
+      "list_documents",
+      {
+        description:
+          "List project documents visible to this authenticated agent. Read content with read_document.",
+        inputSchema: {
+          limit: z.number().int().min(1).max(100).optional(),
+          cursor: z.string().min(1).optional()
+        }
+      },
+      async (input) =>
+        this.call(() =>
+          this.options.client.listDocuments(
+            documentListQuerySchema.parse(input)
+          )
+        )
+    );
+    this.server.registerTool(
+      "read_document",
+      {
+        description:
+          "Read the current revision and content of one project document.",
+        inputSchema: { document_id: z.string().uuid() }
+      },
+      async ({ document_id }) =>
+        this.call(() => this.options.client.readDocument(document_id))
+    );
+    this.server.registerTool(
+      "create_document",
+      {
+        description:
+          "Create a project document at a project-relative POSIX path; paths must be unique.",
+        inputSchema: {
+          path: z.string().min(1).max(1024),
+          content: z.string().max(1_000_000)
+        }
+      },
+      async (input) =>
+        this.call(() =>
+          this.options.client.createDocument(
+            createDocumentRequestSchema.parse(input)
+          )
+        )
+    );
+    this.server.registerTool(
+      "update_document",
+      {
+        description:
+          "Create a new revision only when base_revision matches current; stale updates return DOCUMENT_CONFLICT and never overwrite content.",
+        inputSchema: {
+          document_id: z.string().uuid(),
+          content: z.string().max(1_000_000),
+          base_revision: z.number().int().min(1)
+        }
+      },
+      async ({ document_id, ...input }) =>
+        this.call(() =>
+          this.options.client.updateDocument(
+            document_id,
+            updateDocumentRequestSchema.parse(input)
+          )
+        )
     );
   }
   private requireSession() {

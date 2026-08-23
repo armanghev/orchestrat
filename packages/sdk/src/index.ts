@@ -12,7 +12,15 @@ import {
   taskCardSchema,
   taskListQuerySchema,
   taskListResponseSchema,
-  claimMutationRequestSchema
+  claimMutationRequestSchema,
+  createDocumentRequestSchema,
+  createDocumentResponseSchema,
+  documentIdParamsSchema,
+  documentListQuerySchema,
+  documentListResponseSchema,
+  documentResponseSchema,
+  updateDocumentRequestSchema,
+  updateDocumentResponseSchema
 } from "@orchestrat/protocol";
 import type {
   ClaimTaskRequest,
@@ -20,7 +28,10 @@ import type {
   ReleaseClaimRequest,
   OpenAgentSessionRequest,
   PaginationQuery,
-  TaskListQuery
+  TaskListQuery,
+  CreateDocumentRequest,
+  DocumentListQuery,
+  UpdateDocumentRequest
 } from "@orchestrat/protocol";
 
 type Fetch = typeof globalThis.fetch;
@@ -177,8 +188,49 @@ export class AgentApiClient {
     );
   }
 
+  listDocuments(query: Partial<DocumentListQuery> = {}) {
+    const parsed = documentListQuerySchema.parse({ limit: 50, ...query });
+    return this.request(
+      "GET",
+      `/documents${queryString(parsed)}`,
+      documentListResponseSchema,
+      undefined,
+      true
+    );
+  }
+
+  readDocument(documentId: string) {
+    const id = documentIdParamsSchema.parse({ id: documentId }).id;
+    return this.request(
+      "GET",
+      `/documents/${encodeURIComponent(id)}`,
+      documentResponseSchema,
+      undefined,
+      true
+    );
+  }
+
+  createDocument(input: CreateDocumentRequest) {
+    return this.request(
+      "POST",
+      "/documents",
+      createDocumentResponseSchema,
+      createDocumentRequestSchema.parse(input)
+    );
+  }
+
+  updateDocument(documentId: string, input: UpdateDocumentRequest) {
+    const id = documentIdParamsSchema.parse({ id: documentId }).id;
+    return this.request(
+      "PATCH",
+      `/documents/${encodeURIComponent(id)}`,
+      updateDocumentResponseSchema,
+      updateDocumentRequestSchema.parse(input)
+    );
+  }
+
   private async request<T>(
-    method: "GET" | "POST",
+    method: "GET" | "POST" | "PATCH",
     path: string,
     schema: Schema<T>,
     input?: unknown,

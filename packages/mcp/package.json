@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/server": "^2.0.0",
+    "@orchestrat/protocol": "workspace:*",
     "@orchestrat/sdk": "workspace:*",
     "zod": "^4.0.0"
   }
