@@ -2,9 +2,11 @@ import {
   organizationSchema,
   projectSchema,
   taskCardSchema,
+  documentDetailSchema,
   type Organization,
   type Project,
-  type TaskCard
+  type TaskCard,
+  type DocumentDetail
 } from "@orchestrat/protocol";
 
 const timestamp = "2024-01-01T00:00:00.000Z";
@@ -57,6 +59,35 @@ export function taskCard(overrides: Partial<TaskCard> = {}): TaskCard {
     cancelled_at: null,
     comment_count: 0,
     unresolved_blocker_count: 0,
+    ...overrides
+  });
+}
+
+export function documentDetail(
+  overrides: Partial<DocumentDetail> = {}
+): DocumentDetail {
+  const document = {
+    id: "00000000-0000-4000-8000-000000000007",
+    project_id: project().id,
+    path: "README.md",
+    current_revision: 1,
+    created_by: {
+      type: "human" as const,
+      id: "00000000-0000-4000-8000-000000000004"
+    },
+    created_at: timestamp,
+    updated_at: timestamp
+  };
+  return documentDetailSchema.parse({
+    document,
+    revision: {
+      id: "00000000-0000-4000-8000-000000000008",
+      document_id: document.id,
+      revision_number: 1,
+      content: "Initial content",
+      author: document.created_by,
+      created_at: timestamp
+    },
     ...overrides
   });
 }

@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { http, HttpResponse } from "msw";
 import type { AuthClient, AuthSnapshot } from "@/features/auth/auth-client";
-import { project, taskCard } from "@/test/factories";
+import { documentDetail, project, taskCard } from "@/test/factories";
 import { renderDashboardRoute } from "@/test/render";
 import { handlers } from "@/test/handlers";
 
@@ -236,5 +236,105 @@ describe("dashboard routes", () => {
     );
     await screen.findByText("Task Done");
     expect(screen.getAllByText("Task Updated")).toHaveLength(1);
+  });
+
+  it("preserves an unsaved document draft after conflict and shows history", async () => {
+    const expectedProject = project();
+    const initial = documentDetail({
+      document: { ...documentDetail().document, project_id: expectedProject.id }
+    });
+    const current = {
+      ...initial,
+      document: { ...initial.document, current_revision: 2 },
+      revision: {
+        ...initial.revision,
+        revision_number: 2,
+        content: "Server content"
+      }
+    };
+    let detailRequests = 0;
+    let patchRequests = 0;
+    const documentHandlers = [
+      http.get(
+        `http://localhost:3001/api/v1/projects/${expectedProject.id}/documents`,
+        () =>
+          HttpResponse.json({
+            documents: [initial.document],
+            next_cursor: null
+          })
+      ),
+      http.get(
+        `http://localhost:3001/api/v1/documents/${initial.document.id}`,
+        () => {
+          detailRequests += 1;
+          return HttpResponse.json(detailRequests === 1 ? initial : current);
+        }
+      ),
+      http.get(
+        `http://localhost:3001/api/v1/documents/${initial.document.id}/revisions`,
+        () =>
+          HttpResponse.json({
+            revisions: [initial.revision, current.revision],
+            next_cursor: null
+          })
+      ),
+      http.patch(
+        `http://localhost:3001/api/v1/documents/${initial.document.id}`,
+        async ({ request }) => {
+          patchRequests += 1;
+          const body = (await request.json()) as {
+            base_revision: number;
+            content: string;
+          };
+          if (patchRequests === 2) {
+            expect(body.base_revision).toBe(2);
+            expect(body.content).toBe("Unsaved draft");
+            return HttpResponse.json(
+              {
+                ...current,
+                revision: { ...current.revision, content: body.content }
+              },
+              { status: 200 }
+            );
+          }
+          expect(body.base_revision).toBe(1);
+          return HttpResponse.json(
+            {
+              error: {
+                code: "DOCUMENT_CONFLICT",
+                message: "Document changed.",
+                details: { current_revision: 2, base_revision: 1 },
+                request_id: "req_document"
+              }
+            },
+            { status: 409 }
+          );
+        }
+      ),
+      ...handlers
+    ];
+    await renderDashboardRoute({
+      path: `/projects/${expectedProject.id}/documents`,
+      auth: new FakeAuthClient({
+        status: "signedIn",
+        identityKey: "test-user"
+      }),
+      platform: platform(),
+      handlers: documentHandlers
+    });
+    const user = userEvent.setup();
+    const editor = await screen.findByLabelText("Markdown content");
+    await user.clear(editor);
+    await user.type(editor, "Unsaved draft");
+    await user.click(screen.getByRole("button", { name: "Save document" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "draft is preserved"
+    );
+    expect(screen.getByDisplayValue("Unsaved draft")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Retry save" }));
+    await waitFor(() => expect(patchRequests).toBe(2));
+    expect(screen.getByDisplayValue("Unsaved draft")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Revision 1" }));
+    expect(screen.getByDisplayValue("Initial content")).toBeVisible();
   });
 });
