@@ -131,7 +131,13 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
           store: new KeychainCredentialStore(),
           api: process.env.ORCHESTRAT_API_URL ?? "https://api.orchestrat.dev",
           fetch: globalThis.fetch,
-          sourceCommand: resolve(process.argv[1] ?? "orchestrat")
+          sourceCommand: resolve(process.argv[1] ?? "orchestrat"),
+          reportPreview: async (previews) => {
+            for (const preview of previews)
+              process.stdout.write(
+                `orchestrat: preview ${preview.path} ${(preview.entries ?? []).join(",")}\n`
+              );
+          }
         })
       )}\n`
     );

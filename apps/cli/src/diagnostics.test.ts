@@ -98,6 +98,7 @@ test("disconnect partial removes only selected exact entries and preserves backu
     const calls: RequestInit[] = [];
     const backupBefore = await readFile(fixture.backupPath);
     const backupMtime = (await stat(fixture.backupPath)).mtimeMs;
+    let previewed = false;
     const result = await disconnectLocal({
       home: fixture.home,
       cwd: fixture.project,
@@ -105,11 +106,21 @@ test("disconnect partial removes only selected exact entries and preserves backu
       store: fixture.store,
       api: "https://api.test",
       sourceCommand: fixture.source,
+      reportPreview: async (previews) => {
+        previewed = true;
+        assert.ok(
+          previews.some((preview) =>
+            preview.entries.includes("mcp_servers.orchestrat")
+          )
+        );
+      },
       fetch: async (_url, init) => {
+        assert.equal(previewed, true);
         calls.push(init ?? {});
         return new Response("{}", { status: 200 });
       }
     });
+    assert.equal(previewed, true);
     assert.deepEqual(result.disconnected, ["codex"]);
     assert.equal(calls.length, 1);
     assert.deepEqual(JSON.parse(String(calls[0]!.body)), {
@@ -153,6 +164,41 @@ test("disconnect partial removes only selected exact entries and preserves backu
       await readFile(join(fixture.home, ".codex", "hooks.json"), "utf8"),
       /hook codex/
     );
+  } finally {
+    await rm(fixture.home, { recursive: true, force: true });
+  }
+});
+
+test("disconnect preview failure prevents backend and local mutation", async () => {
+  const fixture = await setupHome();
+  try {
+    const configBefore = await readFile(configPath(fixture.home));
+    const linkBefore = await readlink(fixture.command);
+    const storeBefore = new Map(fixture.store.values);
+    let calls = 0;
+    await assert.rejects(
+      () =>
+        disconnectLocal({
+          home: fixture.home,
+          cwd: fixture.project,
+          integration: "codex",
+          store: fixture.store,
+          api: "https://api.test",
+          sourceCommand: fixture.source,
+          reportPreview: () => {
+            throw new Error("preview rejected");
+          },
+          fetch: async () => {
+            calls++;
+            return new Response("{}", { status: 200 });
+          }
+        }),
+      /preview rejected/
+    );
+    assert.equal(calls, 0);
+    assert.deepEqual(await readFile(configPath(fixture.home)), configBefore);
+    assert.equal(await readlink(fixture.command), linkBefore);
+    assert.deepEqual(fixture.store.values, storeBefore);
   } finally {
     await rm(fixture.home, { recursive: true, force: true });
   }

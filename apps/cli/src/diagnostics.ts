@@ -212,6 +212,9 @@ export async function disconnectLocal(input: {
   api: string;
   fetch?: typeof globalThis.fetch;
   sourceCommand: string;
+  reportPreview?: (
+    previews: { path: string; entries: string[] }[]
+  ) => void | Promise<void>;
 }) {
   const config = await readConfig(input.home);
   const project = findProject(config, input.cwd);
@@ -294,6 +297,7 @@ export async function disconnectLocal(input: {
     ...writes.map(({ path, entries }) => ({ path, entries })),
     ...(launcherPath ? [{ path: launcherPath, entries: ["launcher"] }] : [])
   ];
+  await input.reportPreview?.(previews);
   const cliToken = await input.store.read("cli");
   if (!cliToken)
     throw new Error(
