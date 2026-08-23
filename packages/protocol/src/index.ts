@@ -523,6 +523,41 @@ export type OpenAgentSessionRequest = z.infer<
   typeof openAgentSessionRequestSchema
 >;
 
+export const agentLifecycleEventTypeSchema = z.enum([
+  "session.started",
+  "session.ended",
+  "run.failed"
+]);
+export type AgentLifecycleEventType = z.infer<
+  typeof agentLifecycleEventTypeSchema
+>;
+export const agentLifecycleHookRequestSchema = z
+  .object({
+    event: agentLifecycleEventTypeSchema,
+    session_id: idSchema,
+    runtime: runtimeNameSchema,
+    integration: integrationNameSchema,
+    external_session_id: z
+      .string()
+      .trim()
+      .min(1)
+      .max(255)
+      .nullable()
+      .optional(),
+    error: z.string().trim().max(2000).optional()
+  })
+  .strict();
+export type AgentLifecycleHookRequest = z.infer<
+  typeof agentLifecycleHookRequestSchema
+>;
+export const agentLifecycleHookResponseSchema = z.object({
+  event_id: z.number().int().positive(),
+  session: agentSessionSchema
+});
+export type AgentLifecycleHookResponse = z.infer<
+  typeof agentLifecycleHookResponseSchema
+>;
+
 export const agentSessionParamsSchema = z.object({ sessionId: idSchema });
 export const agentSessionResponseSchema = z.object({
   session: agentSessionSchema

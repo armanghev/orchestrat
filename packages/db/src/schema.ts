@@ -462,6 +462,58 @@ export const projectEvents = pgTable(
   ]
 );
 
+export const agentLifecycleEvents = pgTable(
+  "agent_lifecycle_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    projectId: uuid("project_id").notNull(),
+    agentId: uuid("agent_id").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    requestHash: text("request_hash").notNull(),
+    eventId: integer("event_id"),
+    sessionId: uuid("session_id"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.projectId],
+      foreignColumns: [projects.id],
+      name: "agent_lifecycle_events_project_id_projects_id_fk"
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.projectId, table.agentId],
+      foreignColumns: [agents.projectId, agents.id],
+      name: "agent_lifecycle_events_agent_project_fk"
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.projectId, table.sessionId],
+      foreignColumns: [agentSessions.projectId, agentSessions.id],
+      name: "agent_lifecycle_events_session_project_fk"
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.eventId],
+      foreignColumns: [projectEvents.id],
+      name: "agent_lifecycle_events_event_id_fk"
+    }).onDelete("cascade"),
+    uniqueIndex("agent_lifecycle_events_scope_unique").on(
+      table.projectId,
+      table.agentId,
+      table.idempotencyKey
+    ),
+    index("agent_lifecycle_events_project_idx").on(table.projectId),
+    check(
+      "agent_lifecycle_events_idempotency_key_not_blank",
+      sql`btrim(${table.idempotencyKey}) <> ''`
+    ),
+    check(
+      "agent_lifecycle_events_request_hash_not_blank",
+      sql`btrim(${table.requestHash}) <> ''`
+    )
+  ]
+);
+
 export const taskClaims = pgTable(
   "task_claims",
   {
