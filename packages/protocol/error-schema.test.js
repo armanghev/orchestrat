@@ -11,7 +11,12 @@ import {
   documentPathSchema,
   eventSchema,
   heartbeatRequestSchema,
-  projectEventsResponseSchema
+  projectEventsResponseSchema,
+  realtimeEventEnvelopeSchema,
+  realtimeProjectParamsSchema,
+  realtimeSocketQuerySchema,
+  realtimeTicketRequestSchema,
+  realtimeTicketResponseSchema
 } from "./dist/index.js";
 
 const taskError = {
@@ -127,5 +132,80 @@ test("accepts normalized document paths and revision conflicts", () => {
     createDocumentRequestSchema.parse({ path: "README.md", content: "# Notes" })
       .content,
     "# Notes"
+  );
+});
+
+test("accepts project realtime ticket and event contracts", () => {
+  const id = "00000000-0000-4000-8000-000000000001";
+  const expires_at = "2026-08-22T00:00:30.000Z";
+  assert.deepEqual(realtimeTicketRequestSchema.parse({ project_id: id }), {
+    project_id: id
+  });
+  assert.equal(
+    realtimeTicketResponseSchema.parse({
+      ticket: "t".repeat(43),
+      expires_at
+    }).expires_at,
+    expires_at
+  );
+  assert.equal(
+    realtimeProjectParamsSchema.parse({ projectId: id }).projectId,
+    id
+  );
+  assert.equal(
+    realtimeSocketQuerySchema.parse({ ticket: "t".repeat(43) }).ticket.length,
+    43
+  );
+  assert.deepEqual(
+    realtimeEventEnvelopeSchema.parse({
+      project_id: id,
+      sequence: 7,
+      event_type: "task.updated",
+      entity_type: "task",
+      entity_id: id
+    }).sequence,
+    7
+  );
+  assert.equal(
+    realtimeEventEnvelopeSchema.parse({
+      project_id: id,
+      sequence: 8,
+      event_type: "hook.triggered",
+      entity_type: "hook",
+      entity_id: null
+    }).entity_type,
+    "hook"
+  );
+});
+
+test("rejects malformed realtime tickets and non-monotonic event sequences", () => {
+  const id = "00000000-0000-4000-8000-000000000001";
+  assert.throws(() => realtimeTicketRequestSchema.parse({ project_id: "bad" }));
+  assert.throws(() =>
+    realtimeTicketResponseSchema.parse({
+      ticket: "too-short",
+      expires_at: "2026-08-22T00:00:30.000Z"
+    })
+  );
+  assert.throws(() =>
+    realtimeSocketQuerySchema.parse({ ticket: "x".repeat(32) + "." })
+  );
+  assert.throws(() =>
+    realtimeEventEnvelopeSchema.parse({
+      project_id: id,
+      sequence: 0,
+      event_type: "task.updated",
+      entity_type: "task",
+      entity_id: id
+    })
+  );
+  assert.throws(() =>
+    realtimeEventEnvelopeSchema.parse({
+      project_id: id,
+      sequence: 1,
+      event_type: "task.updated",
+      entity_type: "hook",
+      entity_id: id
+    })
   );
 });

@@ -590,6 +590,63 @@ export const projectEventsResponseSchema = paginationResponseSchema.extend({
 });
 export type ProjectEventsResponse = z.infer<typeof projectEventsResponseSchema>;
 
+const realtimeTicketSchema = z
+  .string()
+  .trim()
+  .min(32)
+  .max(256)
+  .regex(/^[A-Za-z0-9_-]+$/);
+
+export const realtimeTicketRequestSchema = z.object({
+  project_id: idSchema
+});
+export type RealtimeTicketRequest = z.infer<typeof realtimeTicketRequestSchema>;
+
+export const realtimeTicketResponseSchema = z.object({
+  ticket: realtimeTicketSchema,
+  expires_at: dateSchema
+});
+export type RealtimeTicketResponse = z.infer<
+  typeof realtimeTicketResponseSchema
+>;
+
+export const realtimeProjectParamsSchema = z.object({
+  projectId: idSchema
+});
+export const realtimeSocketQuerySchema = z.object({
+  ticket: realtimeTicketSchema
+});
+export type RealtimeProjectParams = z.infer<typeof realtimeProjectParamsSchema>;
+export type RealtimeSocketQuery = z.infer<typeof realtimeSocketQuerySchema>;
+
+export const realtimeEntityTypeSchema = z.enum([
+  "task",
+  "claim",
+  "agent",
+  "credential",
+  "session",
+  "document",
+  "hook"
+]);
+export type RealtimeEntityType = z.infer<typeof realtimeEntityTypeSchema>;
+
+export const realtimeEventEnvelopeSchema = z
+  .object({
+    project_id: idSchema,
+    sequence: z.number().int().positive(),
+    event_type: eventTypeSchema,
+    entity_type: realtimeEntityTypeSchema,
+    entity_id: idSchema.nullable()
+  })
+  .refine(
+    ({ event_type, entity_type }) => event_type.startsWith(`${entity_type}.`),
+    {
+      path: ["event_type"],
+      message: "Event type must be namespaced by its entity type."
+    }
+  );
+export type RealtimeEventEnvelope = z.infer<typeof realtimeEventEnvelopeSchema>;
+
 const documentPathSegmentSchema = z
   .string()
   .min(1)
