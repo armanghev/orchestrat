@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { AgentApiClient, AgentApiError } from "./index.js";
+import {
+  AgentApiClient,
+  AgentApiError,
+  validateAgentApiBaseUrl
+} from "./index.js";
 
 const id = "00000000-0000-4000-8000-000000000001";
 const timestamp = "2026-08-22T00:00:00.000Z";
@@ -17,6 +21,25 @@ const session = {
   ended_at: null,
   last_heartbeat_at: timestamp
 };
+
+test("accepts HTTPS roots and loopback HTTP only", () => {
+  assert.equal(
+    validateAgentApiBaseUrl("https://api.test/"),
+    "https://api.test"
+  );
+  assert.equal(
+    validateAgentApiBaseUrl("http://127.0.0.1:3000/"),
+    "http://127.0.0.1:3000"
+  );
+  for (const value of [
+    "http://api.test",
+    "https://api.test/path",
+    "https://user:pass@api.test",
+    "https://api.test?token=secret",
+    "https://api.test#fragment"
+  ])
+    assert.throws(() => validateAgentApiBaseUrl(value));
+});
 
 test("parses success and structured errors without leaking credentials", async () => {
   const calls: Array<{ url: RequestInfo | URL; init?: RequestInit }> = [];

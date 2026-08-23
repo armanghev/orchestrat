@@ -2,6 +2,8 @@
 
 import { parseArgs } from "node:util";
 import { pathToFileURL } from "node:url";
+import { AgentApiClient } from "@orchestrat/sdk";
+import { startStdioBridge } from "@orchestrat/mcp";
 import { readConfig } from "./config.js";
 import { KeychainCredentialReader } from "./keychain.js";
 import { resolveInvocation } from "./resolve.js";
@@ -59,9 +61,26 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       integration: string;
       projectId: string;
     };
-    process.stderr.write(
-      `orchestrat: resolved ${publicResult.integration} project ${publicResult.projectId}\n`
-    );
+    const client = new AgentApiClient({
+      baseUrl: process.env.ORCHESTRAT_API_URL ?? "https://api.orchestrat.dev",
+      token: resolved.credential!
+    });
+    const { bridge } = await startStdioBridge({
+      client,
+      integration: publicResult.integration as "codex" | "claude-code"
+    });
+    const shutdown = async () => {
+      try {
+        await bridge.stop();
+      } catch (error) {
+        process.stderr.write(
+          `orchestrat: shutdown failed: ${error instanceof Error ? error.message : "unknown error"}\n`
+        );
+        process.exitCode = 1;
+      }
+    };
+    process.once("SIGINT", shutdown);
+    process.once("SIGTERM", shutdown);
   }
 }
 

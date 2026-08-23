@@ -47,6 +47,26 @@ export type AgentApiClientOptions = {
   sleep?: Sleep;
 };
 
+export function validateAgentApiBaseUrl(value: string): string {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("Invalid Orchestrat API URL");
+  }
+  const loopback = ["127.0.0.1", "[::1]", "localhost"].includes(url.hostname);
+  if (
+    (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) ||
+    url.username ||
+    url.password ||
+    (url.pathname !== "/" && url.pathname !== "") ||
+    url.search ||
+    url.hash
+  )
+    throw new Error("Orchestrat API URL must be HTTPS or loopback HTTP root");
+  return url.toString().replace(/\/$/, "");
+}
+
 const defaultSleep: Sleep = (milliseconds) =>
   new Promise((resolve) => setTimeout(resolve, milliseconds));
 
@@ -57,7 +77,7 @@ export class AgentApiClient {
   private readonly sleep: Sleep;
 
   constructor(options: AgentApiClientOptions) {
-    this.baseUrl = options.baseUrl.replace(/\/$/, "");
+    this.baseUrl = validateAgentApiBaseUrl(options.baseUrl);
     this.token = options.token;
     this.fetch = options.fetch ?? globalThis.fetch;
     this.sleep = options.sleep ?? defaultSleep;

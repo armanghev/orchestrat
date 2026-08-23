@@ -10,6 +10,11 @@
     "build": "tsc -p tsconfig.json",
     "lint": "eslint src",
     "typecheck": "tsc --noEmit",
-    "test": "node --test"
+    "test": "node --test dist/*.test.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "^2.0.0",
+    "@orchestrat/sdk": "workspace:*",
+    "zod": "^4.0.0"
   }
 }
