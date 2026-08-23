@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { AuthClient, AuthSnapshot } from "@/features/auth/auth-client";
 import { renderDashboardRoute } from "@/test/render";
 import { organization, project } from "@/test/factories";
+import { CLI_ATTEMPT_KEY, CLI_TERMINAL_KEY } from "./cli.authorize";
 
 const apiUrl = "http://localhost:3001/api/v1";
 const attempt = "ca_12345678901234567890";
@@ -55,6 +56,11 @@ function catalogHandlers() {
 
 describe("CLI authorization route", () => {
   it("rejects invalid and extra search values without exposing a secret", async () => {
+    window.sessionStorage.clear();
+    window.sessionStorage.setItem(
+      CLI_TERMINAL_KEY,
+      JSON.stringify({ status: "approved" })
+    );
     await renderDashboardRoute({
       path: "/cli/authorize?attempt=bad",
       auth: new Auth({ status: "signedOut" }),
@@ -63,7 +69,9 @@ describe("CLI authorization route", () => {
     expect(
       await screen.findByRole("heading", { name: "Invalid authorization link" })
     ).toBeVisible();
-    expect(window.sessionStorage.length).toBe(0);
+    expect(window.sessionStorage.getItem(CLI_TERMINAL_KEY)).toContain(
+      '"status":"approved"'
+    );
     expect(screen.queryByText("super-secret")).not.toBeInTheDocument();
   });
 
@@ -113,7 +121,29 @@ describe("CLI authorization route", () => {
     ).toBeVisible();
     expect(body).toEqual({ project_id: expected.id });
     expect(window.location.search).toBe("");
+    expect(
+      JSON.parse(window.sessionStorage.getItem(CLI_TERMINAL_KEY)!)
+    ).toEqual({
+      status: "approved"
+    });
+    expect(window.sessionStorage.getItem(CLI_ATTEMPT_KEY)).toBeNull();
     expect(document.body.textContent).not.toContain("super-secret");
+  });
+
+  it("restores a generic terminal confirmation after reload without an attempt", async () => {
+    window.sessionStorage.clear();
+    window.sessionStorage.setItem(
+      CLI_TERMINAL_KEY,
+      JSON.stringify({ status: "approved" })
+    );
+    await renderDashboardRoute({
+      path: "/cli/authorize",
+      auth: new Auth({ status: "signedIn", identityKey: "user" }),
+      platform: platform()
+    });
+    expect(
+      await screen.findByRole("heading", { name: "CLI access approved." })
+    ).toBeVisible();
   });
 
   it("keeps deny available when catalog fails and reports generic errors", async () => {
@@ -141,7 +171,11 @@ describe("CLI authorization route", () => {
       await screen.findByRole("heading", { name: "CLI access denied." })
     ).toBeVisible();
     expect(window.location.search).toBe("");
-    await waitFor(() => expect(window.sessionStorage.length).toBe(0));
+    await waitFor(() =>
+      expect(window.sessionStorage.getItem(CLI_TERMINAL_KEY)).toContain(
+        '"status":"denied"'
+      )
+    );
   });
 
   it("shows a generic decision error without transport details", async () => {

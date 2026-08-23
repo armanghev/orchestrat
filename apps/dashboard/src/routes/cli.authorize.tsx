@@ -8,7 +8,9 @@ import { useAuthSnapshot } from "@/features/auth/auth-context";
 import { projectCatalogQueryOptions } from "@/features/hierarchy/query-options";
 
 export const CLI_ATTEMPT_KEY = "orchestrat.cli.authorization.attempt";
+export const CLI_TERMINAL_KEY = "orchestrat.cli.authorization.terminal";
 export const attemptPattern = /^ca_[A-Za-z0-9_-]{20,}$/;
+type TerminalState = { status: "approved" | "denied"; attempt?: string };
 
 function clearAttemptQuery() {
   window.history.replaceState(window.history.state, "", "/cli/authorize");
@@ -19,23 +21,39 @@ function CliAuthorizeRoute() {
   const auth = useAuthSnapshot();
   const { api } = Route.useRouteContext();
   const [projectId, setProjectId] = useState("");
-  const [terminal, setTerminal] = useState<"approved" | "denied" | null>(null);
+  const [terminal, setTerminal] = useState<TerminalState | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
   const valid = attemptPattern.test(attempt ?? "");
+  const showTerminal =
+    terminal !== null &&
+    (terminal.attempt === attempt ||
+      (attempt === undefined && terminal.attempt === undefined));
   const catalog = useQuery({
     ...projectCatalogQueryOptions(api),
     enabled: valid && auth.status === "signedIn"
   });
 
   useEffect(() => {
+    if (valid) window.sessionStorage.removeItem(CLI_TERMINAL_KEY);
+    else if (attempt === undefined) {
+      try {
+        const value = JSON.parse(
+          window.sessionStorage.getItem(CLI_TERMINAL_KEY) ?? "null"
+        ) as Partial<TerminalState> | null;
+        if (value?.status === "approved" || value?.status === "denied")
+          setTerminal({ status: value.status });
+      } catch {
+        window.sessionStorage.removeItem(CLI_TERMINAL_KEY);
+      }
+    }
     if (!valid || auth.status === "signedIn")
       window.sessionStorage.removeItem(CLI_ATTEMPT_KEY);
     else if (auth.status !== "loading")
       window.sessionStorage.setItem(CLI_ATTEMPT_KEY, attempt!);
   }, [attempt, auth.status, valid]);
 
-  if (!valid)
+  if (!valid && !showTerminal)
     return (
       <main className="mx-auto max-w-xl px-6 py-16" role="alert">
         <h1 className="text-xl font-semibold">Invalid authorization link</h1>
@@ -53,10 +71,10 @@ function CliAuthorizeRoute() {
   if (auth.status !== "signedIn") {
     return <SignInScreen />;
   }
-  if (terminal)
+  if (showTerminal)
     return (
       <main className="mx-auto max-w-xl px-6 py-16" role="status">
-        <h1 className="text-xl font-semibold">CLI access {terminal}.</h1>
+        <h1 className="text-xl font-semibold">CLI access {terminal.status}.</h1>
         <p className="mt-2">You can return to your terminal.</p>
       </main>
     );
@@ -69,8 +87,16 @@ function CliAuthorizeRoute() {
       if (action === "approve")
         await api.approveCliAuthorization(attempt!, projectId);
       else await api.denyCliAuthorization(attempt!);
+      window.sessionStorage.setItem(
+        CLI_TERMINAL_KEY,
+        JSON.stringify({ status: action === "approve" ? "approved" : "denied" })
+      );
+      window.sessionStorage.removeItem(CLI_ATTEMPT_KEY);
       clearAttemptQuery();
-      setTerminal(action === "approve" ? "approved" : "denied");
+      setTerminal({
+        status: action === "approve" ? "approved" : "denied",
+        attempt: attempt!
+      });
     } catch {
       setTerminal(null);
       setError(true);

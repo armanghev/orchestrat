@@ -136,6 +136,7 @@ test("empty setup uses approved project, stores distinct credentials, and resolv
     config.projects[cwd]?.projectId,
     "550e8400-e29b-41d4-a716-446655440000"
   );
+  assert.equal(config.projects[cwd]?.apiUrl, "https://api.example");
 });
 
 test("stored CLI credential recovers project without opening browser", async () => {

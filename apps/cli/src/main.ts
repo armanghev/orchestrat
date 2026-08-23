@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { parseArgs } from "node:util";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { AgentApiClient } from "@orchestrat/sdk";
 import { startStdioBridge } from "@orchestrat/mcp";
 import { readConfig } from "./config.js";
@@ -10,13 +10,14 @@ import { KeychainCredentialStore } from "./keychain.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { resolve } from "node:path";
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 const openUrl = promisify(execFile);
 const packageVersion = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8")
 ).version as string;
 import { KeychainCredentialReader } from "./keychain.js";
 import { resolveInvocation } from "./resolve.js";
+import { findProject, validateApiUrl } from "./config.js";
 import { readBoundedStdin, runHook } from "./hooks.js";
 import { disconnectLocal, runDoctor, runStatus } from "./diagnostics.js";
 
@@ -99,19 +100,30 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     process.stdout.write(`${packageVersion}\n`);
     return;
   }
+  const home = process.env.HOME ?? process.cwd();
+  const hookPayload = command === "hook" ? await readBoundedStdin() : undefined;
+  const payloadCwd =
+    hookPayload &&
+    typeof hookPayload === "object" &&
+    typeof (hookPayload as { cwd?: unknown }).cwd === "string"
+      ? (hookPayload as { cwd: string }).cwd
+      : process.cwd();
+  const project = findProject(await readConfig(home), payloadCwd);
+  const api =
+    validateApiUrl(process.env.ORCHESTRAT_API_URL) ??
+    project?.apiUrl ??
+    "https://api.orchestrat.dev";
   if (command === "hook") {
-    const payload = await readBoundedStdin();
     await runHook({
       integration: integration as "codex" | "claude-code",
       cwd: process.cwd(),
       home: process.env.HOME ?? process.cwd(),
       credentials: new KeychainCredentialReader(),
-      payload,
-      api: process.env.ORCHESTRAT_API_URL ?? "https://api.orchestrat.dev"
+      payload: hookPayload,
+      api
     });
     return;
   }
-  const home = process.env.HOME ?? process.cwd();
   if (command === "doctor") {
     process.stdout.write(
       `${JSON.stringify(
@@ -119,7 +131,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
           home,
           cwd: process.cwd(),
           credentials: new KeychainCredentialReader(),
-          api: process.env.ORCHESTRAT_API_URL ?? "https://api.orchestrat.dev",
+          api,
           sourceCommand: resolve(process.argv[1] ?? "orchestrat")
         })
       )}\n`
@@ -140,7 +152,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
           cwd: process.cwd(),
           integration,
           store: new KeychainCredentialStore(),
-          api: process.env.ORCHESTRAT_API_URL ?? "https://api.orchestrat.dev",
+          api,
           fetch: globalThis.fetch,
           sourceCommand: resolve(process.argv[1] ?? "orchestrat"),
           reportPreview: async (previews) => {
@@ -157,7 +169,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   if (command === "setup") {
     const integrations = await detectIntegrations();
     const setupResult = await runSetup({
-      api: process.env.ORCHESTRAT_API_URL ?? "https://api.orchestrat.dev",
+      api,
       fetch: globalThis.fetch,
       open: async (url) => {
         await openUrl("open", [url]);
@@ -199,7 +211,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
           home,
           cwd: process.cwd(),
           credentials: new KeychainCredentialReader(),
-          api: process.env.ORCHESTRAT_API_URL ?? "https://api.orchestrat.dev"
+          api
         })
       )}\n`
     );
@@ -209,7 +221,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       projectId: string;
     };
     const client = new AgentApiClient({
-      baseUrl: process.env.ORCHESTRAT_API_URL ?? "https://api.orchestrat.dev",
+      baseUrl: api,
       token: resolved.credential!
     });
     const { bridge } = await startStdioBridge({
@@ -233,7 +245,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
 
 if (
   process.argv[1] &&
-  import.meta.url === pathToFileURL(process.argv[1]).href
+  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
 ) {
   main().catch((error: Error) => {
     process.stderr.write(`orchestrat: ${error.message}\n`);

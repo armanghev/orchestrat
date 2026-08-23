@@ -28,7 +28,8 @@ import {
   configPath,
   canonicalizeCwd,
   type Integration,
-  type OrchestratConfig
+  type OrchestratConfig,
+  validateApiUrl
 } from "./config.js";
 
 export type SetupTransport = {
@@ -170,8 +171,18 @@ export async function authorizeCli(
     secret: string;
     expires_at: string;
   };
+  const webUrl = process.env.ORCHESTRAT_WEB_URL ?? "https://app.orchestrat.dev";
+  let origin: string;
+  try {
+    const url = new URL(webUrl);
+    if (url.protocol !== "http:" && url.protocol !== "https:")
+      throw new Error("Invalid ORCHESTRAT_WEB_URL");
+    origin = url.origin;
+  } catch {
+    throw new Error("Invalid ORCHESTRAT_WEB_URL");
+  }
   await transport.open(
-    `https://app.orchestrat.dev/cli/authorize?attempt=${encodeURIComponent(attempt.attempt_id)}`
+    `${origin}/cli/authorize?attempt=${encodeURIComponent(attempt.attempt_id)}`
   );
   for (;;) {
     if (Date.now() >= Date.parse(attempt.expires_at))
@@ -339,7 +350,10 @@ export async function runSetup(options: SetupRunOptions) {
   }
   config = {
     version: 1,
-    projects: { ...config.projects, [key]: { projectId, integrations } }
+    projects: {
+      ...config.projects,
+      [key]: { projectId, apiUrl: validateApiUrl(options.api), integrations }
+    }
   } as OrchestratConfig;
   await atomicWrite(
     configPath(options.home),

@@ -9,6 +9,7 @@ export type Integration = (typeof INTEGRATIONS)[number];
 export type IntegrationMapping = { agentId: string };
 export type ProjectMapping = {
   projectId: string;
+  apiUrl?: string;
   integrations: Partial<Record<Integration, IntegrationMapping>>;
 };
 export type OrchestratConfig = {
@@ -27,6 +28,19 @@ export const configPath = (home = homedir()) =>
 
 function nonEmpty(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+export function validateApiUrl(value: unknown): string | undefined {
+  if (!nonEmpty(value)) return undefined;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("Invalid API URL");
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:")
+    throw new Error("Invalid API URL");
+  return url.origin;
 }
 
 export function parseConfig(value: unknown): OrchestratConfig {
@@ -72,6 +86,9 @@ export function parseConfig(value: unknown): OrchestratConfig {
     }
     projects[canonicalizeCwd(cwd)] = {
       projectId: project.projectId,
+      ...(project.apiUrl === undefined
+        ? {}
+        : { apiUrl: validateApiUrl(project.apiUrl) }),
       integrations
     };
   }

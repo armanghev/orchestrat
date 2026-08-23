@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -70,6 +70,41 @@ test("built CLI --version matches package metadata", async () => {
     await readFile(new URL("../package.json", import.meta.url), "utf8")
   ) as { version: string };
   assert.equal(stdout.trim(), metadata.version);
+});
+
+test("built CLI runs when invoked through a symlink", async () => {
+  const root = mkdtempSync(join(tmpdir(), "orchestrat-cli-link-"));
+  const link = join(root, "orchestrat");
+  symlinkSync(new URL("./main.js", import.meta.url).pathname, link);
+  const { stdout } = await execFileAsync(process.execPath, [link, "--version"]);
+  assert.equal(stdout.trim(), "0.1.0");
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("preserves and validates an optional project API URL", () => {
+  const config = parseConfig({
+    version: 1,
+    projects: {
+      "/tmp/project": {
+        projectId: "p",
+        apiUrl: "http://localhost:3001/ignored",
+        integrations: {}
+      }
+    }
+  });
+  assert.equal(config.projects["/tmp/project"].apiUrl, "http://localhost:3001");
+  assert.throws(() =>
+    parseConfig({
+      version: 1,
+      projects: {
+        "/tmp/project": {
+          projectId: "p",
+          apiUrl: "file:///tmp",
+          integrations: {}
+        }
+      }
+    })
+  );
 });
 
 test("resolves credentials without exposing them in the public result", async () => {
