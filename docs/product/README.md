@@ -45,9 +45,10 @@ is deliberately deferred.
 
 ## Agent connection model
 
-`npx @orchestrat/cli@latest setup` bootstraps a persistent local `orchestrat`
-executable. The executable provides a generic stdio MCP bridge and lightweight
-lifecycle hooks for both Codex and Claude Code.
+`orchestrat setup` bootstraps a persistent local `orchestrat` executable from
+the locally installed Node CLI. It provides a generic stdio MCP bridge and
+lightweight lifecycle hooks for both Codex and Claude Code; see the
+[private-alpha setup guide](../agent-setup.md).
 
 Each integration has its own project-scoped, revocable credential stored in
 macOS Keychain. Agent configuration files contain no API secrets. The backend
@@ -78,16 +79,18 @@ Implemented today:
 - Organization and project management with membership authorization.
 - Human Tasks API for create/list/detail/update/move, comments, dependencies,
   idempotent creation, and optimistic concurrency.
+- Agent credentials, sessions, heartbeat, presence, exclusive claims, and the
+  local MCP bridge.
+- Versioned Markdown documents and normalized lifecycle events.
+- Private-alpha CLI setup, status, doctor, disconnect, hooks, and read-only
+  desktop integration status; see the [setup guide](../agent-setup.md).
 - Shared web/Tauri dashboard shell.
 
 Still planned:
 
 - Dashboard wiring for Tasks and every agent-facing surface.
-- Agent credentials, sessions, heartbeat, presence, and claim APIs.
-- Markdown documents and revisions.
-- Durable events, Activity, and realtime delivery.
-- Persistent setup CLI, local MCP bridge, hooks, notifications, and alpha
-  distribution.
+- Activity and project-scoped realtime delivery.
+- Notifications and alpha distribution.
 
 The current Tasks API migration and full end-to-end native flow still require
 verification against the production-like PostgreSQL and macOS environments.

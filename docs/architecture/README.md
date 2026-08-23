@@ -102,13 +102,14 @@ resolved by heartbeat expiry.
 The same credential boundary serves long-lived MCP calls and short-lived hook
 commands. Remote MCP and standardized MCP OAuth are deferred.
 
-## Local setup — private-alpha target
+## Local setup — private alpha
 
-`npx @orchestrat/cli@latest setup` bootstraps the persistent executable and
-authorizes it through the browser. The CLI receives an Orchestrat credential,
-not the human's Supabase refresh token.
+`orchestrat setup` uses the locally installed Node CLI to create the persistent
+executable and authorize it through the browser. The CLI receives an
+Orchestrat credential, not the human's Supabase refresh token. See the
+[private-alpha setup guide](../agent-setup.md) for package/bootstrap limits.
 
-For Codex and Claude Code configuration, setup must:
+For Codex and Claude Code configuration, setup:
 
 1. inspect existing files
 2. preview the planned changes
@@ -133,8 +134,8 @@ optimistic concurrency. Kanban positions are ordered within status, moves can
 insert before an anchor, comments are Markdown, and dependency edges cannot
 cross projects or form cycles. Archived projects allow reads but reject writes.
 
-Human mutations cannot select `claimed`. A database claim table and partial
-constraints exist, but there are no agent claim routes or services yet.
+Human mutations cannot select `claimed`. Agent claim routes and services enforce
+exclusive ownership through the database claim table and partial constraints.
 
 ### Private-alpha target
 

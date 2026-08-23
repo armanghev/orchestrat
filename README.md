@@ -15,8 +15,7 @@ that coordination visible in the macOS app.
 - `apps/api` — Fastify API for `api.orchestrat.dev`
 - `packages/protocol` — shared Zod schemas, types, errors, and transport contracts
 - `packages/ui` — small shared React primitives
-- `packages/{sdk,db,mcp,auth,config,logger,testing}` — shared package boundaries;
-  MCP and SDK are currently placeholders
+- `packages/{sdk,db,mcp,auth,config,logger,testing}` — shared package boundaries
 - `docs/` — architecture, product, and API documentation
 
 ## Prerequisites
@@ -35,16 +34,18 @@ Implemented:
 - organization and project management
 - the human Tasks API, including comments, dependencies, idempotent creation,
   and optimistic concurrency
+- agent credentials, sessions, heartbeat, presence, and exclusive claim APIs,
+  plus the local MCP bridge
+- versioned Markdown documents and lifecycle event ingestion
+- private-alpha CLI setup, status, doctor, disconnect, hooks, and read-only
+  desktop integration status ([setup guide](docs/agent-setup.md))
 - the shared web/Tauri dashboard shell
 
 Still required for the private alpha:
 
-- agent credentials, sessions, heartbeat, presence, and exclusive claim leases
-- persistent setup CLI and local stdio MCP bridge for Codex and Claude Code
-- Markdown documents with revision conflicts
-- durable activity events and project-scoped realtime delivery
+- project-scoped realtime delivery
 - real Tasks, Agents, Documents, Activity, and Overview dashboard data
-- integration setup/status, minimal hooks, native notifications, deployment,
+- native notifications, deployment,
   and DMG acceptance
 
 ## Install and run
@@ -144,7 +145,7 @@ Known external limitations:
 
 ## Architecture
 
-The web and macOS apps share `apps/dashboard`. A persistent local CLI will host
+The web and macOS apps share `apps/dashboard`. A persistent local CLI hosts
 the generic stdio MCP bridge and lightweight hooks, storing separate agent
 credentials in macOS Keychain. API transports remain thin and delegate to
 application services. PostgreSQL is the durable source of truth, Drizzle owns
