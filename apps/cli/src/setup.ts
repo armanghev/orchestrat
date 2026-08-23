@@ -1,4 +1,5 @@
 import { basename, dirname, join, resolve } from "node:path";
+import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
@@ -81,7 +82,10 @@ export async function installLauncher(home: string, sourceCommand: string) {
       join(sourcePackage, "package.json"),
       join(runtime, "package.json")
     );
-    await writeFile(join(runtime, "source.txt"), `${resolvedSource}\n`);
+    await writeFile(
+      join(runtime, "source.txt"),
+      `${resolvedSource}\n${await sourceFingerprint(resolvedSource)}\n`
+    );
     const temporary = join(
       dirname(target),
       `.orchestrat-launcher-${process.pid}`
@@ -95,6 +99,11 @@ export async function installLauncher(home: string, sourceCommand: string) {
   }
   await pruneRuntimes(runtimeRoot, runtime);
   return target;
+}
+async function sourceFingerprint(path: string) {
+  return createHash("sha256")
+    .update(await readFile(path))
+    .digest("hex");
 }
 export async function inspectLauncher(home: string, sourceCommand: string) {
   if (!sourceCommand.startsWith("/"))
@@ -134,7 +143,9 @@ export async function inspectLauncher(home: string, sourceCommand: string) {
     );
     return {
       path: target,
-      changed: installedSource.trim() !== resolvedSource,
+      changed:
+        installedSource.trim() !==
+        `${resolvedSource}\n${await sourceFingerprint(resolvedSource)}`,
       managed: true
     };
   }

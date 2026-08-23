@@ -13,7 +13,7 @@ import {
 } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
 import { atomicWrite } from "./safe-files.js";
@@ -231,8 +231,16 @@ test("persistent launcher is an atomic managed runtime and rejects conflicts", a
   assert.equal(await readlink(target), beforeLink);
   assert.equal(await installLauncher(home, source), target);
   assert.equal((await stat(target)).mtimeMs, before.mtimeMs);
-  assert.equal(await installLauncher(home, target), target);
-  assert.equal((await stat(target)).mtimeMs, before.mtimeMs);
+  await writeFile(source, "#!/usr/bin/env node\nchanged\n");
+  const changedRuntime = await installLauncher(home, source);
+  assert.notEqual(await readlink(changedRuntime), firstRuntime);
+  const currentRuntime = await readlink(target);
+  await writeFile(
+    join(dirname(dirname(currentRuntime)), "source.txt"),
+    `${source}\n`
+  );
+  const refreshedRuntime = await installLauncher(home, source);
+  assert.notEqual(await readlink(refreshedRuntime), currentRuntime);
   const upgraded = join(home, "next", "cli-entry.js");
   await mkdir(join(home, "next"), { recursive: true });
   await writeFile(upgraded, "#!/usr/bin/env node\n");
