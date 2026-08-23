@@ -1,0 +1,76 @@
+#!/usr/bin/env node
+
+import { parseArgs } from "node:util";
+import { pathToFileURL } from "node:url";
+import { readConfig } from "./config.js";
+import { KeychainCredentialReader } from "./keychain.js";
+import { resolveInvocation } from "./resolve.js";
+
+export function parseInvocationArgs(argv: string[]): {
+  command: "status" | "mcp";
+  integration?: "codex" | "claude-code";
+} {
+  const { positionals, values } = parseArgs({
+    args: argv,
+    options: { integration: { type: "string" } },
+    allowPositionals: true,
+    strict: true
+  });
+  if (
+    positionals.length !== 1 ||
+    (positionals[0] !== "status" && positionals[0] !== "mcp")
+  )
+    usage();
+  const integration = values.integration;
+  if (
+    typeof integration !== "undefined" &&
+    integration !== "codex" &&
+    integration !== "claude-code"
+  )
+    usage();
+  if (positionals[0] === "status" && integration !== undefined) usage();
+  if (positionals[0] === "mcp" && integration === undefined) usage();
+  return integration === undefined
+    ? { command: positionals[0] as "status" }
+    : { command: positionals[0] as "mcp", integration };
+}
+
+function usage(): never {
+  throw new Error(
+    "Usage: orchestrat status | orchestrat mcp --integration <codex|claude-code>"
+  );
+}
+
+export async function main(argv = process.argv.slice(2)): Promise<void> {
+  const { command, integration } = parseInvocationArgs(argv);
+
+  const resolved = await resolveInvocation({
+    cwd: process.cwd(),
+    integration,
+    read: readConfig,
+    credentials: new KeychainCredentialReader()
+  });
+  if (command === "status")
+    process.stdout.write(
+      `${JSON.stringify({ command, ...resolved.public })}\n`
+    );
+  else {
+    const publicResult = resolved.public as {
+      integration: string;
+      projectId: string;
+    };
+    process.stderr.write(
+      `orchestrat: resolved ${publicResult.integration} project ${publicResult.projectId}\n`
+    );
+  }
+}
+
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
+  main().catch((error: Error) => {
+    process.stderr.write(`orchestrat: ${error.message}\n`);
+    process.exitCode = 1;
+  });
+}
