@@ -16,10 +16,13 @@ import type {
   TaskListQuery,
   UpdateTaskRequest
 } from "@orchestrat/protocol";
+import type { AgentPrincipal } from "./agent-service.js";
 import { idempotencyKeySchema } from "@orchestrat/protocol";
 import { and, asc, count, eq, gt, inArray, or, sql } from "drizzle-orm";
 import { ApiError } from "./api-error.js";
+import { insertProjectEvent } from "./agent-service.js";
 import { PermissionService } from "./permission-service.js";
+import { TaskClaimService } from "./task-claim-service.js";
 
 const hash = (value: unknown) =>
   createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -88,8 +91,10 @@ const taskJson = (task: typeof tasks.$inferSelect) => ({
 
 export class TaskService {
   private readonly permissions: PermissionService;
+  private readonly claims: TaskClaimService;
   constructor(private readonly db: Database) {
     this.permissions = new PermissionService(db);
+    this.claims = new TaskClaimService(db);
   }
 
   private async access(userId: string, projectId: string, write = false) {
@@ -213,6 +218,13 @@ export class TaskService {
             createdByUserId: userId
           })
           .returning();
+        await insertProjectEvent(tx, {
+          projectId,
+          actorUserId: userId,
+          entityId: task.id,
+          type: "task.created",
+          payload: { status: task.status }
+        });
         return taskJson(task);
       })();
       await tx
@@ -225,6 +237,11 @@ export class TaskService {
 
   async list(userId: string, projectId: string, query: TaskListQuery) {
     await this.access(userId, projectId);
+    return this.listProject(projectId, query);
+  }
+
+  private async listProject(projectId: string, query: TaskListQuery) {
+    await this.claims.reconcileExpired(projectId);
     const clauses = [eq(tasks.projectId, projectId)];
     if (query.status) clauses.push(eq(tasks.status, query.status));
     if (query.priority) clauses.push(eq(tasks.priority, query.priority));
@@ -289,6 +306,17 @@ export class TaskService {
 
   async get(userId: string, id: string) {
     const task = await this.taskAccess(userId, id);
+    return this.getProject(task.projectId, id);
+  }
+
+  private async getProject(projectId: string, id: string) {
+    await this.claims.reconcileExpired(projectId, id);
+    const [current] = await this.db
+      .select()
+      .from(tasks)
+      .where(and(eq(tasks.id, id), eq(tasks.projectId, projectId)))
+      .limit(1);
+    if (!current) throw new ApiError(404, "NOT_FOUND", "Task not found.");
     const [comments] = await this.db
       .select({ value: count() })
       .from(taskComments)
@@ -301,10 +329,18 @@ export class TaskService {
         and(eq(taskDependencies.taskId, id), sql`${tasks.status} <> 'done'`)
       );
     return {
-      ...taskJson(task),
+      ...taskJson(current),
       comment_count: Number(comments?.value ?? 0),
       unresolved_blocker_count: Number(blockers?.value ?? 0)
     };
+  }
+
+  async listForAgent(principal: AgentPrincipal, query: TaskListQuery) {
+    return this.listProject(principal.projectId, query);
+  }
+
+  async getForAgent(principal: AgentPrincipal, id: string) {
+    return this.getProject(principal.projectId, id);
   }
 
   async update(userId: string, id: string, input: UpdateTaskRequest) {
@@ -343,6 +379,13 @@ export class TaskService {
           "TASK_VERSION_CONFLICT",
           "Task version is stale."
         );
+      await insertProjectEvent(tx, {
+        projectId: authorized.projectId,
+        actorUserId: userId,
+        entityId: task.id,
+        type: "task.updated",
+        payload: { fields: Object.keys(input) }
+      });
       return taskJson(task);
     });
   }
@@ -363,6 +406,12 @@ export class TaskService {
           "TASK_VERSION_CONFLICT",
           "Task version is stale.",
           { current_version: locked?.version }
+        );
+      if (locked.status === "claimed")
+        throw new ApiError(
+          409,
+          "TASK_NOT_CLAIMABLE",
+          "Claimed tasks can only be changed by their owning agent."
         );
       const statuses = [locked.status, input.status].sort();
       const lockedColumns = await tx
@@ -441,6 +490,13 @@ export class TaskService {
         for (const [position, task] of next.entries())
           await tx.update(tasks).set({ position }).where(eq(tasks.id, task.id));
       const [moved] = await tx.select().from(tasks).where(eq(tasks.id, id));
+      await insertProjectEvent(tx, {
+        projectId: locked.projectId,
+        actorUserId: userId,
+        entityId: moved.id,
+        type: "task.moved",
+        payload: { from_status: locked.status, to_status: input.status }
+      });
       return taskJson(moved);
     });
   }
@@ -550,6 +606,13 @@ export class TaskService {
           bodyMarkdown: input.body_markdown
         })
         .returning();
+      await insertProjectEvent(tx, {
+        projectId: authorized.projectId,
+        actorUserId: userId,
+        entityId: comment.id,
+        type: "task.comment_created",
+        payload: { task_id: id }
+      });
       const [record] = await tx
         .select({ comment: taskComments, user: users })
         .from(taskComments)
@@ -685,6 +748,13 @@ export class TaskService {
         taskId: id,
         dependsOnTaskId: blocker.id
       });
+      await insertProjectEvent(tx, {
+        projectId: task.projectId,
+        actorUserId: userId,
+        entityId: id,
+        type: "task.dependency_added",
+        payload: { depends_on_task_id: blocker.id }
+      });
       return taskJson(updated);
     });
   }
@@ -735,6 +805,13 @@ export class TaskService {
             eq(taskDependencies.dependsOnTaskId, dependsOnTaskId)
           )
         );
+      await insertProjectEvent(tx, {
+        projectId: task.projectId,
+        actorUserId: userId,
+        entityId: id,
+        type: "task.dependency_removed",
+        payload: { depends_on_task_id: dependsOnTaskId }
+      });
       return taskJson(updated);
     });
   }

@@ -7,8 +7,12 @@ import type { ApiErrorResponse, ErrorCode } from "@orchestrat/protocol";
 import multipart from "@fastify/multipart";
 import Fastify from "fastify";
 import { healthRoutes } from "./routes/health.js";
+import { agentActionRoutes } from "./routes/agent-actions.js";
+import { agentManagementRoutes } from "./routes/agents.js";
 import { v1Routes } from "./routes/v1.js";
 import { ApiError } from "./services/api-error.js";
+import { AgentService } from "./services/agent-service.js";
+import { TaskClaimService } from "./services/task-claim-service.js";
 import { IdentityService } from "./services/identity-service.js";
 import { ProjectService } from "./services/project-service.js";
 import {
@@ -51,6 +55,8 @@ export function buildApp(options: AppOptions) {
   const projects = new ProjectService(options.db);
   const profiles = new ProfileService(options.db, options.avatarStorage);
   const tasks = new TaskService(options.db);
+  const agents = new AgentService(options.db);
+  const claims = new TaskClaimService(options.db);
 
   app.register(cors, {
     origin: options.allowedOrigins,
@@ -133,11 +139,25 @@ export function buildApp(options: AppOptions) {
 
   app.register(healthRoutes);
   app.register(healthRoutes, { prefix: "/api/v1" });
+  app.decorateRequest("agentPrincipal", null);
   app.register(
     async (api) => {
       api.decorateRequest("suggestedUsername", null);
       api.decorateRequest("userId", "");
       api.addHook("preHandler", async (request) => {
+        const authorization = rawHeaderEntries(request.raw.rawHeaders)
+          .filter(([name]) => name.toLowerCase() === "authorization")
+          .map(([, value]) => value);
+        if (
+          authorization.length === 1 &&
+          authorization[0]?.match(/^Bearer\s+(orch_agent_\S+)$/)
+        ) {
+          throw new ApiError(
+            401,
+            "AGENT_CREDENTIAL_INVALID",
+            "Agent credentials are only valid on agent routes."
+          );
+        }
         const principal = await options.auth.authenticate({
           headers: rawHeaderEntries(request.raw.rawHeaders),
           method: request.method,
@@ -154,8 +174,36 @@ export function buildApp(options: AppOptions) {
         request.userId = await identities.resolveUserId(principal);
       });
       api.register(v1Routes, { projects, profiles, tasks });
+      api.register(agentManagementRoutes, { agents });
     },
     { prefix: "/api/v1" }
+  );
+  app.register(
+    async (api) => {
+      api.addHook("preHandler", async (request) => {
+        const values = rawHeaderEntries(request.raw.rawHeaders)
+          .filter(([name]) => name.toLowerCase() === "authorization")
+          .map(([, value]) => value);
+        if (values.length !== 1) {
+          throw new ApiError(
+            401,
+            "AGENT_CREDENTIAL_INVALID",
+            "Agent credential is invalid."
+          );
+        }
+        const match = values[0]?.match(/^Bearer\s+([^\s]+)$/);
+        if (!match || !match[1]?.startsWith("orch_agent_")) {
+          throw new ApiError(
+            401,
+            "AGENT_CREDENTIAL_INVALID",
+            "Agent credential is invalid."
+          );
+        }
+        request.agentPrincipal = await agents.authenticate(match[1]);
+      });
+      api.register(agentActionRoutes, { agents, tasks, claims });
+    },
+    { prefix: "/api/v1/agent" }
   );
 
   return app;

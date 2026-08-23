@@ -82,6 +82,12 @@ async function fixture() {
     const migration = await readFile(new URL(name, migrations), "utf8");
     for (const statement of migration.split("--> statement-breakpoint")) {
       if (statement.includes("projects_task_key_prefix_format")) continue;
+      if (
+        statement.includes(
+          "0005 coordination migration requires task_claims to be empty"
+        )
+      )
+        continue;
       if (statement.trim()) await pool.query(statement);
     }
   }
