@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -29,6 +29,11 @@ const response = (value: unknown, status = 200) =>
 test("empty setup uses approved project, stores distinct credentials, and resolves mappings", async () => {
   const home = await mkdtemp(join(tmpdir(), "orch-setup-"));
   const cwd = join(home, "project");
+  const sourceCommand = join(home, "cli", "dist", "main.js");
+  await mkdir(join(home, "cli", "dist"), { recursive: true });
+  await writeFile(sourceCommand, "#!/usr/bin/env node\n");
+  await writeFile(join(home, "cli", "package.json"), '{"version":"0.1.0"}\n');
+  await chmod(sourceCommand, 0o700);
   const store = new Store();
   const opened: string[] = [];
   const calls: string[] = [];
@@ -76,8 +81,13 @@ test("empty setup uses approved project, stores distinct credentials, and resolv
     reportPreview: (value) => {
       previews.push(value);
     },
-    sourceCommand: "/usr/local/bin/orchestrat"
+    sourceCommand,
+    pathEnv: "/usr/bin"
   });
+  assert.equal(
+    result.pathFix,
+    `export PATH="${join(home, ".local", "bin")}:$PATH"`
+  );
   const flattened = previews.flat();
   assert.equal(
     flattened.filter((preview) => preview.entries?.includes("launcher")).length,
@@ -130,6 +140,11 @@ test("empty setup uses approved project, stores distinct credentials, and resolv
 
 test("stored CLI credential recovers project without opening browser", async () => {
   const home = await mkdtemp(join(tmpdir(), "orch-setup-"));
+  const sourceCommand = join(home, "cli", "dist", "main.js");
+  await mkdir(join(home, "cli", "dist"), { recursive: true });
+  await writeFile(sourceCommand, "#!/usr/bin/env node\n");
+  await writeFile(join(home, "cli", "package.json"), '{"version":"0.1.0"}\n');
+  await chmod(sourceCommand, 0o700);
   const store = new Store();
   await store.write("cli", "orch_cli_" + "c".repeat(32));
   const opened: string[] = [];
@@ -151,7 +166,7 @@ test("stored CLI credential recovers project without opening browser", async () 
     cwd: join(home, "project"),
     home,
     integrations: ["codex"],
-    sourceCommand: "/usr/local/bin/orchestrat"
+    sourceCommand
   });
   assert.equal(opened.length, 0);
 });

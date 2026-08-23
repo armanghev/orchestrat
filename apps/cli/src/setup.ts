@@ -1,15 +1,19 @@
-import { dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 import {
   lstat,
-  readlink,
+  readFile,
+  copyFile,
+  chmod,
+  realpath,
   symlink,
   rename,
-  mkdtemp,
+  readdir,
   mkdir,
-  rm
+  rm,
+  writeFile
 } from "node:fs/promises";
 import {
   atomicWrite,
@@ -51,46 +55,105 @@ export async function detectIntegrations(
   return found;
 }
 export async function installLauncher(home: string, sourceCommand: string) {
-  const preview = await inspectLauncher(home, sourceCommand);
-  if (!preview.changed) return preview.path;
+  const resolvedSource = await realpath(sourceCommand);
+  const preview = await inspectLauncher(home, resolvedSource);
   const target = join(home, ".local", "bin", "orchestrat");
-  let existing: Awaited<ReturnType<typeof lstat>> | undefined;
-  try {
-    existing = await lstat(target);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-  }
-  if (existing) {
-    if (existing.isSymbolicLink() && (await readlink(target)) === sourceCommand)
-      return target;
-    throw new Error("Existing persistent CLI launcher conflicts");
-  }
-  await mkdir(dirname(target), { recursive: true, mode: 0o700 });
-  const directory = await mkdtemp(
-    join(dirname(target), ".orchestrat-launcher-")
+  if (!preview.changed) return target;
+  const runtimeRoot = join(home, ".orchestrat", "runtimes");
+  const runtime = join(
+    runtimeRoot,
+    `runtime-${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2)}`
   );
+  await mkdir(dirname(target), { recursive: true, mode: 0o700 });
+  await mkdir(runtimeRoot, { recursive: true, mode: 0o700 });
+  const sourceDirectory = dirname(resolvedSource);
+  const sourcePackage =
+    basename(sourceDirectory) === "dist"
+      ? dirname(sourceDirectory)
+      : sourceDirectory;
+  let installed = false;
   try {
-    const temporary = join(directory, "orchestrat");
-    await symlink(sourceCommand, temporary);
+    await mkdir(join(runtime, "dist"), { recursive: true, mode: 0o700 });
+    await copyFile(resolvedSource, join(runtime, "dist", "main.js"));
+    await chmod(join(runtime, "dist", "main.js"), 0o700);
+    await copyFile(
+      join(sourcePackage, "package.json"),
+      join(runtime, "package.json")
+    );
+    await writeFile(join(runtime, "source.txt"), `${resolvedSource}\n`);
+    const temporary = join(
+      dirname(target),
+      `.orchestrat-launcher-${process.pid}`
+    );
+    await symlink(join(runtime, "dist", "main.js"), temporary);
     await rename(temporary, target);
+    installed = true;
   } finally {
-    await rm(directory, { recursive: true, force: true });
+    if (!installed && (await exists(runtime)))
+      await rm(runtime, { recursive: true, force: true });
   }
+  await pruneRuntimes(runtimeRoot, runtime);
   return target;
 }
 export async function inspectLauncher(home: string, sourceCommand: string) {
   if (!sourceCommand.startsWith("/"))
     throw new Error("Persistent CLI command must be absolute");
   const target = join(home, ".local", "bin", "orchestrat");
+  let resolvedSource = sourceCommand;
   try {
-    const existing = await lstat(target);
-    if (existing.isSymbolicLink() && (await readlink(target)) === sourceCommand)
-      return { path: target, changed: false };
-    throw new Error("Existing persistent CLI launcher conflicts");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    resolvedSource = await realpath(sourceCommand);
+  } catch {
+    // The caller will report a missing source when installation is attempted.
   }
-  return { path: target, changed: true };
+  let existing: Awaited<ReturnType<typeof lstat>>;
+  try {
+    existing = await lstat(target);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT")
+      return { path: target, changed: true, managed: false };
+    throw error;
+  }
+  if (!existing.isSymbolicLink())
+    throw new Error("Existing persistent CLI launcher conflicts");
+  const linked = await realpath(target);
+  let runtimeRoot: string;
+  try {
+    runtimeRoot = await realpath(join(home, ".orchestrat", "runtimes"));
+  } catch {
+    if (linked === resolve(resolvedSource))
+      return { path: target, changed: true, managed: true };
+    throw new Error("Existing persistent CLI launcher conflicts");
+  }
+  if (linked.startsWith(`${runtimeRoot}/`) && basename(linked) === "main.js") {
+    if (linked === resolve(resolvedSource))
+      return { path: target, changed: false, managed: true };
+    const installedSource = await readFile(
+      join(dirname(dirname(linked)), "source.txt"),
+      "utf8"
+    );
+    return {
+      path: target,
+      changed: installedSource.trim() !== resolvedSource,
+      managed: true
+    };
+  }
+  if (linked === resolve(resolvedSource))
+    return { path: target, changed: true, managed: true };
+  throw new Error("Existing persistent CLI launcher conflicts");
+}
+async function exists(path: string) {
+  try {
+    await lstat(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function pruneRuntimes(runtimeRoot: string, current: string) {
+  for (const name of await readdir(runtimeRoot)) {
+    const path = join(runtimeRoot, name);
+    if (path !== current) await rm(path, { recursive: true, force: true });
+  }
 }
 export async function authorizeCli(
   transport: SetupTransport,
@@ -203,10 +266,11 @@ export type SetupRunOptions = SetupTransport & {
   home: string;
   integrations: Integration[];
   sourceCommand: string;
+  pathEnv?: string;
   reportPreview?: (previews: SetupPreview[]) => Promise<void> | void;
 };
 export async function runSetup(options: SetupRunOptions) {
-  const sourceCommand = options.sourceCommand;
+  const sourceCommand = await realpath(options.sourceCommand);
   if (!sourceCommand.startsWith("/"))
     throw new Error("Persistent CLI command must be absolute");
   const launcher = await inspectLauncher(options.home, sourceCommand);
@@ -305,5 +369,10 @@ export async function runSetup(options: SetupRunOptions) {
       mergeToml(source, "codex", command);
     else mergeJson(source, "claude-code", command);
   }
-  return { projectId, integrations };
+  const localBin = join(options.home, ".local", "bin");
+  const pathEntries = (options.pathEnv ?? process.env.PATH ?? "").split(":");
+  const pathFix = pathEntries.includes(localBin)
+    ? undefined
+    : `export PATH="${localBin}:$PATH"`;
+  return { projectId, integrations, pathFix };
 }

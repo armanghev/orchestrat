@@ -86,14 +86,16 @@ importers:
         version: 4.23.12
 
   apps/cli:
-    dependencies:
+    devDependencies:
       '@orchestrat/mcp':
         specifier: workspace:*
         version: link:../../packages/mcp
       '@orchestrat/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk
-    devDependencies:
+      esbuild:
+        specifier: ^0.28.2
+        version: 0.28.2
       '@types/node':
         specifier: ^24.3.0
         version: 24.13.3

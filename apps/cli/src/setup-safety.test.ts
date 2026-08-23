@@ -8,7 +8,8 @@ import {
   stat,
   mkdir,
   writeFile,
-  readlink
+  readlink,
+  symlink
 } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
@@ -39,6 +40,11 @@ const response = (v: unknown, status = 200) =>
   new Response(JSON.stringify(v), { status });
 test("second setup is a no-op and malformed settings fails before transport", async () => {
   const home = await mkdtemp(join(tmpdir(), "orch-safe-"));
+  const sourceCommand = join(home, "cli", "dist", "main.js");
+  await mkdir(join(home, "cli", "dist"), { recursive: true });
+  await writeFile(sourceCommand, "#!/usr/bin/env node\n");
+  await writeFile(join(home, "cli", "package.json"), '{"version":"0.1.0"}\n');
+  await chmod(sourceCommand, 0o700);
   const cwd = join(home, "project");
   const store = new Store();
   await mkdir(join(home, ".codex"), { recursive: true });
@@ -92,7 +98,7 @@ test("second setup is a no-op and malformed settings fails before transport", as
     cwd,
     home,
     integrations: ["codex", "claude-code"] as ("codex" | "claude-code")[],
-    sourceCommand: "/usr/local/bin/orchestrat"
+    sourceCommand
   };
   await runSetup(options);
   const managed = [
@@ -121,7 +127,10 @@ test("second setup is a no-op and malformed settings fails before transport", as
   );
   const firstCalls = calls;
   const firstWrites = store.writes;
-  await runSetup(options);
+  await runSetup({
+    ...options,
+    sourceCommand: join(home, ".local", "bin", "orchestrat")
+  });
   assert.equal(calls, firstCalls);
   assert.equal(store.writes, firstWrites);
   assert.equal(opens, 1);
@@ -204,17 +213,34 @@ test("atomic write preserves original after injected post-backup failure", async
   assert.equal(await readFile(path, "utf8"), "original");
 });
 
-test("persistent launcher is an atomic stable symlink and rejects conflicts", async () => {
+test("persistent launcher is an atomic managed runtime and rejects conflicts", async () => {
   const home = await mkdtemp(join(tmpdir(), "orch-launcher-"));
   const source = join(home, "cli-entry.js");
   await writeFile(source, "#!/usr/bin/env node\n");
+  await writeFile(join(home, "package.json"), '{"version":"0.1.0"}\n');
   await chmod(source, 0o700);
   const target = await installLauncher(home, source);
-  assert.equal(await readlink(target), source);
+  const firstRuntime = await readlink(target);
+  assert.match(firstRuntime, /\.orchestrat\/runtimes\/runtime-/);
   await execFileAsync(target);
   const before = await stat(target);
+  const beforeLink = await readlink(target);
+  await assert.rejects(() =>
+    installLauncher(home, join(home, "missing", "dist", "main.js"))
+  );
+  assert.equal(await readlink(target), beforeLink);
   assert.equal(await installLauncher(home, source), target);
   assert.equal((await stat(target)).mtimeMs, before.mtimeMs);
+  assert.equal(await installLauncher(home, target), target);
+  assert.equal((await stat(target)).mtimeMs, before.mtimeMs);
+  const upgraded = join(home, "next", "cli-entry.js");
+  await mkdir(join(home, "next"), { recursive: true });
+  await writeFile(upgraded, "#!/usr/bin/env node\n");
+  await writeFile(join(home, "next", "package.json"), '{"version":"0.1.0"}\n');
+  await chmod(upgraded, 0o700);
+  await installLauncher(home, upgraded);
+  assert.notEqual(await readlink(target), firstRuntime);
+  await assert.rejects(() => stat(firstRuntime));
   const conflictHome = await mkdtemp(join(tmpdir(), "orch-launcher-conflict-"));
   await mkdir(join(conflictHome, ".local", "bin"), { recursive: true });
   await writeFile(
@@ -225,6 +251,13 @@ test("persistent launcher is an atomic stable symlink and rejects conflicts", as
     () => installLauncher(conflictHome, source),
     /conflicts/
   );
+  const danglingHome = await mkdtemp(join(tmpdir(), "orch-launcher-dangling-"));
+  const danglingTarget = join(danglingHome, ".local", "bin", "orchestrat");
+  await mkdir(join(danglingHome, ".local", "bin"), { recursive: true });
+  await symlink(join(danglingHome, "missing"), danglingTarget);
+  const danglingLink = await readlink(danglingTarget);
+  await assert.rejects(() => installLauncher(danglingHome, source), /ENOENT/);
+  assert.equal(await readlink(danglingTarget), danglingLink);
 });
 
 test("detects both, one, or no supported integrations", async () => {
