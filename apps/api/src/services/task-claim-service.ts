@@ -37,6 +37,15 @@ const claimJson = (value: typeof taskClaims.$inferSelect) => ({
   completed_at: value.completedAt?.toISOString() ?? null
 });
 
+const isActiveClaimConflict = (error: unknown) => {
+  const value = error as { code?: string; message?: string };
+  return (
+    value.code === "23505" ||
+    (value.message?.includes('"task_claims"') === true &&
+      value.message.includes("task_id"))
+  );
+};
+
 export class TaskClaimService {
   constructor(private readonly db: Database) {}
 
@@ -45,92 +54,109 @@ export class TaskClaimService {
     taskId: string,
     input: ClaimTaskRequest
   ) {
-    return this.db.transaction(async (tx) => {
-      const project = await this.lockProject(tx, principal.projectId);
-      await this.activeAgent(tx, principal);
-      await this.activeSession(tx, principal, input.session_id);
-      let [task] = await tx
-        .select()
-        .from(tasks)
-        .where(
-          and(eq(tasks.id, taskId), eq(tasks.projectId, principal.projectId))
-        )
-        .for("update");
-      if (!task) throw new ApiError(404, "NOT_FOUND", "Task not found.");
-      await this.expireClaims(tx, principal.projectId, taskId);
-      [task] = await tx
-        .select()
-        .from(tasks)
-        .where(
-          and(eq(tasks.id, taskId), eq(tasks.projectId, principal.projectId))
-        )
-        .for("update");
-      const [activeClaim] = await tx
+    try {
+      return await this.db.transaction(async (tx) => {
+        const project = await this.lockProject(tx, principal.projectId);
+        await this.activeAgent(tx, principal);
+        await this.activeSession(tx, principal, input.session_id);
+        let [task] = await tx
+          .select()
+          .from(tasks)
+          .where(
+            and(eq(tasks.id, taskId), eq(tasks.projectId, principal.projectId))
+          )
+          .for("update");
+        if (!task) throw new ApiError(404, "NOT_FOUND", "Task not found.");
+        await this.expireClaims(tx, principal.projectId, taskId);
+        [task] = await tx
+          .select()
+          .from(tasks)
+          .where(
+            and(eq(tasks.id, taskId), eq(tasks.projectId, principal.projectId))
+          )
+          .for("update");
+        const [activeClaim] = await tx
+          .select()
+          .from(taskClaims)
+          .where(
+            and(eq(taskClaims.taskId, taskId), eq(taskClaims.status, "active"))
+          )
+          .limit(1);
+        if (activeClaim) throw this.alreadyClaimed(activeClaim);
+        if (task.status !== "ready")
+          throw new ApiError(
+            409,
+            "TASK_NOT_CLAIMABLE",
+            "Only ready tasks can be claimed."
+          );
+        const [blocker] = await tx
+          .select({ id: taskDependencies.dependsOnTaskId })
+          .from(taskDependencies)
+          .innerJoin(tasks, eq(tasks.id, taskDependencies.dependsOnTaskId))
+          .where(
+            and(
+              eq(taskDependencies.projectId, principal.projectId),
+              eq(taskDependencies.taskId, taskId),
+              sql`${tasks.status} <> 'done'`
+            )
+          )
+          .limit(1);
+        if (blocker)
+          throw new ApiError(
+            409,
+            "TASK_NOT_CLAIMABLE",
+            "Task dependencies are unresolved.",
+            { depends_on_task_id: blocker.id }
+          );
+        const now = new Date();
+        const token = `claim_${randomBytes(32).toString("base64url")}`;
+        const [claim] = await tx
+          .insert(taskClaims)
+          .values({
+            id: randomUUID(),
+            projectId: principal.projectId,
+            taskId,
+            agentId: principal.agentId,
+            sessionId: input.session_id,
+            tokenHash: hash(token),
+            claimedAt: now,
+            lastHeartbeatAt: now,
+            leaseExpiresAt: new Date(now.getTime() + input.lease_seconds * 1000)
+          })
+          .returning();
+        await tx
+          .update(tasks)
+          .set({ status: "claimed", updatedAt: now, version: task.version + 1 })
+          .where(eq(tasks.id, task.id));
+        await insertProjectEvent(tx, {
+          projectId: project.id,
+          actorAgentId: principal.agentId,
+          entityId: claim.id,
+          type: "claim.created",
+          payload: {
+            task_id: task.id,
+            session_id: input.session_id,
+            lease_expires_at: claim.leaseExpiresAt.toISOString()
+          }
+        });
+        return { claim: claimJson(claim), claim_token: token };
+      });
+    } catch (error) {
+      if (!isActiveClaimConflict(error)) throw error;
+      const [activeClaim] = await this.db
         .select()
         .from(taskClaims)
         .where(
-          and(eq(taskClaims.taskId, taskId), eq(taskClaims.status, "active"))
-        )
-        .limit(1);
-      if (activeClaim) throw this.alreadyClaimed(activeClaim);
-      if (task.status !== "ready")
-        throw new ApiError(
-          409,
-          "TASK_NOT_CLAIMABLE",
-          "Only ready tasks can be claimed."
-        );
-      const [blocker] = await tx
-        .select({ id: taskDependencies.dependsOnTaskId })
-        .from(taskDependencies)
-        .innerJoin(tasks, eq(tasks.id, taskDependencies.dependsOnTaskId))
-        .where(
           and(
-            eq(taskDependencies.projectId, principal.projectId),
-            eq(taskDependencies.taskId, taskId),
-            sql`${tasks.status} <> 'done'`
+            eq(taskClaims.projectId, principal.projectId),
+            eq(taskClaims.taskId, taskId),
+            eq(taskClaims.status, "active")
           )
         )
         .limit(1);
-      if (blocker)
-        throw new ApiError(
-          409,
-          "TASK_NOT_CLAIMABLE",
-          "Task dependencies are unresolved.",
-          { depends_on_task_id: blocker.id }
-        );
-      const now = new Date();
-      const token = `claim_${randomBytes(32).toString("base64url")}`;
-      const [claim] = await tx
-        .insert(taskClaims)
-        .values({
-          id: randomUUID(),
-          projectId: principal.projectId,
-          taskId,
-          agentId: principal.agentId,
-          sessionId: input.session_id,
-          tokenHash: hash(token),
-          claimedAt: now,
-          lastHeartbeatAt: now,
-          leaseExpiresAt: new Date(now.getTime() + input.lease_seconds * 1000)
-        })
-        .returning();
-      await tx
-        .update(tasks)
-        .set({ status: "claimed", updatedAt: now, version: task.version + 1 })
-        .where(eq(tasks.id, task.id));
-      await insertProjectEvent(tx, {
-        projectId: project.id,
-        actorAgentId: principal.agentId,
-        entityId: claim.id,
-        type: "claim.created",
-        payload: {
-          task_id: task.id,
-          session_id: input.session_id,
-          lease_expires_at: claim.leaseExpiresAt.toISOString()
-        }
-      });
-      return { claim: claimJson(claim), claim_token: token };
-    });
+      if (activeClaim) throw this.alreadyClaimed(activeClaim);
+      throw error;
+    }
   }
 
   async release(

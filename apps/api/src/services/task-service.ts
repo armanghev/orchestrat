@@ -16,6 +16,7 @@ import type {
   TaskListQuery,
   UpdateTaskRequest
 } from "@orchestrat/protocol";
+import type { AgentPrincipal } from "./agent-service.js";
 import { idempotencyKeySchema } from "@orchestrat/protocol";
 import { and, asc, count, eq, gt, inArray, or, sql } from "drizzle-orm";
 import { ApiError } from "./api-error.js";
@@ -236,6 +237,10 @@ export class TaskService {
 
   async list(userId: string, projectId: string, query: TaskListQuery) {
     await this.access(userId, projectId);
+    return this.listProject(projectId, query);
+  }
+
+  private async listProject(projectId: string, query: TaskListQuery) {
     await this.claims.reconcileExpired(projectId);
     const clauses = [eq(tasks.projectId, projectId)];
     if (query.status) clauses.push(eq(tasks.status, query.status));
@@ -301,8 +306,17 @@ export class TaskService {
 
   async get(userId: string, id: string) {
     const task = await this.taskAccess(userId, id);
-    await this.claims.reconcileExpired(task.projectId, id);
-    const current = await this.taskAccess(userId, id);
+    return this.getProject(task.projectId, id);
+  }
+
+  private async getProject(projectId: string, id: string) {
+    await this.claims.reconcileExpired(projectId, id);
+    const [current] = await this.db
+      .select()
+      .from(tasks)
+      .where(and(eq(tasks.id, id), eq(tasks.projectId, projectId)))
+      .limit(1);
+    if (!current) throw new ApiError(404, "NOT_FOUND", "Task not found.");
     const [comments] = await this.db
       .select({ value: count() })
       .from(taskComments)
@@ -319,6 +333,14 @@ export class TaskService {
       comment_count: Number(comments?.value ?? 0),
       unresolved_blocker_count: Number(blockers?.value ?? 0)
     };
+  }
+
+  async listForAgent(principal: AgentPrincipal, query: TaskListQuery) {
+    return this.listProject(principal.projectId, query);
+  }
+
+  async getForAgent(principal: AgentPrincipal, id: string) {
+    return this.getProject(principal.projectId, id);
   }
 
   async update(userId: string, id: string, input: UpdateTaskRequest) {
