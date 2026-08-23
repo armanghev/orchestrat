@@ -202,6 +202,34 @@ describe("dashboard routes", () => {
     expect(await screen.findByText("DASH-1")).toBeVisible();
   });
 
+  it("renders claimed tasks in the task board", async () => {
+    const expectedProject = project();
+    const claimed = taskCard({
+      project_id: expectedProject.id,
+      status: "claimed",
+      title: "Agent-owned task"
+    });
+    const taskHandlers = [
+      http.get(
+        `http://localhost:3001/api/v1/projects/${expectedProject.id}/tasks`,
+        () =>
+          HttpResponse.json({ tasks: [claimed], total: 1, next_cursor: null })
+      ),
+      ...handlers
+    ];
+    await renderDashboardRoute({
+      path: `/projects/${expectedProject.id}/tasks`,
+      auth: new FakeAuthClient({
+        status: "signedIn",
+        identityKey: "test-user"
+      }),
+      platform: platform(),
+      handlers: taskHandlers
+    });
+    expect(await screen.findByText("Agent-owned task")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "claimed" })).toBeVisible();
+  });
+
   it("refetches and replaces stale task data after a version conflict", async () => {
     const expectedProject = project();
     const stale = taskCard({

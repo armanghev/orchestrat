@@ -16,6 +16,8 @@ export const coordinationKeys = {
     [...coordinationKeys.all, "presence", projectId] as const,
   events: (projectId: string) =>
     [...coordinationKeys.all, "events", projectId] as const,
+  eventsInfinite: (projectId: string) =>
+    [...coordinationKeys.events(projectId), "infinite"] as const,
   documents: (projectId: string) =>
     [...coordinationKeys.all, "documents", projectId] as const,
   document: (documentId: string) =>

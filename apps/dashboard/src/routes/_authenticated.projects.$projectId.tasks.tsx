@@ -26,6 +26,16 @@ const statuses: HumanTaskStatus[] = [
   "done",
   "cancelled"
 ];
+const boardStatuses = [
+  "backlog",
+  "ready",
+  "claimed",
+  "in_progress",
+  "blocked",
+  "review",
+  "done",
+  "cancelled"
+] as const;
 const priorities: TaskPriority[] = ["urgent", "high", "medium", "low", "none"];
 
 function TasksRoute() {
@@ -152,7 +162,7 @@ function TasksRoute() {
         onRetry={refresh}
       />
     );
-  const grouped = statuses.map((status) => ({
+  const grouped = boardStatuses.map((status) => ({
     status,
     tasks: tasks.data.tasks.filter((task) => task.status === status)
   }));

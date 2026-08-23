@@ -11,7 +11,7 @@ function ActivityRoute() {
   const { projectId } = Route.useParams();
   const { api } = Route.useRouteContext();
   const activity = useInfiniteQuery({
-    queryKey: coordinationKeys.events(projectId),
+    queryKey: coordinationKeys.eventsInfinite(projectId),
     initialPageParam: undefined as string | undefined,
     queryFn: ({ pageParam }) =>
       api.listProjectEvents(projectId, { limit: 50, after: pageParam }),
