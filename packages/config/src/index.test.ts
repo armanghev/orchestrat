@@ -28,3 +28,21 @@ test("rejects unsupported Supabase JWT algorithms", () => {
     loadApiConfig({ ...env, ORCHESTRAT_SUPABASE_JWT_ALGORITHM: "HS256" })
   );
 });
+
+test("prefers Orchestrat host and port over provider-injected fallbacks", () => {
+  const config = loadApiConfig({
+    ...env,
+    HOST: "provider-host",
+    PORT: "8080",
+    ORCHESTRAT_API_HOST: "0.0.0.0",
+    ORCHESTRAT_API_PORT: "3001"
+  });
+  assert.equal(config.ORCHESTRAT_API_HOST, "0.0.0.0");
+  assert.equal(config.ORCHESTRAT_API_PORT, 3001);
+});
+
+test("accepts standard host and port fallbacks", () => {
+  const config = loadApiConfig({ ...env, HOST: "127.0.0.1", PORT: "8080" });
+  assert.equal(config.ORCHESTRAT_API_HOST, "127.0.0.1");
+  assert.equal(config.ORCHESTRAT_API_PORT, 8080);
+});
