@@ -17,7 +17,7 @@ import {
 } from "./config.js";
 import type { CredentialStore } from "./keychain.js";
 import { inspectLauncher } from "./setup.js";
-import { access, lstat, readlink, rm } from "node:fs/promises";
+import { access, lstat, rm } from "node:fs/promises";
 import { constants } from "node:fs";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
@@ -126,7 +126,7 @@ export async function runDoctor(input: {
       if ((launcherStat.mode & 0o111) === 0)
         throw new Error("launcher is not executable");
       const launcher = await inspectLauncher(input.home, input.sourceCommand);
-      if (launcher.changed) throw new Error("launcher missing");
+      if (!launcher.managed) throw new Error("launcher missing");
       const version = await execFileAsync(launcher.path, ["--version"], {
         timeout: 1500,
         maxBuffer: 1024,
@@ -292,15 +292,7 @@ export async function disconnectLocal(input: {
   let launcherPath: string | undefined;
   if (!integrationsRemain) {
     const launcher = await inspectLauncher(input.home, input.sourceCommand);
-    try {
-      if (
-        (await lstat(launcher.path)).isSymbolicLink() &&
-        (await readlink(launcher.path)) === input.sourceCommand
-      )
-        launcherPath = launcher.path;
-    } catch {
-      launcherPath = undefined;
-    }
+    if (launcher.managed) launcherPath = launcher.path;
   }
   const previews = [
     ...writes.map(({ path, entries }) => ({ path, entries })),
@@ -332,7 +324,13 @@ export async function disconnectLocal(input: {
   }
   for (const write of writes)
     await atomicWrite(write.path, write.content, false);
-  if (launcherPath) await rm(launcherPath, { force: true });
+  if (launcherPath) {
+    await rm(launcherPath, { force: true });
+    await rm(join(input.home, ".orchestrat", "runtimes"), {
+      recursive: true,
+      force: true
+    });
+  }
   for (const name of mapped) {
     const otherProjectUses = Object.entries(config.projects).some(
       ([cwd, value]) => cwd !== project.cwd && Boolean(value.integrations[name])

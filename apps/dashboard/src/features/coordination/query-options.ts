@@ -10,6 +10,7 @@ const knownRealtimeEventTypes = new Set([
   "task.dependency_added",
   "task.dependency_removed",
   "claim.created",
+  "claim.completed",
   "claim.expired",
   "claim.revoked",
   "agent.created",

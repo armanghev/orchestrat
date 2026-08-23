@@ -19,6 +19,7 @@ import { orderProjects } from "@/features/hierarchy/project-order";
 import { usePreferences } from "@/platform/preferences-provider";
 import { DashboardApiError } from "@/lib/api/client";
 import { ProjectRealtimeProvider } from "@/realtime/project-realtime";
+import { usePlatform } from "@/platform/provider";
 
 export const Route = createFileRoute("/_authenticated/projects/$projectId")({
   beforeLoad: async ({ context, params }) => {
@@ -200,6 +201,7 @@ function ProjectLayout() {
   const navigate = useNavigate();
   const router = useRouter();
   const { api } = router.options.context;
+  const platform = usePlatform();
   const profileQuery = useQuery({
     queryKey: ["profile"],
     queryFn: () => api.getProfile()
@@ -253,6 +255,7 @@ function ProjectLayout() {
       api={router.options.context.api}
       queryClient={router.options.context.queryClient}
       projectId={project.project.id}
+      platform={platform}
     >
       <AppShell
         catalog={catalog}

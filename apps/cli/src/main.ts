@@ -179,6 +179,10 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       process.stdout.write(
         `orchestrat: connected ${integration} (${value.agentId})\n`
       );
+    if (setupResult.pathFix)
+      process.stdout.write(
+        `orchestrat: add the launcher to PATH with: ${setupResult.pathFix}\n`
+      );
     return;
   }
 

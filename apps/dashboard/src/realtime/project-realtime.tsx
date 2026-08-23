@@ -9,13 +9,15 @@ import {
 import type { QueryClient } from "@tanstack/react-query";
 import {
   realtimeEventEnvelopeSchema,
-  type RealtimeEventEnvelope
+  type RealtimeEventEnvelope,
+  type Task
 } from "@orchestrat/protocol";
 import type { ApiClient } from "@/lib/api/client";
 import {
   invalidateCoordinationQueries,
   invalidateRealtimeEvent
 } from "@/features/coordination/query-options";
+import type { Platform } from "@/platform/contract";
 
 export type RealtimeStatus = "connecting" | "connected" | "disconnected";
 export type SocketLike = Pick<WebSocket, "close" | "send"> & {
@@ -30,6 +32,23 @@ export type SocketFactory = (url: string) => SocketLike;
 const defaultSocket: SocketFactory = (url) => new WebSocket(url);
 const MAX_RECONNECT_MS = 30_000;
 
+export function notificationForRealtimeEvent(
+  event: RealtimeEventEnvelope,
+  task?: Pick<Task, "status" | "title">
+) {
+  if (event.event_type === "run.failed")
+    return { title: "Agent run failed", body: "An agent run failed." };
+  if (event.event_type === "claim.completed")
+    return { title: "Task completed", body: "An agent completed a task." };
+  if (event.event_type === "claim.expired")
+    return { title: "Claim expired", body: "An agent claim expired." };
+  if (event.entity_type === "task" && task?.status === "done")
+    return { title: "Task completed", body: task.title };
+  if (event.entity_type === "task" && task?.status === "blocked")
+    return { title: "Agent blocked", body: task.title };
+  return null;
+}
+
 export class ProjectRealtimeController {
   private socket: SocketLike | null = null;
   private stopped = false;
@@ -38,18 +57,31 @@ export class ProjectRealtimeController {
   private lastSequence = 0;
   private catchUpSocket: SocketLike | null = null;
   private buffered: RealtimeEventEnvelope[] = [];
+  private lastNotifiedSequence = 0;
   private status: RealtimeStatus = "disconnected";
   private readonly listeners = new Set<() => void>();
 
   constructor(
     private readonly api: Pick<
       ApiClient,
-      "createRealtimeTicket" | "realtimeSocketUrl" | "listProjectEvents"
+      | "createRealtimeTicket"
+      | "realtimeSocketUrl"
+      | "listProjectEvents"
+      | "getTask"
     >,
     private readonly queryClient: QueryClient,
     private readonly projectId: string,
     private readonly socketFactory: SocketFactory = defaultSocket,
-    private readonly random = Math.random
+    private readonly random = Math.random,
+    private readonly platform?: Pick<
+      Platform,
+      "kind" | "notify" | "isBackgrounded"
+    >,
+    private readonly isBackgrounded: () => boolean | Promise<boolean> = () =>
+      this.platform?.isBackgrounded?.() ??
+      Promise.resolve(
+        typeof document !== "undefined" && document.visibilityState === "hidden"
+      )
   ) {}
 
   getStatus = () => this.status;
@@ -171,6 +203,32 @@ export class ProjectRealtimeController {
     if (event.sequence <= this.lastSequence) return;
     this.lastSequence = event.sequence;
     void invalidateRealtimeEvent(this.queryClient, this.projectId, event);
+    void this.notifyForEvent(event);
+  }
+
+  private async notifyForEvent(event: RealtimeEventEnvelope) {
+    try {
+      if (
+        this.platform?.kind !== "desktop" ||
+        !this.platform.notify ||
+        event.sequence <= this.lastNotifiedSequence
+      )
+        return;
+      if (!(await this.isBackgrounded())) return;
+      let task: Pick<Task, "status" | "title"> | undefined;
+      if (
+        event.entity_type === "task" &&
+        event.entity_id &&
+        event.event_type === "task.moved"
+      )
+        task = await this.api.getTask(event.entity_id);
+      const notification = notificationForRealtimeEvent(event, task);
+      if (!notification) return;
+      this.lastNotifiedSequence = event.sequence;
+      await this.platform.notify(notification);
+    } catch {
+      // Notifications are best effort and must never affect realtime processing.
+    }
   }
 
   private scheduleReconnect() {
@@ -197,16 +255,26 @@ export function ProjectRealtimeProvider({
   api,
   queryClient,
   projectId,
+  platform,
   children
 }: {
   api: ApiClient;
   queryClient: QueryClient;
   projectId: string;
+  platform: Platform;
   children: ReactNode;
 }) {
   const controller = useMemo(
-    () => new ProjectRealtimeController(api, queryClient, projectId),
-    [api, projectId, queryClient]
+    () =>
+      new ProjectRealtimeController(
+        api,
+        queryClient,
+        projectId,
+        undefined,
+        Math.random,
+        platform
+      ),
+    [api, platform, projectId, queryClient]
   );
   useEffect(() => controller.start(), [controller]);
   const status = useSyncExternalStore(
