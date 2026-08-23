@@ -2,16 +2,18 @@
 
 This guide covers the current macOS/private-alpha path for connecting Codex and
 Claude Code to one Orchestrat project. It is for trusted testers running from
-the intended project directory. The CLI currently requires Node.js; the stable
-launcher is a link to the installed CLI entry point. A raw checkout does not
-automatically provide an executable `orchestrat`: trusted testers need a
-tester-provided local package/bootstrap that exposes the CLI. Official registry
-distribution is not verified.
+the intended project directory. The CLI requires Node.js 20+ and installs a
+self-contained managed runtime under `~/.orchestrat/runtimes` with a stable
+`~/.local/bin/orchestrat` launcher. Official registry distribution is not yet
+verified; use the [private-alpha runbook](private-alpha-runbook.md) for release
+status, deployment operations, and the clean-Mac acceptance boundary.
 
 ## Prerequisites
 
 - macOS and Node.js 20.19+ (or 22.12+).
-- A tester-provided local package/bootstrap that exposes the CLI and its dependencies.
+- An authorized published `@orchestrat/cli` package for trusted-tester setup.
+  The source-build command in the [private-alpha runbook](private-alpha-runbook.md)
+  is validation only, not clean-Mac installation evidence.
 - An Orchestrat account and access to the target project.
 - `ORCHESTRAT_API_URL` may override the API; the default is
   `https://api.orchestrat.dev`.
@@ -95,5 +97,7 @@ formats and hook contracts:
 
 This is a macOS/local trusted-tester private alpha. Windows, Linux, remote
 agents, and CI agents are not supported. Node remains a runtime dependency.
-There is no automatic task completion, high-volume telemetry, notification
-system, signing/distribution, or deployment claim in this guide.
+Notifications are limited to high-value background desktop events; click-through
+navigation is not implemented or verified. There is no automatic task
+completion, high-volume telemetry, signing/distribution, or deployment claim in
+this guide.
