@@ -10,6 +10,7 @@
     "build": "pnpm build:web",
     "build:web": "tsc -p tsconfig.build.json && vite build",
     "build:desktop": "tauri build",
+    "verify:macos": "sh scripts/verify-macos-artifacts.sh",
     "lint": "eslint src vite.config.ts",
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run",
