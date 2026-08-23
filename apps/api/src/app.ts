@@ -5,6 +5,7 @@ import type { Database } from "@orchestrat/db";
 import { logger } from "@orchestrat/logger";
 import type { ApiErrorResponse, ErrorCode } from "@orchestrat/protocol";
 import multipart from "@fastify/multipart";
+import websocket from "@fastify/websocket";
 import Fastify from "fastify";
 import { healthRoutes } from "./routes/health.js";
 import { agentActionRoutes } from "./routes/agent-actions.js";
@@ -23,6 +24,11 @@ import {
 } from "./services/profile-service.js";
 import { TaskService } from "./services/task-service.js";
 import { DocumentService } from "./services/document-service.js";
+import {
+  realtimeSocketRoutes,
+  realtimeTicketRoutes
+} from "./routes/realtime.js";
+import { RealtimeRegistry, RealtimeTicketStore } from "./realtime/realtime.js";
 
 type AppOptions = {
   allowedOrigins: string[];
@@ -61,6 +67,8 @@ export function buildApp(options: AppOptions) {
   const agents = new AgentService(options.db);
   const claims = new TaskClaimService(options.db);
   const documents = new DocumentService(options.db);
+  const realtimeTickets = new RealtimeTicketStore();
+  const realtimeRegistry = new RealtimeRegistry();
 
   app.register(cors, {
     origin: options.allowedOrigins,
@@ -69,6 +77,7 @@ export function buildApp(options: AppOptions) {
   app.register(multipart, {
     limits: { fileSize: 2 * 1024 * 1024, files: 1 }
   });
+  app.register(websocket, { options: { maxPayload: 64 * 1024 } });
   app.addHook("onRequest", (request, reply, done) => {
     reply.header("x-request-id", request.id);
     done();
@@ -178,11 +187,20 @@ export function buildApp(options: AppOptions) {
         request.userId = await identities.resolveUserId(principal);
       });
       api.register(v1Routes, { projects, profiles, tasks });
+      api.register(realtimeTicketRoutes, {
+        projects,
+        tickets: realtimeTickets
+      });
       api.register(documentRoutes, { documents });
       api.register(agentManagementRoutes, { agents });
     },
     { prefix: "/api/v1" }
   );
+  app.register(realtimeSocketRoutes, {
+    prefix: "/api/v1/realtime",
+    tickets: realtimeTickets,
+    registry: realtimeRegistry
+  });
   app.register(
     async (api) => {
       api.addHook("preHandler", async (request) => {
