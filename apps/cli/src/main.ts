@@ -25,12 +25,16 @@ export function parseInvocationArgs(argv: string[]): {
   command:
     "status" | "mcp" | "setup" | "hook" | "doctor" | "disconnect" | "version";
   integration?: "codex" | "claude-code" | "all";
+  local?: boolean;
 } {
   if (argv.length === 1 && (argv[0] === "--version" || argv[0] === "-v"))
     return { command: "version" };
   const { positionals, values } = parseArgs({
     args: argv,
-    options: { integration: { type: "string" } },
+    options: {
+      integration: { type: "string" },
+      local: { type: "boolean", default: false }
+    },
     allowPositionals: true,
     strict: true
   });
@@ -49,6 +53,7 @@ export function parseInvocationArgs(argv: string[]): {
   )
     usage();
   const integration = values.integration;
+  if (values.local && positionals[0] !== "disconnect") usage();
   if (
     typeof integration !== "undefined" &&
     integration !== "codex" &&
@@ -80,7 +85,11 @@ export function parseInvocationArgs(argv: string[]): {
       positionals[1] !== "all"
     )
       usage();
-    return { command: "disconnect", integration: positionals[1] };
+    return {
+      command: "disconnect",
+      integration: positionals[1],
+      local: values.local
+    };
   }
   if (positionals[0] === "mcp" && integration === undefined) usage();
   return integration === undefined
@@ -95,7 +104,7 @@ function usage(): never {
 }
 
 export async function main(argv = process.argv.slice(2)): Promise<void> {
-  const { command, integration } = parseInvocationArgs(argv);
+  const { command, integration, local } = parseInvocationArgs(argv);
   if (command === "version") {
     process.stdout.write(`${packageVersion}\n`);
     return;
@@ -153,6 +162,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
           integration,
           store: new KeychainCredentialStore(),
           api,
+          localOnly: local,
           fetch: globalThis.fetch,
           sourceCommand: resolve(process.argv[1] ?? "orchestrat"),
           reportPreview: async (previews) => {

@@ -51,6 +51,12 @@ test("does not skip a nearer project without the selected integration", () => {
 
 test("accepts only the two supported command shapes", () => {
   assert.deepEqual(parseInvocationArgs(["status"]), { command: "status" });
+  assert.deepEqual(parseInvocationArgs(["disconnect", "all", "--local"]), {
+    command: "disconnect",
+    integration: "all",
+    local: true
+  });
+  assert.throws(() => parseInvocationArgs(["status", "--local"]));
   assert.deepEqual(parseInvocationArgs(["mcp", "--integration", "codex"]), {
     command: "mcp",
     integration: "codex"

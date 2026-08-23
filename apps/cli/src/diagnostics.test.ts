@@ -169,6 +169,26 @@ test("disconnect partial removes only selected exact entries and preserves backu
   }
 });
 
+test("local disconnect skips remote revoke and still cleans up", async () => {
+  const fixture = await setupHome();
+  const result = await disconnectLocal({
+    home: fixture.home,
+    cwd: fixture.project,
+    integration: "all",
+    store: fixture.store,
+    api: "https://api.test",
+    sourceCommand: fixture.source,
+    localOnly: true,
+    fetch: async () => {
+      throw new Error("remote revoke should be skipped");
+    }
+  });
+  assert.deepEqual(result.disconnected, ["codex", "claude-code"]);
+  assert.equal(fixture.store.values.has("cli"), false);
+  assert.equal(fixture.store.values.has("agent:codex"), false);
+  assert.equal(fixture.store.values.has("agent:claude-code"), false);
+});
+
 test("disconnect preview failure prevents backend and local mutation", async () => {
   const fixture = await setupHome();
   try {

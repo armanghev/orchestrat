@@ -219,6 +219,7 @@ export async function disconnectLocal(input: {
   integration: Integration | "all";
   store: CredentialStore;
   api: string;
+  localOnly?: boolean;
   fetch?: typeof globalThis.fetch;
   sourceCommand: string;
   reportPreview?: (
@@ -299,12 +300,12 @@ export async function disconnectLocal(input: {
     ...(launcherPath ? [{ path: launcherPath, entries: ["launcher"] }] : [])
   ];
   await input.reportPreview?.(previews);
-  const cliToken = await input.store.read("cli");
-  if (!cliToken)
-    throw new Error(
-      "CLI credential is required before disconnecting a mapped agent"
-    );
-  {
+  if (!input.localOnly) {
+    const cliToken = await input.store.read("cli");
+    if (!cliToken)
+      throw new Error(
+        "CLI credential is required before disconnecting a mapped agent"
+      );
     const response = await (input.fetch ?? globalThis.fetch)(
       `${input.api}/api/v1/cli/setup/disconnect`,
       {
