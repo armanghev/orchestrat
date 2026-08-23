@@ -51,21 +51,33 @@ Authorization: Bearer <session-token>
 | `POST`   | `/api/v1/projects/:projectId/credentials/:credentialId/revoke` | Revoke a credential (human project editor)                                             |
 | `GET`    | `/api/v1/projects/:projectId/presence`                         | List project agent presence                                                            |
 | `GET`    | `/api/v1/projects/:projectId/events`                           | List ordered project events with an `after` cursor                                     |
+| `GET`    | `/api/v1/projects/:projectId/documents`                        | List project Markdown documents with cursor pagination                                 |
+| `POST`   | `/api/v1/projects/:projectId/documents`                        | Create a Markdown document and revision 1                                              |
+| `GET`    | `/api/v1/documents/:id`                                        | Read a document and its current revision                                               |
+| `PATCH`  | `/api/v1/documents/:id`                                        | Create a revision using an optimistic `base_revision`                                  |
+| `GET`    | `/api/v1/documents/:id/revisions`                              | List immutable document revisions                                                      |
+| `GET`    | `/api/v1/documents/:id/revisions/:revision`                    | Read one immutable revision                                                            |
 
 Agent-only routes use the `/api/v1/agent` prefix:
 
-| Method | Path                                                | Behavior                                                                   |
-| ------ | --------------------------------------------------- | -------------------------------------------------------------------------- |
-| `POST` | `/api/v1/agent/sessions`                            | Open a session with runtime, integration, and optional external session ID |
-| `POST` | `/api/v1/agent/sessions/:sessionId/heartbeat`       | Refresh a session and renew its active claim leases                        |
-| `POST` | `/api/v1/agent/sessions/:sessionId/close`           | Close a session and revoke its active claims                               |
-| `GET`  | `/api/v1/agent/tasks`                               | List tasks in the credential's project with filters and cursor pagination  |
-| `GET`  | `/api/v1/agent/tasks/:id`                           | Get a task in the credential's project                                     |
-| `POST` | `/api/v1/agent/tasks/:id/claim`                     | Claim a ready task with a session and lease duration                       |
-| `POST` | `/api/v1/agent/sessions/:sessionId/claims/release`  | Release an owned claim using its claim token                               |
-| `POST` | `/api/v1/agent/sessions/:sessionId/claims/complete` | Complete an owned claim using its claim token                              |
-| `GET`  | `/api/v1/agent/presence`                            | List presence for the credential's project                                 |
-| `GET`  | `/api/v1/agent/events`                              | List project events with an `after` cursor                                 |
+| Method  | Path                                                | Behavior                                                                   |
+| ------- | --------------------------------------------------- | -------------------------------------------------------------------------- |
+| `POST`  | `/api/v1/agent/sessions`                            | Open a session with runtime, integration, and optional external session ID |
+| `POST`  | `/api/v1/agent/sessions/:sessionId/heartbeat`       | Refresh a session and renew its active claim leases                        |
+| `POST`  | `/api/v1/agent/sessions/:sessionId/close`           | Close a session and revoke its active claims                               |
+| `GET`   | `/api/v1/agent/tasks`                               | List tasks in the credential's project with filters and cursor pagination  |
+| `GET`   | `/api/v1/agent/tasks/:id`                           | Get a task in the credential's project                                     |
+| `POST`  | `/api/v1/agent/tasks/:id/claim`                     | Claim a ready task with a session and lease duration                       |
+| `POST`  | `/api/v1/agent/sessions/:sessionId/claims/release`  | Release an owned claim using its claim token                               |
+| `POST`  | `/api/v1/agent/sessions/:sessionId/claims/complete` | Complete an owned claim using its claim token                              |
+| `GET`   | `/api/v1/agent/presence`                            | List presence for the credential's project                                 |
+| `GET`   | `/api/v1/agent/events`                              | List project events with an `after` cursor                                 |
+| `GET`   | `/api/v1/agent/documents`                           | List documents in the credential's project with cursor pagination          |
+| `POST`  | `/api/v1/agent/documents`                           | Create a document and revision 1 in the credential's project               |
+| `GET`   | `/api/v1/agent/documents/:id`                       | Read a document in the credential's project                                |
+| `PATCH` | `/api/v1/agent/documents/:id`                       | Create a revision in the credential's project                              |
+| `GET`   | `/api/v1/agent/documents/:id/revisions`             | List immutable revisions                                                   |
+| `GET`   | `/api/v1/agent/documents/:id/revisions/:revision`   | Read one immutable revision                                                |
 
 Names are required. Slugs are optional and derived from names when omitted.
 Project creation also accepts optional `task_key_prefix` (2–8 alphanumeric
@@ -129,6 +141,63 @@ comments, and dependencies. All task writes are rejected with
 `409 PROJECT_ARCHIVED` and the message `Archived projects are read-only.`
 No frontend wiring is implied by these routes.
 
+## Documents API
+
+Human document routes require the Supabase bearer token and organization
+membership for the target project. Agent document routes require exactly one
+`Authorization: Bearer orch_agent_...` credential; the credential fixes the
+agent and project scope, and request path/body IDs do not override it.
+
+Documents are project-scoped plain Markdown. `path` must be a normalized,
+relative POSIX path: 1–1024 characters, with no leading slash, backslash, NUL,
+empty segment, or `.`/`..` segment. `content` is plain text up to 1,000,000
+characters. Create requests are `{ "path": "docs/readme.md", "content": "# Notes" }`
+and begin at revision 1. Successful create and update responses contain a
+`document` object and its new `revision`:
+
+```json
+{
+  "document": {
+    "id": "…",
+    "project_id": "…",
+    "path": "docs/readme.md",
+    "current_revision": 1,
+    "created_by": { "type": "human", "id": "…" },
+    "created_at": "2026-08-22T00:00:00.000Z",
+    "updated_at": "2026-08-22T00:00:00.000Z"
+  },
+  "revision": {
+    "id": "…",
+    "document_id": "…",
+    "revision_number": 1,
+    "content": "# Notes",
+    "author": { "type": "human", "id": "…" },
+    "created_at": "2026-08-22T00:00:00.000Z"
+  }
+}
+```
+
+`PATCH` accepts `{ "content": "…", "base_revision": 1 }`. The update creates
+one immutable revision and advances `current_revision` atomically. A stale
+base returns `409 DOCUMENT_CONFLICT` and no revision or event:
+
+```json
+{
+  "error": {
+    "code": "DOCUMENT_CONFLICT",
+    "message": "Document revision is stale.",
+    "details": { "current_revision": 2, "base_revision": 1 },
+    "request_id": "req_…"
+  }
+}
+```
+
+List and history responses use `{ "next_cursor": string | null }`. Document
+lists accept `limit` (1–100, default 50) and an opaque `cursor`; results are
+ordered by update time and ID. History is returned in revision order and is
+immutable. Archived projects remain readable, while document creation and
+updates return `409 PROJECT_ARCHIVED`.
+
 ## Agent coordination
 
 Human routes use `Authorization: Bearer <Supabase access token>` and resolve
@@ -169,7 +238,6 @@ The API does not currently implement:
 
 - Task deletion
 - MCP or CLI transport
-- Documents or revisions
 - WebSockets, realtime tickets, or Redis
 - Hooks or tool telemetry
 - Agent capability matching or auto-assignment

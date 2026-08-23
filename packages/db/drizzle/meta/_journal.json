@@ -43,6 +43,13 @@
       "when": 1787395200000,
       "tag": "0005_coordination_backend",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1787449693000,
+      "tag": "0006_documents",
+      "breakpoints": true
     }
   ]
 }

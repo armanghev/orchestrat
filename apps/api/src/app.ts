@@ -9,6 +9,8 @@ import Fastify from "fastify";
 import { healthRoutes } from "./routes/health.js";
 import { agentActionRoutes } from "./routes/agent-actions.js";
 import { agentManagementRoutes } from "./routes/agents.js";
+import { agentDocumentRoutes } from "./routes/agent-documents.js";
+import { documentRoutes } from "./routes/documents.js";
 import { v1Routes } from "./routes/v1.js";
 import { ApiError } from "./services/api-error.js";
 import { AgentService } from "./services/agent-service.js";
@@ -20,6 +22,7 @@ import {
   type AvatarStorageConfig
 } from "./services/profile-service.js";
 import { TaskService } from "./services/task-service.js";
+import { DocumentService } from "./services/document-service.js";
 
 type AppOptions = {
   allowedOrigins: string[];
@@ -57,6 +60,7 @@ export function buildApp(options: AppOptions) {
   const tasks = new TaskService(options.db);
   const agents = new AgentService(options.db);
   const claims = new TaskClaimService(options.db);
+  const documents = new DocumentService(options.db);
 
   app.register(cors, {
     origin: options.allowedOrigins,
@@ -174,6 +178,7 @@ export function buildApp(options: AppOptions) {
         request.userId = await identities.resolveUserId(principal);
       });
       api.register(v1Routes, { projects, profiles, tasks });
+      api.register(documentRoutes, { documents });
       api.register(agentManagementRoutes, { agents });
     },
     { prefix: "/api/v1" }
@@ -202,6 +207,7 @@ export function buildApp(options: AppOptions) {
         request.agentPrincipal = await agents.authenticate(match[1]);
       });
       api.register(agentActionRoutes, { agents, tasks, claims });
+      api.register(agentDocumentRoutes, { documents });
     },
     { prefix: "/api/v1/agent" }
   );
