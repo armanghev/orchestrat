@@ -4,6 +4,7 @@ import { setTimeout as wait } from "node:timers/promises";
 import websocket from "@fastify/websocket";
 import Fastify from "fastify";
 import test from "node:test";
+import type { RealtimeEventEnvelope } from "@orchestrat/protocol";
 import {
   RealtimeRegistry,
   RealtimeTicketStore,
@@ -82,9 +83,9 @@ test("committed project events publish once, rollback publishes zero, and failur
       return result;
     }
   };
-  const published: number[] = [];
+  const published: RealtimeEventEnvelope[] = [];
   const wrapped = withRealtimePublisher(db as never, (event) => {
-    published.push(event.sequence);
+    published.push(event);
     if (event.sequence === 2) throw new Error("socket failure");
   });
   const event = (id: number) =>
@@ -104,9 +105,26 @@ test("committed project events publish once, rollback publishes zero, and failur
     assert.equal(value, tx);
   });
   await wrapped.transaction(async () => event(2));
+  await wrapped.transaction(async () => {
+    recordProjectEvent(tx as never, {
+      id: 4,
+      projectId,
+      type: "run.failed",
+      actorAgentId: null,
+      actorUserId: null,
+      entityId: null,
+      payload: {},
+      occurredAt: new Date()
+    });
+  });
   shouldRollback = true;
   await assert.rejects(() => wrapped.transaction(async () => event(3)));
-  assert.deepEqual(published, [1, 2]);
+  assert.deepEqual(
+    published.map(({ sequence }) => sequence),
+    [1, 2, 4]
+  );
+  assert.equal(published[2]?.event_type, "run.failed");
+  assert.equal(published[2]?.entity_type, "run");
 });
 
 test("registry pings and terminates sockets that miss the next pong", async () => {

@@ -708,7 +708,8 @@ export const realtimeEntityTypeSchema = z.enum([
   "credential",
   "session",
   "document",
-  "hook"
+  "hook",
+  "run"
 ]);
 export type RealtimeEntityType = z.infer<typeof realtimeEntityTypeSchema>;
 

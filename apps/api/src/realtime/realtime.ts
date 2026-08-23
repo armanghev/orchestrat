@@ -15,7 +15,8 @@ const entityTypes = new Set([
   "credential",
   "session",
   "document",
-  "hook"
+  "hook",
+  "run"
 ]);
 const pendingEvents = new WeakMap<object, ProjectEvent[]>();
 
