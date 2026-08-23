@@ -7,6 +7,7 @@ import {
 import { z } from "zod";
 import { useAuthClient } from "@/features/auth/auth-context";
 import { AuthCallbackScreen } from "@/features/auth/auth-callback-screen";
+import { CLI_ATTEMPT_KEY, attemptPattern } from "./cli.authorize";
 
 const callbackSearchSchema = z.looseObject({
   code: z.unknown().optional(),
@@ -32,6 +33,16 @@ function AuthCallbackRoute() {
     void navigate({ to: "/auth/callback", search: {}, replace: true });
   }, [navigate]);
   const handleSuccess = useCallback(() => {
+    const pending = window.sessionStorage.getItem(CLI_ATTEMPT_KEY);
+    if (pending && attemptPattern.test(pending)) {
+      window.sessionStorage.removeItem(CLI_ATTEMPT_KEY);
+      void navigate({
+        to: "/cli/authorize",
+        search: { attempt: pending },
+        replace: true
+      });
+      return;
+    }
     void navigate({ to: "/onboarding", replace: true });
   }, [navigate]);
 

@@ -325,6 +325,60 @@ export const agentCredentials = pgTable(
   ]
 );
 
+export const cliAuthorizationAttempts = pgTable(
+  "cli_authorization_attempts",
+  {
+    id: text("id").primaryKey(),
+    secretHash: text("secret_hash").notNull(),
+    status: text("status").notNull(),
+    projectId: uuid("project_id").references(() => projects.id, {
+      onDelete: "cascade"
+    }),
+    approvedByUserId: uuid("approved_by_user_id").references(() => users.id, {
+      onDelete: "set null"
+    }),
+    credentialHash: text("credential_hash"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    exchangedAt: timestamp("exchanged_at", { withTimezone: true })
+  },
+  (table) => [
+    index("cli_authorization_attempts_expires_idx").on(table.expiresAt),
+    check(
+      "cli_authorization_attempts_status_valid",
+      sql`${table.status} in ('pending', 'approved', 'denied', 'expired', 'exchanged')`
+    ),
+    check(
+      "cli_authorization_attempts_secret_hash_not_blank",
+      sql`btrim(${table.secretHash}) <> ''`
+    )
+  ]
+);
+
+export const cliCredentials = pgTable(
+  "cli_credentials",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true })
+  },
+  (table) => [
+    uniqueIndex("cli_credentials_token_hash_unique").on(table.tokenHash),
+    index("cli_credentials_project_idx").on(table.projectId)
+  ]
+);
+
 export const agentSessions = pgTable(
   "agent_sessions",
   {
@@ -405,6 +459,58 @@ export const projectEvents = pgTable(
     }),
     index("project_events_project_id_id_idx").on(table.projectId, table.id),
     check("project_events_type_not_blank", sql`btrim(${table.type}) <> ''`)
+  ]
+);
+
+export const agentLifecycleEvents = pgTable(
+  "agent_lifecycle_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    projectId: uuid("project_id").notNull(),
+    agentId: uuid("agent_id").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    requestHash: text("request_hash").notNull(),
+    eventId: integer("event_id"),
+    sessionId: uuid("session_id"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.projectId],
+      foreignColumns: [projects.id],
+      name: "agent_lifecycle_events_project_id_projects_id_fk"
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.projectId, table.agentId],
+      foreignColumns: [agents.projectId, agents.id],
+      name: "agent_lifecycle_events_agent_project_fk"
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.projectId, table.sessionId],
+      foreignColumns: [agentSessions.projectId, agentSessions.id],
+      name: "agent_lifecycle_events_session_project_fk"
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.eventId],
+      foreignColumns: [projectEvents.id],
+      name: "agent_lifecycle_events_event_id_fk"
+    }).onDelete("cascade"),
+    uniqueIndex("agent_lifecycle_events_scope_unique").on(
+      table.projectId,
+      table.agentId,
+      table.idempotencyKey
+    ),
+    index("agent_lifecycle_events_project_idx").on(table.projectId),
+    check(
+      "agent_lifecycle_events_idempotency_key_not_blank",
+      sql`btrim(${table.idempotencyKey}) <> ''`
+    ),
+    check(
+      "agent_lifecycle_events_request_hash_not_blank",
+      sql`btrim(${table.requestHash}) <> ''`
+    )
   ]
 );
 

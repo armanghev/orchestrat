@@ -1,4 +1,5 @@
-import type { Platform, Unsubscribe } from "./contract";
+import type { LocalIntegrationStatus, Platform, Unsubscribe } from "./contract";
+import { invoke } from "@tauri-apps/api/core";
 import { preferencesSchema } from "./preferences";
 
 const preferencesKey = "preferences";
@@ -134,6 +135,9 @@ export function createTauriPlatform(): Platform {
         unlisten();
         throw error;
       }
+    },
+    localIntegrationStatus(projectId: string): Promise<LocalIntegrationStatus> {
+      return invoke("local_integration_status", { projectId });
     }
   };
 }

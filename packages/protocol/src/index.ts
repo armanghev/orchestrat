@@ -102,6 +102,44 @@ const slugSchema = z
 const nameSchema = z.string().trim().min(1).max(120);
 const dateSchema = z.string().datetime();
 
+export const cliAuthorizationStatusSchema = z.enum([
+  "pending",
+  "approved",
+  "denied",
+  "expired"
+]);
+export type CliAuthorizationStatus = z.infer<
+  typeof cliAuthorizationStatusSchema
+>;
+export const cliAuthorizationAttemptResponseSchema = z.object({
+  attempt_id: z.string().min(20),
+  secret: z.string().min(32),
+  expires_at: dateSchema
+});
+export type CliAuthorizationAttemptResponse = z.infer<
+  typeof cliAuthorizationAttemptResponseSchema
+>;
+export const cliAuthorizationPollResponseSchema = z.object({
+  status: cliAuthorizationStatusSchema,
+  project_id: idSchema.nullable().optional(),
+  credential: z.string().min(32).optional()
+});
+export type CliAuthorizationPollResponse = z.infer<
+  typeof cliAuthorizationPollResponseSchema
+>;
+export const cliAuthorizationAttemptParamsSchema = z.object({
+  attemptId: z.string().regex(/^ca_[A-Za-z0-9_-]{20,}$/)
+});
+export const cliAuthorizationPollRequestSchema = z.object({
+  secret: z.string().min(32).max(128)
+});
+export const cliAuthorizationApprovalRequestSchema = z
+  .object({
+    project_id: idSchema
+  })
+  .strict();
+export const cliAuthorizationDenyRequestSchema = z.object({}).strict();
+
 export const updateOrganizationRequestSchema = z
   .object({
     name: nameSchema.optional(),
@@ -407,7 +445,16 @@ export type DeleteTaskDependencyRequest = z.infer<
 >;
 
 const agentNameSchema = z.string().trim().min(1).max(120);
-const integrationNameSchema = z.string().trim().min(1).max(80);
+export const integrationNameSchema = z.string().trim().min(1).max(80);
+export const cliSetupIntegrationSchema = z.enum(["codex", "claude-code"]);
+export const cliDisconnectRequestSchema = z
+  .object({
+    project_id: idSchema,
+    agent_ids: z.array(idSchema).min(1).max(2),
+    revoke_cli: z.boolean().default(false)
+  })
+  .strict();
+export type CliDisconnectRequest = z.infer<typeof cliDisconnectRequestSchema>;
 const runtimeNameSchema = z.string().trim().min(1).max(80);
 const claimTokenSchema = z.string().trim().min(32).max(512);
 export const agentCredentialTokenSchema = z
@@ -486,6 +533,41 @@ export const openAgentSessionRequestSchema = z.object({
 });
 export type OpenAgentSessionRequest = z.infer<
   typeof openAgentSessionRequestSchema
+>;
+
+export const agentLifecycleEventTypeSchema = z.enum([
+  "session.started",
+  "session.ended",
+  "run.failed"
+]);
+export type AgentLifecycleEventType = z.infer<
+  typeof agentLifecycleEventTypeSchema
+>;
+export const agentLifecycleHookRequestSchema = z
+  .object({
+    event: agentLifecycleEventTypeSchema,
+    session_id: idSchema,
+    runtime: runtimeNameSchema,
+    integration: integrationNameSchema,
+    external_session_id: z
+      .string()
+      .trim()
+      .min(1)
+      .max(255)
+      .nullable()
+      .optional(),
+    error: z.string().trim().max(2000).optional()
+  })
+  .strict();
+export type AgentLifecycleHookRequest = z.infer<
+  typeof agentLifecycleHookRequestSchema
+>;
+export const agentLifecycleHookResponseSchema = z.object({
+  event_id: z.number().int().positive(),
+  session: agentSessionSchema
+});
+export type AgentLifecycleHookResponse = z.infer<
+  typeof agentLifecycleHookResponseSchema
 >;
 
 export const agentSessionParamsSchema = z.object({ sessionId: idSchema });

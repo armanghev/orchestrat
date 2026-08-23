@@ -1,5 +1,5 @@
 import {
-  apiErrorSchema,
+  apiErrorResponseSchema,
   organizationSchema,
   organizationMemberSchema,
   organizationMembersResponseSchema,
@@ -8,6 +8,8 @@ import {
   projectSchema,
   projectsResponseSchema,
   deleteResourceResponseSchema,
+  agentsResponseSchema,
+  agentPresenceSchema,
   type CreateOrganizationRequest,
   type CreateProjectRequest,
   type DeleteResourceResponse,
@@ -20,19 +22,45 @@ import {
   type ProjectsResponse,
   type UpdateOrganizationRequest,
   type UpdateProjectRequest,
+  documentDetailSchema,
+  documentRevisionsResponseSchema,
+  documentsResponseSchema,
+  projectEventsResponseSchema,
+  taskCommentsResponseSchema,
+  taskDependenciesResponseSchema,
+  taskListResponseSchema,
+  taskSchema,
+  type AgentPresence,
+  type AgentsResponse,
+  type CreateDocumentRequest,
+  type CreateTaskCommentRequest,
+  type CreateTaskDependencyRequest,
+  type CreateTaskRequest,
+  type DocumentDetail,
+  type DocumentListQuery,
+  type DocumentRevisionsResponse,
+  type DocumentsResponse,
+  type MoveTaskRequest,
+  type PaginationQuery,
+  type ProjectEventsResponse,
+  type Task,
+  type TaskCommentsQuery,
+  type TaskCommentsResponse,
+  type TaskDependenciesResponse,
+  type TaskListQuery,
+  type TaskListResponse,
+  type UpdateDocumentRequest,
+  type UpdateTaskRequest,
+  type TaskComment,
+  type DocumentRevision,
+  type ErrorCode,
+  cliAuthorizationPollResponseSchema,
+  type CliAuthorizationPollResponse
 } from "@orchestrat/protocol";
-import type { ZodType } from "zod";
+import { z, type ZodType } from "zod";
 
 export type ApiErrorKind =
-  | "UNAUTHENTICATED"
-  | "PERMISSION_DENIED"
-  | "VALIDATION_ERROR"
-  | "NOT_FOUND"
-  | "CONFLICT"
-  | "INTERNAL_ERROR"
-  | "INVALID_RESPONSE"
-  | "NETWORK_ERROR"
-  | "CONFIGURATION_ERROR";
+  ErrorCode | "INVALID_RESPONSE" | "NETWORK_ERROR" | "CONFIGURATION_ERROR";
 
 export class DashboardApiError extends Error {
   constructor(
@@ -55,6 +83,15 @@ export interface ApiTokenSource {
 type RequestOptions = {
   method: "GET" | "POST" | "PATCH" | "DELETE";
   body?: unknown;
+  headers?: HeadersInit;
+};
+
+const queryString = (values: Record<string, string | number | undefined>) => {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(values))
+    if (value !== undefined) params.set(key, String(value));
+  const result = params.toString();
+  return result ? `?${result}` : "";
 };
 
 export class ApiClient {
@@ -254,6 +291,229 @@ export class ApiClient {
     );
   }
 
+  listTasks(
+    projectId: string,
+    query: Partial<TaskListQuery> = {}
+  ): Promise<TaskListResponse> {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/tasks${queryString(query)}`,
+      { method: "GET" },
+      taskListResponseSchema
+    );
+  }
+
+  createTask(
+    projectId: string,
+    input: CreateTaskRequest,
+    idempotencyKey: string
+  ): Promise<Task> {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/tasks`,
+      {
+        method: "POST",
+        body: input,
+        headers: idempotencyKey
+          ? { "Idempotency-Key": idempotencyKey }
+          : undefined
+      },
+      taskSchema
+    );
+  }
+
+  getTask(taskId: string): Promise<Task> {
+    return this.request(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}`,
+      { method: "GET" },
+      taskSchema
+    );
+  }
+
+  updateTask(taskId: string, input: UpdateTaskRequest): Promise<Task> {
+    return this.request(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}`,
+      { method: "PATCH", body: input },
+      taskSchema
+    );
+  }
+
+  moveTask(taskId: string, input: MoveTaskRequest): Promise<Task> {
+    return this.request(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/move`,
+      { method: "POST", body: input },
+      taskSchema
+    );
+  }
+
+  listTaskComments(
+    taskId: string,
+    query: Partial<TaskCommentsQuery> = {}
+  ): Promise<TaskCommentsResponse> {
+    return this.request(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/comments${queryString(query)}`,
+      { method: "GET" },
+      taskCommentsResponseSchema
+    );
+  }
+
+  createTaskComment(
+    taskId: string,
+    input: CreateTaskCommentRequest,
+    idempotencyKey: string
+  ): Promise<TaskComment> {
+    return this.request(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/comments`,
+      {
+        method: "POST",
+        body: input,
+        headers: idempotencyKey
+          ? { "Idempotency-Key": idempotencyKey }
+          : undefined
+      },
+      taskCommentsResponseSchema.shape.comments.element
+    );
+  }
+
+  getTaskDependencies(taskId: string): Promise<TaskDependenciesResponse> {
+    return this.request(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/dependencies`,
+      { method: "GET" },
+      taskDependenciesResponseSchema
+    );
+  }
+
+  addTaskDependency(
+    taskId: string,
+    input: CreateTaskDependencyRequest
+  ): Promise<Task> {
+    return this.request(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/dependencies`,
+      { method: "POST", body: input },
+      taskSchema
+    );
+  }
+
+  removeTaskDependency(
+    taskId: string,
+    dependsOnTaskId: string,
+    expectedVersion: number
+  ): Promise<Task> {
+    return this.request(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/dependencies/${encodeURIComponent(dependsOnTaskId)}`,
+      { method: "DELETE", body: { expected_version: expectedVersion } },
+      taskSchema
+    );
+  }
+
+  listAgents(projectId: string): Promise<AgentsResponse> {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/agents`,
+      { method: "GET" },
+      agentsResponseSchema
+    );
+  }
+
+  getAgentPresence(projectId: string): Promise<{ agents: AgentPresence[] }> {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/presence`,
+      { method: "GET" },
+      z.object({ agents: z.array(agentPresenceSchema) })
+    );
+  }
+
+  listProjectEvents(
+    projectId: string,
+    query: Partial<PaginationQuery> = {}
+  ): Promise<ProjectEventsResponse> {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/events${queryString(query)}`,
+      { method: "GET" },
+      projectEventsResponseSchema
+    );
+  }
+
+  listDocuments(
+    projectId: string,
+    query: Partial<DocumentListQuery> = {}
+  ): Promise<DocumentsResponse> {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/documents${queryString(query)}`,
+      { method: "GET" },
+      documentsResponseSchema
+    );
+  }
+
+  createDocument(
+    projectId: string,
+    input: CreateDocumentRequest
+  ): Promise<DocumentDetail> {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/documents`,
+      { method: "POST", body: input },
+      documentDetailSchema
+    );
+  }
+
+  getDocument(documentId: string): Promise<DocumentDetail> {
+    return this.request(
+      `/api/v1/documents/${encodeURIComponent(documentId)}`,
+      { method: "GET" },
+      documentDetailSchema
+    );
+  }
+
+  updateDocument(
+    documentId: string,
+    input: UpdateDocumentRequest
+  ): Promise<DocumentDetail> {
+    return this.request(
+      `/api/v1/documents/${encodeURIComponent(documentId)}`,
+      { method: "PATCH", body: input },
+      documentDetailSchema
+    );
+  }
+
+  listDocumentRevisions(
+    documentId: string
+  ): Promise<DocumentRevisionsResponse> {
+    return this.request(
+      `/api/v1/documents/${encodeURIComponent(documentId)}/revisions`,
+      { method: "GET" },
+      documentRevisionsResponseSchema
+    );
+  }
+
+  getDocumentRevision(
+    documentId: string,
+    revision: number
+  ): Promise<DocumentRevision> {
+    return this.request(
+      `/api/v1/documents/${encodeURIComponent(documentId)}/revisions/${revision}`,
+      { method: "GET" },
+      documentRevisionsResponseSchema.shape.revisions.element
+    );
+  }
+
+  approveCliAuthorization(
+    attemptId: string,
+    projectId: string
+  ): Promise<CliAuthorizationPollResponse> {
+    return this.request(
+      `/api/v1/cli/authorization/attempts/${encodeURIComponent(attemptId)}/approve`,
+      { method: "POST", body: { project_id: projectId } },
+      cliAuthorizationPollResponseSchema
+    );
+  }
+
+  denyCliAuthorization(
+    attemptId: string
+  ): Promise<CliAuthorizationPollResponse> {
+    return this.request(
+      `/api/v1/cli/authorization/attempts/${encodeURIComponent(attemptId)}/deny`,
+      { method: "POST", body: {} },
+      cliAuthorizationPollResponseSchema
+    );
+  }
+
   private async request<T>(
     path: string,
     options: RequestOptions,
@@ -278,9 +538,10 @@ export class ApiClient {
       );
     }
 
-    const headers: HeadersInit = { Authorization: `Bearer ${token}` };
+    const headers = new Headers(options.headers);
+    headers.set("Authorization", `Bearer ${token}`);
     if (options.body !== undefined && !(options.body instanceof FormData))
-      headers["Content-Type"] = "application/json";
+      headers.set("Content-Type", "application/json");
 
     let response: Response;
     try {
@@ -337,7 +598,7 @@ export class ApiClient {
     response: Response,
     data: unknown
   ): DashboardApiError {
-    const parsed = apiErrorSchema.safeParse(data);
+    const parsed = apiErrorResponseSchema.safeParse(data);
     if (parsed.success) {
       return new DashboardApiError(
         parsed.data.error.message,

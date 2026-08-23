@@ -33,6 +33,13 @@ import {
   RealtimeTicketStore,
   withRealtimePublisher
 } from "./realtime/realtime.js";
+import { CliSetupService } from "./services/cli-setup-service.js";
+import { cliSetupRoutes } from "./routes/cli-setup.js";
+import { CliAuthorizationService } from "./services/cli-authorization-service.js";
+import {
+  cliAuthorizationHumanRoutes,
+  cliAuthorizationPublicRoutes
+} from "./routes/cli-authorization.js";
 
 type AppOptions = {
   allowedOrigins: string[];
@@ -76,6 +83,8 @@ export function buildApp(options: AppOptions) {
   const agents = new AgentService(db);
   const claims = new TaskClaimService(db);
   const documents = new DocumentService(db);
+  const cliAuthorization = new CliAuthorizationService(db);
+  const cliSetup = new CliSetupService(db);
 
   app.register(cors, {
     origin: options.allowedOrigins,
@@ -159,6 +168,11 @@ export function buildApp(options: AppOptions) {
 
   app.register(healthRoutes);
   app.register(healthRoutes, { prefix: "/api/v1" });
+  app.register(cliAuthorizationPublicRoutes, {
+    prefix: "/api/v1",
+    authorization: cliAuthorization
+  });
+  app.register(cliSetupRoutes, { prefix: "/api/v1", setup: cliSetup });
   app.decorateRequest("agentPrincipal", null);
   app.register(
     async (api) => {
@@ -200,6 +214,9 @@ export function buildApp(options: AppOptions) {
       });
       api.register(documentRoutes, { documents });
       api.register(agentManagementRoutes, { agents });
+      api.register(cliAuthorizationHumanRoutes, {
+        authorization: cliAuthorization
+      });
     },
     { prefix: "/api/v1" }
   );

@@ -283,4 +283,85 @@ describe("ApiClient", () => {
 
     await expect(api.getProject(expected.id)).resolves.toEqual(expected);
   });
+
+  it("lists project events with the API pagination cursor", async () => {
+    const projectId = project().id;
+    server.use(
+      http.get(
+        `${apiUrl}/api/v1/projects/${projectId}/events`,
+        ({ request }) => {
+          expect(new URL(request.url).search).toBe("?limit=10&after=42");
+          return HttpResponse.json({ events: [], next_cursor: null });
+        }
+      )
+    );
+    const api = new ApiClient(apiUrl, authTokenFixture(["test-token"]));
+
+    await expect(
+      api.listProjectEvents(projectId, { limit: 10, after: "42" })
+    ).resolves.toEqual({
+      events: [],
+      next_cursor: null
+    });
+  });
+
+  it("sends task creation JSON with its idempotency key", async () => {
+    const projectId = project().id;
+    server.use(
+      http.post(
+        `${apiUrl}/api/v1/projects/${projectId}/tasks`,
+        async ({ request }) => {
+          expect(request.headers.get("idempotency-key")).toBe("task-1");
+          expect(request.headers.get("content-type")).toBe("application/json");
+          await expect(request.json()).resolves.toEqual({ title: "Ship it" });
+          return HttpResponse.json(
+            {
+              error: {
+                code: "TASK_VERSION_CONFLICT",
+                message: "Task changed.",
+                details: { current_version: 2 },
+                request_id: "req_task"
+              }
+            },
+            { status: 409 }
+          );
+        }
+      )
+    );
+    const api = new ApiClient(apiUrl, authTokenFixture(["test-token"]));
+
+    await expect(
+      api.createTask(projectId, { title: "Ship it" }, "task-1")
+    ).rejects.toMatchObject({
+      kind: "TASK_VERSION_CONFLICT",
+      details: { current_version: 2 }
+    });
+  });
+
+  it("preserves document conflict errors for UI recovery", async () => {
+    const documentId = "00000000-0000-4000-8000-000000000005";
+    server.use(
+      http.patch(`${apiUrl}/api/v1/documents/${documentId}`, () =>
+        HttpResponse.json(
+          {
+            error: {
+              code: "DOCUMENT_CONFLICT",
+              message: "Document changed.",
+              details: { current_revision: 3, base_revision: 2 },
+              request_id: "req_document"
+            }
+          },
+          { status: 409 }
+        )
+      )
+    );
+    const api = new ApiClient(apiUrl, authTokenFixture(["test-token"]));
+
+    await expect(
+      api.updateDocument(documentId, { content: "draft", base_revision: 2 })
+    ).rejects.toMatchObject({
+      kind: "DOCUMENT_CONFLICT",
+      details: { current_revision: 3, base_revision: 2 }
+    });
+  });
 });

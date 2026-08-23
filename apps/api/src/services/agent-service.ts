@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import {
   agentCredentials,
+  agentLifecycleEvents,
   agentSessions,
   agents,
   projects,
@@ -15,10 +16,12 @@ import type {
   IssueAgentCredentialResponse,
   OpenAgentSessionRequest,
   PaginationQuery,
-  ProjectEventsResponse
+  ProjectEventsResponse,
+  AgentLifecycleHookRequest,
+  AgentLifecycleHookResponse
 } from "@orchestrat/protocol";
 import { agentCredentialTokenSchema } from "@orchestrat/protocol";
-import { and, asc, desc, eq, gt, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull } from "drizzle-orm";
 import { ApiError } from "./api-error.js";
 import { PermissionService } from "./permission-service.js";
 import { recordProjectEvent } from "../realtime/realtime.js";
@@ -29,11 +32,19 @@ export type AgentPrincipal = {
   credentialId: string;
 };
 
-type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+export type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 export const agentSessionFreshnessMs = 60_000;
 
 const hashToken = (token: string) =>
   createHash("sha256").update(token).digest("hex");
+const isLifecycleConflict = (error: unknown) => {
+  const value = error as { code?: string; message?: string };
+  return (
+    value.code === "23505" ||
+    value.message?.includes("agent_sessions") === true ||
+    value.message?.includes("agent_lifecycle_events") === true
+  );
+};
 const date = (value: Date | null) => value?.toISOString() ?? null;
 const agentJson = (value: typeof agents.$inferSelect) => ({
   id: value.id,
@@ -88,6 +99,7 @@ export async function insertProjectEvent(
     })
     .returning();
   recordProjectEvent(tx, event);
+  return event;
 }
 
 export class AgentService {
@@ -186,110 +198,148 @@ export class AgentService {
     return { agents: rows.map(agentJson) };
   }
 
-  async revokeAgent(userId: string, projectId: string, agentId: string) {
+  private async revokeAgentInTransaction(
+    tx: Transaction,
+    userId: string,
+    projectId: string,
+    agentId: string
+  ) {
     // Security revocation remains allowed on archived projects as shutdown control.
-    await this.permissions.projectEditor(userId, projectId);
-    return this.db.transaction(async (tx) => {
-      const [agent] = await tx
+    const [agent] = await tx
+      .select()
+      .from(agents)
+      .where(and(eq(agents.id, agentId), eq(agents.projectId, projectId)))
+      .for("update");
+    if (!agent) throw new ApiError(404, "AGENT_NOT_FOUND", "Agent not found.");
+    if (agent.status === "active") {
+      const now = new Date();
+      const [revoked] = await tx
+        .update(agents)
+        .set({ status: "revoked", revokedAt: now, updatedAt: now })
+        .where(eq(agents.id, agentId))
+        .returning();
+      await tx
+        .update(agentCredentials)
+        .set({ revokedAt: now })
+        .where(
+          and(
+            eq(agentCredentials.projectId, projectId),
+            eq(agentCredentials.agentId, agentId),
+            isNull(agentCredentials.revokedAt)
+          )
+        );
+      const sessions = await tx
         .select()
-        .from(agents)
-        .where(and(eq(agents.id, agentId), eq(agents.projectId, projectId)))
+        .from(agentSessions)
+        .where(
+          and(
+            eq(agentSessions.projectId, projectId),
+            eq(agentSessions.agentId, agentId),
+            eq(agentSessions.status, "active")
+          )
+        )
         .for("update");
-      if (!agent)
-        throw new ApiError(404, "AGENT_NOT_FOUND", "Agent not found.");
-      if (agent.status === "active") {
-        const now = new Date();
-        const [revoked] = await tx
-          .update(agents)
-          .set({ status: "revoked", revokedAt: now, updatedAt: now })
-          .where(eq(agents.id, agentId))
-          .returning();
+      for (const session of sessions) {
         await tx
-          .update(agentCredentials)
-          .set({ revokedAt: now })
-          .where(
-            and(
-              eq(agentCredentials.projectId, projectId),
-              eq(agentCredentials.agentId, agentId),
-              isNull(agentCredentials.revokedAt)
-            )
-          );
-        const sessions = await tx
-          .select()
-          .from(agentSessions)
-          .where(
-            and(
-              eq(agentSessions.projectId, projectId),
-              eq(agentSessions.agentId, agentId),
-              eq(agentSessions.status, "active")
-            )
-          )
-          .for("update");
-        for (const session of sessions) {
-          await tx
-            .update(agentSessions)
-            .set({ status: "closed", endedAt: now })
-            .where(eq(agentSessions.id, session.id));
-          await insertProjectEvent(tx, {
-            projectId,
-            actorUserId: userId,
-            entityId: session.id,
-            type: "session.closed",
-            payload: { reason: "agent_revoked" }
-          });
-        }
-        const claims = await tx
-          .select()
-          .from(taskClaims)
-          .where(
-            and(
-              eq(taskClaims.projectId, projectId),
-              eq(taskClaims.agentId, agentId),
-              eq(taskClaims.status, "active")
-            )
-          )
-          .for("update");
-        for (const claim of claims) {
-          const [task] = await tx
-            .select()
-            .from(tasks)
-            .where(eq(tasks.id, claim.taskId))
-            .for("update");
-          await tx
-            .update(taskClaims)
-            .set({
-              status: "revoked",
-              releasedAt: now,
-              releaseReason: "agent_revoked"
-            })
-            .where(eq(taskClaims.id, claim.id));
-          if (task?.status === "claimed")
-            await tx
-              .update(tasks)
-              .set({
-                status: "ready",
-                updatedAt: now,
-                version: task.version + 1
-              })
-              .where(eq(tasks.id, task.id));
-          await insertProjectEvent(tx, {
-            projectId,
-            actorUserId: userId,
-            entityId: claim.id,
-            type: "claim.revoked",
-            payload: { task_id: claim.taskId, reason: "agent_revoked" }
-          });
-        }
+          .update(agentSessions)
+          .set({ status: "closed", endedAt: now })
+          .where(eq(agentSessions.id, session.id));
         await insertProjectEvent(tx, {
           projectId,
           actorUserId: userId,
-          entityId: agentId,
-          type: "agent.revoked"
+          entityId: session.id,
+          type: "session.closed",
+          payload: { reason: "agent_revoked" }
         });
-        return agentJson(revoked);
       }
-      return agentJson(agent);
-    });
+      const claims = await tx
+        .select()
+        .from(taskClaims)
+        .where(
+          and(
+            eq(taskClaims.projectId, projectId),
+            eq(taskClaims.agentId, agentId),
+            eq(taskClaims.status, "active")
+          )
+        )
+        .for("update");
+      for (const claim of claims) {
+        const [task] = await tx
+          .select()
+          .from(tasks)
+          .where(eq(tasks.id, claim.taskId))
+          .for("update");
+        await tx
+          .update(taskClaims)
+          .set({
+            status: "revoked",
+            releasedAt: now,
+            releaseReason: "agent_revoked"
+          })
+          .where(eq(taskClaims.id, claim.id));
+        if (task?.status === "claimed")
+          await tx
+            .update(tasks)
+            .set({
+              status: "ready",
+              updatedAt: now,
+              version: task.version + 1
+            })
+            .where(eq(tasks.id, task.id));
+        await insertProjectEvent(tx, {
+          projectId,
+          actorUserId: userId,
+          entityId: claim.id,
+          type: "claim.revoked",
+          payload: { task_id: claim.taskId, reason: "agent_revoked" }
+        });
+      }
+      await insertProjectEvent(tx, {
+        projectId,
+        actorUserId: userId,
+        entityId: agentId,
+        type: "agent.revoked"
+      });
+      return agentJson(revoked);
+    }
+    return agentJson(agent);
+  }
+
+  async revokeAgent(userId: string, projectId: string, agentId: string) {
+    await this.permissions.projectEditor(userId, projectId);
+    return this.db.transaction((tx) =>
+      this.revokeAgentInTransaction(tx, userId, projectId, agentId)
+    );
+  }
+
+  async revokeAgents(
+    userId: string,
+    projectId: string,
+    agentIds: string[],
+    existingTx?: Transaction
+  ) {
+    await this.permissions.projectEditor(userId, projectId);
+    const unique = [...new Set(agentIds)];
+    const revoke = async (tx: Transaction) => {
+      const rows = await tx
+        .select({ id: agents.id })
+        .from(agents)
+        .where(and(eq(agents.projectId, projectId), inArray(agents.id, unique)))
+        .for("update");
+      if (rows.length !== unique.length)
+        throw new ApiError(
+          404,
+          "AGENT_NOT_FOUND",
+          "One or more agents are not in the authorized project."
+        );
+      const revoked = [];
+      for (const agentId of unique)
+        revoked.push(
+          await this.revokeAgentInTransaction(tx, userId, projectId, agentId)
+        );
+      return revoked;
+    };
+    return existingTx ? revoke(existingTx) : this.db.transaction(revoke);
   }
 
   async issueCredential(
@@ -418,6 +468,196 @@ export class AgentService {
     });
   }
 
+  async ingestLifecycle(
+    principal: AgentPrincipal,
+    input: AgentLifecycleHookRequest,
+    idempotencyKey: string
+  ): Promise<AgentLifecycleHookResponse> {
+    const requestHash = createHash("sha256")
+      .update(JSON.stringify(input))
+      .digest("hex");
+    try {
+      return await this.db.transaction(async (tx) => {
+        await this.activeProject(tx, principal.projectId);
+        await this.agentFor(tx, principal);
+        const [reservation] = await tx
+          .insert(agentLifecycleEvents)
+          .values({
+            projectId: principal.projectId,
+            agentId: principal.agentId,
+            idempotencyKey,
+            requestHash
+          })
+          .onConflictDoNothing({
+            target: [
+              agentLifecycleEvents.projectId,
+              agentLifecycleEvents.agentId,
+              agentLifecycleEvents.idempotencyKey
+            ]
+          })
+          .returning();
+        if (!reservation || reservation.eventId) {
+          const previous =
+            reservation ??
+            (
+              await tx
+                .select()
+                .from(agentLifecycleEvents)
+                .where(
+                  and(
+                    eq(agentLifecycleEvents.projectId, principal.projectId),
+                    eq(agentLifecycleEvents.agentId, principal.agentId),
+                    eq(agentLifecycleEvents.idempotencyKey, idempotencyKey)
+                  )
+                )
+                .limit(1)
+            )[0];
+          if (!previous || previous.requestHash !== requestHash)
+            throw new ApiError(
+              409,
+              "IDEMPOTENCY_CONFLICT",
+              "The idempotency key was already used with a different request."
+            );
+          if (!previous.eventId || !previous.sessionId)
+            throw new ApiError(
+              409,
+              "CONFLICT",
+              "The idempotent request is still being processed."
+            );
+          const [session] = await tx
+            .select()
+            .from(agentSessions)
+            .where(eq(agentSessions.id, previous.sessionId));
+          if (!session)
+            throw new ApiError(
+              500,
+              "INTERNAL_ERROR",
+              "Lifecycle session is missing."
+            );
+          return { event_id: previous.eventId, session: sessionJson(session) };
+        }
+
+        let session: typeof agentSessions.$inferSelect;
+        const [existing] = await tx
+          .select()
+          .from(agentSessions)
+          .where(
+            and(
+              eq(agentSessions.id, input.session_id),
+              eq(agentSessions.projectId, principal.projectId),
+              eq(agentSessions.agentId, principal.agentId)
+            )
+          )
+          .for("update");
+        const now = new Date();
+        if (input.event === "session.started") {
+          if (existing?.status === "closed")
+            throw new ApiError(
+              409,
+              "AGENT_SESSION_CLOSED",
+              "Agent session is closed."
+            );
+          if (existing) {
+            const [updated] = await tx
+              .update(agentSessions)
+              .set({
+                runtime: input.runtime,
+                integration: input.integration,
+                externalSessionId: input.external_session_id ?? null,
+                lastHeartbeatAt: now
+              })
+              .where(eq(agentSessions.id, existing.id))
+              .returning();
+            session = updated!;
+          } else {
+            const [created] = await tx
+              .insert(agentSessions)
+              .values({
+                id: input.session_id,
+                projectId: principal.projectId,
+                agentId: principal.agentId,
+                runtime: input.runtime,
+                integration: input.integration,
+                externalSessionId: input.external_session_id ?? null
+              })
+              .returning();
+            session = created!;
+          }
+        } else if (input.event === "session.ended") {
+          if (!existing)
+            throw new ApiError(
+              404,
+              "AGENT_SESSION_NOT_FOUND",
+              "Agent session not found."
+            );
+          session = await this.closeSessionInTransaction(
+            tx,
+            principal,
+            existing,
+            now
+          );
+        } else {
+          if (!existing)
+            throw new ApiError(
+              404,
+              "AGENT_SESSION_NOT_FOUND",
+              "Agent session not found."
+            );
+          const [updated] = await tx
+            .update(agentSessions)
+            .set({ lastHeartbeatAt: now })
+            .where(eq(agentSessions.id, existing.id))
+            .returning();
+          session = updated!;
+        }
+        const event = await insertProjectEvent(tx, {
+          projectId: principal.projectId,
+          actorAgentId: principal.agentId,
+          entityId: session.id,
+          type: input.event,
+          payload: {
+            runtime: input.runtime,
+            integration: input.integration,
+            ...(input.error ? { error: input.error } : {})
+          }
+        });
+        await tx
+          .update(agentLifecycleEvents)
+          .set({ eventId: event.id, sessionId: session.id })
+          .where(eq(agentLifecycleEvents.id, reservation!.id));
+        return { event_id: event!.id, session: sessionJson(session) };
+      });
+    } catch (error) {
+      if (!isLifecycleConflict(error)) throw error;
+      const [previous] = await this.db
+        .select()
+        .from(agentLifecycleEvents)
+        .where(
+          and(
+            eq(agentLifecycleEvents.projectId, principal.projectId),
+            eq(agentLifecycleEvents.agentId, principal.agentId),
+            eq(agentLifecycleEvents.idempotencyKey, idempotencyKey)
+          )
+        )
+        .limit(1);
+      if (!previous || previous.requestHash !== requestHash) throw error;
+      if (!previous.eventId || !previous.sessionId) throw error;
+      const [session] = await this.db
+        .select()
+        .from(agentSessions)
+        .where(
+          and(
+            eq(agentSessions.id, previous.sessionId),
+            eq(agentSessions.projectId, principal.projectId),
+            eq(agentSessions.agentId, principal.agentId)
+          )
+        )
+        .limit(1);
+      if (!session) throw error;
+      return { event_id: previous.eventId, session: sessionJson(session) };
+    }
+  }
+
   async heartbeat(principal: AgentPrincipal, sessionId: string) {
     return this.db.transaction(async (tx) => {
       const session = await this.sessionFor(tx, principal, sessionId);
@@ -475,59 +715,74 @@ export class AgentService {
       await this.agentFor(tx, principal);
       const session = await this.ownedSession(tx, principal, sessionId);
       if (session.status === "closed") return { session: sessionJson(session) };
-      const now = new Date();
-      const claims = await tx
-        .select()
-        .from(taskClaims)
-        .where(
-          and(
-            eq(taskClaims.projectId, principal.projectId),
-            eq(taskClaims.agentId, principal.agentId),
-            eq(taskClaims.sessionId, session.id),
-            eq(taskClaims.status, "active")
-          )
+      const updated = await this.closeSessionInTransaction(
+        tx,
+        principal,
+        session,
+        new Date()
+      );
+      return { session: sessionJson(updated) };
+    });
+  }
+
+  private async closeSessionInTransaction(
+    tx: Transaction,
+    principal: AgentPrincipal,
+    session: typeof agentSessions.$inferSelect,
+    now: Date
+  ) {
+    if (session.status === "closed") return session;
+    const claims = await tx
+      .select()
+      .from(taskClaims)
+      .where(
+        and(
+          eq(taskClaims.projectId, principal.projectId),
+          eq(taskClaims.agentId, principal.agentId),
+          eq(taskClaims.sessionId, session.id),
+          eq(taskClaims.status, "active")
         )
+      )
+      .for("update");
+    for (const claim of claims) {
+      const [task] = await tx
+        .select()
+        .from(tasks)
+        .where(eq(tasks.id, claim.taskId))
         .for("update");
-      for (const claim of claims) {
-        const [task] = await tx
-          .select()
-          .from(tasks)
-          .where(eq(tasks.id, claim.taskId))
-          .for("update");
+      await tx
+        .update(taskClaims)
+        .set({
+          status: "revoked",
+          releasedAt: now,
+          releaseReason: "session_closed"
+        })
+        .where(eq(taskClaims.id, claim.id));
+      if (task?.status === "claimed")
         await tx
-          .update(taskClaims)
-          .set({
-            status: "revoked",
-            releasedAt: now,
-            releaseReason: "session_closed"
-          })
-          .where(eq(taskClaims.id, claim.id));
-        if (task?.status === "claimed")
-          await tx
-            .update(tasks)
-            .set({ status: "ready", updatedAt: now, version: task.version + 1 })
-            .where(eq(tasks.id, task.id));
-        await insertProjectEvent(tx, {
-          projectId: principal.projectId,
-          actorAgentId: principal.agentId,
-          entityId: claim.id,
-          type: "claim.revoked",
-          payload: { task_id: claim.taskId, reason: "session_closed" }
-        });
-      }
-      const [updated] = await tx
-        .update(agentSessions)
-        .set({ status: "closed", endedAt: now })
-        .where(eq(agentSessions.id, session.id))
-        .returning();
+          .update(tasks)
+          .set({ status: "ready", updatedAt: now, version: task.version + 1 })
+          .where(eq(tasks.id, task.id));
       await insertProjectEvent(tx, {
         projectId: principal.projectId,
         actorAgentId: principal.agentId,
-        entityId: session.id,
-        type: "session.closed"
+        entityId: claim.id,
+        type: "claim.revoked",
+        payload: { task_id: claim.taskId, reason: "session_closed" }
       });
-      return { session: sessionJson(updated) };
+    }
+    const [updated] = await tx
+      .update(agentSessions)
+      .set({ status: "closed", endedAt: now })
+      .where(eq(agentSessions.id, session.id))
+      .returning();
+    await insertProjectEvent(tx, {
+      projectId: principal.projectId,
+      actorAgentId: principal.agentId,
+      entityId: session.id,
+      type: "session.closed"
     });
+    return updated!;
   }
 
   async presence(

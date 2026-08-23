@@ -7,9 +7,13 @@ export const KEYCHAIN_SERVICE = "dev.orchestrat.cli.agent";
 export interface CredentialReader {
   read(account: string): Promise<string | undefined>;
 }
+export interface CredentialStore extends CredentialReader {
+  write(account: string, value: string): Promise<void>;
+  remove(account: string): Promise<void>;
+}
 
 export class KeychainCredentialReader implements CredentialReader {
-  constructor(private readonly service = KEYCHAIN_SERVICE) {}
+  constructor(protected readonly service = KEYCHAIN_SERVICE) {}
 
   async read(account: string): Promise<string | undefined> {
     try {
@@ -27,6 +31,40 @@ export class KeychainCredentialReader implements CredentialReader {
         .code;
       if (exitCode === 44) return undefined;
       throw new Error("Unable to read Orchestrat credential from Keychain");
+    }
+  }
+}
+
+export class KeychainCredentialStore
+  extends KeychainCredentialReader
+  implements CredentialStore
+{
+  async write(account: string, value: string) {
+    await execFileAsync(
+      "security",
+      [
+        "add-generic-password",
+        "-U",
+        "-a",
+        account,
+        "-s",
+        this.service,
+        "-w",
+        value
+      ],
+      { windowsHide: true }
+    );
+  }
+  async remove(account: string) {
+    try {
+      await execFileAsync(
+        "security",
+        ["delete-generic-password", "-a", account, "-s", this.service],
+        { windowsHide: true }
+      );
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException & { code?: number }).code !== 44)
+        throw new Error("Unable to remove Orchestrat credential from Keychain");
     }
   }
 }

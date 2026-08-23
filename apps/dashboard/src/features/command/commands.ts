@@ -15,9 +15,7 @@ export const navigationDestinations = [
   "tasks",
   "agents",
   "documents",
-  "messages",
   "activity",
-  "integrations",
   "settings"
 ] as const;
 export type NavigationDestination = (typeof navigationDestinations)[number];
