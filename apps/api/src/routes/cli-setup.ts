@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import {
+  cliDisconnectRequestSchema,
   cliSetupIntegrationSchema,
   projectTaskParamsSchema
 } from "@orchestrat/protocol";
@@ -28,5 +29,17 @@ export async function cliSetupRoutes(
     );
     const integration = cliSetupIntegrationSchema.parse(body?.integration);
     return options.setup.setup(token ?? "", projectId, integration);
+  });
+  app.post("/cli/setup/disconnect", async (request) => {
+    const auth = request.headers.authorization;
+    const token =
+      typeof auth === "string" ? (/^Bearer\s+(.+)$/.exec(auth)?.[1] ?? "") : "";
+    const body = cliDisconnectRequestSchema.parse(request.body);
+    return options.setup.disconnect(
+      token,
+      body.project_id,
+      body.agent_ids,
+      body.revoke_cli
+    );
   });
 }

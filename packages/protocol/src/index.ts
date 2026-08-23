@@ -443,6 +443,14 @@ export type DeleteTaskDependencyRequest = z.infer<
 const agentNameSchema = z.string().trim().min(1).max(120);
 export const integrationNameSchema = z.string().trim().min(1).max(80);
 export const cliSetupIntegrationSchema = z.enum(["codex", "claude-code"]);
+export const cliDisconnectRequestSchema = z
+  .object({
+    project_id: idSchema,
+    agent_ids: z.array(idSchema).min(1).max(2),
+    revoke_cli: z.boolean().default(false)
+  })
+  .strict();
+export type CliDisconnectRequest = z.infer<typeof cliDisconnectRequestSchema>;
 const runtimeNameSchema = z.string().trim().min(1).max(80);
 const claimTokenSchema = z.string().trim().min(32).max(512);
 export const agentCredentialTokenSchema = z

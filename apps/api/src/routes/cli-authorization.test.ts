@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { HumanAuth } from "@orchestrat/auth";
 import type { Database } from "@orchestrat/db";
-import { cliCredentials, users } from "@orchestrat/db";
+import {
+  agentCredentials,
+  agents,
+  cliCredentials,
+  users
+} from "@orchestrat/db";
 import { eq } from "drizzle-orm";
 import { buildApp } from "../app.js";
 import { fixture } from "../test/fixture.js";
@@ -111,6 +116,27 @@ test("CLI setup rejects malformed credentials and unsupported integrations", asy
       }
     });
     assert.equal(unsupported.statusCode, 400);
+  } finally {
+    await app.close();
+  }
+});
+
+test("CLI disconnect request is strict at the trust boundary", async () => {
+  const { app } = await fixture();
+  try {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/cli/setup/disconnect",
+      headers: { authorization: "Bearer nope" },
+      payload: {
+        project_id: "550e8400-e29b-41d4-a716-446655440000",
+        agent_ids: ["550e8400-e29b-41d4-a716-446655440001"],
+        revoke_cli: false,
+        extra: "rejected"
+      }
+    });
+    assert.equal(response.statusCode, 400);
+    assert.equal(response.json().error.code, "VALIDATION_ERROR");
   } finally {
     await app.close();
   }
@@ -261,6 +287,203 @@ test("CLI setup enforces token and project scope and issues distinct agent crede
     });
     assert.equal(revokedProject.statusCode, 401);
     assert.equal(revokedSetup.statusCode, 401);
+  } finally {
+    await app.close();
+  }
+});
+
+test("CLI disconnect is project-scoped and revokes selected then final agents", async () => {
+  const { app, db } = await fixture();
+  try {
+    const org = (
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/organizations",
+        headers: { authorization: "Bearer alice" },
+        payload: { name: "Disconnect" }
+      })
+    ).json();
+    const project = (
+      await app.inject({
+        method: "POST",
+        url: `/api/v1/organizations/${org.id}/projects`,
+        headers: { authorization: "Bearer alice" },
+        payload: { name: "Project" }
+      })
+    ).json();
+    const other = (
+      await app.inject({
+        method: "POST",
+        url: `/api/v1/organizations/${org.id}/projects`,
+        headers: { authorization: "Bearer alice" },
+        payload: { name: "Other" }
+      })
+    ).json();
+    const token = `orch_cli_${"d".repeat(32)}`;
+    const user = (await db.query.users.findFirst())!;
+    await db.insert(cliCredentials).values({
+      projectId: project.id,
+      userId: user.id,
+      tokenHash: createHash("sha256").update(token).digest("hex")
+    });
+    const first = await app.inject({
+      method: "POST",
+      url: "/api/v1/cli/setup",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { project_id: project.id, integration: "codex" }
+    });
+    const second = await app.inject({
+      method: "POST",
+      url: "/api/v1/cli/setup",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { project_id: project.id, integration: "claude-code" }
+    });
+    const firstId = first.json().agent.id;
+    const secondId = second.json().agent.id;
+    const otherToken = `orch_cli_${"o".repeat(32)}`;
+    await db.insert(cliCredentials).values({
+      projectId: other.id,
+      userId: user.id,
+      tokenHash: createHash("sha256").update(otherToken).digest("hex")
+    });
+    const foreign = await app.inject({
+      method: "POST",
+      url: "/api/v1/cli/setup",
+      headers: { authorization: `Bearer ${otherToken}` },
+      payload: { project_id: other.id, integration: "codex" }
+    });
+    const foreignId = foreign.json().agent.id;
+    const mixed = await app.inject({
+      method: "POST",
+      url: "/api/v1/cli/setup/disconnect",
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        project_id: project.id,
+        agent_ids: [firstId, foreignId],
+        revoke_cli: false
+      }
+    });
+    assert.equal(mixed.statusCode, 404);
+    assert.equal(
+      (await db.select().from(agents).where(eq(agents.id, firstId)))[0]!.status,
+      "active"
+    );
+    assert.equal(
+      (
+        await db
+          .select()
+          .from(agentCredentials)
+          .where(eq(agentCredentials.agentId, firstId))
+      ).every((row) => row.revokedAt === null),
+      true
+    );
+    assert.equal(
+      (
+        await app.inject({
+          method: "GET",
+          url: "/api/v1/cli/setup/project",
+          headers: { authorization: `Bearer ${token}` }
+        })
+      ).statusCode,
+      200
+    );
+    const wrong = await app.inject({
+      method: "POST",
+      url: "/api/v1/cli/setup/disconnect",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { project_id: other.id, agent_ids: [firstId], revoke_cli: false }
+    });
+    assert.equal(wrong.statusCode, 403);
+    const partial = await app.inject({
+      method: "POST",
+      url: "/api/v1/cli/setup/disconnect",
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        project_id: project.id,
+        agent_ids: [firstId],
+        revoke_cli: false
+      }
+    });
+    assert.equal(partial.statusCode, 200);
+    assert.deepEqual(partial.json(), {
+      project_id: project.id,
+      revoked_agent_ids: [firstId],
+      cli_revoked: false
+    });
+    assert.doesNotMatch(JSON.stringify(partial.json()), /orch_/);
+    assert.equal(
+      (await db.select().from(agents).where(eq(agents.id, firstId)))[0]!.status,
+      "revoked"
+    );
+    assert.equal(
+      (await db.select().from(agents).where(eq(agents.id, secondId)))[0]!
+        .status,
+      "active"
+    );
+    assert.equal(
+      (
+        await db
+          .select()
+          .from(agentCredentials)
+          .where(eq(agentCredentials.agentId, firstId))
+      ).every((row) => row.revokedAt !== null),
+      true
+    );
+    assert.equal(
+      (
+        await db
+          .select()
+          .from(agentCredentials)
+          .where(eq(agentCredentials.agentId, secondId))
+      ).every((row) => row.revokedAt === null),
+      true
+    );
+    assert.equal(
+      (
+        await app.inject({
+          method: "GET",
+          url: "/api/v1/cli/setup/project",
+          headers: { authorization: `Bearer ${token}` }
+        })
+      ).statusCode,
+      200
+    );
+    const final = await app.inject({
+      method: "POST",
+      url: "/api/v1/cli/setup/disconnect",
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        project_id: project.id,
+        agent_ids: [secondId],
+        revoke_cli: true
+      }
+    });
+    assert.equal(final.statusCode, 200);
+    assert.deepEqual(final.json(), {
+      project_id: project.id,
+      revoked_agent_ids: [secondId],
+      cli_revoked: true
+    });
+    assert.doesNotMatch(JSON.stringify(final.json()), /orch_/);
+    assert.equal(
+      (
+        await app.inject({
+          method: "GET",
+          url: "/api/v1/cli/setup/project",
+          headers: { authorization: `Bearer ${token}` }
+        })
+      ).statusCode,
+      401
+    );
+    assert.equal(
+      (
+        await db
+          .select()
+          .from(agentCredentials)
+          .where(eq(agentCredentials.agentId, firstId))
+      ).every((row) => row.revokedAt !== null),
+      true
+    );
   } finally {
     await app.close();
   }

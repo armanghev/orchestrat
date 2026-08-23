@@ -153,3 +153,77 @@ export function mergeHooks(
   root.hooks = hooks;
   return `${JSON.stringify(root, null, 2)}\n`;
 }
+
+export function removeToml(
+  text: string | undefined,
+  integration: "codex",
+  command: string
+) {
+  if (text === undefined) return text;
+  const header = /^[ \t]*\[mcp_servers\.orchestrat\][ \t]*$/m;
+  const match = header.exec(text);
+  if (!match) return text;
+  const start = match.index;
+  const next = /\n[ \t]*\[/m.exec(text.slice(start + match[0].length));
+  const end = next ? start + match[0].length + next.index + 1 : text.length;
+  const section = text.slice(start, end);
+  const args = `args = ["mcp", "--integration", ${JSON.stringify(integration)}]`;
+  if (
+    !section.includes(`command = ${JSON.stringify(command)}`) ||
+    !section.includes(args)
+  )
+    throw new Error("Existing Orchestrat MCP entry conflicts");
+  return `${text.slice(0, start)}${text.slice(end).replace(/^\n/, "")}`;
+}
+
+export function removeJson(
+  text: string | undefined,
+  integration: "claude-code",
+  command: string
+) {
+  if (text === undefined) return text;
+  const root = JSON.parse(text) as Record<string, unknown>;
+  const servers = root.mcpServers as Record<string, unknown> | undefined;
+  const current = servers?.orchestrat;
+  if (current === undefined) return text;
+  if (
+    JSON.stringify(current) !==
+    JSON.stringify({ command, args: ["mcp", "--integration", integration] })
+  )
+    throw new Error("Existing Orchestrat MCP entry conflicts");
+  delete servers!.orchestrat;
+  return `${JSON.stringify(root, null, 2)}\n`;
+}
+
+export function removeHooks(
+  text: string | undefined,
+  integration: "codex" | "claude-code",
+  command: string
+) {
+  if (text === undefined) return text;
+  const root = JSON.parse(text) as Record<string, unknown>;
+  const hooks = root.hooks as Record<string, unknown> | undefined;
+  if (!hooks) return text;
+  const managed = `'${command.replaceAll("'", "'\\''")}' hook ${integration}`;
+  let removed = false;
+  for (const event of integration === "codex"
+    ? ["SessionStart", "SessionEnd"]
+    : ["SessionStart", "SessionEnd", "StopFailure"]) {
+    const groups = Array.isArray(hooks[event])
+      ? (hooks[event] as Record<string, unknown>[])
+      : [];
+    hooks[event] = groups.flatMap((group) => {
+      const handlers = Array.isArray(group.hooks)
+        ? (group.hooks as Record<string, unknown>[])
+        : [];
+      const kept = handlers.filter((h) => {
+        const match = h.type === "command" && h.command === managed;
+        if (match) removed = true;
+        return !match;
+      });
+      return kept.length ? [{ ...group, hooks: kept }] : [];
+    });
+    if (!(hooks[event] as unknown[]).length) delete hooks[event];
+  }
+  return removed ? `${JSON.stringify(root, null, 2)}\n` : text;
+}

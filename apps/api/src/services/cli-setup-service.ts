@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { cliCredentials, type Database } from "@orchestrat/db";
 import { and, eq, isNull } from "drizzle-orm";
 import { ApiError } from "./api-error.js";
-import { AgentService } from "./agent-service.js";
+import { AgentService, type Transaction } from "./agent-service.js";
 
 const hash = (value: string) =>
   createHash("sha256").update(value).digest("hex");
@@ -56,6 +56,39 @@ export class CliSetupService {
         projectId,
         agent.id
       )
+    };
+  }
+  async disconnect(
+    token: string,
+    projectId: string,
+    agentIds: string[],
+    revokeCli: boolean
+  ) {
+    const credential = await this.credential(token);
+    if (credential.projectId !== projectId)
+      throw new ApiError(
+        403,
+        "PERMISSION_DENIED",
+        "CLI credential is not authorized for this project."
+      );
+    const uniqueAgentIds = [...new Set(agentIds)];
+    await this.db.transaction(async (tx: Transaction) => {
+      await this.agents.revokeAgents(
+        credential.userId,
+        projectId,
+        uniqueAgentIds,
+        tx
+      );
+      if (revokeCli)
+        await tx
+          .update(cliCredentials)
+          .set({ revokedAt: new Date() })
+          .where(eq(cliCredentials.id, credential.id));
+    });
+    return {
+      project_id: projectId,
+      revoked_agent_ids: uniqueAgentIds,
+      cli_revoked: revokeCli
     };
   }
 }

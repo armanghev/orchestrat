@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mergeHooks, mergeJson, mergeToml } from "./safe-files.js";
+import {
+  mergeHooks,
+  mergeJson,
+  mergeToml,
+  removeHooks,
+  removeJson,
+  removeToml
+} from "./safe-files.js";
 
 test("managed adapters emit exact nested hooks and preserve unrelated entries", () => {
   const command = "/Applications/My CLI/orchestrat";
@@ -123,4 +130,44 @@ test("managed hook regressions stay scoped and idempotent", () => {
   assert.throws(() => mergeHooks(extraArgs, "codex", command));
   const toml = `model = "keep"\n  [mcp_servers.orchestrat]  \ncommand = "${command}"\nargs = ["mcp", "--integration", "codex"]\n`;
   assert.equal(mergeToml(toml, "codex", command), toml);
+});
+
+test("managed removals preserve unrelated entries and are idempotent", () => {
+  const command = "/tmp/orchestrat";
+  const toml = `[mcp_servers.keep]\ncommand = "keep"\n\n[mcp_servers.orchestrat]\ncommand = "${command}"\nargs = ["mcp", "--integration", "codex"]\n`;
+  const removedToml = removeToml(toml, "codex", command)!;
+  assert.match(removedToml, /mcp_servers\.keep/);
+  assert.doesNotMatch(removedToml, /mcp_servers\.orchestrat/);
+  assert.equal(removeToml(removedToml, "codex", command), removedToml);
+  const json = JSON.stringify({
+    mcpServers: {
+      keep: { command: "keep" },
+      orchestrat: { command, args: ["mcp", "--integration", "claude-code"] }
+    }
+  });
+  const removedJson = JSON.parse(removeJson(json, "claude-code", command)!);
+  assert.deepEqual(removedJson.mcpServers.keep, { command: "keep" });
+  const hooks = JSON.stringify({
+    hooks: {
+      SessionStart: [
+        {
+          matcher: "startup|resume",
+          hooks: [
+            { type: "command", command: `'${command}' hook codex` },
+            { type: "command", command: "echo keep" }
+          ]
+        }
+      ]
+    }
+  });
+  const removedHooks = JSON.parse(removeHooks(hooks, "codex", command)!);
+  assert.deepEqual(removedHooks.hooks.SessionStart[0].hooks, [
+    { type: "command", command: "echo keep" }
+  ]);
+});
+
+test("removing absent hooks preserves unrelated bytes", () => {
+  const input =
+    '{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"echo keep"}]}]}}';
+  assert.equal(removeHooks(input, "codex", "/tmp/orchestrat"), input);
 });

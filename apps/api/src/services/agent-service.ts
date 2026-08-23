@@ -21,7 +21,7 @@ import type {
   AgentLifecycleHookResponse
 } from "@orchestrat/protocol";
 import { agentCredentialTokenSchema } from "@orchestrat/protocol";
-import { and, asc, desc, eq, gt, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull } from "drizzle-orm";
 import { ApiError } from "./api-error.js";
 import { PermissionService } from "./permission-service.js";
 
@@ -31,7 +31,7 @@ export type AgentPrincipal = {
   credentialId: string;
 };
 
-type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+export type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 export const agentSessionFreshnessMs = 60_000;
 
 const hashToken = (token: string) =>
@@ -192,110 +192,148 @@ export class AgentService {
     return { agents: rows.map(agentJson) };
   }
 
-  async revokeAgent(userId: string, projectId: string, agentId: string) {
+  private async revokeAgentInTransaction(
+    tx: Transaction,
+    userId: string,
+    projectId: string,
+    agentId: string
+  ) {
     // Security revocation remains allowed on archived projects as shutdown control.
-    await this.permissions.projectEditor(userId, projectId);
-    return this.db.transaction(async (tx) => {
-      const [agent] = await tx
+    const [agent] = await tx
+      .select()
+      .from(agents)
+      .where(and(eq(agents.id, agentId), eq(agents.projectId, projectId)))
+      .for("update");
+    if (!agent) throw new ApiError(404, "AGENT_NOT_FOUND", "Agent not found.");
+    if (agent.status === "active") {
+      const now = new Date();
+      const [revoked] = await tx
+        .update(agents)
+        .set({ status: "revoked", revokedAt: now, updatedAt: now })
+        .where(eq(agents.id, agentId))
+        .returning();
+      await tx
+        .update(agentCredentials)
+        .set({ revokedAt: now })
+        .where(
+          and(
+            eq(agentCredentials.projectId, projectId),
+            eq(agentCredentials.agentId, agentId),
+            isNull(agentCredentials.revokedAt)
+          )
+        );
+      const sessions = await tx
         .select()
-        .from(agents)
-        .where(and(eq(agents.id, agentId), eq(agents.projectId, projectId)))
+        .from(agentSessions)
+        .where(
+          and(
+            eq(agentSessions.projectId, projectId),
+            eq(agentSessions.agentId, agentId),
+            eq(agentSessions.status, "active")
+          )
+        )
         .for("update");
-      if (!agent)
-        throw new ApiError(404, "AGENT_NOT_FOUND", "Agent not found.");
-      if (agent.status === "active") {
-        const now = new Date();
-        const [revoked] = await tx
-          .update(agents)
-          .set({ status: "revoked", revokedAt: now, updatedAt: now })
-          .where(eq(agents.id, agentId))
-          .returning();
+      for (const session of sessions) {
         await tx
-          .update(agentCredentials)
-          .set({ revokedAt: now })
-          .where(
-            and(
-              eq(agentCredentials.projectId, projectId),
-              eq(agentCredentials.agentId, agentId),
-              isNull(agentCredentials.revokedAt)
-            )
-          );
-        const sessions = await tx
-          .select()
-          .from(agentSessions)
-          .where(
-            and(
-              eq(agentSessions.projectId, projectId),
-              eq(agentSessions.agentId, agentId),
-              eq(agentSessions.status, "active")
-            )
-          )
-          .for("update");
-        for (const session of sessions) {
-          await tx
-            .update(agentSessions)
-            .set({ status: "closed", endedAt: now })
-            .where(eq(agentSessions.id, session.id));
-          await insertProjectEvent(tx, {
-            projectId,
-            actorUserId: userId,
-            entityId: session.id,
-            type: "session.closed",
-            payload: { reason: "agent_revoked" }
-          });
-        }
-        const claims = await tx
-          .select()
-          .from(taskClaims)
-          .where(
-            and(
-              eq(taskClaims.projectId, projectId),
-              eq(taskClaims.agentId, agentId),
-              eq(taskClaims.status, "active")
-            )
-          )
-          .for("update");
-        for (const claim of claims) {
-          const [task] = await tx
-            .select()
-            .from(tasks)
-            .where(eq(tasks.id, claim.taskId))
-            .for("update");
-          await tx
-            .update(taskClaims)
-            .set({
-              status: "revoked",
-              releasedAt: now,
-              releaseReason: "agent_revoked"
-            })
-            .where(eq(taskClaims.id, claim.id));
-          if (task?.status === "claimed")
-            await tx
-              .update(tasks)
-              .set({
-                status: "ready",
-                updatedAt: now,
-                version: task.version + 1
-              })
-              .where(eq(tasks.id, task.id));
-          await insertProjectEvent(tx, {
-            projectId,
-            actorUserId: userId,
-            entityId: claim.id,
-            type: "claim.revoked",
-            payload: { task_id: claim.taskId, reason: "agent_revoked" }
-          });
-        }
+          .update(agentSessions)
+          .set({ status: "closed", endedAt: now })
+          .where(eq(agentSessions.id, session.id));
         await insertProjectEvent(tx, {
           projectId,
           actorUserId: userId,
-          entityId: agentId,
-          type: "agent.revoked"
+          entityId: session.id,
+          type: "session.closed",
+          payload: { reason: "agent_revoked" }
         });
-        return agentJson(revoked);
       }
-      return agentJson(agent);
-    });
+      const claims = await tx
+        .select()
+        .from(taskClaims)
+        .where(
+          and(
+            eq(taskClaims.projectId, projectId),
+            eq(taskClaims.agentId, agentId),
+            eq(taskClaims.status, "active")
+          )
+        )
+        .for("update");
+      for (const claim of claims) {
+        const [task] = await tx
+          .select()
+          .from(tasks)
+          .where(eq(tasks.id, claim.taskId))
+          .for("update");
+        await tx
+          .update(taskClaims)
+          .set({
+            status: "revoked",
+            releasedAt: now,
+            releaseReason: "agent_revoked"
+          })
+          .where(eq(taskClaims.id, claim.id));
+        if (task?.status === "claimed")
+          await tx
+            .update(tasks)
+            .set({
+              status: "ready",
+              updatedAt: now,
+              version: task.version + 1
+            })
+            .where(eq(tasks.id, task.id));
+        await insertProjectEvent(tx, {
+          projectId,
+          actorUserId: userId,
+          entityId: claim.id,
+          type: "claim.revoked",
+          payload: { task_id: claim.taskId, reason: "agent_revoked" }
+        });
+      }
+      await insertProjectEvent(tx, {
+        projectId,
+        actorUserId: userId,
+        entityId: agentId,
+        type: "agent.revoked"
+      });
+      return agentJson(revoked);
+    }
+    return agentJson(agent);
+  }
+
+  async revokeAgent(userId: string, projectId: string, agentId: string) {
+    await this.permissions.projectEditor(userId, projectId);
+    return this.db.transaction((tx) =>
+      this.revokeAgentInTransaction(tx, userId, projectId, agentId)
+    );
+  }
+
+  async revokeAgents(
+    userId: string,
+    projectId: string,
+    agentIds: string[],
+    existingTx?: Transaction
+  ) {
+    await this.permissions.projectEditor(userId, projectId);
+    const unique = [...new Set(agentIds)];
+    const revoke = async (tx: Transaction) => {
+      const rows = await tx
+        .select({ id: agents.id })
+        .from(agents)
+        .where(and(eq(agents.projectId, projectId), inArray(agents.id, unique)))
+        .for("update");
+      if (rows.length !== unique.length)
+        throw new ApiError(
+          404,
+          "AGENT_NOT_FOUND",
+          "One or more agents are not in the authorized project."
+        );
+      const revoked = [];
+      for (const agentId of unique)
+        revoked.push(
+          await this.revokeAgentInTransaction(tx, userId, projectId, agentId)
+        );
+      return revoked;
+    };
+    return existingTx ? revoke(existingTx) : this.db.transaction(revoke);
   }
 
   async issueCredential(

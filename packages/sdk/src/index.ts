@@ -20,7 +20,9 @@ import {
   documentListResponseSchema,
   documentResponseSchema,
   updateDocumentRequestSchema,
-  updateDocumentResponseSchema
+  updateDocumentResponseSchema,
+  agentLifecycleHookResponseSchema,
+  agentLifecycleHookRequestSchema
 } from "@orchestrat/protocol";
 import type {
   ClaimTaskRequest,
@@ -31,7 +33,8 @@ import type {
   TaskListQuery,
   CreateDocumentRequest,
   DocumentListQuery,
-  UpdateDocumentRequest
+  UpdateDocumentRequest,
+  AgentLifecycleHookRequest
 } from "@orchestrat/protocol";
 
 type Fetch = typeof globalThis.fetch;
@@ -229,12 +232,24 @@ export class AgentApiClient {
     );
   }
 
+  ingestLifecycle(input: AgentLifecycleHookRequest, idempotencyKey: string) {
+    return this.request(
+      "POST",
+      "/hooks/lifecycle",
+      agentLifecycleHookResponseSchema,
+      agentLifecycleHookRequestSchema.parse(input),
+      false,
+      { "idempotency-key": idempotencyKey }
+    );
+  }
+
   private async request<T>(
     method: "GET" | "POST" | "PATCH",
     path: string,
     schema: Schema<T>,
     input?: unknown,
-    retryable = false
+    retryable = false,
+    extraHeaders: Record<string, string> = {}
   ): Promise<T> {
     const body = input === undefined ? undefined : JSON.stringify(input);
     for (let attempt = 0; ; attempt += 1) {
@@ -244,6 +259,7 @@ export class AgentApiClient {
           method,
           headers: {
             authorization: `Bearer ${this.token}`,
+            ...extraHeaders,
             ...(body ? { "content-type": "application/json" } : {})
           },
           body
