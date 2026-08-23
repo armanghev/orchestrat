@@ -171,3 +171,77 @@ test("stored CLI credential recovers project without opening browser", async () 
   });
   assert.equal(opened.length, 0);
 });
+
+test("endpoint transition refreshes authorization and agent credentials", async () => {
+  const home = await mkdtemp(join(tmpdir(), "orch-setup-transition-"));
+  const cwd = join(home, "project");
+  const sourceCommand = join(home, "cli", "dist", "main.js");
+  await mkdir(join(home, "cli", "dist"), { recursive: true });
+  await writeFile(sourceCommand, "#!/usr/bin/env node\n");
+  await writeFile(join(home, "cli", "package.json"), '{"version":"0.1.0"}\n');
+  await chmod(sourceCommand, 0o700);
+  await mkdir(join(home, ".orchestrat"), { recursive: true });
+  await writeFile(
+    join(home, ".orchestrat", "config.json"),
+    JSON.stringify({
+      version: 1,
+      projects: {
+        [cwd]: {
+          projectId: "old-project",
+          apiUrl: "https://old.example",
+          integrations: { codex: { agentId: "old-agent" } }
+        }
+      }
+    })
+  );
+  const store = new Store();
+  await store.write("cli", "old-cli");
+  await store.write("agent:codex", "old-agent-token");
+  const opened: string[] = [];
+  const calls: string[] = [];
+  const fetch: typeof globalThis.fetch = async (input, init) => {
+    const url = String(input);
+    calls.push(url);
+    if (url.endsWith("/attempts"))
+      return response(
+        {
+          attempt_id: "ca_transition",
+          secret: "s".repeat(40),
+          expires_at: new Date(Date.now() + 60_000).toISOString()
+        },
+        201
+      );
+    if (url.endsWith("/poll"))
+      return response({
+        status: "approved",
+        project_id: "new-project",
+        credential: "new-cli"
+      });
+    assert.equal(url, "https://new.example/api/v1/cli/setup");
+    assert.equal(JSON.parse(String(init?.body)).project_id, "new-project");
+    return response({
+      agent: { id: "new-agent" },
+      credential: { token: "new-agent-token" }
+    });
+  };
+  await runSetup({
+    api: "https://new.example",
+    fetch,
+    open: async (url) => {
+      opened.push(url);
+    },
+    sleep: async () => {},
+    store,
+    cwd,
+    home,
+    integrations: ["codex"],
+    sourceCommand
+  });
+  const config = await readConfig(home);
+  assert.equal(config.projects[cwd]?.apiUrl, "https://new.example");
+  assert.equal(config.projects[cwd]?.projectId, "new-project");
+  assert.equal(await store.read("cli"), "new-cli");
+  assert.equal(await store.read("agent:codex"), "new-agent-token");
+  assert.equal(opened.length, 1);
+  assert.ok(calls.every((url) => url.startsWith("https://new.example/")));
+});

@@ -300,6 +300,8 @@ export async function runSetup(options: SetupRunOptions) {
   let config = await readConfig(options.home);
   const key = canonicalizeCwd(options.cwd);
   const existing = config.projects[key];
+  const apiUrl = validateApiUrl(options.api);
+  const apiChanged = existing !== undefined && existing.apiUrl !== apiUrl;
   const configPreviews = await previewSetup(
     options.home,
     options.integrations,
@@ -317,8 +319,8 @@ export async function runSetup(options: SetupRunOptions) {
   await installLauncher(options.home, sourceCommand);
   const cli = await options.store.read("cli");
   let cliToken = cli;
-  let approvedProject = existing?.projectId;
-  if (!cliToken) {
+  let approvedProject = apiChanged ? undefined : existing?.projectId;
+  if (!cliToken || apiChanged) {
     const authorized = await authorizeCli(options, options.store);
     cliToken = authorized.credential;
     approvedProject = authorized.projectId;
@@ -333,9 +335,9 @@ export async function runSetup(options: SetupRunOptions) {
   }
   const projectId = approvedProject;
   if (!projectId) throw new Error("A project must be selected during setup");
-  const integrations: Record<string, { agentId: string }> = {
-    ...(existing?.integrations ?? {})
-  };
+  const integrations: Record<string, { agentId: string }> = apiChanged
+    ? {}
+    : { ...(existing?.integrations ?? {}) };
   for (const integration of options.integrations) {
     const account = `agent:${integration}`;
     if (
@@ -363,7 +365,7 @@ export async function runSetup(options: SetupRunOptions) {
     version: 1,
     projects: {
       ...config.projects,
-      [key]: { projectId, apiUrl: validateApiUrl(options.api), integrations }
+      [key]: { projectId, apiUrl, integrations }
     }
   } as OrchestratConfig;
   await atomicWrite(

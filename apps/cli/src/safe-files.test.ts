@@ -166,6 +166,12 @@ test("managed removals preserve unrelated entries and are idempotent", () => {
   ]);
 });
 
+test("removes managed toml with spaced array formatting", () => {
+  const command = "/bin/orchestrat";
+  const toml = `[mcp_servers.orchestrat]\ncommand = "${command}"\nargs = [ "mcp", "--integration", "codex" ]\n`;
+  assert.doesNotMatch(removeToml(toml, "codex", command)!, /orchestrat/);
+});
+
 test("removing absent hooks preserves unrelated bytes", () => {
   const input =
     '{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"echo keep"}]}]}}';

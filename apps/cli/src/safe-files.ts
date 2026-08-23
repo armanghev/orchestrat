@@ -167,10 +167,12 @@ export function removeToml(
   const next = /\n[ \t]*\[/m.exec(text.slice(start + match[0].length));
   const end = next ? start + match[0].length + next.index + 1 : text.length;
   const section = text.slice(start, end);
-  const args = `args = ["mcp", "--integration", ${JSON.stringify(integration)}]`;
+  const args = new RegExp(
+    `args\\s*=\\s*\\[\\s*"mcp"\\s*,\\s*"--integration"\\s*,\\s*"${integration}"\\s*\\]`
+  );
   if (
     !section.includes(`command = ${JSON.stringify(command)}`) ||
-    !section.includes(args)
+    !args.test(section)
   )
     throw new Error("Existing Orchestrat MCP entry conflicts");
   return `${text.slice(0, start)}${text.slice(end).replace(/^\n/, "")}`;
