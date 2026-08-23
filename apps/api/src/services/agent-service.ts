@@ -24,6 +24,7 @@ import { agentCredentialTokenSchema } from "@orchestrat/protocol";
 import { and, asc, desc, eq, gt, inArray, isNull } from "drizzle-orm";
 import { ApiError } from "./api-error.js";
 import { PermissionService } from "./permission-service.js";
+import { recordProjectEvent } from "../realtime/realtime.js";
 
 export type AgentPrincipal = {
   agentId: string;
@@ -86,14 +87,19 @@ export async function insertProjectEvent(
     payload?: Record<string, unknown>;
   }
 ) {
-  await tx.insert(projectEvents).values({
-    projectId: value.projectId,
-    type: value.type,
-    actorAgentId: value.actorAgentId ?? null,
-    actorUserId: value.actorUserId ?? null,
-    entityId: value.entityId ?? null,
-    payload: value.payload ?? {}
-  });
+  const [event] = await tx
+    .insert(projectEvents)
+    .values({
+      projectId: value.projectId,
+      type: value.type,
+      actorAgentId: value.actorAgentId ?? null,
+      actorUserId: value.actorUserId ?? null,
+      entityId: value.entityId ?? null,
+      payload: value.payload ?? {}
+    })
+    .returning();
+  recordProjectEvent(tx, event);
+  return event;
 }
 
 export class AgentService {
@@ -604,23 +610,20 @@ export class AgentService {
             .returning();
           session = updated!;
         }
-        const [event] = await tx
-          .insert(projectEvents)
-          .values({
-            projectId: principal.projectId,
-            actorAgentId: principal.agentId,
-            entityId: session.id,
-            type: input.event,
-            payload: {
-              runtime: input.runtime,
-              integration: input.integration,
-              ...(input.error ? { error: input.error } : {})
-            }
-          })
-          .returning({ id: projectEvents.id });
+        const event = await insertProjectEvent(tx, {
+          projectId: principal.projectId,
+          actorAgentId: principal.agentId,
+          entityId: session.id,
+          type: input.event,
+          payload: {
+            runtime: input.runtime,
+            integration: input.integration,
+            ...(input.error ? { error: input.error } : {})
+          }
+        });
         await tx
           .update(agentLifecycleEvents)
-          .set({ eventId: event!.id, sessionId: session.id })
+          .set({ eventId: event.id, sessionId: session.id })
           .where(eq(agentLifecycleEvents.id, reservation!.id));
         return { event_id: event!.id, session: sessionJson(session) };
       });

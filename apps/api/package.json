@@ -15,6 +15,7 @@
     "@aws-sdk/client-s3": "^3.1112.0",
     "@fastify/cors": "^11.3.0",
     "@fastify/multipart": "^10.1.1",
+    "@fastify/websocket": "^11.3.0",
     "@orchestrat/auth": "workspace:*",
     "@orchestrat/config": "workspace:*",
     "@orchestrat/db": "workspace:*",
@@ -25,6 +26,7 @@
     "fastify": "^5.5.0"
   },
   "devDependencies": {
+    "@types/ws": "^8.18.1",
     "jose": "^6.2.8",
     "pg-mem": "^3.0.14",
     "tsx": "^4.20.5"
