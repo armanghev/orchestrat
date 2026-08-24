@@ -271,7 +271,10 @@ test("persistent launcher is an atomic managed runtime and rejects conflicts", a
 test("detects both, one, or no supported integrations", async () => {
   assert.deepEqual(await detectIntegrations(async () => true), [
     "codex",
-    "claude-code"
+    "claude-code",
+    "cursor",
+    "antigravity",
+    "opencode"
   ]);
   assert.deepEqual(
     await detectIntegrations(async (command) => command === "codex"),

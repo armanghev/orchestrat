@@ -32,6 +32,11 @@ import {
   type OrchestratConfig,
   validateApiUrl
 } from "./config.js";
+import {
+  HARNESSES,
+  isConfigurableIntegration,
+  type HarnessRecord
+} from "./harnesses.js";
 
 export type SetupTransport = {
   fetch: typeof globalThis.fetch;
@@ -49,12 +54,38 @@ export async function detectIntegrations(
     }
   }
 ) {
-  const found: ("codex" | "claude-code")[] = [];
-  if (await probe("codex")) found.push("codex");
-  if (await probe("claude")) found.push("claude-code");
+  const found = (await detectHarnesses(probe))
+    .filter((item) => item.configurable)
+    .map((item) => item.id)
+    .filter(isConfigurableIntegration);
   if (!found.length)
-    throw new Error("No supported agent integrations found (codex or claude)");
+    throw new Error("No supported agent integrations found");
   return found;
+}
+
+export async function detectHarnesses(
+  probe: (command: string) => Promise<boolean> = async (command) => {
+    try {
+      await execFileAsync(command, ["--version"]);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+): Promise<(HarnessRecord & { detected: boolean })[]> {
+  const detected: (HarnessRecord & { detected: boolean })[] = [];
+  for (const item of HARNESSES) {
+    const commands = item.commands ?? [item.command];
+    let available = false;
+    for (const command of commands) {
+      if (await probe(command)) {
+        available = true;
+        break;
+      }
+    }
+    if (available) detected.push({ ...item, detected: true });
+  }
+  return detected;
 }
 export async function installLauncher(home: string, sourceCommand: string) {
   const resolvedSource = await realpath(sourceCommand);

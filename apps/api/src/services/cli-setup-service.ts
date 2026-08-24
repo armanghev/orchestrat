@@ -3,6 +3,7 @@ import { cliCredentials, type Database } from "@orchestrat/db";
 import { and, eq, isNull } from "drizzle-orm";
 import { ApiError } from "./api-error.js";
 import { AgentService, type Transaction } from "./agent-service.js";
+import type { CliSetupIntegration } from "@orchestrat/protocol";
 
 const hash = (value: string) =>
   createHash("sha256").update(value).digest("hex");
@@ -35,7 +36,7 @@ export class CliSetupService {
   async setup(
     token: string,
     projectId: string,
-    integration: "codex" | "claude-code"
+    integration: CliSetupIntegration
   ) {
     const credential = await this.credential(token);
     if (credential.projectId !== projectId)

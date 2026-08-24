@@ -3,8 +3,13 @@ import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
-export const INTEGRATIONS = ["codex", "claude-code"] as const;
-export type Integration = (typeof INTEGRATIONS)[number];
+import {
+  CONFIGURABLE_INTEGRATIONS,
+  type ConfigurableIntegration
+} from "./harnesses.js";
+
+export const INTEGRATIONS = CONFIGURABLE_INTEGRATIONS;
+export type Integration = ConfigurableIntegration;
 
 export type IntegrationMapping = { agentId: string };
 export type ProjectMapping = {

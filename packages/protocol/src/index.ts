@@ -446,11 +446,18 @@ export type DeleteTaskDependencyRequest = z.infer<
 
 const agentNameSchema = z.string().trim().min(1).max(120);
 export const integrationNameSchema = z.string().trim().min(1).max(80);
-export const cliSetupIntegrationSchema = z.enum(["codex", "claude-code"]);
+export const cliSetupIntegrationSchema = z.enum([
+  "codex",
+  "claude-code",
+  "cursor",
+  "antigravity",
+  "opencode"
+]);
+export type CliSetupIntegration = z.infer<typeof cliSetupIntegrationSchema>;
 export const cliDisconnectRequestSchema = z
   .object({
     project_id: idSchema,
-    agent_ids: z.array(idSchema).min(1).max(2),
+    agent_ids: z.array(idSchema).min(1).max(5),
     revoke_cli: z.boolean().default(false)
   })
   .strict();

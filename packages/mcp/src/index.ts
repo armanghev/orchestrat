@@ -8,6 +8,7 @@ import {
   updateDocumentRequestSchema
 } from "@orchestrat/protocol";
 import { z } from "zod";
+import { cliSetupIntegrationSchema } from "@orchestrat/protocol";
 
 export const mcpPackage = "@orchestrat/mcp";
 
@@ -29,7 +30,7 @@ type Client = Pick<
 >;
 export type BridgeOptions = {
   client: Client;
-  integration: "codex" | "claude-code";
+  integration: z.infer<typeof cliSetupIntegrationSchema>;
   runtime?: string;
   heartbeatMs?: number;
 };
