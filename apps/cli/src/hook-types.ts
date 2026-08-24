@@ -5,7 +5,7 @@ export type NormalizedHook = {
   session_id: string;
   external_session_id: string;
   runtime: string;
-  integration: "codex" | "claude-code";
+  integration: "codex" | "claude-code" | "cursor" | "antigravity";
   error?: string;
 };
 
