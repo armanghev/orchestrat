@@ -1,8 +1,5 @@
 import { AgentApiClient } from "@orchestrat/sdk";
-import {
-  atomicWrite,
-  readOptional,
-} from "./safe-files.js";
+import { atomicWrite, readOptional } from "./safe-files.js";
 import {
   configPath,
   findProject,
@@ -138,7 +135,9 @@ export async function runDoctor(input: {
   }
   if (project && input.sourceCommand) {
     const command = join(input.home, ".local", "bin", "orchestrat");
-    for (const integration of Object.keys(project.integrations) as Integration[]) {
+    for (const integration of Object.keys(
+      project.integrations
+    ) as Integration[]) {
       try {
         const plan = harnessConfigPlan(input.home, integration, command);
         let current = true;
@@ -149,9 +148,7 @@ export async function runDoctor(input: {
         }
         checks[`config.${integration}`] = redacted(
           current,
-          current
-            ? "present"
-            : "missing or outdated"
+          current ? "present" : "missing or outdated"
         );
       } catch {
         checks[`config.${integration}`] = redacted(
@@ -215,9 +212,7 @@ export async function disconnectLocal(input: {
   const config = await readConfig(input.home);
   const project = findProject(config, input.cwd);
   const selected =
-    input.integration === "all"
-      ? INTEGRATIONS
-      : [input.integration];
+    input.integration === "all" ? INTEGRATIONS : [input.integration];
   const mapped = selected.filter(
     (integration) => project?.integrations[integration]
   );

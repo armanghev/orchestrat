@@ -13,6 +13,9 @@ export type UiWriter = (text: string) => void;
 export type Harness = { id: string; label?: string; hint?: string };
 export type DetectedHarness = Harness & {
   configurable: boolean;
+  mcpConfigured?: boolean;
+  hooksConfigured?: boolean;
+  hooksSupported?: boolean;
   unsupportedReason?: string;
 };
 export type Cancelled = { cancelled: true };
@@ -28,9 +31,16 @@ export type UiComponents = {
   cancel: (message?: string) => void;
   outro: (message?: string) => void;
   intro: (message?: string) => void;
-  log: { info(message: string): void; success(message: string): void; warn(message: string): void };
+  log: {
+    info(message: string): void;
+    success(message: string): void;
+    warn(message: string): void;
+  };
   note: (message?: string, title?: string) => void;
-  spinner: () => { start(message?: string): void; stop(message?: string): void };
+  spinner: () => {
+    start(message?: string): void;
+    stop(message?: string): void;
+  };
 };
 
 const defaultComponents: UiComponents = {
@@ -43,14 +53,14 @@ const defaultComponents: UiComponents = {
   spinner: clackSpinner
 };
 
-export function isInteractive(input: {
-  stdin?: { isTTY?: boolean };
-  stdout?: { isTTY?: boolean };
-  env?: NodeJS.ProcessEnv;
-} = {}): boolean {
-  return Boolean(
-    input.stdin?.isTTY && input.stdout?.isTTY && !input.env?.CI
-  );
+export function isInteractive(
+  input: {
+    stdin?: { isTTY?: boolean };
+    stdout?: { isTTY?: boolean };
+    env?: NodeJS.ProcessEnv;
+  } = {}
+): boolean {
+  return Boolean(input.stdin?.isTTY && input.stdout?.isTTY && !input.env?.CI);
 }
 
 export async function selectHarnesses<T extends Harness>(
@@ -64,7 +74,8 @@ export async function selectHarnesses<T extends Harness>(
   const configurable = harnesses.filter(
     (harness) => (harness as unknown as DetectedHarness).configurable !== false
   );
-  if (!options.interactive) return { cancelled: false, values: [...configurable] };
+  if (!options.interactive)
+    return { cancelled: false, values: [...configurable] };
   const components = options.components ?? defaultComponents;
   const answer = await components.multiselect({
     message: "Select agent harnesses to connect",
@@ -120,7 +131,9 @@ export type SetupResult = {
 
 export async function runSetupProgress<T>(
   operation: () => Promise<T>,
-  options: { interactive: boolean; components?: UiComponents } = { interactive: false }
+  options: { interactive: boolean; components?: UiComponents } = {
+    interactive: false
+  }
 ): Promise<T> {
   if (!options.interactive) return operation();
   const spinner = (options.components ?? defaultComponents).spinner();
@@ -136,15 +149,20 @@ export async function runSetupProgress<T>(
 }
 
 export function renderSetupResult(result: SetupResult, write: UiWriter): void {
-  for (const integration of Object.keys(result.integrations ?? {}))
-    write(`✓ connected ${integration}\n`);
-  if (result.pathFix) write(`  PATH: ${result.pathFix}\n`);
-  for (const harness of result.harnesses ?? []) {
-    write(`  ${harness.label ?? harness.id}: MCP ${harness.mcpConfigured ? "configured" : "not configured"}\n`);
+  const harnesses = result.harnesses ?? [];
+  if (!harnesses.length)
+    for (const integration of Object.keys(result.integrations ?? {}))
+      write(`✓ connected ${integration}\n`);
+  for (const harness of harnesses) {
+    write(`\n${harness.label ?? harness.id}\n`);
     write(
-      `    Hooks: ${harness.hooksSupported === false ? "unavailable/unsupported" : harness.hooksConfigured ? "configured" : "not configured"}\n`
+      `${harness.mcpConfigured ? "✓" : "✗"} MCP ${harness.mcpConfigured ? "configured" : "not configured"}\n`
+    );
+    write(
+      `${harness.hooksSupported === false ? "○" : harness.hooksConfigured ? "✓" : "✗"} Hooks: ${harness.hooksSupported === false ? "unavailable/unsupported" : harness.hooksConfigured ? "configured" : "not configured"}\n`
     );
   }
+  if (result.pathFix) write(`  PATH: ${result.pathFix}\n`);
   const connected = Object.keys(result.integrations ?? {}).length;
   if (connected) write(`${connected} agents connected\n`);
 }
@@ -162,16 +180,24 @@ export function renderStatus(result: unknown, write: UiWriter): void {
     configured?: boolean;
     cwd?: string;
     project_id?: string | null;
-    backend?: Record<string, { ok?: boolean; detail?: string; status?: string }>;
+    backend?: Record<
+      string,
+      { ok?: boolean; detail?: string; status?: string }
+    >;
   };
   write(`Status: ${value.configured ? "configured" : "not configured"}\n`);
-  if (value.cwd) write(`Project: ${value.project_id ?? "none"}\n  ${value.cwd}\n`);
+  if (value.cwd)
+    write(`Project: ${value.project_id ?? "none"}\n  ${value.cwd}\n`);
   for (const [name, state] of Object.entries(value.backend ?? {}))
-    write(`  ${state.ok === false ? "✗" : "✓"} ${name}: ${state.detail ?? state.status ?? "reachable"}\n`);
+    write(
+      `  ${state.ok === false ? "✗" : "✓"} ${name}: ${state.detail ?? state.status ?? "reachable"}\n`
+    );
 }
 
 export function renderDoctor(result: unknown, write: UiWriter): void {
-  const checks = (result as { checks?: Record<string, { ok: boolean; detail: string }> }).checks ?? {};
+  const checks =
+    (result as { checks?: Record<string, { ok: boolean; detail: string }> })
+      .checks ?? {};
   write("Doctor\n");
   for (const [name, check] of Object.entries(checks))
     write(`  ${check.ok ? "✓" : "✗"} ${name}: ${check.detail}\n`);
@@ -199,12 +225,21 @@ export function renderResult(
     options.write(`${JSON.stringify(result)}\n`);
     return;
   }
-  ({ status: renderStatus, doctor: renderDoctor, disconnect: renderDisconnect }[command] as (value: unknown, write: UiWriter) => void)(result, options.write);
+  (
+    ({
+      status: renderStatus,
+      doctor: renderDoctor,
+      disconnect: renderDisconnect
+    })[command] as (value: unknown, write: UiWriter) => void
+  )(result, options.write);
 }
 
 export function finishSetup(
   message: string,
-  options: { interactive: boolean; components?: UiComponents } = { interactive: false }
+  options: { interactive: boolean; components?: UiComponents } = {
+    interactive: false
+  }
 ): void {
-  if (options.interactive) (options.components ?? defaultComponents).outro(message);
+  if (options.interactive)
+    (options.components ?? defaultComponents).outro(message);
 }

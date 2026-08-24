@@ -11,6 +11,25 @@ import type { ConfigurableIntegration } from "./harnesses.js";
 export type { NormalizedHook } from "./hook-types.js";
 export { deterministicSessionId } from "./hook-types.js";
 
+export function hookCwd(
+  integration: ConfigurableIntegration,
+  payload: unknown,
+  fallback: string
+) {
+  if (!payload || typeof payload !== "object") return fallback;
+  const input = payload as Record<string, unknown>;
+  if (typeof input.cwd === "string") return input.cwd;
+  const paths =
+    integration === "cursor"
+      ? input.workspace_roots
+      : integration === "antigravity"
+        ? input.workspacePaths
+        : undefined;
+  return Array.isArray(paths) && typeof paths[0] === "string"
+    ? paths[0]
+    : fallback;
+}
+
 export async function readBoundedStdin(
   stdin: AsyncIterable<Buffer | string> = process.stdin,
   ceiling = 64 * 1024
@@ -51,20 +70,7 @@ export async function runHook(input: {
               input.event ?? input.eventName,
               input.payload
             );
-  const payloadCwd =
-    input.payload &&
-    typeof input.payload === "object" &&
-    typeof (input.payload as { cwd?: unknown }).cwd === "string"
-      ? (input.payload as { cwd: string }).cwd
-      : input.integration === "cursor" &&
-          Array.isArray((input.payload as { workspace_roots?: unknown })?.workspace_roots) &&
-          typeof (input.payload as { workspace_roots: unknown[] }).workspace_roots[0] === "string"
-        ? (input.payload as { workspace_roots: string[] }).workspace_roots[0]
-        : input.integration === "antigravity" &&
-            Array.isArray((input.payload as { workspacePaths?: unknown })?.workspacePaths) &&
-            typeof (input.payload as { workspacePaths: unknown[] }).workspacePaths[0] === "string"
-          ? (input.payload as { workspacePaths: string[] }).workspacePaths[0]
-          : input.cwd;
+  const payloadCwd = hookCwd(input.integration, input.payload, input.cwd);
   const resolved = await resolveInvocation({
     cwd: payloadCwd,
     home: input.home,

@@ -77,12 +77,24 @@ test("accepts configurable harness commands and explicit hook events", () => {
     integration: "antigravity",
     local: false
   });
-  assert.deepEqual(parseInvocationArgs(["hook", "cursor", "--event", "sessionStart"]), {
+  assert.deepEqual(
+    parseInvocationArgs(["hook", "cursor", "--event", "sessionStart"]),
+    {
+      command: "hook",
+      integration: "cursor",
+      event: "sessionStart"
+    }
+  );
+  assert.deepEqual(parseInvocationArgs(["hook", "cursor"]), {
     command: "hook",
     integration: "cursor",
-    event: "sessionStart"
+    event: undefined
   });
   assert.throws(() => parseInvocationArgs(["hook", "antigravity"]));
+  assert.throws(() => parseInvocationArgs(["hook", "opencode"]));
+  assert.throws(() =>
+    parseInvocationArgs(["hook", "antigravity", "--event", "other"])
+  );
 });
 
 test("built CLI --version matches package metadata", async () => {

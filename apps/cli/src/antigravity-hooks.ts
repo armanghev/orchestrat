@@ -14,14 +14,19 @@ export function normalizeAntigravityHook(
     typeof input.conversationId === "string" ? input.conversationId.trim() : "";
   if (!external) throw new Error("Missing Antigravity conversationId");
   const paths = input.workspacePaths;
-  const cwd = Array.isArray(paths) && typeof paths[0] === "string" ? paths[0].trim() : "";
+  const cwd =
+    Array.isArray(paths) && typeof paths[0] === "string" ? paths[0].trim() : "";
   if (!cwd) throw new Error("Missing Antigravity workspace path");
   if (eventName !== "PreInvocation" && eventName !== "Stop")
     throw new Error("Unsupported Antigravity hook event");
   const error = errorText(input.error);
   const failed = eventName === "Stop" && !!error;
   return {
-    event: failed ? "run.failed" : eventName === "PreInvocation" ? "session.started" : "session.ended",
+    event: failed
+      ? "run.failed"
+      : eventName === "PreInvocation"
+        ? "session.started"
+        : "session.ended",
     session_id: deterministicSessionId("antigravity", external),
     external_session_id: external,
     runtime: "antigravity",

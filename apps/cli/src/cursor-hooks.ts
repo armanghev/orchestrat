@@ -11,7 +11,9 @@ export function normalizeCursorHook(value: unknown): NormalizedHook {
   if (typeof eventName !== "string")
     throw new Error("Malformed Cursor hook input");
   const external =
-    typeof input.conversation_id === "string" ? input.conversation_id.trim() : "";
+    typeof input.conversation_id === "string"
+      ? input.conversation_id.trim()
+      : "";
   if (!external) throw new Error("Missing Cursor conversation_id");
   const roots = input.workspace_roots;
   const root = Array.isArray(roots) ? roots[0] : undefined;
@@ -31,7 +33,9 @@ export function normalizeCursorHook(value: unknown): NormalizedHook {
           ? "run.failed"
           : undefined;
   if (!event) throw new Error("Unsupported Cursor hook event");
-  const error = errorText(input.error ?? input.tool_output ?? input.reason);
+  const error = errorText(
+    input.error_message ?? input.error ?? input.tool_output ?? input.reason
+  );
   return {
     event,
     session_id: deterministicSessionId("cursor", external),

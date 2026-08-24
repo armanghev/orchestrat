@@ -4,9 +4,11 @@ import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
 import { AgentApiClient } from "@orchestrat/sdk";
 import { startStdioBridge } from "@orchestrat/mcp";
-import { readConfig } from "./config.js";
 import { detectHarnesses, runSetup } from "./setup.js";
-import { isConfigurableIntegration, type ConfigurableIntegration } from "./harnesses.js";
+import {
+  isConfigurableIntegration,
+  type ConfigurableIntegration
+} from "./harnesses.js";
 import { KeychainCredentialStore } from "./keychain.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -18,8 +20,8 @@ const packageVersion = JSON.parse(
 ).version as string;
 import { KeychainCredentialReader } from "./keychain.js";
 import { resolveInvocation } from "./resolve.js";
-import { findProject, validateApiUrl } from "./config.js";
-import { readBoundedStdin, runHook } from "./hooks.js";
+import { findProject, readConfig, validateApiUrl } from "./config.js";
+import { hookCwd, readBoundedStdin, runHook } from "./hooks.js";
 import { disconnectLocal, runDoctor, runStatus } from "./diagnostics.js";
 import {
   finishSetup,
@@ -67,36 +69,40 @@ export function parseInvocationArgs(argv: string[]): {
     usage();
   const integration = values.integration;
   if (values.local && positionals[0] !== "disconnect") usage();
+  if (values.event !== undefined && positionals[0] !== "hook") usage();
   if (
     typeof integration !== "undefined" &&
     !isConfigurableIntegration(integration)
   )
     usage();
-  if (
-    (positionals[0] === "status" ||
-      positionals[0] === "setup" ||
-      positionals[0] === "doctor") &&
-    integration !== undefined
-  )
-    usage();
+  if (integration !== undefined && positionals[0] !== "mcp") usage();
   if (positionals[0] === "setup") return { command: "setup" };
   if (positionals[0] === "hook") {
     const hookIntegration = positionals[1];
     if (
       positionals.length !== 2 ||
       !isConfigurableIntegration(hookIntegration) ||
-      ((hookIntegration === "cursor" || hookIntegration === "antigravity") &&
-        typeof values.event !== "string")
+      hookIntegration === "opencode" ||
+      (hookIntegration === "antigravity" &&
+        !["PreInvocation", "Stop"].includes(values.event ?? "")) ||
+      (hookIntegration === "cursor" &&
+        values.event !== undefined &&
+        !["sessionStart", "sessionEnd", "postToolUseFailure"].includes(
+          values.event
+        )) ||
+      ((hookIntegration === "codex" || hookIntegration === "claude-code") &&
+        values.event !== undefined)
     )
       usage();
-    return { command: "hook", integration: hookIntegration, event: values.event };
+    return {
+      command: "hook",
+      integration: hookIntegration,
+      event: values.event
+    };
   }
   if (positionals[0] === "doctor") return { command: "doctor" };
   if (positionals[0] === "disconnect") {
-    if (
-      !isConfigurableIntegration(positionals[1]) &&
-      positionals[1] !== "all"
-    )
+    if (!isConfigurableIntegration(positionals[1]) && positionals[1] !== "all")
       usage();
     return {
       command: "disconnect",
@@ -123,12 +129,11 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     return;
   }
   const home = process.env.HOME ?? process.cwd();
+  const interactive = isInteractive(process);
   const hookPayload = command === "hook" ? await readBoundedStdin() : undefined;
   const payloadCwd =
-    hookPayload &&
-    typeof hookPayload === "object" &&
-    typeof (hookPayload as { cwd?: unknown }).cwd === "string"
-      ? (hookPayload as { cwd: string }).cwd
+    command === "hook" && integration && integration !== "all"
+      ? hookCwd(integration, hookPayload, process.cwd())
       : process.cwd();
   const project = findProject(await readConfig(home), payloadCwd);
   const api =
@@ -136,91 +141,119 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     project?.apiUrl ??
     "https://api.orchestrat.dev";
   if (command === "hook") {
-    if (integration !== "codex" && integration !== "claude-code")
-      throw new Error(`${integration} hooks require a future hook adapter (event: ${event})`);
+    if (!integration || integration === "all") usage();
     await runHook({
       integration,
       cwd: process.cwd(),
       home: process.env.HOME ?? process.cwd(),
       credentials: new KeychainCredentialReader(),
       payload: hookPayload,
+      event,
       api
     });
     return;
   }
   if (command === "doctor") {
     const result = await runDoctor({
-          home,
-          cwd: process.cwd(),
-          credentials: new KeychainCredentialReader(),
-          api,
-          sourceCommand: resolve(process.argv[1] ?? "orchestrat")
-        });
-    renderResult("doctor", result, { interactive: isInteractive(process), write: (text) => process.stdout.write(text) });
+      home,
+      cwd: process.cwd(),
+      credentials: new KeychainCredentialReader(),
+      api,
+      sourceCommand: resolve(process.argv[1] ?? "orchestrat")
+    });
+    renderResult("doctor", result, {
+      interactive,
+      write: (text) => process.stdout.write(text)
+    });
     return;
   }
   if (command === "disconnect") {
-    if (!integration)
-      usage();
+    if (!integration) usage();
     const result = await disconnectLocal({
-          home,
-          cwd: process.cwd(),
-          integration: integration as never,
-          store: new KeychainCredentialStore(),
-          api,
-          localOnly: local,
-          fetch: globalThis.fetch,
-          sourceCommand: resolve(process.argv[1] ?? "orchestrat"),
-          reportPreview: async (previews) => {
-            if (isInteractive(process)) renderPreview(previews, (text) => process.stdout.write(text));
-          }
-        });
-    renderResult("disconnect", result, { interactive: isInteractive(process), write: (text) => process.stdout.write(text) });
+      home,
+      cwd: process.cwd(),
+      integration,
+      store: new KeychainCredentialStore(),
+      api,
+      localOnly: local,
+      fetch: globalThis.fetch,
+      sourceCommand: resolve(process.argv[1] ?? "orchestrat"),
+      reportPreview: async (previews) => {
+        if (interactive)
+          renderPreview(previews, (text) => process.stdout.write(text));
+      }
+    });
+    renderResult(
+      "disconnect",
+      interactive ? { ...result, previews: [] } : result,
+      {
+        interactive,
+        write: (text) => process.stdout.write(text)
+      }
+    );
     return;
   }
   if (command === "setup") {
-    const interactive = isInteractive(process);
     const detected = await detectHarnesses();
     const detectedUi = detected.map((item) => ({
       id: item.id,
       label: item.label,
       configurable: item.configurable,
-      mcpConfigured: item.supportsMcp,
       hooksSupported: item.supportsHooks,
-      hooksConfigured: item.supportsHooks,
-      unsupportedReason: item.configurable ? undefined : "not configurable"
+      unsupportedReason: item.configurable
+        ? undefined
+        : "built-in MCP configuration unavailable"
     }));
-    if (interactive) renderDetectedAgents(detectedUi, { interactive, write: (text) => process.stdout.write(text) });
+    if (interactive)
+      renderDetectedAgents(detectedUi, {
+        interactive,
+        write: (text) => process.stdout.write(text)
+      });
     const selected = await selectHarnesses(detectedUi, { interactive });
     if (selected.cancelled) {
       process.exitCode = 130;
       return;
     }
-    const integrations = selected.values.map((item) => item.id).filter(isConfigurableIntegration);
-    const setupResult = await runSetupProgress(() => runSetup({
-      api,
-      fetch: globalThis.fetch,
-      open: async (url) => {
-        await openUrl("open", [url]);
-      },
-      sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-      store: new KeychainCredentialStore(),
-      cwd: process.cwd(),
-      home,
-      integrations: integrations as never,
-      sourceCommand: resolve(process.argv[1] ?? "orchestrat"),
-      reportPreview: async (previews) => {
-        if (interactive) renderPreview(previews.filter((item) => item.changed), (text) => process.stdout.write(text));
-      }
-    }), { interactive });
+    const integrations = selected.values
+      .map((item) => item.id)
+      .filter(isConfigurableIntegration);
+    if (!integrations.length)
+      throw new Error("No configurable agent integrations found");
+    const setupResult = await runSetupProgress(
+      () =>
+        runSetup({
+          api,
+          fetch: globalThis.fetch,
+          open: async (url) => {
+            await openUrl("open", [url]);
+          },
+          sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+          store: new KeychainCredentialStore(),
+          cwd: process.cwd(),
+          home,
+          integrations,
+          sourceCommand: resolve(process.argv[1] ?? "orchestrat"),
+          reportPreview: async (previews) => {
+            if (interactive)
+              renderPreview(
+                previews.filter((item) => item.changed),
+                (text) => process.stdout.write(text)
+              );
+          }
+        }),
+      { interactive }
+    );
     const presentedResult = {
       ...setupResult,
+      integrations: Object.fromEntries(
+        integrations.map((id) => [id, setupResult.integrations[id]])
+      ),
       harnesses: selected.values.map((item) => ({
         id: item.id,
         label: item.label,
-        mcpConfigured: item.mcpConfigured,
+        mcpConfigured: true,
         hooksSupported: item.hooksSupported,
-        hooksConfigured: item.hooksConfigured
+        hooksConfigured: item.hooksSupported
       }))
     };
     if (interactive) {
@@ -230,12 +263,6 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     return;
   }
 
-  const resolved = await resolveInvocation({
-    cwd: process.cwd(),
-    integration: integration as "codex" | "claude-code" | undefined,
-    read: readConfig,
-    credentials: new KeychainCredentialReader()
-  });
   if (command === "status") {
     const result = await runStatus({
       home,
@@ -243,8 +270,18 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       credentials: new KeychainCredentialReader(),
       api
     });
-    renderResult("status", result, { interactive: isInteractive(process), write: (text) => process.stdout.write(text) });
+    renderResult("status", result, {
+      interactive,
+      write: (text) => process.stdout.write(text)
+    });
   } else if (command === "mcp") {
+    if (!integration || integration === "all") usage();
+    const resolved = await resolveInvocation({
+      cwd: process.cwd(),
+      integration,
+      read: readConfig,
+      credentials: new KeychainCredentialReader()
+    });
     const publicResult = resolved.public as {
       integration: string;
       projectId: string;
@@ -255,7 +292,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     });
     const { bridge } = await startStdioBridge({
       client,
-      integration: publicResult.integration as "codex" | "claude-code"
+      integration: publicResult.integration as ConfigurableIntegration
     });
     const shutdown = async () => {
       try {

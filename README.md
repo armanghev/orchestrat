@@ -4,7 +4,7 @@ orchestrat is a macOS-first coordination plane for humans and autonomous coding
 agents. It provides shared tasks, exclusive ownership, project knowledge, and
 activity around agent work; it is not an agent runtime.
 
-The private-alpha goal is to connect Codex and Claude Code to the same project
+The private-alpha goal is to connect supported coding agents to the same project
 through a local Orchestrat CLI, let exactly one agent claim shared work, and make
 that coordination visible in the macOS app.
 

@@ -6,9 +6,14 @@ test("detects configurable harnesses and keeps Pi out of setup", async () => {
   const found = await detectHarnesses(async (command) =>
     ["codex", "pi"].includes(command)
   );
-  assert.deepEqual(found.map((item) => item.id), ["codex", "pi"]);
   assert.deepEqual(
-    await detectIntegrations(async (command) => ["codex", "pi"].includes(command)),
+    found.map((item) => item.id),
+    ["codex", "pi"]
+  );
+  assert.deepEqual(
+    await detectIntegrations(async (command) =>
+      ["codex", "pi"].includes(command)
+    ),
     ["codex"]
   );
 });
@@ -19,5 +24,21 @@ test("Cursor uses cursor-agent then agent fallback", async () => {
     commands.push(command);
     return command === "agent";
   });
-  assert.deepEqual(commands.slice(0, 4), ["codex", "claude", "cursor-agent", "agent"]);
+  assert.deepEqual(commands.slice(0, 4), [
+    "codex",
+    "claude",
+    "cursor-agent",
+    "agent"
+  ]);
+});
+
+test("detects macOS harness applications without a CLI launcher", async () => {
+  const found = await detectHarnesses(
+    async () => false,
+    async (application) => application === "Cursor.app"
+  );
+  assert.deepEqual(
+    found.map((item) => item.id),
+    ["cursor"]
+  );
 });

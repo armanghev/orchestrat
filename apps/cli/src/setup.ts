@@ -1,9 +1,23 @@
 import { basename, dirname, join, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
+import { homedir } from "node:os";
 import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
+const commandAvailable = async (command: string) => {
+  try {
+    await execFileAsync(command, ["--version"], {
+      timeout: 1500,
+      maxBuffer: 1024,
+      windowsHide: true
+    });
+    return true;
+  } catch {
+    return false;
+  }
+};
 import {
+  access,
   lstat,
   readFile,
   copyFile,
@@ -16,10 +30,18 @@ import {
   rm,
   writeFile
 } from "node:fs/promises";
-import {
-  atomicWrite,
-  readOptional
-} from "./safe-files.js";
+const applicationAvailable = async (name: string) => {
+  for (const directory of ["/Applications", join(homedir(), "Applications")])
+    try {
+      await access(join(directory, name));
+      return true;
+    } catch {
+      // Try the next standard macOS application directory.
+    }
+  return false;
+};
+const noApplication = async () => false;
+import { atomicWrite, readOptional } from "./safe-files.js";
 import type { CredentialStore } from "./keychain.js";
 import {
   readConfig,
@@ -43,33 +65,26 @@ export type SetupTransport = {
   api: string;
 };
 export async function detectIntegrations(
-  probe: (command: string) => Promise<boolean> = async (command) => {
-    try {
-      await execFileAsync(command, ["--version"]);
-      return true;
-    } catch {
-      return false;
-    }
-  }
+  probe: (command: string) => Promise<boolean> = commandAvailable,
+  probeApplication: (name: string) => Promise<boolean> = probe ===
+  commandAvailable
+    ? applicationAvailable
+    : noApplication
 ) {
-  const found = (await detectHarnesses(probe))
+  const found = (await detectHarnesses(probe, probeApplication))
     .filter((item) => item.configurable)
     .map((item) => item.id)
     .filter(isConfigurableIntegration);
-  if (!found.length)
-    throw new Error("No supported agent integrations found");
+  if (!found.length) throw new Error("No supported agent integrations found");
   return found;
 }
 
 export async function detectHarnesses(
-  probe: (command: string) => Promise<boolean> = async (command) => {
-    try {
-      await execFileAsync(command, ["--version"]);
-      return true;
-    } catch {
-      return false;
-    }
-  }
+  probe: (command: string) => Promise<boolean> = commandAvailable,
+  probeApplication: (name: string) => Promise<boolean> = probe ===
+  commandAvailable
+    ? applicationAvailable
+    : noApplication
 ): Promise<(HarnessRecord & { detected: boolean })[]> {
   const detected: (HarnessRecord & { detected: boolean })[] = [];
   for (const item of HARNESSES) {
@@ -81,6 +96,13 @@ export async function detectHarnesses(
         break;
       }
     }
+    if (!available)
+      for (const application of item.applications ?? []) {
+        if (await probeApplication(application)) {
+          available = true;
+          break;
+        }
+      }
     if (available) detected.push({ ...item, detected: true });
   }
   return detected;

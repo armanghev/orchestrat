@@ -27,7 +27,11 @@ test("selects all harnesses by default and maps selected IDs", async () => {
       cancel: () => undefined,
       outro: () => undefined,
       intro: () => undefined,
-      log: { info: () => undefined, success: () => undefined, warn: () => undefined },
+      log: {
+        info: () => undefined,
+        success: () => undefined,
+        warn: () => undefined
+      },
       note: () => undefined,
       spinner: () => ({ start: () => undefined, stop: () => undefined })
     }
@@ -48,7 +52,11 @@ test("cancellation is distinct and does not select or mutate", async () => {
       },
       outro: () => undefined,
       intro: () => undefined,
-      log: { info: () => undefined, success: () => undefined, warn: () => undefined },
+      log: {
+        info: () => undefined,
+        success: () => undefined,
+        warn: () => undefined
+      },
       note: () => undefined,
       spinner: () => ({ start: () => undefined, stop: () => undefined })
     }
@@ -63,16 +71,26 @@ test("non-TTY selects without prompting and emits stable JSON", async () => {
     values: [...harnesses]
   });
   const output: string[] = [];
-  renderResult("doctor", { checks: { config: { ok: true, detail: "valid" } } }, {
-    interactive: false,
-    write: (text) => output.push(text)
-  });
-  assert.equal(output[0], '{"checks":{"config":{"ok":true,"detail":"valid"}}}\n');
+  renderResult(
+    "doctor",
+    { checks: { config: { ok: true, detail: "valid" } } },
+    {
+      interactive: false,
+      write: (text) => output.push(text)
+    }
+  );
+  assert.equal(
+    output[0],
+    '{"checks":{"config":{"ok":true,"detail":"valid"}}}\n'
+  );
 });
 
 test("interactive doctor output contains only check details", () => {
   const output: string[] = [];
-  renderDoctor({ checks: { credential: { ok: true, detail: "present" } } }, (text) => output.push(text));
+  renderDoctor(
+    { checks: { credential: { ok: true, detail: "present" } } },
+    (text) => output.push(text)
+  );
   assert.match(output.join(""), /credential: present/);
   assert.doesNotMatch(output.join(""), /token|secret|orch_agent_/i);
 });
@@ -80,28 +98,53 @@ test("interactive doctor output contains only check details", () => {
 test("detected rendering separates configurable and unsupported agents", () => {
   const calls: string[] = [];
   renderDetectedAgents(
-    [{ id: "codex", label: "Codex", configurable: true }, { id: "cursor", label: "Cursor", configurable: false, unsupportedReason: "not installed" }],
+    [
+      { id: "codex", label: "Codex", configurable: true },
+      {
+        id: "cursor",
+        label: "Cursor",
+        configurable: false,
+        unsupportedReason: "not installed"
+      }
+    ],
     {
       interactive: true,
       write: () => undefined,
       components: {
-        multiselect: async () => [], cancel: () => undefined, outro: () => undefined,
+        multiselect: async () => [],
+        cancel: () => undefined,
+        outro: () => undefined,
         intro: (message) => calls.push(`intro:${message}`),
-        log: { info: (message) => calls.push(`info:${message}`), success: () => undefined, warn: () => undefined },
+        log: {
+          info: (message) => calls.push(`info:${message}`),
+          success: () => undefined,
+          warn: () => undefined
+        },
         note: (message, title) => calls.push(`note:${title}:${message}`),
         spinner: () => ({ start: () => undefined, stop: () => undefined })
       }
     }
   );
-  assert.deepEqual(calls, ["intro:Welcome to Orchestrat", "info:Detected agents", "note:codex:Codex — configurable", "note:cursor:Cursor — unsupported: not installed"]);
+  assert.deepEqual(calls, [
+    "intro:Welcome to Orchestrat",
+    "info:Detected agents",
+    "note:codex:Codex — configurable",
+    "note:cursor:Cursor — unsupported: not installed"
+  ]);
 });
 
 test("setup result reports MCP, hooks support, and connected count", () => {
   const output: string[] = [];
-  renderSetupResult({
-    integrations: { codex: { agentId: "private" } },
-    harnesses: [{ id: "codex", mcpConfigured: true, hooksConfigured: true }, { id: "cursor", hooksSupported: false }]
-  }, (text) => output.push(text));
+  renderSetupResult(
+    {
+      integrations: { codex: { agentId: "private" } },
+      harnesses: [
+        { id: "codex", mcpConfigured: true, hooksConfigured: true },
+        { id: "cursor", hooksSupported: false }
+      ]
+    },
+    (text) => output.push(text)
+  );
   const rendered = output.join("");
   assert.match(rendered, /MCP configured/);
   assert.match(rendered, /Hooks: unavailable\/unsupported/);
@@ -115,7 +158,24 @@ test("setup progress runs and returns the operation result", async () => {
 });
 
 test("TTY detection requires both streams and excludes CI", () => {
-  assert.equal(isInteractive({ stdin: { isTTY: true }, stdout: { isTTY: true }, env: {} }), true);
-  assert.equal(isInteractive({ stdin: { isTTY: true }, stdout: { isTTY: false }, env: {} }), false);
-  assert.equal(isInteractive({ stdin: { isTTY: true }, stdout: { isTTY: true }, env: { CI: "1" } }), false);
+  assert.equal(
+    isInteractive({ stdin: { isTTY: true }, stdout: { isTTY: true }, env: {} }),
+    true
+  );
+  assert.equal(
+    isInteractive({
+      stdin: { isTTY: true },
+      stdout: { isTTY: false },
+      env: {}
+    }),
+    false
+  );
+  assert.equal(
+    isInteractive({
+      stdin: { isTTY: true },
+      stdout: { isTTY: true },
+      env: { CI: "1" }
+    }),
+    false
+  );
 });

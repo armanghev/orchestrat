@@ -287,13 +287,15 @@ test("runHook dispatches Cursor and Antigravity hooks using workspace cwd fallba
     });
     assert.equal((payloads[0] as { event: string }).event, "session.started");
     assert.equal((payloads[1] as { event: string }).event, "session.started");
-    await assert.rejects(() =>
-      runHook({
-        ...common,
-        integration: "opencode",
-        payload: {}
-      })
-    , /OpenCode does not support hooks/);
+    await assert.rejects(
+      () =>
+        runHook({
+          ...common,
+          integration: "opencode",
+          payload: {}
+        }),
+      /OpenCode does not support hooks/
+    );
   } finally {
     await rm(home, { recursive: true, force: true });
   }

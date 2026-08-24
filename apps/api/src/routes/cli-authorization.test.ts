@@ -263,9 +263,17 @@ test("CLI setup enforces token and project scope and issues distinct agent crede
       headers: { authorization: `Bearer ${token}` },
       payload: { project_id: project.id, integration: "claude-code" }
     });
+    const cursor = await app.inject({
+      method: "POST",
+      url: "/api/v1/cli/setup",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { project_id: project.id, integration: "cursor" }
+    });
     assert.equal(codex.statusCode, 200);
     assert.equal(claude.statusCode, 200);
+    assert.equal(cursor.statusCode, 200);
     assert.notEqual(codex.json().agent.id, claude.json().agent.id);
+    assert.notEqual(cursor.json().agent.id, claude.json().agent.id);
     assert.match(codex.json().credential.token, /^orch_agent_/);
     assert.match(claude.json().credential.token, /^orch_agent_/);
     assert.notEqual(
@@ -273,7 +281,7 @@ test("CLI setup enforces token and project scope and issues distinct agent crede
       claude.json().credential.token
     );
     assert.equal((await db.query.cliCredentials.findMany()).length, 1);
-    assert.equal((await db.query.agentCredentials.findMany()).length, 2);
+    assert.equal((await db.query.agentCredentials.findMany()).length, 3);
     await db.update(cliCredentials).set({ revokedAt: new Date() });
     const revokedProject = await app.inject({
       method: "GET",
