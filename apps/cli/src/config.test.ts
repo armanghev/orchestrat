@@ -81,9 +81,13 @@ test("built CLI --version matches package metadata", async () => {
 test("built CLI runs when invoked through a symlink", async () => {
   const root = mkdtempSync(join(tmpdir(), "orchestrat-cli-link-"));
   const link = join(root, "orchestrat");
+  const { stdout: expected } = await execFileAsync(process.execPath, [
+    new URL("./main.js", import.meta.url).pathname,
+    "--version"
+  ]);
   symlinkSync(new URL("./main.js", import.meta.url).pathname, link);
   const { stdout } = await execFileAsync(process.execPath, [link, "--version"]);
-  assert.equal(stdout.trim(), "0.1.0");
+  assert.equal(stdout, expected);
   rmSync(root, { recursive: true, force: true });
 });
 
