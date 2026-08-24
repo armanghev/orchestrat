@@ -25,8 +25,11 @@
   "devDependencies": {
     "@orchestrat/mcp": "workspace:*",
     "@orchestrat/sdk": "workspace:*",
-    "esbuild": "^0.28.2",
     "@types/node": "^24.3.0",
+    "esbuild": "^0.28.2",
     "typescript": "^5.9.2"
+  },
+  "dependencies": {
+    "@clack/prompts": "^1.7.0"
   }
 }
