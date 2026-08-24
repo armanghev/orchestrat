@@ -1,20 +1,16 @@
 import { AgentApiClient } from "@orchestrat/sdk";
 import {
   atomicWrite,
-  mergeHooks,
-  mergeJson,
-  mergeToml,
   readOptional,
-  removeHooks,
-  removeJson,
-  removeToml
 } from "./safe-files.js";
 import {
   configPath,
   findProject,
+  INTEGRATIONS,
   readConfig,
   type Integration
 } from "./config.js";
+import { harnessConfigPlan } from "./harness-config.js";
 import type { CredentialStore } from "./keychain.js";
 import { inspectLauncher } from "./setup.js";
 import { access, lstat, rm } from "node:fs/promises";
@@ -142,28 +138,18 @@ export async function runDoctor(input: {
   }
   if (project && input.sourceCommand) {
     const command = join(input.home, ".local", "bin", "orchestrat");
-    for (const integration of Object.keys(
-      project.integrations
-    ) as Integration[]) {
-      const mcpPath =
-        integration === "codex"
-          ? join(input.home, ".codex", "config.toml")
-          : join(input.home, ".claude.json");
-      const hookPath =
-        integration === "codex"
-          ? join(input.home, ".codex", "hooks.json")
-          : join(input.home, ".claude", "settings.json");
+    for (const integration of Object.keys(project.integrations) as Integration[]) {
       try {
-        const mcp = await readOptional(mcpPath);
-        const hooks = await readOptional(hookPath);
-        const mergedMcp =
-          integration === "codex"
-            ? mergeToml(mcp, integration, command)
-            : mergeJson(mcp, integration, command);
-        const mergedHooks = mergeHooks(hooks, integration, command);
+        const plan = harnessConfigPlan(input.home, integration, command);
+        let current = true;
+        for (const item of [plan.mcp, plan.hooks]) {
+          if (!item) continue;
+          const source = await readOptional(item.path);
+          current = current && source === item.merge(source);
+        }
         checks[`config.${integration}`] = redacted(
-          mcp === mergedMcp && hooks === mergedHooks,
-          mcp === mergedMcp && hooks === mergedHooks
+          current,
+          current
             ? "present"
             : "missing or outdated"
         );
@@ -230,7 +216,7 @@ export async function disconnectLocal(input: {
   const project = findProject(config, input.cwd);
   const selected =
     input.integration === "all"
-      ? (["codex", "claude-code"] as const)
+      ? INTEGRATIONS
       : [input.integration];
   const mapped = selected.filter(
     (integration) => project?.integrations[integration]
@@ -243,39 +229,18 @@ export async function disconnectLocal(input: {
       ([cwd, value]) => cwd !== project.cwd && Boolean(value.integrations[name])
     );
     if (otherProjectUses) continue;
-    const mcpPath =
-      name === "codex"
-        ? join(input.home, ".codex", "config.toml")
-        : join(input.home, ".claude.json");
-    const hookPath =
-      name === "codex"
-        ? join(input.home, ".codex", "hooks.json")
-        : join(input.home, ".claude", "settings.json");
-    const mcp = await readOptional(mcpPath);
-    const hooks = await readOptional(hookPath);
-    const nextMcp =
-      name === "codex"
-        ? removeToml(mcp, name, command)
-        : removeJson(mcp, name, command);
-    const nextHooks = removeHooks(hooks, name, command);
-    if (nextMcp !== mcp)
-      writes.push({
-        path: mcpPath,
-        entries: [
-          name === "codex" ? "mcp_servers.orchestrat" : "mcpServers.orchestrat"
-        ],
-        content: nextMcp ?? ""
-      });
-    if (nextHooks !== hooks)
-      writes.push({
-        path: hookPath,
-        entries: [
-          "SessionStart",
-          "SessionEnd",
-          ...(name === "claude-code" ? ["StopFailure"] : [])
-        ],
-        content: nextHooks ?? ""
-      });
+    const plan = harnessConfigPlan(input.home, name, command);
+    for (const item of [plan.mcp, plan.hooks]) {
+      if (!item) continue;
+      const source = await readOptional(item.path);
+      const next = item.remove(source);
+      if (next !== source)
+        writes.push({
+          path: item.path,
+          entries: item.entries,
+          content: next ?? ""
+        });
+    }
   }
   const nextConfig = structuredClone(config);
   const nextProject = nextConfig.projects[project.cwd]!;

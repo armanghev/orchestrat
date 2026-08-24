@@ -22,10 +22,10 @@ test("new harness plans use native paths and are idempotent", () => {
 test("new harness plans reject managed conflicts", () => {
   const cursor = harnessConfigPlan("/home/test", "cursor", command);
   assert.ok(cursor.mcp);
-  assert.throws(() => cursor.mcp.merge(JSON.stringify({ mcpServers: { orchestrat: { command: "bad" } } })));
+  assert.throws(() => cursor.mcp!.merge(JSON.stringify({ mcpServers: { orchestrat: { command: "bad" } } })));
   const antigravity = harnessConfigPlan("/home/test", "antigravity", command);
   assert.ok(antigravity.hooks);
-  assert.throws(() => antigravity.hooks.merge(JSON.stringify({ orchestrat: { Stop: [] } })));
+  assert.throws(() => antigravity.hooks!.merge(JSON.stringify({ orchestrat: { Stop: [] } })));
 });
 
 test("OpenCode intentionally has no hook plan", () => {
