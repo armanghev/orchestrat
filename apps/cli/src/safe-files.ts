@@ -8,6 +8,7 @@ import {
   rm
 } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import type { ConfigurableIntegration } from "./harnesses.js";
 
 export async function readOptional(path: string) {
   try {
@@ -228,4 +229,105 @@ export function removeHooks(
     if (!(hooks[event] as unknown[]).length) delete hooks[event];
   }
   return removed ? `${JSON.stringify(root, null, 2)}\n` : text;
+}
+
+const commandArgs = (command: string, integration: string) => [
+  command,
+  "mcp",
+  "--integration",
+  integration
+];
+const jsonObject = (text: string | undefined, message: string) => {
+  const value = text === undefined ? {} : JSON.parse(text);
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new Error(message);
+  return value as Record<string, any>;
+};
+const managedCommand = (command: string, integration: string, event?: string) =>
+  `'${command.replaceAll("'", "'\\''")}' hook ${integration}${event ? ` --event ${event}` : ""}`;
+
+export function mergeHarnessMcp(
+  text: string | undefined,
+  integration: ConfigurableIntegration,
+  command: string
+) {
+  if (integration === "codex") return mergeToml(text, integration, command);
+  if (integration === "claude-code") return mergeJson(text, integration, command);
+  const root = jsonObject(text, "Harness configuration must be a JSON object");
+  if (integration === "opencode") {
+    const mcp = root.mcp && typeof root.mcp === "object" && !Array.isArray(root.mcp) ? root.mcp : {};
+    const servers = mcp.servers && typeof mcp.servers === "object" && !Array.isArray(mcp.servers) ? mcp.servers : {};
+    const expected = { type: "local", command: commandArgs(command, integration) };
+    if (servers.orchestrat !== undefined && JSON.stringify(servers.orchestrat) !== JSON.stringify(expected))
+      throw new Error("Existing Orchestrat MCP entry conflicts");
+    servers.orchestrat = expected;
+    root.mcp = { ...mcp, servers };
+  } else {
+    const mcp = root.mcpServers && typeof root.mcpServers === "object" && !Array.isArray(root.mcpServers) ? root.mcpServers : {};
+    const expected = { command, args: ["mcp", "--integration", integration] };
+    if (mcp.orchestrat !== undefined && JSON.stringify(mcp.orchestrat) !== JSON.stringify(expected))
+      throw new Error("Existing Orchestrat MCP entry conflicts");
+    mcp.orchestrat = expected;
+    root.mcpServers = mcp;
+  }
+  return `${JSON.stringify(root, null, 2)}\n`;
+}
+
+export function removeHarnessMcp(text: string | undefined, integration: ConfigurableIntegration, command: string) {
+  if (text === undefined) return text;
+  if (integration === "codex") return removeToml(text, integration, command);
+  if (integration === "claude-code") return removeJson(text, integration, command);
+  const root = jsonObject(text, "Harness configuration must be a JSON object");
+  const parent = integration === "opencode" ? root.mcp?.servers : root.mcpServers;
+  const expected = integration === "opencode"
+    ? { type: "local", command: commandArgs(command, integration) }
+    : { command, args: ["mcp", "--integration", integration] };
+  if (parent?.orchestrat === undefined) return text;
+  if (JSON.stringify(parent.orchestrat) !== JSON.stringify(expected)) throw new Error("Existing Orchestrat MCP entry conflicts");
+  delete parent.orchestrat;
+  return `${JSON.stringify(root, null, 2)}\n`;
+}
+
+export function mergeHarnessHooks(text: string | undefined, integration: ConfigurableIntegration, command: string) {
+  if (integration === "codex" || integration === "claude-code") return mergeHooks(text, integration, command);
+  const root = jsonObject(text, "Hook configuration must be a JSON object");
+  if (integration === "cursor") {
+    const hooks = root.hooks && typeof root.hooks === "object" && !Array.isArray(root.hooks) ? root.hooks : {};
+    for (const event of ["sessionStart", "sessionEnd", "postToolUseFailure"]) {
+      const expected = { command: managedCommand(command, integration, event) };
+      if (hooks[event] !== undefined && JSON.stringify(hooks[event]) !== JSON.stringify([expected])) throw new Error(`Existing Orchestrat ${event} hook conflicts`);
+      hooks[event] = [expected];
+    }
+    root.version = 1;
+    root.hooks = hooks;
+  } else {
+    const existing = root.orchestrat;
+    const expected = { PreInvocation: [{ command: managedCommand(command, integration, "PreInvocation") }], Stop: [{ command: managedCommand(command, integration, "Stop") }] };
+    if (existing !== undefined && JSON.stringify(existing) !== JSON.stringify(expected)) throw new Error("Existing Orchestrat hook entry conflicts");
+    root.orchestrat = expected;
+  }
+  return `${JSON.stringify(root, null, 2)}\n`;
+}
+
+export function removeHarnessHooks(text: string | undefined, integration: ConfigurableIntegration, command: string) {
+  if (text === undefined) return text;
+  if (integration === "codex" || integration === "claude-code") return removeHooks(text, integration, command);
+  const root = jsonObject(text, "Hook configuration must be a JSON object");
+  if (integration === "cursor") {
+    const hooks = root.hooks;
+    if (!hooks) return text;
+    for (const event of ["sessionStart", "sessionEnd", "postToolUseFailure"]) {
+      const expected = [{ command: managedCommand(command, integration, event) }];
+      if (hooks[event] === undefined) continue;
+      if (JSON.stringify(hooks[event]) !== JSON.stringify(expected)) throw new Error(`Existing Orchestrat ${event} hook conflicts`);
+      delete hooks[event];
+    }
+    if (!Object.keys(hooks).length) delete root.hooks;
+  } else {
+    const expected = { PreInvocation: [{ command: managedCommand(command, integration, "PreInvocation") }], Stop: [{ command: managedCommand(command, integration, "Stop") }] };
+    if (root.orchestrat === undefined) return text;
+    if (JSON.stringify(root.orchestrat) !== JSON.stringify(expected)) throw new Error("Existing Orchestrat hook entry conflicts");
+    delete root.orchestrat;
+  }
+  return `${JSON.stringify(root, null, 2)}\n`;
 }

@@ -18,9 +18,6 @@ import {
 } from "node:fs/promises";
 import {
   atomicWrite,
-  mergeJson,
-  mergeHooks,
-  mergeToml,
   readOptional
 } from "./safe-files.js";
 import type { CredentialStore } from "./keychain.js";
@@ -37,6 +34,7 @@ import {
   isConfigurableIntegration,
   type HarnessRecord
 } from "./harnesses.js";
+import { harnessConfigPlan, previewHarnessConfig } from "./harness-config.js";
 
 export type SetupTransport = {
   fetch: typeof globalThis.fetch;
@@ -261,55 +259,22 @@ export async function authorizeCli(
 }
 
 export type SetupPreview = {
-  integration?: "codex" | "claude-code";
+  integration?: Integration;
   path: string;
   changed: boolean;
   entries?: string[];
+  capability?: "mcp" | "hooks";
 };
 export async function previewSetup(
   home: string,
-  integrations: ("codex" | "claude-code")[],
+  integrations: Integration[],
   command: string
 ) {
   if (!command.startsWith("/"))
     throw new Error("Persistent CLI command must be absolute");
   const result: SetupPreview[] = [];
-  for (const integration of integrations) {
-    const path =
-      integration === "codex"
-        ? join(home, ".codex", "config.toml")
-        : join(home, ".claude.json");
-    const source = await readOptional(path);
-    const next =
-      integration === "codex"
-        ? mergeToml(source, integration, command)
-        : mergeJson(source, integration, command);
-    result.push({
-      integration,
-      path,
-      changed: source !== next,
-      entries: [
-        integration === "codex"
-          ? "mcp_servers.orchestrat"
-          : "mcpServers.orchestrat"
-      ]
-    });
-    const hookPath =
-      integration === "codex"
-        ? join(home, ".codex", "hooks.json")
-        : join(home, ".claude", "settings.json");
-    const hookSource = await readOptional(hookPath);
-    const hookNext = mergeHooks(hookSource, integration, command);
-    result.push({
-      integration,
-      path: hookPath,
-      changed: hookSource !== hookNext,
-      entries:
-        integration === "codex"
-          ? ["SessionStart", "SessionEnd"]
-          : ["SessionStart", "SessionEnd", "StopFailure"]
-    });
-  }
+  for (const integration of integrations)
+    result.push(...(await previewHarnessConfig(home, integration, command)));
   return result;
 }
 
@@ -403,29 +368,20 @@ export async function runSetup(options: SetupRunOptions) {
     configPath(options.home),
     `${JSON.stringify(config, null, 2)}\n`
   );
-  for (const preview of configPreviews) {
-    const source = await readOptional(preview.path);
-    const next =
-      preview.path.endsWith("hooks.json") ||
-      preview.path.endsWith("settings.json")
-        ? mergeHooks(source, preview.integration!, command)
-        : preview.integration === "codex"
-          ? mergeToml(source, "codex", command)
-          : mergeJson(source, "claude-code", command);
-    await atomicWrite(preview.path, next);
+  for (const integration of options.integrations) {
+    const plan = harnessConfigPlan(options.home, integration, command);
+    for (const item of [plan.mcp, plan.hooks]) {
+      if (!item) continue;
+      await atomicWrite(item.path, item.merge(await readOptional(item.path)));
+    }
   }
   if ((await inspectLauncher(options.home, sourceCommand)).changed)
     throw new Error("Persistent CLI launcher verification failed");
-  for (const preview of configPreviews) {
-    const source = await readOptional(preview.path);
-    if (
-      preview.path.endsWith("hooks.json") ||
-      preview.path.endsWith("settings.json")
-    )
-      mergeHooks(source, preview.integration!, command);
-    else if (preview.integration === "codex")
-      mergeToml(source, "codex", command);
-    else mergeJson(source, "claude-code", command);
+  for (const integration of options.integrations) {
+    const plan = harnessConfigPlan(options.home, integration, command);
+    for (const item of [plan.mcp, plan.hooks]) {
+      if (item) item.merge(await readOptional(item.path));
+    }
   }
   const localBin = join(options.home, ".local", "bin");
   const pathEntries = (options.pathEnv ?? process.env.PATH ?? "").split(":");
