@@ -11,3 +11,4 @@ local/
 .DS_Store*
 PRODUCT.md
 DESIGN.md
+deploy/private-alpha.env

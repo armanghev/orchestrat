@@ -17,6 +17,7 @@ import { Route as AuthenticatedProfileRouteImport } from './routes/_authenticate
 import { Route as AuthenticatedSetupRouteImport } from './routes/_authenticated.setup'
 import { Route as AuthCallbackRouteImport } from './routes/auth.callback'
 import { Route as AuthDesktopRouteImport } from './routes/auth.desktop'
+import { Route as CliAuthorizeRouteImport } from './routes/cli.authorize'
 import { Route as AuthenticatedProjectsProjectIdRouteImport } from './routes/_authenticated.projects.$projectId'
 import { Route as AuthDesktopCallbackRouteImport } from './routes/auth.desktop_.callback'
 import { Route as AuthenticatedOrganizationsOrganizationIdSettingsRouteImport } from './routes/_authenticated.organizations.$organizationId.settings'
@@ -68,6 +69,11 @@ const AuthCallbackRoute = AuthCallbackRouteImport.update({
 const AuthDesktopRoute = AuthDesktopRouteImport.update({
   id: '/auth/desktop',
   path: '/auth/desktop',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CliAuthorizeRoute = CliAuthorizeRouteImport.update({
+  id: '/cli/authorize',
+  path: '/cli/authorize',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthenticatedProjectsProjectIdRoute =
@@ -150,6 +156,7 @@ export interface FileRoutesByFullPath {
   '/setup': typeof AuthenticatedSetupRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/desktop': typeof AuthDesktopRoute
+  '/cli/authorize': typeof CliAuthorizeRoute
   '/projects/$projectId': typeof AuthenticatedProjectsProjectIdRouteWithChildren
   '/auth/desktop/callback': typeof AuthDesktopCallbackRoute
   '/organizations/$organizationId/settings': typeof AuthenticatedOrganizationsOrganizationIdSettingsRoute
@@ -171,6 +178,7 @@ export interface FileRoutesByTo {
   '/setup': typeof AuthenticatedSetupRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/desktop': typeof AuthDesktopRoute
+  '/cli/authorize': typeof CliAuthorizeRoute
   '/auth/desktop/callback': typeof AuthDesktopCallbackRoute
   '/organizations/$organizationId/settings': typeof AuthenticatedOrganizationsOrganizationIdSettingsRoute
   '/projects/$projectId/activity': typeof AuthenticatedProjectsProjectIdActivityRoute
@@ -193,6 +201,7 @@ export interface FileRoutesById {
   '/_authenticated/setup': typeof AuthenticatedSetupRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/desktop': typeof AuthDesktopRoute
+  '/cli/authorize': typeof CliAuthorizeRoute
   '/_authenticated/projects/$projectId': typeof AuthenticatedProjectsProjectIdRouteWithChildren
   '/auth/desktop_/callback': typeof AuthDesktopCallbackRoute
   '/_authenticated/organizations/$organizationId/settings': typeof AuthenticatedOrganizationsOrganizationIdSettingsRoute
@@ -216,6 +225,7 @@ export interface FileRouteTypes {
     | '/setup'
     | '/auth/callback'
     | '/auth/desktop'
+    | '/cli/authorize'
     | '/projects/$projectId'
     | '/auth/desktop/callback'
     | '/organizations/$organizationId/settings'
@@ -237,6 +247,7 @@ export interface FileRouteTypes {
     | '/setup'
     | '/auth/callback'
     | '/auth/desktop'
+    | '/cli/authorize'
     | '/auth/desktop/callback'
     | '/organizations/$organizationId/settings'
     | '/projects/$projectId/activity'
@@ -258,6 +269,7 @@ export interface FileRouteTypes {
     | '/_authenticated/setup'
     | '/auth/callback'
     | '/auth/desktop'
+    | '/cli/authorize'
     | '/_authenticated/projects/$projectId'
     | '/auth/desktop_/callback'
     | '/_authenticated/organizations/$organizationId/settings'
@@ -277,6 +289,7 @@ export interface RootRouteChildren {
   AuthenticatedRoute: typeof AuthenticatedRouteWithChildren
   AuthCallbackRoute: typeof AuthCallbackRoute
   AuthDesktopRoute: typeof AuthDesktopRoute
+  CliAuthorizeRoute: typeof CliAuthorizeRoute
   AuthDesktopCallbackRoute: typeof AuthDesktopCallbackRoute
 }
 
@@ -336,6 +349,13 @@ declare module '@tanstack/react-router' {
       path: '/auth/desktop'
       fullPath: '/auth/desktop'
       preLoaderRoute: typeof AuthDesktopRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/cli/authorize': {
+      id: '/cli/authorize'
+      path: '/cli/authorize'
+      fullPath: '/cli/authorize'
+      preLoaderRoute: typeof CliAuthorizeRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated/projects/$projectId': {
@@ -493,6 +513,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthenticatedRoute: AuthenticatedRouteWithChildren,
   AuthCallbackRoute: AuthCallbackRoute,
   AuthDesktopRoute: AuthDesktopRoute,
+  CliAuthorizeRoute: CliAuthorizeRoute,
   AuthDesktopCallbackRoute: AuthDesktopCallbackRoute,
 }
 export const routeTree = rootRouteImport

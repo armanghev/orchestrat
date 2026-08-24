@@ -26,14 +26,14 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' data: blob: https://avatars.githubusercontent.com; style-src 'self' 'unsafe-inline'; font-src 'self'; script-src 'self'; connect-src 'self' http://localhost:3001 https://api.orchestrat.dev; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'none'"
+      "csp": "default-src 'self'; img-src 'self' data: blob: https://avatars.githubusercontent.com; style-src 'self' 'unsafe-inline'; font-src 'self'; script-src 'self'; connect-src 'self' http://localhost:3001 https://api.orchestrat.dev wss://api.orchestrat.dev https://*.supabase.co wss://*.supabase.co; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'none'"
     }
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["app", "dmg"],
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/icon.icns"],
-    "macOS": { "minimumSystemVersion": "13.0" }
+    "macOS": { "minimumSystemVersion": "13.0", "hardenedRuntime": true }
   },
   "plugins": {
     "deep-link": {

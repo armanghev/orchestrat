@@ -5,10 +5,13 @@ import type { Database } from "@orchestrat/db";
 import { logger } from "@orchestrat/logger";
 import type { ApiErrorResponse, ErrorCode } from "@orchestrat/protocol";
 import multipart from "@fastify/multipart";
+import websocket from "@fastify/websocket";
 import Fastify from "fastify";
 import { healthRoutes } from "./routes/health.js";
 import { agentActionRoutes } from "./routes/agent-actions.js";
 import { agentManagementRoutes } from "./routes/agents.js";
+import { agentDocumentRoutes } from "./routes/agent-documents.js";
+import { documentRoutes } from "./routes/documents.js";
 import { v1Routes } from "./routes/v1.js";
 import { ApiError } from "./services/api-error.js";
 import { AgentService } from "./services/agent-service.js";
@@ -20,6 +23,23 @@ import {
   type AvatarStorageConfig
 } from "./services/profile-service.js";
 import { TaskService } from "./services/task-service.js";
+import { DocumentService } from "./services/document-service.js";
+import {
+  realtimeSocketRoutes,
+  realtimeTicketRoutes
+} from "./routes/realtime.js";
+import {
+  RealtimeRegistry,
+  RealtimeTicketStore,
+  withRealtimePublisher
+} from "./realtime/realtime.js";
+import { CliSetupService } from "./services/cli-setup-service.js";
+import { cliSetupRoutes } from "./routes/cli-setup.js";
+import { CliAuthorizationService } from "./services/cli-authorization-service.js";
+import {
+  cliAuthorizationHumanRoutes,
+  cliAuthorizationPublicRoutes
+} from "./routes/cli-authorization.js";
 
 type AppOptions = {
   allowedOrigins: string[];
@@ -51,12 +71,20 @@ export function buildApp(options: AppOptions) {
     genReqId: () => `req_${randomUUID()}`,
     logger: true
   });
-  const identities = new IdentityService(options.db);
-  const projects = new ProjectService(options.db);
-  const profiles = new ProfileService(options.db, options.avatarStorage);
-  const tasks = new TaskService(options.db);
-  const agents = new AgentService(options.db);
-  const claims = new TaskClaimService(options.db);
+  const realtimeTickets = new RealtimeTicketStore();
+  const realtimeRegistry = new RealtimeRegistry();
+  const db = withRealtimePublisher(options.db, (event) =>
+    realtimeRegistry.publish(event)
+  );
+  const identities = new IdentityService(db);
+  const projects = new ProjectService(db);
+  const profiles = new ProfileService(db, options.avatarStorage);
+  const tasks = new TaskService(db);
+  const agents = new AgentService(db);
+  const claims = new TaskClaimService(db);
+  const documents = new DocumentService(db);
+  const cliAuthorization = new CliAuthorizationService(db);
+  const cliSetup = new CliSetupService(db);
 
   app.register(cors, {
     origin: options.allowedOrigins,
@@ -65,6 +93,7 @@ export function buildApp(options: AppOptions) {
   app.register(multipart, {
     limits: { fileSize: 2 * 1024 * 1024, files: 1 }
   });
+  app.register(websocket, { options: { maxPayload: 64 * 1024 } });
   app.addHook("onRequest", (request, reply, done) => {
     reply.header("x-request-id", request.id);
     done();
@@ -139,6 +168,11 @@ export function buildApp(options: AppOptions) {
 
   app.register(healthRoutes);
   app.register(healthRoutes, { prefix: "/api/v1" });
+  app.register(cliAuthorizationPublicRoutes, {
+    prefix: "/api/v1",
+    authorization: cliAuthorization
+  });
+  app.register(cliSetupRoutes, { prefix: "/api/v1", setup: cliSetup });
   app.decorateRequest("agentPrincipal", null);
   app.register(
     async (api) => {
@@ -174,10 +208,23 @@ export function buildApp(options: AppOptions) {
         request.userId = await identities.resolveUserId(principal);
       });
       api.register(v1Routes, { projects, profiles, tasks });
+      api.register(realtimeTicketRoutes, {
+        projects,
+        tickets: realtimeTickets
+      });
+      api.register(documentRoutes, { documents });
       api.register(agentManagementRoutes, { agents });
+      api.register(cliAuthorizationHumanRoutes, {
+        authorization: cliAuthorization
+      });
     },
     { prefix: "/api/v1" }
   );
+  app.register(realtimeSocketRoutes, {
+    prefix: "/api/v1/realtime",
+    tickets: realtimeTickets,
+    registry: realtimeRegistry
+  });
   app.register(
     async (api) => {
       api.addHook("preHandler", async (request) => {
@@ -202,6 +249,7 @@ export function buildApp(options: AppOptions) {
         request.agentPrincipal = await agents.authenticate(match[1]);
       });
       api.register(agentActionRoutes, { agents, tasks, claims });
+      api.register(agentDocumentRoutes, { documents });
     },
     { prefix: "/api/v1/agent" }
   );

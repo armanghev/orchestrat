@@ -15,8 +15,7 @@ that coordination visible in the macOS app.
 - `apps/api` — Fastify API for `api.orchestrat.dev`
 - `packages/protocol` — shared Zod schemas, types, errors, and transport contracts
 - `packages/ui` — small shared React primitives
-- `packages/{sdk,db,mcp,auth,config,logger,testing}` — shared package boundaries;
-  MCP and SDK are currently placeholders
+- `packages/{sdk,db,mcp,auth,config,logger,testing}` — shared package boundaries
 - `docs/` — architecture, product, and API documentation
 
 ## Prerequisites
@@ -35,17 +34,28 @@ Implemented:
 - organization and project management
 - the human Tasks API, including comments, dependencies, idempotent creation,
   and optimistic concurrency
+- agent credentials, sessions, heartbeat, presence, and exclusive claim APIs,
+  plus the local MCP bridge
+- versioned Markdown documents and lifecycle event ingestion
+- private-alpha CLI setup, status, doctor, disconnect, hooks, durable managed
+  runtime packaging, and read-only desktop integration status
+- project-scoped realtime catch-up, dashboard synchronization, and selective
+  native notifications
+- private-alpha deployment manifests, Vercel app-root configuration, and
+  macOS app/DMG signing preparation
 - the shared web/Tauri dashboard shell
 
 Still required for the private alpha:
 
-- agent credentials, sessions, heartbeat, presence, and exclusive claim leases
-- persistent setup CLI and local stdio MCP bridge for Codex and Claude Code
-- Markdown documents with revision conflicts
-- durable activity events and project-scoped realtime delivery
-- real Tasks, Agents, Documents, Activity, and Overview dashboard data
-- integration setup/status, minimal hooks, native notifications, deployment,
-  and DMG acceptance
+- npm publication and clean-Mac CLI installation evidence
+- Vercel/API deployment, DNS, hosted database migration, and backup/recovery
+  evidence
+- signed/notarized DMG distribution and Gatekeeper evidence
+- real hosted auth, realtime, and two-agent acceptance evidence
+
+See the [private-alpha install and operations runbook](docs/private-alpha-runbook.md)
+and [clean-Mac acceptance checklist](docs/acceptance/clean-mac-two-agent-checklist.md)
+for the exact external gates and current NOT RUN boundaries.
 
 ## Install and run
 
@@ -125,12 +135,16 @@ pnpm format:check
 - ✅ Renderer receives only `AccessGrant` (`accessToken`, `expiresAtMs`) and does not persist refresh token/secret material.
 - ✅ Required native build config is documented in `.env.example` and documented runtime vars above.
 - ✅ Validation gates for missing/invalid desktop config, web callback safety, and web/native secret classification checks pass in automated suites.
-- ⚠️ Packaging check in this environment cannot complete macOS DMG signing/bundling; verify `pnpm --filter @orchestrat/dashboard build:desktop` in a full macOS runner.
+- ⚠️ A local unsigned app/DMG build is possible; Apple signing, notarization,
+  stapling, Gatekeeper assessment, and distribution remain unverified.
 
 Known external limitations:
 
-- JS install/build command gates are blocked here by missing network and missing binaries in `node_modules` (`turbo`, `vitest`, `playwright`, `tauri`).
-- `cargo test` transport-path tests that require local socket binding report permission failures under this sandbox, so only shared/native state-machine suites are fully reliable in this runner.
+- npm publication, Vercel/API deployment, DNS, hosted database migration,
+  Apple trust gates, and real clean-Mac acceptance require external systems and
+  human authorization; none is claimed by this checkout.
+- Local sandbox restrictions can block network-backed or loopback-dependent
+  tests; report those as environment limitations rather than alpha evidence.
 
 ## Migration acceptance notes
 
@@ -144,7 +158,7 @@ Known external limitations:
 
 ## Architecture
 
-The web and macOS apps share `apps/dashboard`. A persistent local CLI will host
+The web and macOS apps share `apps/dashboard`. A persistent local CLI hosts
 the generic stdio MCP bridge and lightweight hooks, storing separate agent
 credentials in macOS Keychain. API transports remain thin and delegate to
 application services. PostgreSQL is the durable source of truth, Drizzle owns

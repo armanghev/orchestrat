@@ -21,4 +21,9 @@ export const apiConfigSchema = z.object({
 export type ApiConfig = z.infer<typeof apiConfigSchema>;
 export const loadApiConfig = (
   env: NodeJS.ProcessEnv = process.env
-): ApiConfig => apiConfigSchema.parse(env);
+): ApiConfig =>
+  apiConfigSchema.parse({
+    ...env,
+    ORCHESTRAT_API_HOST: env.ORCHESTRAT_API_HOST ?? env.HOST,
+    ORCHESTRAT_API_PORT: env.ORCHESTRAT_API_PORT ?? env.PORT
+  });

@@ -1,0 +1,32 @@
+{
+  "name": "@orchestrat/cli",
+  "version": "0.1.0-alpha.0",
+  "type": "module",
+  "files": [
+    "dist/main.js",
+    "package.json"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "bin": {
+    "orchestrat": "dist/main.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && esbuild src/main.ts --bundle --platform=node --format=esm --outfile=dist/main.js",
+    "prepack": "pnpm build",
+    "lint": "eslint src",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test dist/*.test.js"
+  },
+  "devDependencies": {
+    "@orchestrat/mcp": "workspace:*",
+    "@orchestrat/sdk": "workspace:*",
+    "esbuild": "^0.28.2",
+    "@types/node": "^24.3.0",
+    "typescript": "^5.9.2"
+  }
+}

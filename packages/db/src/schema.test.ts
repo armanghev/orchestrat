@@ -3,10 +3,13 @@ import { readdir, readFile } from "node:fs/promises";
 import test from "node:test";
 import { getTableConfig } from "drizzle-orm/pg-core";
 import {
+  agentLifecycleEvents,
   agentCredentials,
   agentSessions,
   agents,
   apiIdempotencyKeys,
+  documentRevisions,
+  documents,
   projectEvents,
   projects,
   taskClaims,
@@ -15,6 +18,42 @@ import {
   tasks,
   users
 } from "./schema.js";
+
+test("agent lifecycle idempotency is project/agent scoped and hash-only", async () => {
+  const config = getTableConfig(agentLifecycleEvents);
+  assert.equal(agentLifecycleEvents.requestHash.notNull, true);
+  assert.equal(agentLifecycleEvents.eventId.notNull, false);
+  assert.equal(agentLifecycleEvents.sessionId.notNull, false);
+  assert.ok(
+    config.indexes.find(
+      (index) => index.config.name === "agent_lifecycle_events_scope_unique"
+    )
+  );
+  assert.deepEqual(
+    config.foreignKeys.map((foreignKey) => foreignKey.getName()).sort(),
+    [
+      "agent_lifecycle_events_agent_project_fk",
+      "agent_lifecycle_events_event_id_fk",
+      "agent_lifecycle_events_project_id_projects_id_fk",
+      "agent_lifecycle_events_session_project_fk"
+    ]
+  );
+  const sql = await readFile(
+    new URL("../drizzle/0008_agent_lifecycle_events.sql", import.meta.url),
+    "utf8"
+  );
+  assert.match(sql, /request_hash/);
+  assert.match(sql, /agent_lifecycle_events_scope_unique/);
+  assert.match(sql, /agent_lifecycle_events_event_id_fk/);
+  assert.doesNotMatch(sql, /"token"\s+text/);
+  const journal = JSON.parse(
+    await readFile(
+      new URL("../drizzle/meta/_journal.json", import.meta.url),
+      "utf8"
+    )
+  ) as { entries: { tag: string }[] };
+  assert.equal(journal.entries.at(-1)?.tag, "0008_agent_lifecycle_events");
+});
 
 test("users have provider-qualified identity and non-unique email indexes", () => {
   const config = getTableConfig(users);
@@ -231,4 +270,55 @@ test("coordination migration adds project-scoped claim keys without plaintext to
     ),
     /task_claims_one_active_per_task/
   );
+});
+
+test("documents enforce project paths, revisions, and coherent authors", () => {
+  assert.equal(documents.path.notNull, true);
+  assert.equal(documents.currentRevision.hasDefault, true);
+  assert.ok(
+    getTableConfig(documents).indexes.find(
+      (index) => index.config.name === "documents_project_path_unique"
+    )
+  );
+  assert.ok(
+    getTableConfig(documents).checks.find(
+      (check) => check.name === "documents_author_consistent"
+    )
+  );
+
+  const revisionConfig = getTableConfig(documentRevisions);
+  assert.equal(documentRevisions.contentMarkdown.notNull, true);
+  assert.ok(
+    revisionConfig.indexes.find(
+      (index) =>
+        index.config.name === "document_revisions_document_id_revision_unique"
+    )
+  );
+  assert.ok(
+    revisionConfig.foreignKeys.find(
+      (foreignKey) =>
+        foreignKey.getName() === "document_revisions_document_project_fk"
+    )
+  );
+  assert.ok(
+    revisionConfig.checks.find(
+      (check) => check.name === "document_revisions_author_consistent"
+    )
+  );
+});
+
+test("documents migration creates immutable Markdown revision storage", async () => {
+  const sql = await readFile(
+    new URL("../drizzle/0006_documents.sql", import.meta.url),
+    "utf8"
+  );
+  assert.match(sql, /CREATE TYPE "public"\."document_author_type"/);
+  assert.match(sql, /CREATE TABLE "documents"/);
+  assert.match(sql, /CREATE TABLE "document_revisions"/);
+  assert.match(sql, /"content_markdown" text NOT NULL/);
+  assert.match(sql, /documents_project_path_unique/);
+  assert.match(sql, /document_revisions_document_id_revision_unique/);
+  assert.match(sql, /document_revisions_document_project_fk/);
+  assert.match(sql, /documents_author_consistent/);
+  assert.match(sql, /document_revisions_author_consistent/);
 });

@@ -18,6 +18,8 @@ import {
 import { orderProjects } from "@/features/hierarchy/project-order";
 import { usePreferences } from "@/platform/preferences-provider";
 import { DashboardApiError } from "@/lib/api/client";
+import { ProjectRealtimeProvider } from "@/realtime/project-realtime";
+import { usePlatform } from "@/platform/provider";
 
 export const Route = createFileRoute("/_authenticated/projects/$projectId")({
   beforeLoad: async ({ context, params }) => {
@@ -199,6 +201,7 @@ function ProjectLayout() {
   const navigate = useNavigate();
   const router = useRouter();
   const { api } = router.options.context;
+  const platform = usePlatform();
   const profileQuery = useQuery({
     queryKey: ["profile"],
     queryFn: () => api.getProfile()
@@ -248,18 +251,25 @@ function ProjectLayout() {
     id = project.project.id
   ) => navigate({ to: `/projects/${id}/${destination}` as never });
   return (
-    <AppShell
-      catalog={catalog}
-      activeProjectId={project.project.id}
-      activeRoute={route}
-      navigateToProject={navigateToProject}
-      navigateToRoute={navigateToRoute}
-      openPreferences={() => navigate({ to: "/profile" as never })}
-      signOut={() => router.options.context.auth.signOut()}
-      profile={profileQuery.data}
-      retryCatalog={() => reloadHierarchy(router)}
+    <ProjectRealtimeProvider
+      api={router.options.context.api}
+      queryClient={router.options.context.queryClient}
+      projectId={project.project.id}
+      platform={platform}
     >
-      <Outlet />
-    </AppShell>
+      <AppShell
+        catalog={catalog}
+        activeProjectId={project.project.id}
+        activeRoute={route}
+        navigateToProject={navigateToProject}
+        navigateToRoute={navigateToRoute}
+        openPreferences={() => navigate({ to: "/profile" as never })}
+        signOut={() => router.options.context.auth.signOut()}
+        profile={profileQuery.data}
+        retryCatalog={() => reloadHierarchy(router)}
+      >
+        <Outlet />
+      </AppShell>
+    </ProjectRealtimeProvider>
   );
 }

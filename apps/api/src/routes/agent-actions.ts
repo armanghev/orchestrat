@@ -1,9 +1,11 @@
 import {
   agentSessionParamsSchema,
+  agentLifecycleHookRequestSchema,
   claimMutationRequestSchema,
   claimTaskRequestSchema,
   completeClaimRequestSchema,
   idParamsSchema,
+  idempotencyKeySchema,
   openAgentSessionRequestSchema,
   paginationQuerySchema,
   taskListQuerySchema
@@ -12,6 +14,7 @@ import type { FastifyInstance } from "fastify";
 import type { AgentService } from "../services/agent-service.js";
 import type { TaskClaimService } from "../services/task-claim-service.js";
 import type { TaskService } from "../services/task-service.js";
+import { ApiError } from "../services/api-error.js";
 
 const taskParamsSchema = idParamsSchema;
 
@@ -33,6 +36,20 @@ export async function agentActionRoutes(
         )
       )
   );
+  app.post("/hooks/lifecycle", async (request) => {
+    const key = request.headers["idempotency-key"];
+    if (typeof key !== "string")
+      throw new ApiError(
+        400,
+        "VALIDATION_ERROR",
+        "An Idempotency-Key header is required."
+      );
+    return options.agents.ingestLifecycle(
+      request.agentPrincipal!,
+      agentLifecycleHookRequestSchema.parse(request.body),
+      idempotencyKeySchema.parse(key)
+    );
+  });
   app.post("/sessions/:sessionId/heartbeat", (request) =>
     options.agents.heartbeat(
       request.agentPrincipal!,

@@ -33,6 +33,15 @@ export function createBrowserPlatform(): Platform {
     },
     async onAuthCallback() {
       return () => undefined;
+    },
+    async localIntegrationStatus() {
+      return {
+        supported: false,
+        cli_exists: false,
+        project_mapping: false,
+        integrations: {},
+        error: "Local integration status is unavailable in the browser."
+      };
     }
   };
 }

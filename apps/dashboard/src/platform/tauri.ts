@@ -1,4 +1,10 @@
-import type { Platform, Unsubscribe } from "./contract";
+import type {
+  LocalIntegrationStatus,
+  NativeNotification,
+  Platform,
+  Unsubscribe
+} from "./contract";
+import { invoke } from "@tauri-apps/api/core";
 import { preferencesSchema } from "./preferences";
 
 const preferencesKey = "preferences";
@@ -134,6 +140,20 @@ export function createTauriPlatform(): Platform {
         unlisten();
         throw error;
       }
+    },
+    async notify(notification: NativeNotification) {
+      const { isPermissionGranted, requestPermission, sendNotification } =
+        await import("@tauri-apps/plugin-notification");
+      let granted = await isPermissionGranted();
+      if (!granted) granted = (await requestPermission()) === "granted";
+      if (granted) sendNotification(notification);
+    },
+    async isBackgrounded() {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      return !(await getCurrentWindow().isFocused());
+    },
+    localIntegrationStatus(projectId: string): Promise<LocalIntegrationStatus> {
+      return invoke("local_integration_status", { projectId });
     }
   };
 }

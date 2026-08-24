@@ -60,10 +60,13 @@ const coordinationErrorCodeSchema = z.enum([
   "CLAIM_NOT_OWNER"
 ]);
 
+const documentErrorCodeSchema = z.enum(["DOCUMENT_CONFLICT"]);
+
 export const errorCodeSchema = z.union([
   baseErrorCodeSchema,
   taskErrorCodeSchema,
-  coordinationErrorCodeSchema
+  coordinationErrorCodeSchema,
+  documentErrorCodeSchema
 ]);
 export type ErrorCode = z.infer<typeof errorCodeSchema>;
 
@@ -98,6 +101,44 @@ const slugSchema = z
   .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
 const nameSchema = z.string().trim().min(1).max(120);
 const dateSchema = z.string().datetime();
+
+export const cliAuthorizationStatusSchema = z.enum([
+  "pending",
+  "approved",
+  "denied",
+  "expired"
+]);
+export type CliAuthorizationStatus = z.infer<
+  typeof cliAuthorizationStatusSchema
+>;
+export const cliAuthorizationAttemptResponseSchema = z.object({
+  attempt_id: z.string().min(20),
+  secret: z.string().min(32),
+  expires_at: dateSchema
+});
+export type CliAuthorizationAttemptResponse = z.infer<
+  typeof cliAuthorizationAttemptResponseSchema
+>;
+export const cliAuthorizationPollResponseSchema = z.object({
+  status: cliAuthorizationStatusSchema,
+  project_id: idSchema.nullable().optional(),
+  credential: z.string().min(32).optional()
+});
+export type CliAuthorizationPollResponse = z.infer<
+  typeof cliAuthorizationPollResponseSchema
+>;
+export const cliAuthorizationAttemptParamsSchema = z.object({
+  attemptId: z.string().regex(/^ca_[A-Za-z0-9_-]{20,}$/)
+});
+export const cliAuthorizationPollRequestSchema = z.object({
+  secret: z.string().min(32).max(128)
+});
+export const cliAuthorizationApprovalRequestSchema = z
+  .object({
+    project_id: idSchema
+  })
+  .strict();
+export const cliAuthorizationDenyRequestSchema = z.object({}).strict();
 
 export const updateOrganizationRequestSchema = z
   .object({
@@ -404,7 +445,16 @@ export type DeleteTaskDependencyRequest = z.infer<
 >;
 
 const agentNameSchema = z.string().trim().min(1).max(120);
-const integrationNameSchema = z.string().trim().min(1).max(80);
+export const integrationNameSchema = z.string().trim().min(1).max(80);
+export const cliSetupIntegrationSchema = z.enum(["codex", "claude-code"]);
+export const cliDisconnectRequestSchema = z
+  .object({
+    project_id: idSchema,
+    agent_ids: z.array(idSchema).min(1).max(2),
+    revoke_cli: z.boolean().default(false)
+  })
+  .strict();
+export type CliDisconnectRequest = z.infer<typeof cliDisconnectRequestSchema>;
 const runtimeNameSchema = z.string().trim().min(1).max(80);
 const claimTokenSchema = z.string().trim().min(32).max(512);
 export const agentCredentialTokenSchema = z
@@ -483,6 +533,41 @@ export const openAgentSessionRequestSchema = z.object({
 });
 export type OpenAgentSessionRequest = z.infer<
   typeof openAgentSessionRequestSchema
+>;
+
+export const agentLifecycleEventTypeSchema = z.enum([
+  "session.started",
+  "session.ended",
+  "run.failed"
+]);
+export type AgentLifecycleEventType = z.infer<
+  typeof agentLifecycleEventTypeSchema
+>;
+export const agentLifecycleHookRequestSchema = z
+  .object({
+    event: agentLifecycleEventTypeSchema,
+    session_id: idSchema,
+    runtime: runtimeNameSchema,
+    integration: integrationNameSchema,
+    external_session_id: z
+      .string()
+      .trim()
+      .min(1)
+      .max(255)
+      .nullable()
+      .optional(),
+    error: z.string().trim().max(2000).optional()
+  })
+  .strict();
+export type AgentLifecycleHookRequest = z.infer<
+  typeof agentLifecycleHookRequestSchema
+>;
+export const agentLifecycleHookResponseSchema = z.object({
+  event_id: z.number().int().positive(),
+  session: agentSessionSchema
+});
+export type AgentLifecycleHookResponse = z.infer<
+  typeof agentLifecycleHookResponseSchema
 >;
 
 export const agentSessionParamsSchema = z.object({ sessionId: idSchema });
@@ -586,6 +671,193 @@ export const projectEventsResponseSchema = paginationResponseSchema.extend({
   events: z.array(projectEventSchema)
 });
 export type ProjectEventsResponse = z.infer<typeof projectEventsResponseSchema>;
+
+const realtimeTicketSchema = z
+  .string()
+  .trim()
+  .min(32)
+  .max(256)
+  .regex(/^[A-Za-z0-9_-]+$/);
+
+export const realtimeTicketRequestSchema = z.object({
+  project_id: idSchema
+});
+export type RealtimeTicketRequest = z.infer<typeof realtimeTicketRequestSchema>;
+
+export const realtimeTicketResponseSchema = z.object({
+  ticket: realtimeTicketSchema,
+  expires_at: dateSchema
+});
+export type RealtimeTicketResponse = z.infer<
+  typeof realtimeTicketResponseSchema
+>;
+
+export const realtimeProjectParamsSchema = z.object({
+  projectId: idSchema
+});
+export const realtimeSocketQuerySchema = z.object({
+  ticket: realtimeTicketSchema
+});
+export type RealtimeProjectParams = z.infer<typeof realtimeProjectParamsSchema>;
+export type RealtimeSocketQuery = z.infer<typeof realtimeSocketQuerySchema>;
+
+export const realtimeEntityTypeSchema = z.enum([
+  "task",
+  "claim",
+  "agent",
+  "credential",
+  "session",
+  "document",
+  "hook",
+  "run"
+]);
+export type RealtimeEntityType = z.infer<typeof realtimeEntityTypeSchema>;
+
+export const realtimeEventEnvelopeSchema = z
+  .object({
+    project_id: idSchema,
+    sequence: z.number().int().positive(),
+    event_type: eventTypeSchema,
+    entity_type: realtimeEntityTypeSchema,
+    entity_id: idSchema.nullable()
+  })
+  .refine(
+    ({ event_type, entity_type }) => event_type.startsWith(`${entity_type}.`),
+    {
+      path: ["event_type"],
+      message: "Event type must be namespaced by its entity type."
+    }
+  );
+export type RealtimeEventEnvelope = z.infer<typeof realtimeEventEnvelopeSchema>;
+
+const documentPathSegmentSchema = z
+  .string()
+  .min(1)
+  .refine((segment) => segment !== "." && segment !== "..", {
+    message: "Document paths cannot contain dot segments."
+  });
+
+/** A normalized, project-relative POSIX path (for example, docs/README.md). */
+export const documentPathSchema = z
+  .string()
+  .min(1)
+  .max(1024)
+  .refine((path) => !path.startsWith("/"), {
+    message: "Document paths must be project-relative."
+  })
+  .refine((path) => !path.includes("\\") && !path.includes("\0"), {
+    message: "Document paths must use POSIX separators and cannot contain NULs."
+  })
+  .refine(
+    (path) =>
+      path
+        .split("/")
+        .every(
+          (segment) => documentPathSegmentSchema.safeParse(segment).success
+        ),
+    { message: "Document paths cannot contain empty or dot segments." }
+  );
+export type DocumentPath = z.infer<typeof documentPathSchema>;
+
+export const documentAuthorTypeSchema = z.enum(["human", "agent"]);
+export type DocumentAuthorType = z.infer<typeof documentAuthorTypeSchema>;
+export const documentContentSchema = z.string().max(1_000_000);
+
+const documentAuthorSchema = z.object({
+  type: documentAuthorTypeSchema,
+  id: idSchema
+});
+
+export const documentSchema = z.object({
+  id: idSchema,
+  project_id: idSchema,
+  path: documentPathSchema,
+  current_revision: z.number().int().min(1),
+  created_by: documentAuthorSchema.nullable(),
+  created_at: dateSchema,
+  updated_at: dateSchema
+});
+export type Document = z.infer<typeof documentSchema>;
+
+export const documentRevisionSchema = z.object({
+  id: idSchema,
+  document_id: idSchema,
+  revision_number: z.number().int().min(1),
+  content: documentContentSchema,
+  author: z.object({
+    type: documentAuthorTypeSchema,
+    id: idSchema
+  }),
+  created_at: dateSchema
+});
+export type DocumentRevision = z.infer<typeof documentRevisionSchema>;
+
+export const documentDetailSchema = z.object({
+  document: documentSchema,
+  revision: documentRevisionSchema
+});
+export type DocumentDetail = z.infer<typeof documentDetailSchema>;
+export const documentResponseSchema = documentDetailSchema;
+export type DocumentResponse = z.infer<typeof documentResponseSchema>;
+
+export const documentListQuerySchema = z.object({
+  limit: limitSchema,
+  cursor: cursorSchema.optional()
+});
+export type DocumentListQuery = z.infer<typeof documentListQuerySchema>;
+
+export const documentsResponseSchema = z.object({
+  documents: z.array(documentSchema),
+  next_cursor: cursorSchema.nullable()
+});
+export type DocumentsResponse = z.infer<typeof documentsResponseSchema>;
+export const documentListResponseSchema = documentsResponseSchema;
+export type DocumentListResponse = z.infer<typeof documentListResponseSchema>;
+
+export const createDocumentRequestSchema = z.object({
+  path: documentPathSchema,
+  content: documentContentSchema
+});
+export type CreateDocumentRequest = z.infer<typeof createDocumentRequestSchema>;
+
+export const createDocumentResponseSchema = documentDetailSchema;
+export type CreateDocumentResponse = z.infer<
+  typeof createDocumentResponseSchema
+>;
+
+export const updateDocumentRequestSchema = z.object({
+  content: documentContentSchema,
+  base_revision: z.number().int().min(1)
+});
+export type UpdateDocumentRequest = z.infer<typeof updateDocumentRequestSchema>;
+
+export const updateDocumentResponseSchema = documentDetailSchema;
+export type UpdateDocumentResponse = z.infer<
+  typeof updateDocumentResponseSchema
+>;
+
+export const documentIdParamsSchema = z.object({ id: idSchema });
+export const projectDocumentParamsSchema = z.object({ projectId: idSchema });
+export const documentRevisionParamsSchema = z.object({
+  id: idSchema,
+  revision: z.coerce.number().int().min(1)
+});
+
+export const documentRevisionsResponseSchema = z.object({
+  revisions: z.array(documentRevisionSchema),
+  next_cursor: cursorSchema.nullable()
+});
+export type DocumentRevisionsResponse = z.infer<
+  typeof documentRevisionsResponseSchema
+>;
+
+export const documentConflictDetailsSchema = z.object({
+  current_revision: z.number().int().min(1),
+  base_revision: z.number().int().min(1)
+});
+export type DocumentConflictDetails = z.infer<
+  typeof documentConflictDetailsSchema
+>;
 
 export const eventSchema = z.object({
   type: z.string(),

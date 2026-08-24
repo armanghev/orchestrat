@@ -60,6 +60,10 @@ export const agentSessionStatus = pgEnum("agent_session_status", [
   "active",
   "closed"
 ]);
+export const documentAuthorType = pgEnum("document_author_type", [
+  "human",
+  "agent"
+]);
 
 export const users = pgTable(
   "users",
@@ -321,6 +325,60 @@ export const agentCredentials = pgTable(
   ]
 );
 
+export const cliAuthorizationAttempts = pgTable(
+  "cli_authorization_attempts",
+  {
+    id: text("id").primaryKey(),
+    secretHash: text("secret_hash").notNull(),
+    status: text("status").notNull(),
+    projectId: uuid("project_id").references(() => projects.id, {
+      onDelete: "cascade"
+    }),
+    approvedByUserId: uuid("approved_by_user_id").references(() => users.id, {
+      onDelete: "set null"
+    }),
+    credentialHash: text("credential_hash"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    exchangedAt: timestamp("exchanged_at", { withTimezone: true })
+  },
+  (table) => [
+    index("cli_authorization_attempts_expires_idx").on(table.expiresAt),
+    check(
+      "cli_authorization_attempts_status_valid",
+      sql`${table.status} in ('pending', 'approved', 'denied', 'expired', 'exchanged')`
+    ),
+    check(
+      "cli_authorization_attempts_secret_hash_not_blank",
+      sql`btrim(${table.secretHash}) <> ''`
+    )
+  ]
+);
+
+export const cliCredentials = pgTable(
+  "cli_credentials",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true })
+  },
+  (table) => [
+    uniqueIndex("cli_credentials_token_hash_unique").on(table.tokenHash),
+    index("cli_credentials_project_idx").on(table.projectId)
+  ]
+);
+
 export const agentSessions = pgTable(
   "agent_sessions",
   {
@@ -401,6 +459,58 @@ export const projectEvents = pgTable(
     }),
     index("project_events_project_id_id_idx").on(table.projectId, table.id),
     check("project_events_type_not_blank", sql`btrim(${table.type}) <> ''`)
+  ]
+);
+
+export const agentLifecycleEvents = pgTable(
+  "agent_lifecycle_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    projectId: uuid("project_id").notNull(),
+    agentId: uuid("agent_id").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    requestHash: text("request_hash").notNull(),
+    eventId: integer("event_id"),
+    sessionId: uuid("session_id"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.projectId],
+      foreignColumns: [projects.id],
+      name: "agent_lifecycle_events_project_id_projects_id_fk"
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.projectId, table.agentId],
+      foreignColumns: [agents.projectId, agents.id],
+      name: "agent_lifecycle_events_agent_project_fk"
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.projectId, table.sessionId],
+      foreignColumns: [agentSessions.projectId, agentSessions.id],
+      name: "agent_lifecycle_events_session_project_fk"
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.eventId],
+      foreignColumns: [projectEvents.id],
+      name: "agent_lifecycle_events_event_id_fk"
+    }).onDelete("cascade"),
+    uniqueIndex("agent_lifecycle_events_scope_unique").on(
+      table.projectId,
+      table.agentId,
+      table.idempotencyKey
+    ),
+    index("agent_lifecycle_events_project_idx").on(table.projectId),
+    check(
+      "agent_lifecycle_events_idempotency_key_not_blank",
+      sql`btrim(${table.idempotencyKey}) <> ''`
+    ),
+    check(
+      "agent_lifecycle_events_request_hash_not_blank",
+      sql`btrim(${table.requestHash}) <> ''`
+    )
   ]
 );
 
@@ -489,5 +599,97 @@ export const apiIdempotencyKeys = pgTable(
       table.idempotencyKey
     )
     // ponytail: no retention job yet; add bounded cleanup when idempotency volume requires it.
+  ]
+);
+
+export const documents = pgTable(
+  "documents",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    path: text("path").notNull(),
+    currentRevision: integer("current_revision").default(1).notNull(),
+    createdByType: documentAuthorType("created_by_type"),
+    createdByUserId: uuid("created_by_user_id").references(() => users.id, {
+      onDelete: "restrict"
+    }),
+    createdByAgentId: uuid("created_by_agent_id"),
+    ...timestamps
+  },
+  (table) => [
+    unique("documents_project_id_id_unique").on(table.projectId, table.id),
+    uniqueIndex("documents_project_path_unique").on(
+      table.projectId,
+      table.path
+    ),
+    index("documents_project_updated_idx").on(
+      table.projectId,
+      table.updatedAt,
+      table.id
+    ),
+    foreignKey({
+      columns: [table.projectId, table.createdByAgentId],
+      foreignColumns: [agents.projectId, agents.id],
+      name: "documents_created_by_agent_project_fk"
+    }),
+    check("documents_path_not_blank", sql`btrim(${table.path}) <> ''`),
+    check(
+      "documents_current_revision_positive",
+      sql`${table.currentRevision} > 0`
+    ),
+    check(
+      "documents_author_consistent",
+      sql`(${table.createdByType} is null and ${table.createdByUserId} is null and ${table.createdByAgentId} is null) or (${table.createdByType} = 'human' and ${table.createdByUserId} is not null and ${table.createdByAgentId} is null) or (${table.createdByType} = 'agent' and ${table.createdByUserId} is null and ${table.createdByAgentId} is not null)`
+    )
+  ]
+);
+
+export const documentRevisions = pgTable(
+  "document_revisions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    projectId: uuid("project_id").notNull(),
+    documentId: uuid("document_id").notNull(),
+    revisionNumber: integer("revision_number").notNull(),
+    contentMarkdown: text("content_markdown").notNull(),
+    authorType: documentAuthorType("author_type").notNull(),
+    authorUserId: uuid("author_user_id").references(() => users.id, {
+      onDelete: "restrict"
+    }),
+    authorAgentId: uuid("author_agent_id"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    uniqueIndex("document_revisions_document_id_revision_unique").on(
+      table.documentId,
+      table.revisionNumber
+    ),
+    foreignKey({
+      columns: [table.projectId, table.documentId],
+      foreignColumns: [documents.projectId, documents.id],
+      name: "document_revisions_document_project_fk"
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.projectId, table.authorAgentId],
+      foreignColumns: [agents.projectId, agents.id],
+      name: "document_revisions_author_agent_project_fk"
+    }),
+    index("document_revisions_document_created_idx").on(
+      table.documentId,
+      table.createdAt,
+      table.id
+    ),
+    check(
+      "document_revisions_revision_number_positive",
+      sql`${table.revisionNumber} > 0`
+    ),
+    check(
+      "document_revisions_author_consistent",
+      sql`(${table.authorType} = 'human' and ${table.authorUserId} is not null and ${table.authorAgentId} is null) or (${table.authorType} = 'agent' and ${table.authorUserId} is null and ${table.authorAgentId} is not null)`
+    )
   ]
 );

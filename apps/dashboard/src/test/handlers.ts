@@ -58,5 +58,30 @@ export const handlers = [
     assertAuthorization(request);
     assertBodylessRequest(request);
     return HttpResponse.json(project());
+  }),
+  http.get(`${apiUrl}/projects/:projectId/tasks`, ({ request }) => {
+    assertAuthorization(request);
+    assertBodylessRequest(request);
+    return HttpResponse.json({ tasks: [], total: 0, next_cursor: null });
+  }),
+  http.get(`${apiUrl}/projects/:projectId/agents`, ({ request }) => {
+    assertAuthorization(request);
+    assertBodylessRequest(request);
+    return HttpResponse.json({ agents: [] });
+  }),
+  http.get(`${apiUrl}/projects/:projectId/presence`, ({ request }) => {
+    assertAuthorization(request);
+    assertBodylessRequest(request);
+    return HttpResponse.json({ agents: [] });
+  }),
+  http.get(`${apiUrl}/projects/:projectId/events`, ({ request }) => {
+    assertAuthorization(request);
+    assertBodylessRequest(request);
+    return HttpResponse.json({ events: [], next_cursor: null });
+  }),
+  http.get(`${apiUrl}/projects/:projectId/documents`, ({ request }) => {
+    assertAuthorization(request);
+    assertBodylessRequest(request);
+    return HttpResponse.json({ documents: [], next_cursor: null });
   })
 ];
