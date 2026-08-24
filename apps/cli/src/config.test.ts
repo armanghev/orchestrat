@@ -67,6 +67,24 @@ test("accepts only the two supported command shapes", () => {
   );
 });
 
+test("accepts configurable harness commands and explicit hook events", () => {
+  assert.deepEqual(parseInvocationArgs(["mcp", "--integration", "cursor"]), {
+    command: "mcp",
+    integration: "cursor"
+  });
+  assert.deepEqual(parseInvocationArgs(["disconnect", "antigravity"]), {
+    command: "disconnect",
+    integration: "antigravity",
+    local: false
+  });
+  assert.deepEqual(parseInvocationArgs(["hook", "cursor", "--event", "sessionStart"]), {
+    command: "hook",
+    integration: "cursor",
+    event: "sessionStart"
+  });
+  assert.throws(() => parseInvocationArgs(["hook", "antigravity"]));
+});
+
 test("built CLI --version matches package metadata", async () => {
   const { stdout } = await execFileAsync(process.execPath, [
     new URL("./main.js", import.meta.url).pathname,
