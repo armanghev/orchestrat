@@ -1,13 +1,20 @@
 import {
   cancel as clackCancel,
+  intro as clackIntro,
   isCancel,
+  log as clackLog,
   multiselect as clackMultiselect,
+  note as clackNote,
   outro as clackOutro,
   spinner as clackSpinner
 } from "@clack/prompts";
 
 export type UiWriter = (text: string) => void;
 export type Harness = { id: string; label?: string; hint?: string };
+export type DetectedHarness = Harness & {
+  configurable: boolean;
+  unsupportedReason?: string;
+};
 export type Cancelled = { cancelled: true };
 export type Selection<T extends Harness> = { cancelled: false; values: T[] };
 
@@ -20,6 +27,9 @@ export type UiComponents = {
   }) => Promise<string[] | symbol>;
   cancel: (message?: string) => void;
   outro: (message?: string) => void;
+  intro: (message?: string) => void;
+  log: { info(message: string): void; success(message: string): void; warn(message: string): void };
+  note: (message?: string, title?: string) => void;
   spinner: () => { start(message?: string): void; stop(message?: string): void };
 };
 
@@ -27,6 +37,9 @@ const defaultComponents: UiComponents = {
   multiselect: clackMultiselect,
   cancel: clackCancel,
   outro: clackOutro,
+  intro: clackIntro,
+  log: clackLog,
+  note: clackNote,
   spinner: clackSpinner
 };
 
@@ -48,16 +61,19 @@ export async function selectHarnesses<T extends Harness>(
     isCancel?: (answer: unknown) => boolean;
   }
 ): Promise<Selection<T> | Cancelled> {
-  if (!options.interactive) return { cancelled: false, values: [...harnesses] };
+  const configurable = harnesses.filter(
+    (harness) => (harness as unknown as DetectedHarness).configurable !== false
+  );
+  if (!options.interactive) return { cancelled: false, values: [...configurable] };
   const components = options.components ?? defaultComponents;
   const answer = await components.multiselect({
     message: "Select agent harnesses to connect",
-    options: harnesses.map((harness) => ({
+    options: configurable.map((harness) => ({
       value: harness.id,
       label: harness.label ?? harness.id,
       hint: harness.hint
     })),
-    initialValues: harnesses.map((harness) => harness.id),
+    initialValues: configurable.map((harness) => harness.id),
     required: true
   });
   if ((options.isCancel ?? isCancel)(answer)) {
@@ -67,13 +83,39 @@ export async function selectHarnesses<T extends Harness>(
   const selected = new Set(answer as string[]);
   return {
     cancelled: false,
-    values: harnesses.filter((harness) => selected.has(harness.id))
+    values: configurable.filter((harness) => selected.has(harness.id))
   };
+}
+
+export function renderDetectedAgents(
+  harnesses: readonly DetectedHarness[],
+  options: { interactive: boolean; write: UiWriter; components?: UiComponents }
+): void {
+  if (!options.interactive) {
+    options.write(`${JSON.stringify({ detected: harnesses })}\n`);
+    return;
+  }
+  const components = options.components ?? defaultComponents;
+  components.intro("Welcome to Orchestrat");
+  components.log.info("Detected agents");
+  for (const harness of harnesses) {
+    const suffix = harness.configurable
+      ? "configurable"
+      : `unsupported${harness.unsupportedReason ? `: ${harness.unsupportedReason}` : ""}`;
+    components.note(`${harness.label ?? harness.id} — ${suffix}`, harness.id);
+  }
 }
 
 export type SetupResult = {
   integrations?: Record<string, { agentId?: string }>;
   pathFix?: string;
+  harnesses?: readonly {
+    id: string;
+    label?: string;
+    mcpConfigured?: boolean;
+    hooksConfigured?: boolean;
+    hooksSupported?: boolean;
+  }[];
 };
 
 export async function runSetupProgress<T>(
@@ -97,6 +139,14 @@ export function renderSetupResult(result: SetupResult, write: UiWriter): void {
   for (const integration of Object.keys(result.integrations ?? {}))
     write(`✓ connected ${integration}\n`);
   if (result.pathFix) write(`  PATH: ${result.pathFix}\n`);
+  for (const harness of result.harnesses ?? []) {
+    write(`  ${harness.label ?? harness.id}: MCP ${harness.mcpConfigured ? "configured" : "not configured"}\n`);
+    write(
+      `    Hooks: ${harness.hooksSupported === false ? "unavailable/unsupported" : harness.hooksConfigured ? "configured" : "not configured"}\n`
+    );
+  }
+  const connected = Object.keys(result.integrations ?? {}).length;
+  if (connected) write(`${connected} agents connected\n`);
 }
 
 export function renderPreview(

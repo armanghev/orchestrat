@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   isInteractive,
+  renderDetectedAgents,
+  renderSetupResult,
   renderDoctor,
   renderResult,
   runSetupProgress,
@@ -24,6 +26,9 @@ test("selects all harnesses by default and maps selected IDs", async () => {
       },
       cancel: () => undefined,
       outro: () => undefined,
+      intro: () => undefined,
+      log: { info: () => undefined, success: () => undefined, warn: () => undefined },
+      note: () => undefined,
       spinner: () => ({ start: () => undefined, stop: () => undefined })
     }
   });
@@ -42,6 +47,9 @@ test("cancellation is distinct and does not select or mutate", async () => {
         canceled = true;
       },
       outro: () => undefined,
+      intro: () => undefined,
+      log: { info: () => undefined, success: () => undefined, warn: () => undefined },
+      note: () => undefined,
       spinner: () => ({ start: () => undefined, stop: () => undefined })
     }
   });
@@ -67,6 +75,38 @@ test("interactive doctor output contains only check details", () => {
   renderDoctor({ checks: { credential: { ok: true, detail: "present" } } }, (text) => output.push(text));
   assert.match(output.join(""), /credential: present/);
   assert.doesNotMatch(output.join(""), /token|secret|orch_agent_/i);
+});
+
+test("detected rendering separates configurable and unsupported agents", () => {
+  const calls: string[] = [];
+  renderDetectedAgents(
+    [{ id: "codex", label: "Codex", configurable: true }, { id: "cursor", label: "Cursor", configurable: false, unsupportedReason: "not installed" }],
+    {
+      interactive: true,
+      write: () => undefined,
+      components: {
+        multiselect: async () => [], cancel: () => undefined, outro: () => undefined,
+        intro: (message) => calls.push(`intro:${message}`),
+        log: { info: (message) => calls.push(`info:${message}`), success: () => undefined, warn: () => undefined },
+        note: (message, title) => calls.push(`note:${title}:${message}`),
+        spinner: () => ({ start: () => undefined, stop: () => undefined })
+      }
+    }
+  );
+  assert.deepEqual(calls, ["intro:Welcome to Orchestrat", "info:Detected agents", "note:codex:Codex — configurable", "note:cursor:Cursor — unsupported: not installed"]);
+});
+
+test("setup result reports MCP, hooks support, and connected count", () => {
+  const output: string[] = [];
+  renderSetupResult({
+    integrations: { codex: { agentId: "private" } },
+    harnesses: [{ id: "codex", mcpConfigured: true, hooksConfigured: true }, { id: "cursor", hooksSupported: false }]
+  }, (text) => output.push(text));
+  const rendered = output.join("");
+  assert.match(rendered, /MCP configured/);
+  assert.match(rendered, /Hooks: unavailable\/unsupported/);
+  assert.match(rendered, /1 agents connected/);
+  assert.doesNotMatch(rendered, /private/);
 });
 
 test("setup progress runs and returns the operation result", async () => {
