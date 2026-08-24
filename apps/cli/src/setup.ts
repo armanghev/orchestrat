@@ -356,6 +356,19 @@ export async function runSetup(options: SetupRunOptions) {
   const integrations: Record<string, { agentId: string }> = apiChanged
     ? {}
     : { ...(existing?.integrations ?? {}) };
+  const persistMapping = async () => {
+    config = {
+      version: 1,
+      projects: {
+        ...config.projects,
+        [key]: { projectId, apiUrl, integrations }
+      }
+    } as OrchestratConfig;
+    await atomicWrite(
+      configPath(options.home),
+      `${JSON.stringify(config, null, 2)}\n`
+    );
+  };
   for (const integration of options.integrations) {
     const account = `agent:${integration}`;
     if (
@@ -371,25 +384,19 @@ export async function runSetup(options: SetupRunOptions) {
       },
       body: JSON.stringify({ project_id: projectId, integration })
     });
-    if (!response.ok) throw new Error("Unable to configure integration");
+    if (!response.ok)
+      throw new Error(
+        `Unable to configure ${integration} (API ${response.status})`
+      );
     const result = (await response.json()) as {
       agent: { id: string };
       credential: { token: string };
     };
     await options.store.write(account, result.credential.token);
     integrations[integration] = { agentId: result.agent.id };
+    await persistMapping();
   }
-  config = {
-    version: 1,
-    projects: {
-      ...config.projects,
-      [key]: { projectId, apiUrl, integrations }
-    }
-  } as OrchestratConfig;
-  await atomicWrite(
-    configPath(options.home),
-    `${JSON.stringify(config, null, 2)}\n`
-  );
+  await persistMapping();
   for (const integration of options.integrations) {
     const plan = harnessConfigPlan(options.home, integration, command);
     for (const item of [plan.mcp, plan.hooks]) {

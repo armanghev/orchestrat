@@ -245,3 +245,59 @@ test("endpoint transition refreshes authorization and agent credentials", async 
   assert.equal(opened.length, 1);
   assert.ok(calls.every((url) => url.startsWith("https://new.example/")));
 });
+
+test("partial setup records provisioned agents and names the rejected harness", async () => {
+  const home = await mkdtemp(join(tmpdir(), "orch-setup-partial-"));
+  const cwd = join(home, "project");
+  const sourceCommand = join(home, "cli", "dist", "main.js");
+  await mkdir(join(home, "cli", "dist"), { recursive: true });
+  await writeFile(sourceCommand, "#!/usr/bin/env node\n");
+  await writeFile(join(home, "cli", "package.json"), '{"version":"0.1.0"}\n');
+  await chmod(sourceCommand, 0o700);
+  const store = new Store();
+  const fetch: typeof globalThis.fetch = async (input, init) => {
+    const url = String(input);
+    if (url.endsWith("/attempts"))
+      return response(
+        {
+          attempt_id: "ca_partial",
+          secret: "s".repeat(40),
+          expires_at: new Date(Date.now() + 60_000).toISOString()
+        },
+        201
+      );
+    if (url.endsWith("/poll"))
+      return response({
+        status: "approved",
+        project_id: "550e8400-e29b-41d4-a716-446655440000",
+        credential: "orch_cli_" + "c".repeat(32)
+      });
+    const integration = JSON.parse(String(init?.body)).integration;
+    return integration === "cursor"
+      ? response({ error: "unsupported" }, 400)
+      : response({
+          agent: { id: "550e8400-e29b-41d4-a716-446655440001" },
+          credential: { token: "orch_agent_" + "x".repeat(32) }
+        });
+  };
+  await assert.rejects(
+    () =>
+      runSetup({
+        api: "https://api.example",
+        fetch,
+        open: async () => {},
+        sleep: async () => {},
+        store,
+        cwd,
+        home,
+        integrations: ["codex", "cursor"],
+        sourceCommand
+      }),
+    /Unable to configure cursor \(API 400\)/
+  );
+  assert.equal(
+    (await readConfig(home)).projects[cwd]?.integrations.codex?.agentId,
+    "550e8400-e29b-41d4-a716-446655440001"
+  );
+  assert.equal(await store.read("agent:cursor"), undefined);
+});
