@@ -224,3 +224,77 @@ test("runHook posts normalized payload using the payload cwd mapping", async () 
     await rm(home, { recursive: true, force: true });
   }
 });
+
+test("runHook dispatches Cursor and Antigravity hooks using workspace cwd fallbacks", async () => {
+  const home = await mkdtemp(join("/tmp", "orchestrat-hook-runtime-"));
+  const cwd = join(home, "project");
+  const config = {
+    version: 1 as const,
+    projects: {
+      [cwd]: {
+        projectId: "00000000-0000-4000-8000-000000000001",
+        integrations: {
+          cursor: { agentId: "00000000-0000-4000-8000-000000000002" },
+          antigravity: { agentId: "00000000-0000-4000-8000-000000000003" }
+        }
+      }
+    }
+  };
+  const payloads: unknown[] = [];
+  const fetch: typeof globalThis.fetch = async (_url, init) => {
+    payloads.push(JSON.parse(String(init?.body)));
+    return new Response(
+      JSON.stringify({
+        event_id: 1,
+        session: {
+          id: "00000000-0000-4000-8000-000000000004",
+          agent_id: "00000000-0000-4000-8000-000000000002",
+          project_id: "00000000-0000-4000-8000-000000000001",
+          runtime: "cursor",
+          integration: "cursor",
+          external_session_id: "provider-id",
+          status: "active",
+          started_at: "2026-08-22T00:00:00.000Z",
+          ended_at: null,
+          last_heartbeat_at: "2026-08-22T00:00:00.000Z"
+        }
+      })
+    );
+  };
+  const common = {
+    cwd: home,
+    home,
+    read: async () => config,
+    credentials: { read: async () => "orch_agent_token" },
+    api: "https://api.test",
+    fetch
+  };
+  try {
+    await runHook({
+      ...common,
+      integration: "cursor",
+      payload: {
+        hook_event_name: "sessionStart",
+        conversation_id: "cursor-1",
+        workspace_roots: [cwd]
+      }
+    });
+    await runHook({
+      ...common,
+      integration: "antigravity",
+      event: "PreInvocation",
+      payload: { conversationId: "agy-1", workspacePaths: [cwd] }
+    });
+    assert.equal((payloads[0] as { event: string }).event, "session.started");
+    assert.equal((payloads[1] as { event: string }).event, "session.started");
+    await assert.rejects(() =>
+      runHook({
+        ...common,
+        integration: "opencode",
+        payload: {}
+      })
+    , /OpenCode does not support hooks/);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
