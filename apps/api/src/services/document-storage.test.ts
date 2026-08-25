@@ -294,6 +294,35 @@ test("stale conflict removes an uploaded orphan when its revision is absent", as
   void userId;
 });
 
+test("an ambiguous commit response retains a potentially referenced object", async () => {
+  const { db, document, service, storage, userId } = await setup();
+  const transaction = db.transaction.bind(db);
+  Object.defineProperty(db, "transaction", {
+    configurable: true,
+    value: async (callback: Parameters<typeof db.transaction>[0]) => {
+      await transaction(callback);
+      throw new Error("commit response lost");
+    }
+  });
+  await assert.rejects(
+    service.update(userId, document.document.id, {
+      base_revision: 1,
+      content: "two"
+    }),
+    /commit response lost/
+  );
+  assert.equal(storage.deleteKeys.length, 0);
+  assert.equal(
+    (
+      await db
+        .select()
+        .from(documentRevisions)
+        .where(eq(documentRevisions.documentId, document.document.id))
+    ).length,
+    2
+  );
+});
+
 test("corrupt and missing metadata-backed objects are unavailable", async () => {
   const corrupt = await setup();
   await corrupt.service.update(corrupt.userId, corrupt.document.document.id, {
