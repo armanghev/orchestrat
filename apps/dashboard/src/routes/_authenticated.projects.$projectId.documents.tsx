@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -227,6 +229,9 @@ function DocumentEditor({
   const [rename, setRename] = useState(false);
   const [path, setPath] = useState("");
   const [historyRevision, setHistoryRevision] = useState<number | null>(null);
+  const [editorView, setEditorView] = useState<"editing" | "preview">(
+    "editing"
+  );
   const draftRef = useRef(draft);
   const baseContentRef = useRef(baseContent);
   const baseRevisionRef = useRef(baseRevision);
@@ -627,23 +632,54 @@ function DocumentEditor({
           </div>
         </div>
       ) : null}
-      <label
-        htmlFor="document-content"
-        className="mt-5 block text-sm font-medium"
-      >
-        Markdown content
-      </label>
-      <textarea
-        id="document-content"
-        value={draft}
-        onChange={(event) => {
-          setDraft(event.target.value);
-          if (!remote && !merging) setStatus("Unsaved");
-        }}
-        disabled={archived}
-        rows={16}
-        className="mt-2 w-full rounded-lg border border-input bg-transparent p-3 font-mono text-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
-      />
+      <section className="mt-5" aria-label="Markdown editor">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          {editorView === "editing" ? (
+            <label htmlFor="document-content" className="text-sm font-medium">
+              Markdown content
+            </label>
+          ) : (
+            <span className="text-sm font-medium">Markdown preview</span>
+          )}
+          <div aria-label="Document view" className="flex gap-1">
+            <Button
+              aria-pressed={editorView === "editing"}
+              size="sm"
+              variant={editorView === "editing" ? "default" : "outline"}
+              onClick={() => setEditorView("editing")}
+            >
+              Editing
+            </Button>
+            <Button
+              aria-pressed={editorView === "preview"}
+              size="sm"
+              variant={editorView === "preview" ? "default" : "outline"}
+              onClick={() => setEditorView("preview")}
+            >
+              Preview
+            </Button>
+          </div>
+        </div>
+        {editorView === "editing" ? (
+          <div className="mt-2 overflow-hidden rounded-lg border border-input">
+            <textarea
+              id="document-content"
+              value={draft}
+              onChange={(event) => {
+                setDraft(event.target.value);
+                if (!remote && !merging) setStatus("Unsaved");
+              }}
+              disabled={archived}
+              rows={16}
+              className="block w-full bg-transparent p-3 font-mono text-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+            />
+          </div>
+        ) : (
+          <div className="mt-2 min-h-[24rem] overflow-auto rounded-lg border border-input p-4">
+            <MarkdownPreview content={draft} />
+          </div>
+        )}
+      </section>
       {merging && !remote && !archived ? (
         <div className="mt-3 flex items-center gap-2">
           <p className="text-sm text-amber-500">
@@ -702,6 +738,16 @@ function DocumentEditor({
         ) : null}
       </section>
     </section>
+  );
+}
+
+function MarkdownPreview({ content }: { content: string }) {
+  if (!content.trim())
+    return <p className="text-sm text-muted-foreground">Nothing to preview.</p>;
+  return (
+    <div className="text-sm leading-6 [&_a]:text-primary [&_a]:underline [&_blockquote]:my-4 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_h1]:mb-4 [&_h1]:text-3xl [&_h1]:font-semibold [&_h1]:tracking-tight [&_h2]:mb-3 [&_h2]:mt-8 [&_h2]:text-2xl [&_h2]:font-semibold [&_h3]:mb-2 [&_h3]:mt-6 [&_h3]:text-xl [&_h3]:font-semibold [&_li]:my-1 [&_ol]:my-4 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-4 [&_pre]:my-4 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_table]:my-4 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-border [&_td]:p-2 [&_th]:border [&_th]:border-border [&_th]:bg-muted [&_th]:p-2 [&_ul]:my-4 [&_ul]:list-disc [&_ul]:pl-6">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+    </div>
   );
 }
 

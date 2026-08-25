@@ -469,6 +469,61 @@ describe("dashboard routes", () => {
     expect(await screen.findByDisplayValue("Initial content")).toBeVisible();
   });
 
+  it("renders GFM in preview without changing the editor draft", async () => {
+    const expectedProject = project();
+    const content =
+      "# Plan\n\n- [x] Preview works\n\n| Item | Status |\n| --- | --- |\n| Document | Ready |";
+    const initial = documentDetail({
+      document: {
+        ...documentDetail().document,
+        project_id: expectedProject.id
+      },
+      revision: { ...documentDetail().revision, content }
+    });
+    const documentHandlers = [
+      http.get(
+        `http://localhost:3001/api/v1/projects/${expectedProject.id}/documents`,
+        () =>
+          HttpResponse.json({
+            documents: [initial.document],
+            next_cursor: null
+          })
+      ),
+      http.get(
+        `http://localhost:3001/api/v1/documents/${initial.document.id}`,
+        () => HttpResponse.json(initial)
+      ),
+      http.get(
+        `http://localhost:3001/api/v1/documents/${initial.document.id}/revisions`,
+        () =>
+          HttpResponse.json({
+            revisions: [initial.revision].map(revisionSummary),
+            next_cursor: null
+          })
+      ),
+      ...handlers
+    ];
+    await renderDashboardRoute({
+      path: `/projects/${expectedProject.id}/documents`,
+      auth: new FakeAuthClient({
+        status: "signedIn",
+        identityKey: "test-user"
+      }),
+      platform: platform(),
+      handlers: documentHandlers
+    });
+    const user = userEvent.setup();
+    expect(await screen.findByLabelText("Markdown content")).toHaveValue(
+      content
+    );
+    await user.click(screen.getByRole("button", { name: "Preview" }));
+    expect(screen.getByRole("heading", { name: "Plan" })).toBeVisible();
+    expect(screen.getByRole("checkbox", { checked: true })).toBeDisabled();
+    expect(screen.getByRole("table")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Editing" }));
+    expect(screen.getByLabelText("Markdown content")).toHaveValue(content);
+  });
+
   it("debounces autosaves and serializes a queued edit", async () => {
     const expectedProject = project();
     const initial = documentDetail({
@@ -1082,7 +1137,9 @@ describe("dashboard routes", () => {
       handlers: documentHandlers
     });
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Archived (1)" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Archived (1)" })
+    );
     expect(await screen.findByLabelText("Markdown content")).toBeDisabled();
     expect(screen.getByRole("button", { name: "Restore" })).toBeVisible();
     expect(
