@@ -897,6 +897,7 @@ function AttachmentSection({
         complete: true
       });
       await onChanged();
+      setUploading(null);
     } catch (error) {
       if (controller.signal.aborted) {
         setUploading(null);
@@ -966,7 +967,11 @@ function AttachmentSection({
         </Button>
       </div>
       {uploading ? (
-        <div className="mt-3 rounded border p-3" role="status">
+        <div
+          className="mt-3 rounded border p-3"
+          role="status"
+          aria-label="Attachment upload progress"
+        >
           <div className="flex justify-between gap-3 text-sm">
             <span className="truncate">{uploading.file.name}</span>
             <span>{Math.round(uploading.progress * 100)}%</span>

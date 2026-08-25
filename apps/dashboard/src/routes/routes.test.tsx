@@ -7,6 +7,7 @@ import { documentDetail, project, taskCard } from "@/test/factories";
 import { renderDashboardRoute } from "@/test/render";
 import { handlers } from "@/test/handlers";
 import { coordinationKeys } from "@/features/coordination/query-options";
+import { ApiClient } from "@/lib/api/client";
 
 class FakeAuthClient implements AuthClient {
   readonly capabilities = { github: true, magicLink: true };
@@ -940,6 +941,103 @@ describe("dashboard routes", () => {
     });
     expect(await screen.findByDisplayValue("Agent revision")).toBeVisible();
     expect(screen.getAllByDisplayValue("Human draft")).toHaveLength(2);
+  });
+
+  it("removes completed attachment progress after refreshing the attachment row", async () => {
+    const expectedProject = project();
+    const initial = documentDetail({
+      document: { ...documentDetail().document, project_id: expectedProject.id }
+    });
+    const uploadId = "00000000-0000-4000-8000-000000000021";
+    const attachment = {
+      id: "00000000-0000-4000-8000-000000000022",
+      document_id: initial.document.id,
+      filename: "receipt.txt",
+      content_type: "text/plain",
+      size_bytes: 7,
+      created_at: "2026-08-24T00:00:00.000Z"
+    };
+    let attachments: (typeof attachment)[] = [];
+    const putPresignedObject = vi
+      .spyOn(ApiClient.prototype, "putPresignedObject")
+      .mockImplementation(async (_url, body, onProgress) => {
+        onProgress?.(body.size);
+      });
+    const documentHandlers = [
+      http.get(
+        `http://localhost:3001/api/v1/projects/${expectedProject.id}/documents`,
+        () =>
+          HttpResponse.json({
+            documents: [initial.document],
+            next_cursor: null
+          })
+      ),
+      http.get(
+        `http://localhost:3001/api/v1/documents/${initial.document.id}`,
+        () => HttpResponse.json(initial)
+      ),
+      http.get(
+        `http://localhost:3001/api/v1/documents/${initial.document.id}/revisions`,
+        () =>
+          HttpResponse.json({
+            revisions: [initial.revision].map(revisionSummary),
+            next_cursor: null
+          })
+      ),
+      http.get(
+        `http://localhost:3001/api/v1/documents/${initial.document.id}/attachments`,
+        () => HttpResponse.json({ attachments })
+      ),
+      http.post(
+        `http://localhost:3001/api/v1/documents/${initial.document.id}/attachments/uploads`,
+        () =>
+          HttpResponse.json({
+            upload: {
+              id: uploadId,
+              mode: "single",
+              upload_url: "https://storage.example.test/upload",
+              expires_at: "2026-08-25T00:00:00.000Z"
+            }
+          })
+      ),
+      http.post(
+        `http://localhost:3001/api/v1/documents/${initial.document.id}/attachments/uploads/${uploadId}/complete`,
+        () => {
+          attachments = [attachment];
+          return HttpResponse.json({ attachment });
+        }
+      ),
+      ...handlers
+    ];
+    try {
+      await renderDashboardRoute({
+        path: `/projects/${expectedProject.id}/documents`,
+        auth: new FakeAuthClient({
+          status: "signedIn",
+          identityKey: "test-user"
+        }),
+        platform: platform(),
+        handlers: documentHandlers
+      });
+      await screen.findByLabelText("Markdown content");
+      const input =
+        document.querySelector<HTMLInputElement>("input[type=file]");
+      expect(input).not.toBeNull();
+      fireEvent.change(input!, {
+        target: {
+          files: [new File(["receipt"], "receipt.txt", { type: "text/plain" })]
+        }
+      });
+      await waitFor(() => expect(putPresignedObject).toHaveBeenCalledOnce());
+      await waitFor(() =>
+        expect(
+          screen.queryByLabelText("Attachment upload progress")
+        ).not.toBeInTheDocument()
+      );
+      expect(screen.getByText("receipt.txt")).toBeVisible();
+    } finally {
+      putPresignedObject.mockRestore();
+    }
   });
 
   it("renders archived documents as readable but non-editable", async () => {
