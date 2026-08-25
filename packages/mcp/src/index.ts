@@ -4,8 +4,10 @@ import { AgentApiClient, AgentApiError } from "@orchestrat/sdk";
 import {
   createDocumentRequestSchema,
   documentConflictDetailsSchema,
+  documentEditMismatchDetailsSchema,
   documentListQuerySchema,
-  updateDocumentRequestSchema
+  updateDocumentRequestSchema,
+  editDocumentRequestSchema
 } from "@orchestrat/protocol";
 import { z } from "zod";
 import { cliSetupIntegrationSchema } from "@orchestrat/protocol";
@@ -27,6 +29,9 @@ type Client = Pick<
   | "readDocument"
   | "createDocument"
   | "updateDocument"
+  | "editDocument"
+  | "listDocumentRevisions"
+  | "readDocumentRevision"
 >;
 export type BridgeOptions = {
   client?: Client;
@@ -61,7 +66,9 @@ export function mapMcpError(error: unknown) {
   const parsedDetails =
     known && error.code === "DOCUMENT_CONFLICT"
       ? documentConflictDetailsSchema.safeParse(error.details)
-      : undefined;
+      : known && error.code === "DOCUMENT_EDIT_MISMATCH"
+        ? documentEditMismatchDetailsSchema.safeParse(error.details)
+        : undefined;
   const details = parsedDetails?.success ? parsedDetails.data : undefined;
   return {
     isError: true,
@@ -176,7 +183,8 @@ export class McpBridge {
       this.server.registerTool(
         "list_projects",
         {
-          description: "List Orchestrat projects available to this global Cursor connection.",
+          description:
+            "List Orchestrat projects available to this global Cursor connection.",
           inputSchema: {}
         },
         async () =>
@@ -190,10 +198,12 @@ export class McpBridge {
       this.server.registerTool(
         "select_project",
         {
-          description: "Select the Orchestrat project for subsequent work in this global Cursor connection.",
+          description:
+            "Select the Orchestrat project for subsequent work in this global Cursor connection.",
           inputSchema: { project_id: z.string().uuid() }
         },
-        async ({ project_id }) => this.call(() => this.selectProject(project_id))
+        async ({ project_id }) =>
+          this.call(() => this.selectProject(project_id))
       );
     }
     this.server.registerTool(
@@ -348,6 +358,53 @@ export class McpBridge {
           )
         )
     );
+    this.server.registerTool(
+      "edit_document",
+      {
+        description:
+          "Apply exact sequential text replacements against a document revision. Every old_text must match exactly once.",
+        inputSchema: {
+          document_id: z.string().uuid(),
+          base_revision: editDocumentRequestSchema.shape.base_revision,
+          edits: editDocumentRequestSchema.shape.edits.min(1)
+        }
+      },
+      async ({ document_id, ...input }) =>
+        this.call(() => this.activeClient().editDocument(document_id, input))
+    );
+    this.server.registerTool(
+      "list_document_revisions",
+      {
+        description:
+          "List document revision metadata without fetching revision bodies.",
+        inputSchema: {
+          document_id: z.string().uuid(),
+          limit: z.number().int().min(1).max(100).optional(),
+          cursor: z.string().min(1).optional()
+        }
+      },
+      async ({ document_id, limit, cursor }) =>
+        this.call(() =>
+          this.activeClient().listDocumentRevisions(document_id, {
+            limit,
+            cursor
+          })
+        )
+    );
+    this.server.registerTool(
+      "read_document_revision",
+      {
+        description: "Read one historical document revision and its content.",
+        inputSchema: {
+          document_id: z.string().uuid(),
+          revision: z.number().int().min(1)
+        }
+      },
+      async ({ document_id, revision }) =>
+        this.call(() =>
+          this.activeClient().readDocumentRevision(document_id, revision)
+        )
+    );
   }
   private requireSession() {
     if (!this.sessionId)
@@ -368,9 +425,15 @@ export class McpBridge {
     return this.client;
   }
   private async selectProject(projectId: string) {
-    const project = this.options.projects?.find((item) => item.id === projectId);
+    const project = this.options.projects?.find(
+      (item) => item.id === projectId
+    );
     if (!project)
-      throw new AgentApiError(404, "NOT_FOUND", "Selected project is unavailable.");
+      throw new AgentApiError(
+        404,
+        "NOT_FOUND",
+        "Selected project is unavailable."
+      );
     const previousSessionId = this.sessionId;
     this.sessionId = undefined;
     if (previousSessionId)

@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   AgentApiClient,
   AgentApiError,
+  parseAttachmentUpload,
   validateAgentApiBaseUrl
 } from "./index.js";
 
@@ -179,6 +180,7 @@ test("maps typed agent document routes and sends revision preconditions", async 
     project_id: id,
     path: "docs/README.md",
     current_revision: 1,
+    archived_at: null,
     created_by: { type: "agent", id },
     created_at: timestamp,
     updated_at: timestamp
@@ -214,7 +216,7 @@ test("maps typed agent document routes and sends revision preconditions", async 
   await client.updateDocument(id, { content: "updated", base_revision: 1 });
   assert.equal(
     calls[0]!.url,
-    "https://api.test/api/v1/agent/documents?limit=1"
+    "https://api.test/api/v1/agent/documents?limit=1&include_archived=false"
   );
   assert.equal(calls[1]!.url, `https://api.test/api/v1/agent/documents/${id}`);
   assert.equal(calls[2]!.init?.method, "POST");
@@ -222,5 +224,166 @@ test("maps typed agent document routes and sends revision preconditions", async 
   assert.deepEqual(JSON.parse(String(calls[3]!.init?.body)), {
     content: "updated",
     base_revision: 1
+  });
+});
+
+test("supports exact edits, summary history, lifecycle, and unsigned object puts", async () => {
+  const document = {
+    id,
+    project_id: id,
+    path: "docs/README.md",
+    current_revision: 1,
+    archived_at: null,
+    created_by: { type: "agent", id },
+    created_at: timestamp,
+    updated_at: timestamp
+  };
+  const revision = {
+    id,
+    document_id: id,
+    revision_number: 1,
+    content: "hello",
+    author: { type: "agent", id },
+    created_at: timestamp
+  };
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const client = new AgentApiClient({
+    baseUrl: "https://api.test",
+    token,
+    fetch: async (url, init) => {
+      calls.push({ url: String(url), init });
+      if (String(url).startsWith("https://signed.test"))
+        return new Response("", { status: 200, headers: { etag: "etag-1" } });
+      if (String(url).includes("/revisions?"))
+        return new Response(
+          JSON.stringify({ revisions: [], next_cursor: null })
+        );
+      return new Response(JSON.stringify({ document, revision }));
+    }
+  });
+  await client.editDocument(id, {
+    base_revision: 1,
+    edits: [{ old_text: "hello", new_text: "updated" }]
+  });
+  await client.listDocumentRevisions(id, { limit: 10 });
+  await client.archiveDocument(id);
+  const etag = await client.putPresignedObject(
+    "https://signed.test/object",
+    "body",
+    "text/plain"
+  );
+  assert.equal(etag, "etag-1");
+  assert.equal(new URL(calls[0]!.url).pathname.endsWith("/edits"), true);
+  assert.match(calls[1]!.url, /view=summary/);
+  const signedHeaders = calls.at(-1)!.init!.headers as Record<string, string>;
+  assert.equal(signedHeaders.authorization, undefined);
+});
+
+test("parses wrapped upload sessions, completes direct uploads, and sends zero-byte PUTs", async () => {
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const attachment = {
+    id,
+    document_id: id,
+    filename: "empty.bin",
+    content_type: "application/octet-stream",
+    size_bytes: 0,
+    created_at: timestamp
+  };
+  const client = new AgentApiClient({
+    baseUrl: "https://api.test",
+    token,
+    fetch: async (url, init) => {
+      calls.push({ url: String(url), init });
+      if (String(url).endsWith("/parts"))
+        return new Response(
+          JSON.stringify({
+            parts: [{ part_number: 1, upload_url: "https://signed.test/part" }]
+          })
+        );
+      if (
+        String(url).includes("/attachments/uploads") &&
+        init?.method === "POST"
+      )
+        return new Response(
+          JSON.stringify({
+            attachment,
+            upload: {
+              id,
+              mode: "single",
+              expires_at: timestamp,
+              status: "completed"
+            }
+          })
+        );
+      return new Response(
+        JSON.stringify({
+          upload: {
+            id,
+            mode: "single",
+            upload_url: "https://signed.test/empty",
+            expires_at: timestamp,
+            completed_parts: [{ part_number: 1, etag: "etag-1" }]
+          }
+        })
+      );
+    }
+  });
+  const parsed = parseAttachmentUpload({
+    upload: {
+      id,
+      mode: "multipart",
+      expires_at: timestamp,
+      completed_parts: [{ part_number: 2, etag: "etag-2" }]
+    }
+  });
+  assert.equal(parsed.id, id);
+  assert.deepEqual(parsed.completed_parts, [
+    { part_number: 2, etag: "etag-2" }
+  ]);
+  const session = await client.startDocumentAttachmentUpload(id, {
+    filename: "empty.bin",
+    content_type: "application/octet-stream",
+    size_bytes: 0
+  });
+  assert.equal(session.mode, "single");
+  await client.putPresignedObject(
+    "https://signed.test/empty",
+    new Uint8Array(0),
+    undefined,
+    0
+  );
+  const completed = await client.completeDocumentAttachmentUpload(
+    id,
+    session.id
+  );
+  assert.equal(completed.attachment.size_bytes, 0);
+  const parts = await client.refreshDocumentAttachmentParts(id, id, [1]);
+  assert.equal(parts.parts[0]!.upload_url, "https://signed.test/part");
+  assert.throws(
+    () =>
+      client.refreshDocumentAttachmentParts(
+        id,
+        id,
+        Array.from({ length: 101 }, (_, index) => index + 1)
+      ),
+    /1-100/
+  );
+  const put = calls.find((call) => call.url.startsWith("https://signed.test"));
+  assert.equal((put?.init?.body as Uint8Array).byteLength, 0);
+});
+
+test("resolves relative attachment download tickets against the API base", async () => {
+  const client = new AgentApiClient({
+    baseUrl: "https://api.test",
+    token,
+    fetch: async () =>
+      new Response(
+        JSON.stringify({
+          download_url: "/api/v1/attachments/download?ticket=ticket"
+        })
+      )
+  });
+  assert.deepEqual(await client.downloadDocumentAttachment(id, id), {
+    download_url: "https://api.test/api/v1/attachments/download?ticket=ticket"
   });
 });

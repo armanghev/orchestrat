@@ -153,6 +153,17 @@ test("invokes a registered tool over the official in-memory transport", async ()
         "Document revision is stale.",
         { current_revision: 2, base_revision: 1 }
       );
+    },
+    async editDocument(_documentId: string, input: unknown) {
+      calls.push({ edit: input });
+      return { document: {}, revision: {} };
+    },
+    async listDocumentRevisions(_documentId: string, input: unknown) {
+      calls.push({ history: input });
+      return { revisions: [], next_cursor: null };
+    },
+    async readDocumentRevision() {
+      return { document: {}, revision: {} };
     }
   };
   const bridge = new McpBridge({
@@ -216,6 +227,41 @@ test("invokes a registered tool over the official in-memory transport", async ()
   assert.equal(stale.result.isError, true);
   assert.match(stale.result.content[0].text, /DOCUMENT_CONFLICT/);
   assert.match(stale.result.content[0].text, /current_revision/);
+  const exact = await request({
+    jsonrpc: "2.0",
+    id: 5,
+    method: "tools/call",
+    params: {
+      name: "edit_document",
+      arguments: {
+        document_id: id,
+        base_revision: 1,
+        edits: [{ old_text: "hello", new_text: "updated" }]
+      }
+    }
+  });
+  assert.equal(exact.result.isError, undefined);
+  const history = await request({
+    jsonrpc: "2.0",
+    id: 6,
+    method: "tools/call",
+    params: {
+      name: "list_document_revisions",
+      arguments: { document_id: id, limit: 5 }
+    }
+  });
+  assert.equal(history.result.isError, undefined);
+  assert.deepEqual(calls.at(-1), { history: { limit: 5, cursor: undefined } });
+  const historical = await request({
+    jsonrpc: "2.0",
+    id: 7,
+    method: "tools/call",
+    params: {
+      name: "read_document_revision",
+      arguments: { document_id: id, revision: 1 }
+    }
+  });
+  assert.equal(historical.result.isError, undefined);
   await clientTransport.close();
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.deepEqual(calls.at(-1), "close");
@@ -228,18 +274,44 @@ test("global Cursor requires a selected project before project tools run", async
       calls.push(`open:${name}`);
       return { session: { id: `${id}-${name}` } };
     },
-    async heartbeat() { return {}; },
-    async closeSession() { calls.push(`close:${name}`); return {}; },
-    async listTasks() { calls.push(`tasks:${name}`); return {}; },
-    async getTask() { return {}; },
-    async claimTask() { return {}; },
-    async releaseClaim() { return {}; },
-    async completeClaim() { return {}; },
-    async listEvents() { return {}; },
-    async listDocuments() { return { documents: [], next_cursor: null }; },
-    async readDocument() { return {}; },
-    async createDocument() { return { document: {}, revision: {} }; },
-    async updateDocument() { return {}; }
+    async heartbeat() {
+      return {};
+    },
+    async closeSession() {
+      calls.push(`close:${name}`);
+      return {};
+    },
+    async listTasks() {
+      calls.push(`tasks:${name}`);
+      return {};
+    },
+    async getTask() {
+      return {};
+    },
+    async claimTask() {
+      return {};
+    },
+    async releaseClaim() {
+      return {};
+    },
+    async completeClaim() {
+      return {};
+    },
+    async listEvents() {
+      return {};
+    },
+    async listDocuments() {
+      return { documents: [], next_cursor: null };
+    },
+    async readDocument() {
+      return {};
+    },
+    async createDocument() {
+      return { document: {}, revision: {} };
+    },
+    async updateDocument() {
+      return {};
+    }
   });
   const first = "550e8400-e29b-41d4-a716-446655440000";
   const bridge = new McpBridge({
@@ -253,7 +325,8 @@ test("global Cursor requires a selected project before project tools run", async
       }
     ]
   });
-  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
   await bridge.start();
   await bridge.server.connect(serverTransport);
   await clientTransport.start();
@@ -275,7 +348,10 @@ test("global Cursor requires a selected project before project tools run", async
       clientInfo: { name: "test", version: "1" }
     }
   });
-  await clientTransport.send({ jsonrpc: "2.0", method: "notifications/initialized" } as never);
+  await clientTransport.send({
+    jsonrpc: "2.0",
+    method: "notifications/initialized"
+  } as never);
   const blocked = await request({
     jsonrpc: "2.0",
     id: 2,

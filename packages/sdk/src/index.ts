@@ -15,6 +15,7 @@ import {
   claimMutationRequestSchema,
   createDocumentRequestSchema,
   createDocumentResponseSchema,
+  createAttachmentUploadRequestSchema,
   documentIdParamsSchema,
   documentListQuerySchema,
   documentListResponseSchema,
@@ -36,6 +37,25 @@ import type {
   UpdateDocumentRequest,
   AgentLifecycleHookRequest
 } from "@orchestrat/protocol";
+import {
+  parseAttachmentParts,
+  parseAttachmentUpload,
+  parseCompletedAttachmentUpload,
+  parseDocumentRevisionHistory,
+  parseHistoricalDocumentRevision,
+  documentMutationResponse,
+  parseEditDocumentRequest,
+  parseRenameDocumentRequest,
+  type AttachmentPartsResponse,
+  type AttachmentUpload,
+  type CreateAttachmentUploadRequest,
+  type CompletedAttachmentUpload,
+  type DocumentRevisionHistory,
+  type HistoricalDocumentRevision,
+  type EditDocumentRequest,
+  type RenameDocumentRequest
+} from "./documents.js";
+export * from "./documents.js";
 
 type Fetch = typeof globalThis.fetch;
 type Sleep = (milliseconds: number) => Promise<void>;
@@ -191,8 +211,16 @@ export class AgentApiClient {
     );
   }
 
-  listDocuments(query: Partial<DocumentListQuery> = {}) {
-    const parsed = documentListQuerySchema.parse({ limit: 50, ...query });
+  listDocuments(
+    query: Partial<DocumentListQuery> & { include_archived?: boolean } = {}
+  ) {
+    const parsed = documentListQuerySchema.parse({
+      limit: 50,
+      ...query,
+      ...(query.include_archived === undefined
+        ? {}
+        : { include_archived: String(query.include_archived) })
+    });
     return this.request(
       "GET",
       `/documents${queryString(parsed)}`,
@@ -232,6 +260,218 @@ export class AgentApiClient {
     );
   }
 
+  editDocument(documentId: string, input: EditDocumentRequest) {
+    const id = documentIdParamsSchema.parse({ id: documentId }).id;
+    return this.request(
+      "POST",
+      `/documents/${encodeURIComponent(id)}/edits`,
+      documentResponseSchema,
+      parseEditDocumentRequest(input)
+    );
+  }
+
+  renameDocument(documentId: string, input: RenameDocumentRequest) {
+    const id = documentIdParamsSchema.parse({ id: documentId }).id;
+    return this.request(
+      "PATCH",
+      `/documents/${encodeURIComponent(id)}/path`,
+      documentMutationResponse,
+      parseRenameDocumentRequest(input)
+    );
+  }
+
+  archiveDocument(documentId: string) {
+    return this.documentLifecycle(documentId, "archive");
+  }
+
+  restoreDocument(documentId: string) {
+    return this.documentLifecycle(documentId, "restore");
+  }
+
+  listDocumentRevisions(
+    documentId: string,
+    query: { limit?: number; cursor?: string } = {}
+  ): Promise<DocumentRevisionHistory> {
+    const id = documentIdParamsSchema.parse({ id: documentId }).id;
+    const limit = query.limit ?? 50;
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100)
+      throw new Error("revision limit must be between 1 and 100");
+    return this.request(
+      "GET",
+      `/documents/${encodeURIComponent(id)}/revisions${queryString({
+        view: "summary",
+        limit,
+        cursor: query.cursor
+      })}`,
+      { parse: parseDocumentRevisionHistory },
+      undefined,
+      true
+    );
+  }
+
+  readDocumentRevision(
+    documentId: string,
+    revision: number
+  ): Promise<HistoricalDocumentRevision> {
+    const id = documentIdParamsSchema.parse({ id: documentId }).id;
+    if (!Number.isInteger(revision) || revision < 1)
+      throw new Error("revision must be a positive integer");
+    return this.request(
+      "GET",
+      `/documents/${encodeURIComponent(id)}/revisions/${revision}`,
+      { parse: parseHistoricalDocumentRevision },
+      undefined,
+      true
+    );
+  }
+
+  startDocumentAttachmentUpload(
+    documentId: string,
+    input: CreateAttachmentUploadRequest
+  ): Promise<AttachmentUpload> {
+    const id = documentIdParamsSchema.parse({ id: documentId }).id;
+    return this.request(
+      "POST",
+      `/documents/${encodeURIComponent(id)}/attachments/uploads`,
+      { parse: parseAttachmentUpload },
+      createAttachmentUploadRequestSchema.parse(input)
+    );
+  }
+
+  getDocumentAttachmentUpload(
+    documentId: string,
+    uploadSessionId: string
+  ): Promise<AttachmentUpload> {
+    const id = documentIdParamsSchema.parse({ id: documentId }).id;
+    return this.request(
+      "GET",
+      `/documents/${encodeURIComponent(id)}/attachments/uploads/${encodeURIComponent(uploadSessionId)}`,
+      { parse: parseAttachmentUpload },
+      undefined,
+      true
+    );
+  }
+
+  refreshAttachmentUpload(
+    documentId: string,
+    uploadSessionId: string
+  ): Promise<AttachmentUpload> {
+    const id = documentIdParamsSchema.parse({ id: documentId }).id;
+    return this.request(
+      "POST",
+      `/documents/${encodeURIComponent(id)}/attachments/uploads/${encodeURIComponent(uploadSessionId)}/refresh`,
+      { parse: parseAttachmentUpload },
+      {}
+    );
+  }
+
+  refreshDocumentAttachmentParts(
+    documentId: string,
+    uploadSessionId: string,
+    partNumbers: number[]
+  ): Promise<AttachmentPartsResponse> {
+    if (
+      !partNumbers.length ||
+      partNumbers.length > 100 ||
+      new Set(partNumbers).size !== partNumbers.length ||
+      partNumbers.some(
+        (part) => !Number.isInteger(part) || part < 1 || part > 10_000
+      )
+    )
+      throw new Error(
+        "part numbers must contain 1-100 unique positive integers"
+      );
+    const id = documentIdParamsSchema.parse({ id: documentId }).id;
+    return this.request(
+      "POST",
+      `/documents/${encodeURIComponent(id)}/attachments/uploads/${encodeURIComponent(uploadSessionId)}/parts`,
+      { parse: parseAttachmentParts },
+      { part_numbers: partNumbers }
+    );
+  }
+
+  completeDocumentAttachmentUpload(
+    documentId: string,
+    uploadSessionId: string,
+    parts?: Array<{ part_number: number; etag: string }>
+  ): Promise<CompletedAttachmentUpload> {
+    const id = documentIdParamsSchema.parse({ id: documentId }).id;
+    return this.request(
+      "POST",
+      `/documents/${encodeURIComponent(id)}/attachments/uploads/${encodeURIComponent(uploadSessionId)}/complete`,
+      { parse: parseCompletedAttachmentUpload },
+      { parts }
+    );
+  }
+
+  abortDocumentAttachmentUpload(documentId: string, uploadSessionId: string) {
+    const id = documentIdParamsSchema.parse({ id: documentId }).id;
+    return this.request(
+      "DELETE",
+      `/documents/${encodeURIComponent(id)}/attachments/uploads/${encodeURIComponent(uploadSessionId)}`,
+      { parse: (value: unknown) => value }
+    );
+  }
+
+  downloadDocumentAttachment(
+    documentId: string,
+    attachmentId: string
+  ): Promise<{ download_url: string }> {
+    const id = documentIdParamsSchema.parse({ id: documentId }).id;
+    return this.request(
+      "POST",
+      `/documents/${encodeURIComponent(id)}/attachments/${encodeURIComponent(attachmentId)}/download`,
+      {
+        parse: (value: unknown) => {
+          const url = (value as { download_url?: unknown })?.download_url;
+          if (typeof url !== "string")
+            throw new Error("invalid download response");
+          return {
+            download_url: new URL(url, `${this.baseUrl}/`).toString()
+          };
+        }
+      },
+      {}
+    );
+  }
+
+  async putPresignedObject(
+    url: string,
+    body: BodyInit,
+    contentType?: string,
+    contentLength?: number
+  ) {
+    const uploadBody = contentLength === 0 ? new Uint8Array(0) : body;
+    const response = await this.fetch(url, {
+      method: "PUT",
+      headers: {
+        ...(contentType ? { "content-type": contentType } : {}),
+        ...(contentLength === undefined
+          ? {}
+          : { "content-length": String(contentLength) })
+      },
+      body: uploadBody,
+      ...(typeof uploadBody === "object" ? { duplex: "half" as const } : {})
+    });
+    if (!response.ok)
+      throw new AgentApiError(
+        response.status,
+        "STORAGE_UPLOAD_FAILED",
+        "Object upload failed."
+      );
+    return response.headers.get("etag") ?? undefined;
+  }
+
+  private documentLifecycle(documentId: string, action: "archive" | "restore") {
+    const id = documentIdParamsSchema.parse({ id: documentId }).id;
+    return this.request(
+      "POST",
+      `/documents/${encodeURIComponent(id)}/${action}`,
+      documentMutationResponse,
+      {}
+    );
+  }
+
   ingestLifecycle(input: AgentLifecycleHookRequest, idempotencyKey: string) {
     return this.request(
       "POST",
@@ -244,7 +484,7 @@ export class AgentApiClient {
   }
 
   private async request<T>(
-    method: "GET" | "POST" | "PATCH",
+    method: "GET" | "POST" | "PATCH" | "DELETE",
     path: string,
     schema: Schema<T>,
     input?: unknown,
@@ -276,7 +516,8 @@ export class AgentApiClient {
       }
       let value: unknown;
       try {
-        value = await response.json();
+        const text = await response.text();
+        value = text.length ? JSON.parse(text) : undefined;
       } catch {
         throw new AgentApiError(
           response.status,
