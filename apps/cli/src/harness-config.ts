@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import type { McpScope } from "./config.js";
 import type { ConfigurableIntegration } from "./harnesses.js";
 import { harness } from "./harnesses.js";
 import {
@@ -30,14 +31,16 @@ export type HarnessConfigPlan = {
 export function harnessConfigPlan(
   home: string,
   integration: ConfigurableIntegration,
-  command: string
+  command: string,
+  projectRoot = home,
+  mcpScope: McpScope = "project"
 ): HarnessConfigPlan {
   const item = harness(integration)!;
   const mcpPath = (
     {
       codex: join(home, ".codex", "config.toml"),
       "claude-code": join(home, ".claude.json"),
-      cursor: join(home, ".cursor", "mcp.json"),
+      cursor: join(mcpScope === "global" ? home : projectRoot, ".cursor", "mcp.json"),
       antigravity: join(home, ".gemini", "config", "mcp_config.json"),
       opencode: join(home, ".config", "opencode", "opencode.json")
     } as Record<ConfigurableIntegration, string>
@@ -65,8 +68,22 @@ export function harnessConfigPlan(
             ? "mcp_servers.orchestrat"
             : "mcpServers.orchestrat"
       ],
-      merge: (text) => mergeHarnessMcp(text, integration, command),
-      remove: (text) => removeHarnessMcp(text, integration, command)
+      merge: (text) =>
+        mergeHarnessMcp(
+          text,
+          integration,
+          command,
+          undefined,
+          mcpScope === "global"
+        ),
+      remove: (text) =>
+        removeHarnessMcp(
+          text,
+          integration,
+          command,
+          undefined,
+          mcpScope === "global"
+        )
     };
   if (item.supportsHooks && hookPath)
     plan.hooks = {
@@ -88,9 +105,17 @@ export function harnessConfigPlan(
 export async function previewHarnessConfig(
   home: string,
   integration: ConfigurableIntegration,
-  command: string
+  command: string,
+  projectRoot = home,
+  mcpScope: McpScope = "project"
 ) {
-  const plan = harnessConfigPlan(home, integration, command);
+  const plan = harnessConfigPlan(
+    home,
+    integration,
+    command,
+    projectRoot,
+    mcpScope
+  );
   const previews = [] as {
     integration: ConfigurableIntegration;
     path: string;

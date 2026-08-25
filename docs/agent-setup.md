@@ -28,12 +28,12 @@ orchestrat setup
 
 Setup detects installed Claude Code, Codex, Cursor, Antigravity, OpenCode, and
 Pi commands, then asks which configurable agents to connect. Before any
-mutation it prints the paths and managed entries that will change. It then
-opens browser authorization, asks for the project scope, creates a separate
-project-scoped agent identity and credential per selected integration, and
-stores those credentials in separate macOS Keychain entries. The persistent
-launcher is `~/.local/bin/orchestrat`; the local project and agent mapping is
-non-secret metadata.
+mutation it prints the paths and managed entries that will change. Browser
+authorization proves the account only; the CLI then asks for the project to
+configure. It creates a separate project-scoped agent identity and credential
+per selected integration, and stores those credentials in separate macOS
+Keychain entries. The persistent launcher is `~/.local/bin/orchestrat`; the
+local project and agent mapping is non-secret metadata.
 
 Claude Code, Codex, Cursor, and Antigravity receive MCP and lifecycle-hook
 configuration. OpenCode receives MCP configuration only because it has no
@@ -47,7 +47,9 @@ Managed files are:
 - `~/.codex/hooks.json`
 - `~/.claude.json`
 - `~/.claude/settings.json`
-- `~/.cursor/mcp.json`
+- `<project>/.cursor/mcp.json` or `~/.cursor/mcp.json` (chosen during setup;
+  global setup asks which projects each selected harness may access, then the
+  harness calls `select_project` before project-scoped work)
 - `~/.cursor/hooks.json`
 - `~/.gemini/config/mcp_config.json`
 - `~/.gemini/config/hooks.json`

@@ -4,7 +4,11 @@ import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
 import { AgentApiClient } from "@orchestrat/sdk";
 import { startStdioBridge } from "@orchestrat/mcp";
-import { detectHarnesses, runSetup } from "./setup.js";
+import {
+  detectHarnesses,
+  resolveSetupAuthorization,
+  runSetup
+} from "./setup.js";
 import {
   isConfigurableIntegration,
   type ConfigurableIntegration
@@ -19,18 +23,28 @@ const packageVersion = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8")
 ).version as string;
 import { KeychainCredentialReader } from "./keychain.js";
-import { resolveInvocation } from "./resolve.js";
-import { findProject, readConfig, validateApiUrl } from "./config.js";
+import { resolveGlobalInvocation, resolveInvocation } from "./resolve.js";
+import {
+  canonicalizeCwd,
+  findProject,
+  readConfig,
+  validateApiUrl
+} from "./config.js";
 import { hookCwd, readBoundedStdin, runHook } from "./hooks.js";
 import { disconnectLocal, runDoctor, runStatus } from "./diagnostics.js";
 import {
   finishSetup,
   isInteractive,
+  startSetup,
   renderDetectedAgents,
   renderPreview,
   renderResult,
+  renderSetupAuthorization,
   renderSetupResult,
   runSetupProgress,
+  selectMcpScope,
+  selectGlobalProjects,
+  selectProject,
   selectHarnesses
 } from "./ui.js";
 
@@ -38,6 +52,8 @@ export function parseInvocationArgs(argv: string[]): {
   command:
     "status" | "mcp" | "setup" | "hook" | "doctor" | "disconnect" | "version";
   integration?: ConfigurableIntegration | "all";
+  cwd?: string;
+  global?: boolean;
   local?: boolean;
   event?: string;
 } {
@@ -47,6 +63,8 @@ export function parseInvocationArgs(argv: string[]): {
     args: argv,
     options: {
       integration: { type: "string" },
+      cwd: { type: "string" },
+      global: { type: "boolean", default: false },
       local: { type: "boolean", default: false },
       event: { type: "string" }
     },
@@ -70,6 +88,9 @@ export function parseInvocationArgs(argv: string[]): {
   const integration = values.integration;
   if (values.local && positionals[0] !== "disconnect") usage();
   if (values.event !== undefined && positionals[0] !== "hook") usage();
+  if (values.cwd !== undefined && positionals[0] !== "mcp") usage();
+  if (values.global && positionals[0] !== "mcp") usage();
+  if (values.global && values.cwd !== undefined) usage();
   if (
     typeof integration !== "undefined" &&
     !isConfigurableIntegration(integration)
@@ -113,17 +134,22 @@ export function parseInvocationArgs(argv: string[]): {
   if (positionals[0] === "mcp" && integration === undefined) usage();
   return integration === undefined
     ? { command: positionals[0] as "status" }
-    : { command: positionals[0] as "mcp", integration };
+    : {
+        command: positionals[0] as "mcp",
+        integration,
+        ...(values.cwd === undefined ? {} : { cwd: values.cwd }),
+        ...(values.global ? { global: true } : {})
+      };
 }
 
 function usage(): never {
   throw new Error(
-    "Usage: orchestrat setup | status | doctor | hook <integration> [--event <event>] | disconnect <integration|all> | mcp --integration <integration>"
+    "Usage: orchestrat setup | status | doctor | hook <integration> [--event <event>] | disconnect <integration|all> | mcp --integration <integration> [--cwd <project>] [--global]"
   );
 }
 
 export async function main(argv = process.argv.slice(2)): Promise<void> {
-  const { command, integration, local, event } = parseInvocationArgs(argv);
+  const { command, integration, local, event, cwd: configuredCwd, global } = parseInvocationArgs(argv);
   if (command === "version") {
     process.stdout.write(`${packageVersion}\n`);
     return;
@@ -135,7 +161,10 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     command === "hook" && integration && integration !== "all"
       ? hookCwd(integration, hookPayload, process.cwd())
       : process.cwd();
-  const project = findProject(await readConfig(home), payloadCwd);
+  const config = await readConfig(home);
+  const invocationCwd =
+    command === "mcp" && configuredCwd ? resolve(configuredCwd) : payloadCwd;
+  const project = findProject(config, invocationCwd);
   const api =
     validateApiUrl(process.env.ORCHESTRAT_API_URL) ??
     project?.apiUrl ??
@@ -194,6 +223,34 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     return;
   }
   if (command === "setup") {
+    const store = new KeychainCredentialStore();
+    const cwd = process.cwd();
+    const existing = config.projects[canonicalizeCwd(cwd)];
+    const authorization = interactive
+      ? await (async () => {
+          startSetup({ interactive });
+          const result = await resolveSetupAuthorization(
+            {
+              api,
+              fetch: globalThis.fetch,
+              open: async (url) => {
+                await openUrl("open", [url]);
+              },
+              sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+            },
+            store,
+            existing !== undefined && existing.apiUrl !== api
+          );
+          const selected = await selectProject(result.projects, { interactive });
+          if (selected.cancelled) {
+            process.exitCode = 130;
+            return undefined;
+          }
+          renderSetupAuthorization(selected.value, { interactive });
+          return { ...result, projectId: selected.value.id };
+        })()
+      : undefined;
+    if (interactive && !authorization) return;
     const detected = await detectHarnesses();
     const detectedUi = detected.map((item) => ({
       id: item.id,
@@ -219,6 +276,21 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       .filter(isConfigurableIntegration);
     if (!integrations.length)
       throw new Error("No configurable agent integrations found");
+    const mcpScope = integrations.length
+      ? await selectMcpScope({ interactive })
+      : undefined;
+    if (mcpScope?.cancelled) {
+      process.exitCode = 130;
+      return;
+    }
+    const globalProjects =
+      mcpScope?.value === "global" && authorization
+        ? await selectGlobalProjects(authorization.projects, { interactive })
+        : undefined;
+    if (globalProjects?.cancelled) {
+      process.exitCode = 130;
+      return;
+    }
     const setupResult = await runSetupProgress(
       () =>
         runSetup({
@@ -228,10 +300,18 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
             await openUrl("open", [url]);
           },
           sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-          store: new KeychainCredentialStore(),
-          cwd: process.cwd(),
+          store,
+          cwd,
           home,
           integrations,
+          authorization:
+            authorization && {
+              credential: authorization.credential,
+              projects: authorization.projects
+            },
+          projectId: authorization?.projectId,
+          mcpScope: mcpScope?.value,
+          globalProjects: globalProjects?.values,
           sourceCommand: resolve(process.argv[1] ?? "orchestrat"),
           reportPreview: async (previews) => {
             if (interactive)
@@ -276,8 +356,40 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     });
   } else if (command === "mcp") {
     if (!integration || integration === "all") usage();
+    if (global) {
+      const projects = await resolveGlobalInvocation({
+        integration,
+        read: readConfig,
+        credentials: new KeychainCredentialReader(),
+        home
+      });
+      const { bridge } = await startStdioBridge({
+        integration,
+        projects: projects.map((project) => ({
+          id: project.projectId,
+          name: `${project.organizationName} / ${project.name}`,
+          client: new AgentApiClient({
+            baseUrl: project.apiUrl ?? api,
+            token: project.credential
+          })
+        }))
+      });
+      const shutdown = async () => {
+        try {
+          await bridge.stop();
+        } catch (error) {
+          process.stderr.write(
+            `orchestrat: shutdown failed: ${error instanceof Error ? error.message : "unknown error"}\n`
+          );
+          process.exitCode = 1;
+        }
+      };
+      process.once("SIGINT", shutdown);
+      process.once("SIGTERM", shutdown);
+      return;
+    }
     const resolved = await resolveInvocation({
-      cwd: process.cwd(),
+      cwd: invocationCwd,
       integration,
       read: readConfig,
       credentials: new KeychainCredentialReader()

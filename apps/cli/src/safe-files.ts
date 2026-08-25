@@ -44,7 +44,8 @@ export async function atomicWrite(
 export function mergeJson(
   text: string | undefined,
   integration: "claude-code",
-  command: string
+  command: string,
+  global = false
 ) {
   const value = text === undefined ? {} : JSON.parse(text);
   if (!value || typeof value !== "object" || Array.isArray(value))
@@ -60,10 +61,16 @@ export function mergeJson(
   if (
     current !== undefined &&
     JSON.stringify(current) !==
-      JSON.stringify({ command, args: ["mcp", "--integration", integration] })
+      JSON.stringify({
+        command,
+        args: ["mcp", "--integration", integration, ...(global ? ["--global"] : [])]
+      })
   )
     throw new Error("Existing Orchestrat MCP entry conflicts");
-  servers.orchestrat = { command, args: ["mcp", "--integration", integration] };
+  servers.orchestrat = {
+    command,
+    args: ["mcp", "--integration", integration, ...(global ? ["--global"] : [])]
+  };
   root.mcpServers = servers;
   return `${JSON.stringify(root, null, 2)}\n`;
 }
@@ -71,7 +78,8 @@ export function mergeJson(
 export function mergeToml(
   text: string | undefined,
   integration: "codex",
-  command: string
+  command: string,
+  global = false
 ) {
   const source = text ?? "";
   if (/^[ \t]*\[mcp_servers\.orchestrat\][ \t]*$/m.test(source)) {
@@ -82,7 +90,7 @@ export function mergeToml(
       rest.search(/\n[ \t]*\[/) >= 0 ? rest.search(/\n[ \t]*\[/) : rest.length
     );
     const expectedArgs = new RegExp(
-      `args\\s*=\\s*\\[\\s*"mcp"\\s*,\\s*"--integration"\\s*,\\s*"${integration}"\\s*\\]`
+      `args\\s*=\\s*\\[\\s*"mcp"\\s*,\\s*"--integration"\\s*,\\s*"${integration}"${global ? '\\s*,\\s*"--global"' : ""}\\s*\\]`
     );
     if (
       !section.includes(`command = ${JSON.stringify(command)}`) ||
@@ -91,7 +99,7 @@ export function mergeToml(
       throw new Error("Existing Orchestrat MCP entry conflicts");
     return source;
   }
-  return `${source}${source && !source.endsWith("\n") ? "\n" : ""}\n[mcp_servers.orchestrat]\ncommand = ${JSON.stringify(command)}\nargs = ["mcp", "--integration", ${JSON.stringify(integration)}]\n`;
+  return `${source}${source && !source.endsWith("\n") ? "\n" : ""}\n[mcp_servers.orchestrat]\ncommand = ${JSON.stringify(command)}\nargs = ["mcp", "--integration", ${JSON.stringify(integration)}${global ? ', "--global"' : ""}]\n`;
 }
 
 export function mergeHooks(
@@ -158,7 +166,8 @@ export function mergeHooks(
 export function removeToml(
   text: string | undefined,
   integration: "codex",
-  command: string
+  command: string,
+  global = false
 ) {
   if (text === undefined) return text;
   const header = /^[ \t]*\[mcp_servers\.orchestrat\][ \t]*$/m;
@@ -169,7 +178,7 @@ export function removeToml(
   const end = next ? start + match[0].length + next.index + 1 : text.length;
   const section = text.slice(start, end);
   const args = new RegExp(
-    `args\\s*=\\s*\\[\\s*"mcp"\\s*,\\s*"--integration"\\s*,\\s*"${integration}"\\s*\\]`
+    `args\\s*=\\s*\\[\\s*"mcp"\\s*,\\s*"--integration"\\s*,\\s*"${integration}"${global ? '\\s*,\\s*"--global"' : ""}\\s*\\]`
   );
   if (
     !section.includes(`command = ${JSON.stringify(command)}`) ||
@@ -182,7 +191,8 @@ export function removeToml(
 export function removeJson(
   text: string | undefined,
   integration: "claude-code",
-  command: string
+  command: string,
+  global = false
 ) {
   if (text === undefined) return text;
   const root = JSON.parse(text) as Record<string, unknown>;
@@ -191,7 +201,10 @@ export function removeJson(
   if (current === undefined) return text;
   if (
     JSON.stringify(current) !==
-    JSON.stringify({ command, args: ["mcp", "--integration", integration] })
+    JSON.stringify({
+      command,
+      args: ["mcp", "--integration", integration, ...(global ? ["--global"] : [])]
+    })
   )
     throw new Error("Existing Orchestrat MCP entry conflicts");
   delete servers!.orchestrat;
@@ -231,11 +244,17 @@ export function removeHooks(
   return removed ? `${JSON.stringify(root, null, 2)}\n` : text;
 }
 
-const commandArgs = (command: string, integration: string) => [
+const commandArgs = (
+  command: string,
+  integration: string,
+  cwd?: string,
+  global = false
+) => [
   command,
   "mcp",
   "--integration",
-  integration
+  integration,
+  ...(global ? ["--global"] : cwd ? ["--cwd", cwd] : [])
 ];
 const jsonObject = (text: string | undefined, message: string) => {
   const value = text === undefined ? {} : JSON.parse(text);
@@ -249,11 +268,14 @@ const managedCommand = (command: string, integration: string, event?: string) =>
 export function mergeHarnessMcp(
   text: string | undefined,
   integration: ConfigurableIntegration,
-  command: string
+  command: string,
+  cwd?: string,
+  global = false
 ) {
-  if (integration === "codex") return mergeToml(text, integration, command);
+  if (integration === "codex")
+    return mergeToml(text, integration, command, global);
   if (integration === "claude-code")
-    return mergeJson(text, integration, command);
+    return mergeJson(text, integration, command, global);
   const root = jsonObject(text, "Harness configuration must be a JSON object");
   if (integration === "opencode") {
     const mcp =
@@ -268,7 +290,7 @@ export function mergeHarnessMcp(
         : {};
     const expected = {
       type: "local",
-      command: commandArgs(command, integration)
+      command: commandArgs(command, integration, cwd, global)
     };
     if (
       servers.orchestrat !== undefined &&
@@ -284,7 +306,10 @@ export function mergeHarnessMcp(
       !Array.isArray(root.mcpServers)
         ? root.mcpServers
         : {};
-    const expected = { command, args: ["mcp", "--integration", integration] };
+    const expected = {
+      command,
+      args: commandArgs(command, integration, cwd, global).slice(1)
+    };
     if (
       mcp.orchestrat !== undefined &&
       JSON.stringify(mcp.orchestrat) !== JSON.stringify(expected)
@@ -299,19 +324,25 @@ export function mergeHarnessMcp(
 export function removeHarnessMcp(
   text: string | undefined,
   integration: ConfigurableIntegration,
-  command: string
+  command: string,
+  cwd?: string,
+  global = false
 ) {
   if (text === undefined) return text;
-  if (integration === "codex") return removeToml(text, integration, command);
+  if (integration === "codex")
+    return removeToml(text, integration, command, global);
   if (integration === "claude-code")
-    return removeJson(text, integration, command);
+    return removeJson(text, integration, command, global);
   const root = jsonObject(text, "Harness configuration must be a JSON object");
   const parent =
     integration === "opencode" ? root.mcp?.servers : root.mcpServers;
   const expected =
     integration === "opencode"
-      ? { type: "local", command: commandArgs(command, integration) }
-      : { command, args: ["mcp", "--integration", integration] };
+      ? { type: "local", command: commandArgs(command, integration, cwd, global) }
+      : {
+          command,
+          args: commandArgs(command, integration, cwd, global).slice(1)
+        };
   if (parent?.orchestrat === undefined) return text;
   if (JSON.stringify(parent.orchestrat) !== JSON.stringify(expected))
     throw new Error("Existing Orchestrat MCP entry conflicts");

@@ -56,3 +56,37 @@ test("Cursor hook plan preserves unrelated hooks", () => {
     version: 1
   });
 });
+
+test("global Cursor MCP selects its project through the bridge", () => {
+  const plan = harnessConfigPlan(
+    "/home/test",
+    "cursor",
+    command,
+    "/work/project",
+    "global"
+  );
+  assert.equal(plan.mcp?.path, "/home/test/.cursor/mcp.json");
+  assert.deepEqual(JSON.parse(plan.mcp!.merge(undefined)).mcpServers.orchestrat, {
+    command,
+    args: ["mcp", "--integration", "cursor", "--global"]
+  });
+});
+
+test("every configurable harness can use the global MCP bridge", () => {
+  for (const integration of [
+    "codex",
+    "claude-code",
+    "cursor",
+    "antigravity",
+    "opencode"
+  ] as const) {
+    const plan = harnessConfigPlan(
+      "/home/test",
+      integration,
+      command,
+      "/work/project",
+      "global"
+    );
+    assert.match(plan.mcp!.merge(undefined), /--global/);
+  }
+});

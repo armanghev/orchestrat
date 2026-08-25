@@ -9,7 +9,7 @@ import { promisify } from "node:util";
 import { findMapping, findProject, parseConfig } from "./config.js";
 import { MemoryCredentialReader } from "./keychain.js";
 import { parseInvocationArgs } from "./main.js";
-import { resolveInvocation } from "./resolve.js";
+import { resolveGlobalInvocation, resolveInvocation } from "./resolve.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -72,6 +72,14 @@ test("accepts configurable harness commands and explicit hook events", () => {
     command: "mcp",
     integration: "cursor"
   });
+  assert.deepEqual(
+    parseInvocationArgs(["mcp", "--integration", "cursor", "--global"]),
+    { command: "mcp", integration: "cursor", global: true }
+  );
+  assert.deepEqual(
+    parseInvocationArgs(["mcp", "--integration", "codex", "--global"]),
+    { command: "mcp", integration: "codex", global: true }
+  );
   assert.deepEqual(parseInvocationArgs(["disconnect", "antigravity"]), {
     command: "disconnect",
     integration: "antigravity",
@@ -171,4 +179,35 @@ test("resolves credentials without exposing them in the public result", async ()
     agentId: "a"
   });
   assert.equal("credential" in resolved.public, false);
+});
+
+test("resolves only the configured global Cursor projects", async () => {
+  const projects = await resolveGlobalInvocation({
+    integration: "cursor",
+    read: async () =>
+      parseConfig({
+        version: 1,
+        projects: {},
+        globalProjects: {
+          cursor: {
+            "550e8400-e29b-41d4-a716-446655440000": {
+              name: "Project",
+              organizationName: "Org",
+              agentId: "agent"
+            }
+          }
+        }
+      }),
+    credentials: new MemoryCredentialReader(
+      new Map([
+        [
+          "agent:550e8400-e29b-41d4-a716-446655440000:cursor",
+          "secret"
+        ]
+      ])
+    )
+  });
+  assert.deepEqual(projects.map(({ projectId }) => projectId), [
+    "550e8400-e29b-41d4-a716-446655440000"
+  ]);
 });

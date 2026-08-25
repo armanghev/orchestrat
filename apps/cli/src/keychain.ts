@@ -3,6 +3,10 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 export const KEYCHAIN_SERVICE = "dev.orchestrat.cli.agent";
+export const agentAccount = (projectId: string, integration: string) =>
+  `agent:${projectId}:${integration}`;
+export const legacyAgentAccount = (integration: string) =>
+  `agent:${integration}`;
 
 export interface CredentialReader {
   read(account: string): Promise<string | undefined>;

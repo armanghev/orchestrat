@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   isInteractive,
+  startSetup,
   renderDetectedAgents,
+  renderSetupAuthorization,
   renderSetupResult,
   renderDoctor,
   renderResult,
@@ -126,10 +128,38 @@ test("detected rendering separates configurable and unsupported agents", () => {
     }
   );
   assert.deepEqual(calls, [
-    "intro:Welcome to Orchestrat",
     "info:Detected agents",
     "note:codex:Codex — configurable",
     "note:cursor:Cursor — unsupported: not installed"
+  ]);
+});
+
+test("setup renders authorization before detected agents", () => {
+  const calls: string[] = [];
+  const components = {
+    multiselect: async () => [],
+    cancel: () => undefined,
+    outro: () => undefined,
+    intro: (message?: string) => calls.push(`intro:${message}`),
+    log: {
+      info: (message: string) => calls.push(`info:${message}`),
+      success: (message: string) => calls.push(`success:${message}`),
+      warn: () => undefined
+    },
+    note: () => undefined,
+    spinner: () => ({ start: () => undefined, stop: () => undefined })
+  };
+  startSetup({ interactive: true, components });
+  renderSetupAuthorization(
+    { id: "project-123", name: "Project", organization_name: "Org" },
+    { interactive: true, components }
+  );
+  renderDetectedAgents([], { interactive: true, write: () => undefined, components });
+  assert.deepEqual(calls, [
+    "intro:Welcome to Orchestrat",
+    "success:Authenticated",
+    "success:Selected project: Org / Project",
+    "info:Detected agents"
   ]);
 });
 

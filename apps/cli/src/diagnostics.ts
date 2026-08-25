@@ -8,7 +8,11 @@ import {
   type Integration
 } from "./config.js";
 import { harnessConfigPlan } from "./harness-config.js";
-import type { CredentialStore } from "./keychain.js";
+import {
+  agentAccount,
+  legacyAgentAccount,
+  type CredentialStore
+} from "./keychain.js";
 import { inspectLauncher } from "./setup.js";
 import { access, lstat, rm } from "node:fs/promises";
 import { constants } from "node:fs";
@@ -33,7 +37,8 @@ export async function runStatus(input: {
   for (const integration of integrations as Integration[]) {
     const mapping = project?.integrations[integration];
     const token =
-      (await input.credentials.read(`agent:${integration}`)) ??
+      (await input.credentials.read(agentAccount(project!.projectId, integration))) ??
+      (await input.credentials.read(legacyAgentAccount(integration))) ??
       (await input.credentials.read(integration));
     if (!token) {
       backend[integration] = redacted(false, "missing credential");
@@ -139,7 +144,13 @@ export async function runDoctor(input: {
       project.integrations
     ) as Integration[]) {
       try {
-        const plan = harnessConfigPlan(input.home, integration, command);
+        const plan = harnessConfigPlan(
+          input.home,
+          integration,
+          command,
+          project.cwd,
+          project.mcpScopes?.[integration] ?? "project"
+        );
         let current = true;
         for (const item of [plan.mcp, plan.hooks]) {
           if (!item) continue;
@@ -163,7 +174,8 @@ export async function runDoctor(input: {
     : []) as Integration[]) {
     const mapping = project!.integrations[integration]!;
     const token =
-      (await input.credentials.read(`agent:${integration}`)) ??
+      (await input.credentials.read(agentAccount(project!.projectId, integration))) ??
+      (await input.credentials.read(legacyAgentAccount(integration))) ??
       (await input.credentials.read(integration));
     checks[`credential.${integration}`] = redacted(
       Boolean(token),
@@ -223,8 +235,25 @@ export async function disconnectLocal(input: {
     const otherProjectUses = Object.entries(config.projects).some(
       ([cwd, value]) => cwd !== project.cwd && Boolean(value.integrations[name])
     );
-    if (otherProjectUses) continue;
-    const plan = harnessConfigPlan(input.home, name, command);
+    const mcpScope = project.mcpScopes?.[name] ?? "project";
+    const globalProjectsRemain =
+      mcpScope === "global" &&
+      Object.keys(config.globalProjects?.[name] ?? {}).some(
+        (projectId) => projectId !== project.projectId
+      );
+    if (
+      (otherProjectUses &&
+        (name !== "cursor" || mcpScope === "global")) ||
+      globalProjectsRemain
+    )
+      continue;
+    const plan = harnessConfigPlan(
+      input.home,
+      name,
+      command,
+      project.cwd,
+      mcpScope
+    );
     for (const item of [plan.mcp, plan.hooks]) {
       if (!item) continue;
       const source = await readOptional(item.path);
@@ -240,6 +269,14 @@ export async function disconnectLocal(input: {
   const nextConfig = structuredClone(config);
   const nextProject = nextConfig.projects[project.cwd]!;
   for (const name of mapped) delete nextProject.integrations[name];
+  for (const name of mapped)
+    if (project.mcpScopes?.[name] === "global") {
+      delete nextConfig.globalProjects?.[name]?.[project.projectId];
+      if (!Object.keys(nextConfig.globalProjects?.[name] ?? {}).length)
+        delete nextConfig.globalProjects?.[name];
+    }
+  if (!Object.keys(nextConfig.globalProjects ?? {}).length)
+    delete nextConfig.globalProjects;
   if (!Object.keys(nextProject.integrations).length)
     delete nextConfig.projects[project.cwd];
   writes.push({
@@ -296,8 +333,8 @@ export async function disconnectLocal(input: {
     const otherProjectUses = Object.entries(config.projects).some(
       ([cwd, value]) => cwd !== project.cwd && Boolean(value.integrations[name])
     );
-    if (otherProjectUses) continue;
-    await input.store.remove(`agent:${name}`);
+    await input.store.remove(agentAccount(project.projectId, name));
+    if (!otherProjectUses) await input.store.remove(legacyAgentAccount(name));
     await input.store.remove(name);
   }
   if (!integrationsRemain) await input.store.remove("cli");

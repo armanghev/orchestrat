@@ -29,7 +29,8 @@ type Client = Pick<
   | "updateDocument"
 >;
 export type BridgeOptions = {
-  client: Client;
+  client?: Client;
+  projects?: { id: string; name: string; client: Client }[];
   integration: z.infer<typeof cliSetupIntegrationSchema>;
   runtime?: string;
   heartbeatMs?: number;
@@ -107,7 +108,9 @@ export class McpBridge {
   private sessionId?: string;
   private heartbeatTimer?: ReturnType<typeof setInterval>;
   private stopping?: Promise<void>;
+  private client?: Client;
   constructor(private readonly options: BridgeOptions) {
+    this.client = options.client;
     this.server = new McpServer({ name: "orchestrat", version: "0.1.0" });
     this.server.server.onclose = () => {
       void this.stop().catch((error) => this.reportCleanupError(error));
@@ -115,16 +118,13 @@ export class McpBridge {
     this.registerTools();
   }
   async start() {
-    const opened = await this.options.client.openSession({
+    if (!this.client) return this.server;
+    const opened = await this.client.openSession({
       runtime: this.options.runtime ?? this.options.integration,
       integration: this.options.integration
     });
     this.sessionId = opened.session.id;
-    this.heartbeatTimer = setInterval(
-      () => void this.heartbeat(),
-      this.options.heartbeatMs ?? 20_000
-    );
-    this.heartbeatTimer.unref?.();
+    this.startHeartbeat();
     return this.server;
   }
   async stop() {
@@ -141,7 +141,7 @@ export class McpBridge {
       }
       if (sessionId)
         try {
-          await this.options.client.closeSession(sessionId);
+          await this.activeClient().closeSession(sessionId);
         } catch (error) {
           this.reportCleanupError(error);
         }
@@ -156,21 +156,53 @@ export class McpBridge {
   private async heartbeat() {
     if (!this.sessionId) return;
     try {
-      await this.options.client.heartbeat(this.sessionId);
+      await this.activeClient().heartbeat(this.sessionId);
     } catch (error) {
       process.stderr.write(
         `orchestrat: heartbeat failed: ${error instanceof Error ? error.message : "unknown error"}\n`
       );
     }
   }
+  private startHeartbeat() {
+    if (this.heartbeatTimer) return;
+    this.heartbeatTimer = setInterval(
+      () => void this.heartbeat(),
+      this.options.heartbeatMs ?? 20_000
+    );
+    this.heartbeatTimer.unref?.();
+  }
   private registerTools() {
+    if (this.options.projects) {
+      this.server.registerTool(
+        "list_projects",
+        {
+          description: "List Orchestrat projects available to this global Cursor connection.",
+          inputSchema: {}
+        },
+        async () =>
+          success(
+            this.options.projects!.map(({ id, name }) => ({
+              project_id: id,
+              name
+            }))
+          )
+      );
+      this.server.registerTool(
+        "select_project",
+        {
+          description: "Select the Orchestrat project for subsequent work in this global Cursor connection.",
+          inputSchema: { project_id: z.string().uuid() }
+        },
+        async ({ project_id }) => this.call(() => this.selectProject(project_id))
+      );
+    }
     this.server.registerTool(
       "list_tasks",
       {
         description: "List project tasks visible to this authenticated agent.",
         inputSchema: listTasksInput
       },
-      async (input) => this.call(() => this.options.client.listTasks(input))
+      async (input) => this.call(() => this.activeClient().listTasks(input))
     );
     this.server.registerTool(
       "get_task",
@@ -180,7 +212,7 @@ export class McpBridge {
         inputSchema: taskIdInput
       },
       async ({ task_id }) =>
-        this.call(() => this.options.client.getTask(task_id))
+        this.call(() => this.activeClient().getTask(task_id))
     );
     this.server.registerTool(
       "claim_task",
@@ -195,7 +227,7 @@ export class McpBridge {
       async ({ task_id, lease_seconds }) =>
         this.call(async () => {
           const sessionId = this.requireSession();
-          const result = await this.options.client.claimTask(task_id, {
+          const result = await this.activeClient().claimTask(task_id, {
             session_id: sessionId,
             lease_seconds: lease_seconds ?? 300
           });
@@ -222,7 +254,7 @@ export class McpBridge {
                 "CLAIM_NOT_FOUND",
                 "No local claim token for this task."
               );
-            const result = await this.options.client[action](
+            const result = await this.activeClient()[action](
               this.requireSession(),
               {
                 claim_token: token
@@ -242,7 +274,7 @@ export class McpBridge {
           after: z.string().min(1).optional()
         }
       },
-      async (input) => this.call(() => this.options.client.listEvents(input))
+      async (input) => this.call(() => this.activeClient().listEvents(input))
     );
     this.server.registerTool(
       "heartbeat",
@@ -251,7 +283,7 @@ export class McpBridge {
         inputSchema: {}
       },
       async () =>
-        this.call(() => this.options.client.heartbeat(this.requireSession()))
+        this.call(() => this.activeClient().heartbeat(this.requireSession()))
     );
     this.server.registerTool(
       "list_documents",
@@ -265,7 +297,7 @@ export class McpBridge {
       },
       async (input) =>
         this.call(() =>
-          this.options.client.listDocuments(
+          this.activeClient().listDocuments(
             documentListQuerySchema.parse(input)
           )
         )
@@ -278,7 +310,7 @@ export class McpBridge {
         inputSchema: { document_id: z.string().uuid() }
       },
       async ({ document_id }) =>
-        this.call(() => this.options.client.readDocument(document_id))
+        this.call(() => this.activeClient().readDocument(document_id))
     );
     this.server.registerTool(
       "create_document",
@@ -292,7 +324,7 @@ export class McpBridge {
       },
       async (input) =>
         this.call(() =>
-          this.options.client.createDocument(
+          this.activeClient().createDocument(
             createDocumentRequestSchema.parse(input)
           )
         )
@@ -310,7 +342,7 @@ export class McpBridge {
       },
       async ({ document_id, ...input }) =>
         this.call(() =>
-          this.options.client.updateDocument(
+          this.activeClient().updateDocument(
             document_id,
             updateDocumentRequestSchema.parse(input)
           )
@@ -325,6 +357,33 @@ export class McpBridge {
         "The agent session is not open."
       );
     return this.sessionId;
+  }
+  private activeClient() {
+    if (!this.client)
+      throw new AgentApiError(
+        409,
+        "AGENT_SESSION_NOT_FOUND",
+        "Select an Orchestrat project before using project tools."
+      );
+    return this.client;
+  }
+  private async selectProject(projectId: string) {
+    const project = this.options.projects?.find((item) => item.id === projectId);
+    if (!project)
+      throw new AgentApiError(404, "NOT_FOUND", "Selected project is unavailable.");
+    const previousSessionId = this.sessionId;
+    this.sessionId = undefined;
+    if (previousSessionId)
+      await this.activeClient().closeSession(previousSessionId);
+    this.claims.clear();
+    this.client = project.client;
+    const opened = await this.client.openSession({
+      runtime: this.options.runtime ?? this.options.integration,
+      integration: this.options.integration
+    });
+    this.sessionId = opened.session.id;
+    this.startHeartbeat();
+    return { project_id: project.id, name: project.name };
   }
   private async call<T>(operation: () => Promise<T>) {
     try {

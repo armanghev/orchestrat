@@ -55,6 +55,16 @@ test("empty setup uses approved project, stores distinct credentials, and resolv
         project_id: "550e8400-e29b-41d4-a716-446655440000",
         credential: "orch_cli_" + "c".repeat(32)
       });
+    if (url.endsWith("/projects"))
+      return response({
+        projects: [
+          {
+            id: "550e8400-e29b-41d4-a716-446655440000",
+            name: "Project",
+            organization_name: "Org"
+          }
+        ]
+      });
     const integration = JSON.parse(String(init?.body)).integration;
     return response({
       agent: {
@@ -150,8 +160,8 @@ test("stored CLI credential recovers project without opening browser", async () 
   await store.write("cli", "orch_cli_" + "c".repeat(32));
   const opened: string[] = [];
   const fetch: typeof globalThis.fetch = async (input) =>
-    String(input).endsWith("/project")
-      ? response({ project_id: "550e8400-e29b-41d4-a716-446655440000" })
+    String(input).endsWith("/projects")
+      ? response({ projects: [{ id: "550e8400-e29b-41d4-a716-446655440000", name: "Project", organization_name: "Org" }] })
       : response({
           agent: { id: "550e8400-e29b-41d4-a716-446655440001" },
           credential: { token: "orch_agent_" + "x".repeat(32) }
@@ -170,6 +180,247 @@ test("stored CLI credential recovers project without opening browser", async () 
     sourceCommand
   });
   assert.equal(opened.length, 0);
+});
+
+test("Cursor MCP setup is project-scoped and migrates the legacy user entry", async () => {
+  const home = await mkdtemp(join(tmpdir(), "orch-setup-cursor-project-"));
+  const cwd = join(home, "project");
+  const sourceCommand = join(home, "cli", "dist", "main.js");
+  const command = join(home, ".local", "bin", "orchestrat");
+  await mkdir(join(home, "cli", "dist"), { recursive: true });
+  await writeFile(sourceCommand, "#!/usr/bin/env node\n");
+  await writeFile(join(home, "cli", "package.json"), '{"version":"0.1.0"}\n');
+  await chmod(sourceCommand, 0o700);
+  await mkdir(join(home, ".cursor"), { recursive: true });
+  await writeFile(
+    join(home, ".cursor", "mcp.json"),
+    JSON.stringify({
+      mcpServers: {
+        orchestrat: {
+          command,
+          args: ["mcp", "--integration", "cursor"]
+        }
+      }
+    })
+  );
+  const store = new Store();
+  await store.write("cli", "orch_cli_" + "c".repeat(32));
+  const fetch: typeof globalThis.fetch = async (input) =>
+    String(input).endsWith("/projects")
+      ? response({ projects: [{ id: "550e8400-e29b-41d4-a716-446655440000", name: "Project", organization_name: "Org" }] })
+      : response({
+          agent: { id: "550e8400-e29b-41d4-a716-446655440001" },
+          credential: { token: "orch_agent_" + "x".repeat(32) }
+        });
+  await runSetup({
+    api: "https://api.example",
+    fetch,
+    open: async () => {
+      assert.fail("stored credential must not open browser authorization");
+    },
+    sleep: async () => {},
+    store,
+    cwd,
+    home,
+    integrations: ["cursor"],
+    sourceCommand
+  });
+  assert.match(
+    await readFile(join(cwd, ".cursor", "mcp.json"), "utf8"),
+    /"orchestrat"/
+  );
+  assert.doesNotMatch(
+    await readFile(join(home, ".cursor", "mcp.json"), "utf8"),
+    /"orchestrat"/
+  );
+});
+
+test("global Cursor setup grants only the selected projects", async () => {
+  const home = await mkdtemp(join(tmpdir(), "orch-setup-cursor-global-"));
+  const cwd = join(home, "project");
+  const sourceCommand = join(home, "cli", "dist", "main.js");
+  const first = "550e8400-e29b-41d4-a716-446655440000";
+  const second = "550e8400-e29b-41d4-a716-446655440001";
+  await mkdir(join(home, "cli", "dist"), { recursive: true });
+  await writeFile(sourceCommand, "#!/usr/bin/env node\n");
+  await writeFile(join(home, "cli", "package.json"), '{"version":"0.1.0"}\n');
+  await chmod(sourceCommand, 0o700);
+  const store = new Store();
+  const fetch: typeof globalThis.fetch = async (_input, init) => {
+    const { project_id } = JSON.parse(String(init?.body));
+    return response({
+      agent: { id: project_id === first ? "first-agent" : "second-agent" },
+      credential: { token: `orch_agent_${project_id}` }
+    });
+  };
+  await runSetup({
+    api: "https://api.example",
+    fetch,
+    open: async () => {},
+    sleep: async () => {},
+    store,
+    cwd,
+    home,
+    integrations: ["codex", "cursor"],
+    sourceCommand,
+    projectId: first,
+    mcpScope: "global",
+    authorization: {
+      credential: "orch_cli_test",
+      projects: [
+        { id: first, name: "First", organization_name: "Org" },
+        { id: second, name: "Second", organization_name: "Org" }
+      ]
+    },
+    globalProjects: [
+      { id: first, name: "First", organization_name: "Org" },
+      { id: second, name: "Second", organization_name: "Org" }
+    ]
+  });
+  const config = await readConfig(home);
+  assert.deepEqual(Object.keys(config.globalProjects?.codex ?? {}), [first, second]);
+  assert.deepEqual(Object.keys(config.globalProjects?.cursor ?? {}), [first, second]);
+  assert.equal(
+    await store.read(`agent:${second}:cursor`),
+    `orch_agent_${second}`
+  );
+  assert.equal(await store.read(`agent:${first}:cursor`), `orch_agent_${first}`);
+  assert.equal(await store.read(`agent:${second}:codex`), `orch_agent_${second}`);
+  assert.match(
+    await readFile(join(home, ".codex", "config.toml"), "utf8"),
+    /--global/
+  );
+  assert.deepEqual(
+    JSON.parse(await readFile(join(home, ".cursor", "mcp.json"), "utf8"))
+      .mcpServers.orchestrat.args,
+    ["mcp", "--integration", "cursor", "--global"]
+  );
+});
+
+test("rejected stored CLI credential reauthorizes in the browser", async () => {
+  const home = await mkdtemp(join(tmpdir(), "orch-setup-reauthorize-"));
+  const cwd = join(home, "project");
+  const sourceCommand = join(home, "cli", "dist", "main.js");
+  await mkdir(join(home, "cli", "dist"), { recursive: true });
+  await writeFile(sourceCommand, "#!/usr/bin/env node\n");
+  await writeFile(join(home, "cli", "package.json"), '{"version":"0.1.0"}\n');
+  await chmod(sourceCommand, 0o700);
+  const store = new Store();
+  await store.write("cli", "orch_cli_" + "s".repeat(32));
+  const opened: string[] = [];
+  let storedTokenRejected = false;
+  const fetch: typeof globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url.endsWith("/projects") && !storedTokenRejected) {
+      storedTokenRejected = true;
+      return response({}, 401);
+    }
+    if (url.endsWith("/attempts"))
+      return response(
+        {
+          attempt_id: "ca_reauthorize",
+          secret: "s".repeat(40),
+          expires_at: new Date(Date.now() + 60_000).toISOString()
+        },
+        201
+      );
+    if (url.endsWith("/poll"))
+      return response({
+        status: "approved",
+        project_id: "550e8400-e29b-41d4-a716-446655440000",
+        credential: "orch_cli_" + "n".repeat(32)
+      });
+    if (url.endsWith("/projects"))
+      return response({ projects: [{ id: "550e8400-e29b-41d4-a716-446655440000", name: "Project", organization_name: "Org" }] });
+    return response({
+      agent: { id: "550e8400-e29b-41d4-a716-446655440001" },
+      credential: { token: "orch_agent_" + "x".repeat(32) }
+    });
+  };
+  const result = await runSetup({
+    api: "https://api.example",
+    fetch,
+    open: async (url) => {
+      opened.push(url);
+    },
+    sleep: async () => {},
+    store,
+    cwd,
+    home,
+    integrations: ["codex"],
+    sourceCommand
+  });
+  assert.equal(result.projectId, "550e8400-e29b-41d4-a716-446655440000");
+  assert.equal(await store.read("cli"), "orch_cli_" + "n".repeat(32));
+  assert.equal(opened.length, 1);
+});
+
+test("stored CLI credential reconciles a stale project mapping before setup", async () => {
+  const home = await mkdtemp(join(tmpdir(), "orch-setup-project-change-"));
+  const cwd = join(home, "project");
+  const sourceCommand = join(home, "cli", "dist", "main.js");
+  await mkdir(join(home, "cli", "dist"), { recursive: true });
+  await writeFile(sourceCommand, "#!/usr/bin/env node\n");
+  await writeFile(join(home, "cli", "package.json"), '{"version":"0.1.0"}\n');
+  await chmod(sourceCommand, 0o700);
+  await mkdir(join(home, ".orchestrat"), { recursive: true });
+  await writeFile(
+    join(home, ".orchestrat", "config.json"),
+    JSON.stringify({
+      version: 1,
+      projects: {
+        [cwd]: {
+          projectId: "11111111-1111-4111-8111-111111111111",
+          apiUrl: "https://api.example",
+          integrations: {
+            codex: { agentId: "550e8400-e29b-41d4-a716-446655440009" }
+          }
+        }
+      }
+    })
+  );
+  const store = new Store();
+  await store.write("cli", "orch_cli_" + "c".repeat(32));
+  await store.write("agent:codex", "orch_agent_" + "o".repeat(32));
+  const calls: string[] = [];
+  const fetch: typeof globalThis.fetch = async (input) => {
+    const url = String(input);
+    calls.push(url);
+    if (url.endsWith("/projects"))
+      return response({ projects: [{ id: "550e8400-e29b-41d4-a716-446655440000", name: "Project", organization_name: "Org" }] });
+    return response({
+      agent: { id: "550e8400-e29b-41d4-a716-446655440001" },
+      credential: { token: "orch_agent_" + "n".repeat(32) }
+    });
+  };
+  const result = await runSetup({
+    api: "https://api.example",
+    fetch,
+    open: async () => {
+      assert.fail("valid stored credential must not open browser authorization");
+    },
+    sleep: async () => {},
+    store,
+    cwd,
+    home,
+    integrations: ["codex"],
+    sourceCommand
+  });
+  assert.deepEqual(calls, [
+    "https://api.example/api/v1/cli/setup/projects",
+    "https://api.example/api/v1/cli/setup"
+  ]);
+  assert.equal(result.projectId, "550e8400-e29b-41d4-a716-446655440000");
+  assert.equal(
+    result.integrations.codex?.agentId,
+    "550e8400-e29b-41d4-a716-446655440001"
+  );
+  assert.equal(
+    await store.read(
+      "agent:550e8400-e29b-41d4-a716-446655440000:codex"
+    ),
+    "orch_agent_" + "n".repeat(32)
+  );
 });
 
 test("endpoint transition refreshes authorization and agent credentials", async () => {
@@ -217,6 +468,8 @@ test("endpoint transition refreshes authorization and agent credentials", async 
         project_id: "new-project",
         credential: "new-cli"
       });
+    if (url.endsWith("/projects"))
+      return response({ projects: [{ id: "new-project", name: "Project", organization_name: "Org" }] });
     assert.equal(url, "https://new.example/api/v1/cli/setup");
     assert.equal(JSON.parse(String(init?.body)).project_id, "new-project");
     return response({
@@ -241,7 +494,7 @@ test("endpoint transition refreshes authorization and agent credentials", async 
   assert.equal(config.projects[cwd]?.apiUrl, "https://new.example");
   assert.equal(config.projects[cwd]?.projectId, "new-project");
   assert.equal(await store.read("cli"), "new-cli");
-  assert.equal(await store.read("agent:codex"), "new-agent-token");
+  assert.equal(await store.read("agent:new-project:codex"), "new-agent-token");
   assert.equal(opened.length, 1);
   assert.ok(calls.every((url) => url.startsWith("https://new.example/")));
 });
@@ -272,6 +525,8 @@ test("partial setup records provisioned agents and names the rejected harness", 
         project_id: "550e8400-e29b-41d4-a716-446655440000",
         credential: "orch_cli_" + "c".repeat(32)
       });
+    if (url.endsWith("/projects"))
+      return response({ projects: [{ id: "550e8400-e29b-41d4-a716-446655440000", name: "Project", organization_name: "Org" }] });
     const integration = JSON.parse(String(init?.body)).integration;
     return integration === "cursor"
       ? response({ error: "unsupported" }, 400)

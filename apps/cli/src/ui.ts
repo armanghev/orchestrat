@@ -4,6 +4,7 @@ import {
   isCancel,
   log as clackLog,
   multiselect as clackMultiselect,
+  select as clackSelect,
   note as clackNote,
   outro as clackOutro,
   spinner as clackSpinner
@@ -20,6 +21,11 @@ export type DetectedHarness = Harness & {
 };
 export type Cancelled = { cancelled: true };
 export type Selection<T extends Harness> = { cancelled: false; values: T[] };
+export type ProjectChoice = {
+  id: string;
+  name: string;
+  organization_name: string;
+};
 
 export type UiComponents = {
   multiselect: (options: {
@@ -28,6 +34,10 @@ export type UiComponents = {
     initialValues?: string[];
     required?: boolean;
   }) => Promise<string[] | symbol>;
+  select?: (options: {
+    message: string;
+    options: { value: string; label: string }[];
+  }) => Promise<string | symbol>;
   cancel: (message?: string) => void;
   outro: (message?: string) => void;
   intro: (message?: string) => void;
@@ -45,6 +55,7 @@ export type UiComponents = {
 
 const defaultComponents: UiComponents = {
   multiselect: clackMultiselect,
+  select: clackSelect,
   cancel: clackCancel,
   outro: clackOutro,
   intro: clackIntro,
@@ -98,6 +109,111 @@ export async function selectHarnesses<T extends Harness>(
   };
 }
 
+export async function selectProject(
+  projects: readonly ProjectChoice[],
+  options: {
+    interactive: boolean;
+    components?: UiComponents;
+    isCancel?: (answer: unknown) => boolean;
+  }
+): Promise<{ cancelled: false; value: ProjectChoice } | Cancelled> {
+  if (!projects.length) throw new Error("No projects are available to this account");
+  if (!options.interactive) {
+    if (projects.length !== 1)
+      throw new Error("Select a project by running setup in an interactive terminal");
+    return { cancelled: false, value: projects[0]! };
+  }
+  const components = options.components ?? defaultComponents;
+  const answer = await (components.select ?? clackSelect)({
+    message: "Select a project to configure",
+    options: projects.map((project) => ({
+      value: project.id,
+      label: `${project.organization_name} / ${project.name}`
+    }))
+  });
+  if ((options.isCancel ?? isCancel)(answer)) {
+    components.cancel("Setup canceled.");
+    return { cancelled: true };
+  }
+  const project = projects.find((item) => item.id === answer);
+  if (!project) throw new Error("Selected project is unavailable");
+  return { cancelled: false, value: project };
+}
+
+export async function selectMcpScope(options: {
+  interactive: boolean;
+  components?: UiComponents;
+  isCancel?: (answer: unknown) => boolean;
+}): Promise<{ cancelled: false; value: "project" | "global" } | Cancelled> {
+  if (!options.interactive) return { cancelled: false, value: "project" };
+  const components = options.components ?? defaultComponents;
+  const answer = await (components.select ?? clackSelect)({
+    message: "Configure MCPs for this project or globally?",
+    options: [
+      { value: "project", label: "Project (recommended)" },
+      { value: "global", label: "Global (choose projects)" }
+    ]
+  });
+  if ((options.isCancel ?? isCancel)(answer)) {
+    components.cancel("Setup canceled.");
+    return { cancelled: true };
+  }
+  if (answer !== "project" && answer !== "global")
+    throw new Error("Selected Cursor MCP scope is unavailable");
+  return { cancelled: false, value: answer };
+}
+
+export async function selectGlobalProjects(
+  projects: readonly ProjectChoice[],
+  options: {
+    interactive: boolean;
+    components?: UiComponents;
+    isCancel?: (answer: unknown) => boolean;
+  }
+): Promise<Selection<ProjectChoice> | Cancelled> {
+  if (!projects.length) throw new Error("No projects are available to this account");
+  if (!options.interactive) return { cancelled: false, values: [...projects] };
+  const components = options.components ?? defaultComponents;
+  const answer = await components.multiselect({
+    message: "Allow global MCPs to access projects",
+    options: projects.map((project) => ({
+      value: project.id,
+      label: `${project.organization_name} / ${project.name}`
+    })),
+    initialValues: projects.map((project) => project.id),
+    required: true
+  });
+  if ((options.isCancel ?? isCancel)(answer)) {
+    components.cancel("Setup canceled.");
+    return { cancelled: true };
+  }
+  const selected = new Set(answer as string[]);
+  return {
+    cancelled: false,
+    values: projects.filter((project) => selected.has(project.id))
+  };
+}
+
+export function startSetup(options: {
+  interactive: boolean;
+  components?: UiComponents;
+}): void {
+  if (options.interactive)
+    (options.components ?? defaultComponents).intro("Welcome to Orchestrat");
+}
+
+export function renderSetupAuthorization(
+  project: ProjectChoice,
+  options: { interactive: boolean; components?: UiComponents }
+): void {
+  if (!options.interactive) return;
+  const components = options.components ?? defaultComponents;
+  components.log.success("Authenticated");
+  components.log.success(
+    `Selected project: ${project.organization_name} / ${project.name}`
+  );
+}
+
 export function renderDetectedAgents(
   harnesses: readonly DetectedHarness[],
   options: { interactive: boolean; write: UiWriter; components?: UiComponents }
@@ -107,7 +223,6 @@ export function renderDetectedAgents(
     return;
   }
   const components = options.components ?? defaultComponents;
-  components.intro("Welcome to Orchestrat");
   components.log.info("Detected agents");
   for (const harness of harnesses) {
     const suffix = harness.configurable
