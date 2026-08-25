@@ -71,7 +71,12 @@ const memberJson = (member: {
 export class ProjectService {
   private readonly permissions: PermissionService;
 
-  constructor(private readonly db: Database) {
+  constructor(
+    private readonly db: Database,
+    private readonly cleanupProjectStorage?: (
+      projectId: string
+    ) => Promise<void>
+  ) {
     this.permissions = new PermissionService(db);
   }
 
@@ -402,6 +407,7 @@ export class ProjectService {
       .where(and(eq(projects.id, projectId), eq(projects.name, name)))
       .returning({ id: projects.id });
     if (!deleted) throw new ApiError(404, "NOT_FOUND", "Project not found.");
+    await this.cleanupProjectStorage?.(projectId).catch(() => undefined);
     return { deleted: true };
   }
 }

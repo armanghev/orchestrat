@@ -1,17 +1,26 @@
 import {
   createDocumentRequestSchema,
   documentIdParamsSchema,
+  documentHistoryQuerySchema,
+  attachmentPartsRequestSchema,
+  completeAttachmentUploadRequestSchema,
+  createAttachmentUploadRequestSchema,
+  documentAttachmentParamsSchema,
+  documentAttachmentUploadParamsSchema,
   documentListQuerySchema,
   documentRevisionParamsSchema,
   projectDocumentParamsSchema,
+  editDocumentRequestSchema,
+  renameDocumentRequestSchema,
   updateDocumentRequestSchema
 } from "@orchestrat/protocol";
 import type { FastifyInstance } from "fastify";
 import type { DocumentService } from "../services/document-service.js";
+import type { AttachmentService } from "../services/attachment-service.js";
 
 export async function documentRoutes(
   app: FastifyInstance,
-  options: { documents: DocumentService }
+  options: { documents: DocumentService; attachments: AttachmentService }
 ) {
   app.get("/projects/:projectId/documents", (request) =>
     options.documents.list(
@@ -44,10 +53,37 @@ export async function documentRoutes(
       updateDocumentRequestSchema.parse(request.body)
     )
   );
+  app.post("/documents/:id/edits", (request) =>
+    options.documents.edit(
+      request.userId,
+      documentIdParamsSchema.parse(request.params).id,
+      editDocumentRequestSchema.parse(request.body)
+    )
+  );
+  app.patch("/documents/:id/path", (request) =>
+    options.documents.rename(
+      request.userId,
+      documentIdParamsSchema.parse(request.params).id,
+      renameDocumentRequestSchema.parse(request.body)
+    )
+  );
+  app.post("/documents/:id/archive", (request) =>
+    options.documents.archive(
+      request.userId,
+      documentIdParamsSchema.parse(request.params).id
+    )
+  );
+  app.post("/documents/:id/restore", (request) =>
+    options.documents.restore(
+      request.userId,
+      documentIdParamsSchema.parse(request.params).id
+    )
+  );
   app.get("/documents/:id/revisions", (request) =>
     options.documents.revisions(
       request.userId,
-      documentIdParamsSchema.parse(request.params).id
+      documentIdParamsSchema.parse(request.params).id,
+      documentHistoryQuerySchema.parse(request.query)
     )
   );
   app.get("/documents/:id/revisions/:revision", (request) => {
@@ -58,4 +94,100 @@ export async function documentRoutes(
       params.revision
     );
   });
+  app.get("/documents/:documentId/attachments", (request) =>
+    options.attachments.list(
+      request.userId,
+      documentIdParamsSchema.parse({
+        id: (request.params as { documentId: string }).documentId
+      }).id
+    )
+  );
+  app.post("/documents/:documentId/attachments/uploads", (request, reply) =>
+    options.attachments
+      .create(
+        request.userId,
+        documentIdParamsSchema.parse({
+          id: (request.params as { documentId: string }).documentId
+        }).id,
+        createAttachmentUploadRequestSchema.parse(request.body)
+      )
+      .then((value) => reply.code(201).send(value))
+  );
+  app.get("/documents/:documentId/attachments/uploads/:uploadId", (request) =>
+    (() => {
+      const params = documentAttachmentUploadParamsSchema.parse(request.params);
+      return options.attachments.inspect(
+        request.userId,
+        params.uploadId,
+        params.documentId
+      );
+    })()
+  );
+  app.post(
+    "/documents/:documentId/attachments/uploads/:uploadId/refresh",
+    (request) => {
+      const params = documentAttachmentUploadParamsSchema.parse(request.params);
+      return options.attachments.refresh(
+        request.userId,
+        params.uploadId,
+        params.documentId
+      );
+    }
+  );
+  app.post(
+    "/documents/:documentId/attachments/uploads/:uploadId/parts",
+    (request) => {
+      const params = documentAttachmentUploadParamsSchema.parse(request.params);
+      return options.attachments.signPartsForUser(
+        request.userId,
+        params.uploadId,
+        attachmentPartsRequestSchema.parse(request.body).part_numbers,
+        params.documentId
+      );
+    }
+  );
+  app.post(
+    "/documents/:documentId/attachments/uploads/:uploadId/complete",
+    (request) => {
+      const params = documentAttachmentUploadParamsSchema.parse(request.params);
+      return options.attachments.complete(
+        request.userId,
+        params.uploadId,
+        completeAttachmentUploadRequestSchema.parse(request.body).parts,
+        params.documentId
+      );
+    }
+  );
+  app.delete(
+    "/documents/:documentId/attachments/uploads/:uploadId",
+    (request) => {
+      const params = documentAttachmentUploadParamsSchema.parse(request.params);
+      return options.attachments.abort(
+        request.userId,
+        params.uploadId,
+        params.documentId
+      );
+    }
+  );
+  app.delete("/documents/:documentId/attachments/:attachmentId", (request) =>
+    (() => {
+      const params = documentAttachmentParamsSchema.parse(request.params);
+      return options.attachments.remove(
+        request.userId,
+        params.documentId,
+        params.attachmentId
+      );
+    })()
+  );
+  app.post(
+    "/documents/:documentId/attachments/:attachmentId/download",
+    (request) => {
+      const params = documentAttachmentParamsSchema.parse(request.params);
+      return options.attachments.download(
+        request.userId,
+        params.attachmentId,
+        params.documentId
+      );
+    }
+  );
 }

@@ -5,8 +5,13 @@ import { createDatabase, type Database } from "@orchestrat/db";
 import { DataType, newDb } from "pg-mem";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../app.js";
+import type { DocumentStorageConfig } from "../services/document-service.js";
 
-export async function fixture(): Promise<{
+export async function fixture(
+  options: {
+    documentStorage?: DocumentStorageConfig;
+  } = {}
+): Promise<{
   app: FastifyInstance;
   db: Database;
 }> {
@@ -104,5 +109,13 @@ export async function fixture(): Promise<{
   const { db } = createDatabase(
     pool as unknown as Parameters<typeof createDatabase>[0]
   );
-  return { app: buildApp({ allowedOrigins: [], auth, db }), db };
+  return {
+    app: buildApp({
+      allowedOrigins: [],
+      auth,
+      db,
+      documentStorage: options.documentStorage
+    }),
+    db
+  };
 }

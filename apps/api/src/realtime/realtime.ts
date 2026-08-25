@@ -99,6 +99,67 @@ export class RealtimeTicketStore {
   }
 }
 
+export type AttachmentDownloadTicket = {
+  attachmentId: string;
+  projectId: string;
+  documentId: string;
+  expiresAt: number;
+};
+
+export class AttachmentDownloadTicketStore {
+  // ponytail: in-memory tickets only support one replica; use Redis/shared state for scale-out.
+  private readonly tickets = new Map<string, AttachmentDownloadTicket>();
+
+  constructor(
+    private readonly clock: Clock = Date.now,
+    private readonly random: Random = randomBytes
+  ) {}
+
+  issue(
+    attachmentId: string,
+    projectId: string,
+    documentId: string,
+    ttlMs = 60_000
+  ) {
+    const now = this.clock();
+    for (const [ticket, record] of this.tickets) {
+      if (record.expiresAt <= now) this.tickets.delete(ticket);
+    }
+    const ticket = this.random(32).toString("base64url");
+    const expiresAt = now + ttlMs;
+    this.tickets.set(ticket, {
+      attachmentId,
+      projectId,
+      documentId,
+      expiresAt
+    });
+    return { ticket, expiresAt };
+  }
+
+  consume(
+    ticket: string,
+    expected?: Partial<
+      Pick<
+        AttachmentDownloadTicket,
+        "attachmentId" | "projectId" | "documentId"
+      >
+    >
+  ) {
+    const record = this.tickets.get(ticket);
+    if (!record) return null;
+    this.tickets.delete(ticket);
+    if (
+      record.expiresAt <= this.clock() ||
+      (expected?.attachmentId &&
+        record.attachmentId !== expected.attachmentId) ||
+      (expected?.projectId && record.projectId !== expected.projectId) ||
+      (expected?.documentId && record.documentId !== expected.documentId)
+    )
+      return null;
+    return record;
+  }
+}
+
 export class RealtimeRegistry {
   // ponytail: in-memory connections only support one replica; use Redis/shared state for scale-out.
   private readonly connections = new Map<string, Set<WebSocket>>();

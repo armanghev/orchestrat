@@ -23,13 +23,19 @@ import {
   type AvatarStorageConfig
 } from "./services/profile-service.js";
 import { TaskService } from "./services/task-service.js";
-import { DocumentService } from "./services/document-service.js";
+import {
+  DocumentService,
+  type DocumentStorageConfig
+} from "./services/document-service.js";
+import { AttachmentService } from "./services/attachment-service.js";
 import {
   realtimeSocketRoutes,
   realtimeTicketRoutes
 } from "./routes/realtime.js";
+import { attachmentDownloadRoutes } from "./routes/attachment-download.js";
 import {
   RealtimeRegistry,
+  AttachmentDownloadTicketStore,
   RealtimeTicketStore,
   withRealtimePublisher
 } from "./realtime/realtime.js";
@@ -47,6 +53,7 @@ type AppOptions = {
   closeDatabase?: () => Promise<void>;
   db: Database;
   avatarStorage?: AvatarStorageConfig;
+  documentStorage?: DocumentStorageConfig;
 };
 
 const errorResponse = (
@@ -72,17 +79,25 @@ export function buildApp(options: AppOptions) {
     logger: true
   });
   const realtimeTickets = new RealtimeTicketStore();
+  const attachmentDownloadTickets = new AttachmentDownloadTicketStore();
   const realtimeRegistry = new RealtimeRegistry();
   const db = withRealtimePublisher(options.db, (event) =>
     realtimeRegistry.publish(event)
   );
   const identities = new IdentityService(db);
-  const projects = new ProjectService(db);
   const profiles = new ProfileService(db, options.avatarStorage);
   const tasks = new TaskService(db);
   const agents = new AgentService(db);
   const claims = new TaskClaimService(db);
-  const documents = new DocumentService(db);
+  const documents = new DocumentService(db, options.documentStorage);
+  const projects = new ProjectService(db, (projectId) =>
+    documents.deleteProjectStorage(projectId)
+  );
+  const attachments = new AttachmentService(
+    db,
+    options.documentStorage,
+    attachmentDownloadTickets
+  );
   const cliAuthorization = new CliAuthorizationService(db);
   const cliSetup = new CliSetupService(db);
 
@@ -168,6 +183,10 @@ export function buildApp(options: AppOptions) {
 
   app.register(healthRoutes);
   app.register(healthRoutes, { prefix: "/api/v1" });
+  app.register(attachmentDownloadRoutes, {
+    prefix: "/api/v1",
+    attachments
+  });
   app.register(cliAuthorizationPublicRoutes, {
     prefix: "/api/v1",
     authorization: cliAuthorization
@@ -212,7 +231,7 @@ export function buildApp(options: AppOptions) {
         projects,
         tickets: realtimeTickets
       });
-      api.register(documentRoutes, { documents });
+      api.register(documentRoutes, { documents, attachments });
       api.register(agentManagementRoutes, { agents });
       api.register(cliAuthorizationHumanRoutes, {
         authorization: cliAuthorization
@@ -249,7 +268,7 @@ export function buildApp(options: AppOptions) {
         request.agentPrincipal = await agents.authenticate(match[1]);
       });
       api.register(agentActionRoutes, { agents, tasks, claims });
-      api.register(agentDocumentRoutes, { documents });
+      api.register(agentDocumentRoutes, { documents, attachments });
     },
     { prefix: "/api/v1/agent" }
   );
