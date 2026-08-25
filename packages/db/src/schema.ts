@@ -361,9 +361,11 @@ export const cliCredentials = pgTable(
   "cli_credentials",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    projectId: uuid("project_id")
-      .notNull()
-      .references(() => projects.id, { onDelete: "cascade" }),
+    // Null credentials are user-scoped. Existing project-scoped credentials
+    // remain valid during the CLI authorization migration.
+    projectId: uuid("project_id").references(() => projects.id, {
+      onDelete: "cascade"
+    }),
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),

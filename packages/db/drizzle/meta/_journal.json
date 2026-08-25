@@ -64,6 +64,13 @@
       "when": 1787456000000,
       "tag": "0008_agent_lifecycle_events",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1787550000000,
+      "tag": "0009_cli_user_credentials",
+      "breakpoints": true
     }
   ]
 }

@@ -513,13 +513,10 @@ export class ApiClient {
     );
   }
 
-  approveCliAuthorization(
-    attemptId: string,
-    projectId: string
-  ): Promise<CliAuthorizationPollResponse> {
+  approveCliAuthorization(attemptId: string): Promise<CliAuthorizationPollResponse> {
     return this.request(
       `/api/v1/cli/authorization/attempts/${encodeURIComponent(attemptId)}/approve`,
-      { method: "POST", body: { project_id: projectId } },
+      { method: "POST", body: {} },
       cliAuthorizationPollResponseSchema
     );
   }

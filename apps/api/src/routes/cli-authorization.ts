@@ -28,13 +28,9 @@ export async function cliAuthorizationHumanRoutes(
   app.post(
     "/cli/authorization/attempts/:attemptId/approve",
     async (request) => {
-      const body = cliAuthorizationApprovalRequestSchema.parse(request.body);
+      cliAuthorizationApprovalRequestSchema.parse(request.body);
       const params = cliAuthorizationAttemptParamsSchema.parse(request.params);
-      return options.authorization.approve(
-        request.userId,
-        params.attemptId,
-        body.project_id
-      );
+      return options.authorization.approve(request.userId, params.attemptId);
     }
   );
   app.post("/cli/authorization/attempts/:attemptId/deny", async (request) => {

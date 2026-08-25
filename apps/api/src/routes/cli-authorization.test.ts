@@ -95,13 +95,13 @@ test("CLI authorization stores only hashes, denies access, expires, and exchange
         url: "/api/v1/cli/authorization/attempts"
       })
     ).json();
-    const deniedApproval = await app.inject({
+    const approved = await app.inject({
       method: "POST",
       url: `/api/v1/cli/authorization/attempts/${unauthorisedAttempt.attempt_id}/approve`,
       headers: { authorization: "Bearer alice" },
-      payload: { project_id: "00000000-0000-4000-8000-000000000000" }
+      payload: {}
     });
-    assert.equal(deniedApproval.statusCode, 403);
+    assert.equal(approved.statusCode, 200);
     assert.ok(project.id);
   } finally {
     await app.close();
@@ -158,29 +158,20 @@ test("approved attempts expire without issuing credentials and exchange only onc
   let now = new Date("2026-08-22T00:00:00.000Z");
   const service = new CliAuthorizationService(db, () => now);
   try {
-    const org = (
-      await app.inject({
-        method: "POST",
-        url: "/api/v1/organizations",
-        headers: { authorization: "Bearer alice" },
-        payload: { name: "Expiry" }
-      })
-    ).json();
-    const project = (
-      await app.inject({
-        method: "POST",
-        url: `/api/v1/organizations/${org.id}/projects`,
-        headers: { authorization: "Bearer alice" },
-        payload: { name: "Expiry project" }
-      })
-    ).json();
+    await db.insert(users).values({
+      authProvider: "supabase",
+      authSubject: "550e8400-e29b-41d4-a716-446655440000",
+      username: "alice",
+      name: "alice",
+      email: "alice@example.com"
+    });
     const [user] = await db
       .select()
       .from(users)
       .where(eq(users.email, "alice@example.com"));
     assert.ok(user);
     const expiring = await service.createAttempt();
-    await service.approve(user.id, expiring.attempt_id, project.id);
+    await service.approve(user.id, expiring.attempt_id);
     now = new Date(now.getTime() + 10 * 60_000 + 1);
     assert.deepEqual(await service.poll(expiring.attempt_id, expiring.secret), {
       status: "expired"
@@ -189,7 +180,7 @@ test("approved attempts expire without issuing credentials and exchange only onc
 
     now = new Date("2026-08-22T00:00:00.000Z");
     const exchange = await service.createAttempt();
-    await service.approve(user.id, exchange.attempt_id, project.id);
+    await service.approve(user.id, exchange.attempt_id);
     const first = await service.poll(exchange.attempt_id, exchange.secret);
     assert.equal(first.status, "approved");
     assert.match(first.credential!, /^orch_cli_/);
@@ -205,6 +196,7 @@ test("approved attempts expire without issuing credentials and exchange only onc
       createHash("sha256").update(first.credential!).digest("hex")
     );
     assert.notEqual(rows[0]!.tokenHash, first.credential);
+    assert.equal(rows[0]!.projectId, null);
   } finally {
     await app.close();
   }
@@ -296,6 +288,56 @@ test("CLI setup enforces token and project scope and issues distinct agent crede
     });
     assert.equal(revokedProject.statusCode, 401);
     assert.equal(revokedSetup.statusCode, 401);
+  } finally {
+    await app.close();
+  }
+});
+
+test("user-scoped CLI credentials list and configure accessible projects", async () => {
+  const { app, db } = await fixture();
+  try {
+    const organization = (
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/organizations",
+        headers: { authorization: "Bearer alice" },
+        payload: { name: "CLI projects" }
+      })
+    ).json();
+    const project = (
+      await app.inject({
+        method: "POST",
+        url: `/api/v1/organizations/${organization.id}/projects`,
+        headers: { authorization: "Bearer alice" },
+        payload: { name: "Chosen in CLI" }
+      })
+    ).json();
+    const token = `orch_cli_${"u".repeat(32)}`;
+    const user = (await db.query.users.findFirst())!;
+    await db.insert(cliCredentials).values({
+      userId: user.id,
+      tokenHash: createHash("sha256").update(token).digest("hex")
+    });
+    const projects = await app.inject({
+      method: "GET",
+      url: "/api/v1/cli/setup/projects",
+      headers: { authorization: `Bearer ${token}` }
+    });
+    assert.equal(projects.statusCode, 200);
+    assert.deepEqual(projects.json().projects, [
+      {
+        id: project.id,
+        name: "Chosen in CLI",
+        organization_name: "CLI projects"
+      }
+    ]);
+    const setup = await app.inject({
+      method: "POST",
+      url: "/api/v1/cli/setup",
+      headers: { authorization: `Bearer ${token}` },
+      payload: { project_id: project.id, integration: "cursor" }
+    });
+    assert.equal(setup.statusCode, 200);
   } finally {
     await app.close();
   }

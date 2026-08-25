@@ -4,6 +4,7 @@ import test from "node:test";
 import { getTableConfig } from "drizzle-orm/pg-core";
 import {
   agentLifecycleEvents,
+  cliCredentials,
   agentCredentials,
   agentSessions,
   agents,
@@ -52,7 +53,16 @@ test("agent lifecycle idempotency is project/agent scoped and hash-only", async 
       "utf8"
     )
   ) as { entries: { tag: string }[] };
-  assert.equal(journal.entries.at(-1)?.tag, "0008_agent_lifecycle_events");
+  assert.equal(journal.entries.at(-1)?.tag, "0009_cli_user_credentials");
+});
+
+test("CLI credentials can be user-scoped after the authorization migration", async () => {
+  assert.equal(cliCredentials.projectId.notNull, false);
+  const sql = await readFile(
+    new URL("../drizzle/0009_cli_user_credentials.sql", import.meta.url),
+    "utf8"
+  );
+  assert.match(sql, /ALTER COLUMN "project_id" DROP NOT NULL/);
 });
 
 test("users have provider-qualified identity and non-unique email indexes", () => {

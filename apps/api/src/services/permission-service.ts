@@ -4,7 +4,7 @@ import {
   projects,
   type Database
 } from "@orchestrat/db";
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { ApiError } from "./api-error.js";
 
 export class PermissionService {
@@ -56,6 +56,25 @@ export class PermissionService {
 
   async project(userId: string, projectId: string) {
     return (await this.projectAccess(userId, projectId)).project;
+  }
+
+  async projects(userId: string) {
+    return this.db
+      .select({
+        id: projects.id,
+        name: projects.name,
+        organizationName: organizations.name
+      })
+      .from(projects)
+      .innerJoin(organizations, eq(organizations.id, projects.organizationId))
+      .innerJoin(
+        organizationMembers,
+        and(
+          eq(organizationMembers.organizationId, organizations.id),
+          eq(organizationMembers.userId, userId)
+        )
+      )
+      .orderBy(asc(organizations.name), asc(projects.name));
   }
 
   async projectAccess(userId: string, projectId: string) {

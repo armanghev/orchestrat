@@ -1,11 +1,9 @@
 import { useEffect, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { SignInScreen } from "@/features/auth/sign-in-screen";
 import { useAuthSnapshot } from "@/features/auth/auth-context";
-import { projectCatalogQueryOptions } from "@/features/hierarchy/query-options";
 
 export const CLI_ATTEMPT_KEY = "orchestrat.cli.authorization.attempt";
 export const CLI_TERMINAL_KEY = "orchestrat.cli.authorization.terminal";
@@ -20,7 +18,6 @@ function CliAuthorizeRoute() {
   const { attempt } = Route.useSearch();
   const auth = useAuthSnapshot();
   const { api } = Route.useRouteContext();
-  const [projectId, setProjectId] = useState("");
   const [terminal, setTerminal] = useState<TerminalState | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
@@ -29,10 +26,6 @@ function CliAuthorizeRoute() {
     terminal !== null &&
     (terminal.attempt === attempt ||
       (attempt === undefined && terminal.attempt === undefined));
-  const catalog = useQuery({
-    ...projectCatalogQueryOptions(api),
-    enabled: valid && auth.status === "signedIn"
-  });
 
   useEffect(() => {
     if (valid) window.sessionStorage.removeItem(CLI_TERMINAL_KEY);
@@ -80,12 +73,10 @@ function CliAuthorizeRoute() {
     );
 
   const decide = async (action: "approve" | "deny") => {
-    if (action === "approve" && !projectId) return;
     setBusy(true);
     setError(false);
     try {
-      if (action === "approve")
-        await api.approveCliAuthorization(attempt!, projectId);
+      if (action === "approve") await api.approveCliAuthorization(attempt!);
       else await api.denyCliAuthorization(attempt!);
       window.sessionStorage.setItem(
         CLI_TERMINAL_KEY,
@@ -110,41 +101,9 @@ function CliAuthorizeRoute() {
       <div>
         <h1 className="text-2xl font-semibold">Authorize Orchestrat CLI</h1>
         <p className="mt-2 text-muted-foreground">
-          Choose a project for this CLI connection.
+          Approve this browser sign-in to continue setup in your terminal.
         </p>
       </div>
-      {catalog.isLoading && (
-        <p role="status" aria-busy="true">
-          Loading projects…
-        </p>
-      )}
-      {catalog.isError && (
-        <p role="alert">
-          Unable to load projects. You can still deny this request.
-        </p>
-      )}
-      {!catalog.isError && (
-        <label
-          className="flex flex-col gap-2 text-sm font-medium"
-          htmlFor="cli-project"
-        >
-          Project
-          <select
-            id="cli-project"
-            className="control-field"
-            value={projectId}
-            onChange={(event) => setProjectId(event.target.value)}
-            disabled={busy || catalog.isLoading}
-          >
-            <option value="">Select a project</option>
-            {catalog.data?.projects.map(({ organization, project }) => (
-              <option key={project.id} value={project.id}>
-                {organization.name} / {project.name}
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
       {error && (
         <p role="alert">Unable to update CLI authorization. Try again.</p>
       )}
@@ -152,7 +111,7 @@ function CliAuthorizeRoute() {
         <Button
           type="button"
           onClick={() => void decide("approve")}
-          disabled={busy || !projectId || catalog.isError}
+          disabled={busy}
         >
           Approve
         </Button>

@@ -121,7 +121,6 @@ export type CliAuthorizationAttemptResponse = z.infer<
 >;
 export const cliAuthorizationPollResponseSchema = z.object({
   status: cliAuthorizationStatusSchema,
-  project_id: idSchema.nullable().optional(),
   credential: z.string().min(32).optional()
 });
 export type CliAuthorizationPollResponse = z.infer<
@@ -133,12 +132,21 @@ export const cliAuthorizationAttemptParamsSchema = z.object({
 export const cliAuthorizationPollRequestSchema = z.object({
   secret: z.string().min(32).max(128)
 });
-export const cliAuthorizationApprovalRequestSchema = z
-  .object({
-    project_id: idSchema
-  })
-  .strict();
+export const cliAuthorizationApprovalRequestSchema = z.object({}).strict();
 export const cliAuthorizationDenyRequestSchema = z.object({}).strict();
+
+export const cliSetupProjectsResponseSchema = z.object({
+  projects: z.array(
+    z.object({
+      id: idSchema,
+      name: nameSchema,
+      organization_name: nameSchema
+    })
+  )
+});
+export type CliSetupProjectsResponse = z.infer<
+  typeof cliSetupProjectsResponseSchema
+>;
 
 export const updateOrganizationRequestSchema = z
   .object({
