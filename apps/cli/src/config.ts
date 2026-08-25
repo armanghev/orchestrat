@@ -3,18 +3,32 @@ import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
-export const INTEGRATIONS = ["codex", "claude-code"] as const;
-export type Integration = (typeof INTEGRATIONS)[number];
+import {
+  CONFIGURABLE_INTEGRATIONS,
+  type ConfigurableIntegration
+} from "./harnesses.js";
+
+export const INTEGRATIONS = CONFIGURABLE_INTEGRATIONS;
+export type Integration = ConfigurableIntegration;
 
 export type IntegrationMapping = { agentId: string };
+export type McpScope = "project" | "global";
+export type GlobalProject = {
+  name: string;
+  organizationName: string;
+  apiUrl?: string;
+  agentId: string;
+};
 export type ProjectMapping = {
   projectId: string;
   apiUrl?: string;
+  mcpScopes?: Partial<Record<Integration, McpScope>>;
   integrations: Partial<Record<Integration, IntegrationMapping>>;
 };
 export type OrchestratConfig = {
   version: 1;
   projects: Record<string, ProjectMapping>;
+  globalProjects?: Partial<Record<Integration, Record<string, GlobalProject>>>;
 };
 export type ResolvedMapping = ProjectMapping & {
   cwd: string;
@@ -84,15 +98,100 @@ export function parseConfig(value: unknown): OrchestratConfig {
         throw new Error("Invalid integration mapping");
       integrations[integration as Integration] = { agentId: agent.agentId };
     }
+    const mcpScopes: Partial<Record<Integration, McpScope>> = {};
+    if (project.mcpScopes !== undefined) {
+      if (!project.mcpScopes || typeof project.mcpScopes !== "object")
+        throw new Error("Invalid project mapping");
+      for (const [integration, scope] of Object.entries(
+        project.mcpScopes as Record<string, unknown>
+      )) {
+        if (
+          !(INTEGRATIONS as readonly string[]).includes(integration) ||
+          (scope !== "project" && scope !== "global")
+        )
+          throw new Error("Invalid project mapping");
+        mcpScopes[integration as Integration] = scope;
+      }
+    }
+    if (project.cursorMcpScope !== undefined) {
+      if (
+        project.cursorMcpScope !== "project" &&
+        project.cursorMcpScope !== "global"
+      )
+        throw new Error("Invalid project mapping");
+      if (
+        mcpScopes.cursor !== undefined &&
+        mcpScopes.cursor !== project.cursorMcpScope
+      )
+        throw new Error("Invalid project mapping");
+      mcpScopes.cursor = project.cursorMcpScope;
+    }
     projects[canonicalizeCwd(cwd)] = {
       projectId: project.projectId,
       ...(project.apiUrl === undefined
         ? {}
         : { apiUrl: validateApiUrl(project.apiUrl) }),
+      ...(Object.keys(mcpScopes).length ? { mcpScopes } : {}),
       integrations
     };
   }
-  return { version: 1, projects };
+  const globalProjects: Partial<
+    Record<Integration, Record<string, GlobalProject>>
+  > = {};
+  const parseGlobalProjects = (
+    projectsInput: unknown,
+    integration: Integration
+  ) => {
+    if (
+      !projectsInput ||
+      typeof projectsInput !== "object"
+    )
+      throw new Error("Invalid global MCP mapping");
+    const mapped: Record<string, GlobalProject> = {};
+    for (const [projectId, rawProject] of Object.entries(
+      projectsInput as Record<string, unknown>
+    )) {
+      if (!nonEmpty(projectId) || !rawProject || typeof rawProject !== "object")
+        throw new Error("Invalid global MCP mapping");
+      const project = rawProject as Record<string, unknown>;
+      if (
+        !nonEmpty(project.name) ||
+        !nonEmpty(project.organizationName) ||
+        !nonEmpty(project.agentId)
+      )
+        throw new Error("Invalid global MCP mapping");
+      mapped[projectId] = {
+        name: project.name,
+        organizationName: project.organizationName,
+        agentId: project.agentId,
+        ...(project.apiUrl === undefined
+          ? {}
+          : { apiUrl: validateApiUrl(project.apiUrl) })
+      };
+    }
+    globalProjects[integration] = mapped;
+  };
+  if (input.globalProjects !== undefined) {
+    if (!input.globalProjects || typeof input.globalProjects !== "object")
+      throw new Error("Invalid global MCP mapping");
+    for (const [integration, projects] of Object.entries(
+      input.globalProjects as Record<string, unknown>
+    )) {
+      if (!(INTEGRATIONS as readonly string[]).includes(integration))
+        throw new Error("Invalid global MCP mapping");
+      parseGlobalProjects(projects, integration as Integration);
+    }
+  }
+  if (input.globalCursorProjects !== undefined) {
+    if (globalProjects.cursor !== undefined)
+      throw new Error("Invalid global MCP mapping");
+    parseGlobalProjects(input.globalCursorProjects, "cursor");
+  }
+  return {
+    version: 1,
+    projects,
+    ...(Object.keys(globalProjects).length ? { globalProjects } : {})
+  };
 }
 
 export async function readConfig(home = homedir()): Promise<OrchestratConfig> {

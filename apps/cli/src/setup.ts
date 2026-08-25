@@ -1,9 +1,23 @@
 import { basename, dirname, join, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
+import { homedir } from "node:os";
 import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
+const commandAvailable = async (command: string) => {
+  try {
+    await execFileAsync(command, ["--version"], {
+      timeout: 1500,
+      maxBuffer: 1024,
+      windowsHide: true
+    });
+    return true;
+  } catch {
+    return false;
+  }
+};
 import {
+  access,
   lstat,
   readFile,
   copyFile,
@@ -16,22 +30,39 @@ import {
   rm,
   writeFile
 } from "node:fs/promises";
+const applicationAvailable = async (name: string) => {
+  for (const directory of ["/Applications", join(homedir(), "Applications")])
+    try {
+      await access(join(directory, name));
+      return true;
+    } catch {
+      // Try the next standard macOS application directory.
+    }
+  return false;
+};
+const noApplication = async () => false;
+import { atomicWrite, readOptional, removeHarnessMcp } from "./safe-files.js";
 import {
-  atomicWrite,
-  mergeJson,
-  mergeHooks,
-  mergeToml,
-  readOptional
-} from "./safe-files.js";
-import type { CredentialStore } from "./keychain.js";
+  agentAccount,
+  legacyAgentAccount,
+  type CredentialStore
+} from "./keychain.js";
 import {
   readConfig,
   configPath,
   canonicalizeCwd,
   type Integration,
+  type McpScope,
   type OrchestratConfig,
   validateApiUrl
 } from "./config.js";
+import {
+  HARNESSES,
+  isConfigurableIntegration,
+  type HarnessRecord
+} from "./harnesses.js";
+import { harnessConfigPlan, previewHarnessConfig } from "./harness-config.js";
+import type { ProjectChoice } from "./ui.js";
 
 export type SetupTransport = {
   fetch: typeof globalThis.fetch;
@@ -40,21 +71,47 @@ export type SetupTransport = {
   api: string;
 };
 export async function detectIntegrations(
-  probe: (command: string) => Promise<boolean> = async (command) => {
-    try {
-      await execFileAsync(command, ["--version"]);
-      return true;
-    } catch {
-      return false;
-    }
-  }
+  probe: (command: string) => Promise<boolean> = commandAvailable,
+  probeApplication: (name: string) => Promise<boolean> = probe ===
+  commandAvailable
+    ? applicationAvailable
+    : noApplication
 ) {
-  const found: ("codex" | "claude-code")[] = [];
-  if (await probe("codex")) found.push("codex");
-  if (await probe("claude")) found.push("claude-code");
-  if (!found.length)
-    throw new Error("No supported agent integrations found (codex or claude)");
+  const found = (await detectHarnesses(probe, probeApplication))
+    .filter((item) => item.configurable)
+    .map((item) => item.id)
+    .filter(isConfigurableIntegration);
+  if (!found.length) throw new Error("No supported agent integrations found");
   return found;
+}
+
+export async function detectHarnesses(
+  probe: (command: string) => Promise<boolean> = commandAvailable,
+  probeApplication: (name: string) => Promise<boolean> = probe ===
+  commandAvailable
+    ? applicationAvailable
+    : noApplication
+): Promise<(HarnessRecord & { detected: boolean })[]> {
+  const detected: (HarnessRecord & { detected: boolean })[] = [];
+  for (const item of HARNESSES) {
+    const commands = item.commands ?? [item.command];
+    let available = false;
+    for (const command of commands) {
+      if (await probe(command)) {
+        available = true;
+        break;
+      }
+    }
+    if (!available)
+      for (const application of item.applications ?? []) {
+        if (await probeApplication(application)) {
+          available = true;
+          break;
+        }
+      }
+    if (available) detected.push({ ...item, detected: true });
+  }
+  return detected;
 }
 export async function installLauncher(home: string, sourceCommand: string) {
   const resolvedSource = await realpath(sourceCommand);
@@ -214,7 +271,6 @@ export async function authorizeCli(
     const result = (await response.json()) as {
       status: string;
       credential?: string;
-      project_id?: string;
     };
     if (result.status === "pending") {
       await transport.sleep(2000);
@@ -222,62 +278,129 @@ export async function authorizeCli(
     }
     if (result.status !== "approved" || !result.credential)
       throw new Error(`Browser authorization ${result.status}`);
-    if (!result.project_id)
-      throw new Error("Browser authorization returned no project");
     await store.write(account, result.credential);
-    return { credential: result.credential, projectId: result.project_id };
+    return resolveSetupAuthorization(transport, store);
   }
 }
 
+export type SetupAuthorization = {
+  credential: string;
+  projects: ProjectChoice[];
+};
+
+export async function resolveSetupAuthorization(
+  transport: SetupTransport,
+  store: CredentialStore,
+  forceAuthorization = false
+): Promise<SetupAuthorization> {
+  const credential = await store.read("cli");
+  if (!credential || forceAuthorization)
+    return authorizeCli(transport, store);
+  const response = await transport.fetch(
+    `${transport.api}/api/v1/cli/setup/projects`,
+    { headers: { authorization: `Bearer ${credential}` } }
+  );
+  if (response.status === 401 || response.status === 403)
+    return authorizeCli(transport, store);
+  if (!response.ok) throw new Error("Unable to resolve CLI projects");
+  const result = (await response.json()) as { projects?: ProjectChoice[] };
+  if (!Array.isArray(result.projects)) throw new Error("CLI projects were not returned");
+  return { credential, projects: result.projects };
+}
+
 export type SetupPreview = {
-  integration?: "codex" | "claude-code";
+  integration?: Integration;
   path: string;
   changed: boolean;
   entries?: string[];
+  capability?: "mcp" | "hooks";
 };
+
+function removeLegacyMcp(
+  source: string | undefined,
+  integration: Integration,
+  command: string,
+  projectRoot: string,
+  globalMcp: { merge: (text: string | undefined) => string }
+) {
+  try {
+    globalMcp.merge(source);
+    return source;
+  } catch {
+    try {
+      return removeHarnessMcp(source, integration, command);
+    } catch {
+      return removeHarnessMcp(source, integration, command, projectRoot);
+    }
+  }
+}
+
 export async function previewSetup(
   home: string,
-  integrations: ("codex" | "claude-code")[],
-  command: string
+  integrations: Integration[],
+  command: string,
+  projectRoot = home,
+  mcpScopes: Partial<Record<Integration, McpScope>> = {}
 ) {
   if (!command.startsWith("/"))
     throw new Error("Persistent CLI command must be absolute");
   const result: SetupPreview[] = [];
   for (const integration of integrations) {
-    const path =
-      integration === "codex"
-        ? join(home, ".codex", "config.toml")
-        : join(home, ".claude.json");
-    const source = await readOptional(path);
-    const next =
-      integration === "codex"
-        ? mergeToml(source, integration, command)
-        : mergeJson(source, integration, command);
-    result.push({
-      integration,
-      path,
-      changed: source !== next,
-      entries: [
-        integration === "codex"
-          ? "mcp_servers.orchestrat"
-          : "mcpServers.orchestrat"
-      ]
-    });
-    const hookPath =
-      integration === "codex"
-        ? join(home, ".codex", "hooks.json")
-        : join(home, ".claude", "settings.json");
-    const hookSource = await readOptional(hookPath);
-    const hookNext = mergeHooks(hookSource, integration, command);
-    result.push({
-      integration,
-      path: hookPath,
-      changed: hookSource !== hookNext,
-      entries:
-        integration === "codex"
-          ? ["SessionStart", "SessionEnd"]
-          : ["SessionStart", "SessionEnd", "StopFailure"]
-    });
+    const mcpScope = mcpScopes[integration] ?? "project";
+    if (mcpScope === "global") {
+      const plan = harnessConfigPlan(
+        home,
+        integration,
+        command,
+        projectRoot,
+        mcpScope
+      );
+      for (const [capability, item] of [
+        ["mcp", plan.mcp],
+        ["hooks", plan.hooks]
+      ] as const) {
+        if (!item) continue;
+        const source = await readOptional(item.path);
+        const migrated =
+          capability === "mcp"
+            ? removeLegacyMcp(source, integration, command, projectRoot, item)
+            : source;
+        result.push({
+          integration,
+          path: item.path,
+          changed: source !== item.merge(migrated),
+          entries: item.entries,
+          capability
+        });
+      }
+      continue;
+    }
+    result.push(
+      ...(await previewHarnessConfig(
+        home,
+        integration,
+        command,
+        projectRoot,
+        mcpScope
+      ))
+    );
+  }
+  if (
+    integrations.includes("cursor") &&
+    (mcpScopes.cursor ?? "project") !== "global" &&
+    projectRoot !== home
+  ) {
+    const legacy = harnessConfigPlan(home, "cursor", command).mcp!;
+    const source = await readOptional(legacy.path);
+    const next = legacy.remove(source);
+    if (next !== source)
+      result.push({
+        integration: "cursor",
+        path: legacy.path,
+        changed: true,
+        entries: legacy.entries,
+        capability: "mcp"
+      });
   }
   return result;
 }
@@ -288,6 +411,10 @@ export type SetupRunOptions = SetupTransport & {
   home: string;
   integrations: Integration[];
   sourceCommand: string;
+  authorization?: SetupAuthorization;
+  projectId?: string;
+  mcpScope?: McpScope;
+  globalProjects?: ProjectChoice[];
   pathEnv?: string;
   reportPreview?: (previews: SetupPreview[]) => Promise<void> | void;
 };
@@ -302,10 +429,15 @@ export async function runSetup(options: SetupRunOptions) {
   const existing = config.projects[key];
   const apiUrl = validateApiUrl(options.api);
   const apiChanged = existing !== undefined && existing.apiUrl !== apiUrl;
+  const mcpScopes = { ...(existing?.mcpScopes ?? {}) };
+  for (const integration of options.integrations)
+    mcpScopes[integration] = options.mcpScope ?? mcpScopes[integration] ?? "project";
   const configPreviews = await previewSetup(
     options.home,
     options.integrations,
-    command
+    command,
+    key,
+    mcpScopes
   );
   const previews: SetupPreview[] = [
     {
@@ -317,34 +449,70 @@ export async function runSetup(options: SetupRunOptions) {
   ];
   await options.reportPreview?.(previews);
   await installLauncher(options.home, sourceCommand);
-  const cli = await options.store.read("cli");
-  let cliToken = cli;
-  let approvedProject = apiChanged ? undefined : existing?.projectId;
-  if (!cliToken || apiChanged) {
-    const authorized = await authorizeCli(options, options.store);
-    cliToken = authorized.credential;
-    approvedProject = authorized.projectId;
-  } else if (!approvedProject) {
-    const response = await options.fetch(
-      `${options.api}/api/v1/cli/setup/project`,
-      { headers: { authorization: `Bearer ${cliToken}` } }
+  const authorization =
+    options.authorization ??
+    (await resolveSetupAuthorization(options, options.store, apiChanged));
+  const { credential: cliToken, projects } = authorization;
+  const projectId =
+    options.projectId ??
+    (existing && projects.some((project) => project.id === existing.projectId)
+      ? existing.projectId
+      : projects.length === 1
+        ? projects[0]!.id
+        : undefined);
+  if (!projectId) throw new Error("Select a project by running setup in an interactive terminal");
+  const projectChanged = existing?.projectId !== projectId;
+  const integrations: Record<string, { agentId: string }> =
+    apiChanged || projectChanged ? {} : { ...(existing?.integrations ?? {}) };
+  const globalIntegrations = options.integrations.filter(
+    (integration) => mcpScopes[integration] === "global"
+  );
+  const selectedGlobalProjects =
+    globalIntegrations.length
+      ? options.globalProjects ?? projects
+      : [];
+  if (
+    globalIntegrations.length &&
+    !selectedGlobalProjects.length
+  )
+    throw new Error("Select at least one project for global MCP");
+  const globalMappings = { ...(config.globalProjects ?? {}) };
+  for (const integration of globalIntegrations) globalMappings[integration] = {};
+  const persistMapping = async () => {
+    config = {
+      version: 1,
+      projects: {
+        ...config.projects,
+        [key]: {
+          projectId,
+          apiUrl,
+          ...(Object.keys(mcpScopes).length ? { mcpScopes } : {}),
+          integrations
+        }
+      },
+      ...(Object.keys(globalMappings).length
+        ? { globalProjects: globalMappings }
+        : {})
+    } as OrchestratConfig;
+    await atomicWrite(
+      configPath(options.home),
+      `${JSON.stringify(config, null, 2)}\n`
     );
-    if (!response.ok) throw new Error("Unable to resolve the CLI project");
-    approvedProject = ((await response.json()) as { project_id: string })
-      .project_id;
-  }
-  const projectId = approvedProject;
-  if (!projectId) throw new Error("A project must be selected during setup");
-  const integrations: Record<string, { agentId: string }> = apiChanged
-    ? {}
-    : { ...(existing?.integrations ?? {}) };
+  };
   for (const integration of options.integrations) {
-    const account = `agent:${integration}`;
+    const account = agentAccount(projectId, integration);
+    const legacy = legacyAgentAccount(integration);
+    const existingCredential =
+      (await options.store.read(account)) ??
+      (projectChanged ? undefined : await options.store.read(legacy));
     if (
       integrations[integration]?.agentId &&
-      (await options.store.read(account))
-    )
+      existingCredential
+    ) {
+      if (!(await options.store.read(account)))
+        await options.store.write(account, existingCredential);
       continue;
+    }
     const response = await options.fetch(`${options.api}/api/v1/cli/setup`, {
       method: "POST",
       headers: {
@@ -353,48 +521,93 @@ export async function runSetup(options: SetupRunOptions) {
       },
       body: JSON.stringify({ project_id: projectId, integration })
     });
-    if (!response.ok) throw new Error("Unable to configure integration");
+    if (!response.ok)
+      throw new Error(
+        `Unable to configure ${integration} (API ${response.status})`
+      );
     const result = (await response.json()) as {
       agent: { id: string };
       credential: { token: string };
     };
     await options.store.write(account, result.credential.token);
     integrations[integration] = { agentId: result.agent.id };
+    await persistMapping();
   }
-  config = {
-    version: 1,
-    projects: {
-      ...config.projects,
-      [key]: { projectId, apiUrl, integrations }
+  for (const integration of globalIntegrations)
+    for (const project of selectedGlobalProjects) {
+      const account = agentAccount(project.id, integration);
+      const mapped =
+        project.id === projectId
+          ? integrations[integration]
+          : globalMappings[integration]?.[project.id];
+      let agentId = mapped?.agentId;
+      if (!agentId || !(await options.store.read(account))) {
+        const response = await options.fetch(`${options.api}/api/v1/cli/setup`, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${cliToken}`,
+            "content-type": "application/json"
+          },
+          body: JSON.stringify({ project_id: project.id, integration })
+        });
+        if (!response.ok)
+          throw new Error(`Unable to configure ${integration} for ${project.organization_name} / ${project.name} (API ${response.status})`);
+        const result = (await response.json()) as {
+          agent: { id: string };
+          credential: { token: string };
+        };
+        agentId = result.agent.id;
+        await options.store.write(account, result.credential.token);
+      }
+      globalMappings[integration]![project.id] = {
+        name: project.name,
+        organizationName: project.organization_name,
+        apiUrl,
+        agentId
+      };
+      await persistMapping();
     }
-  } as OrchestratConfig;
-  await atomicWrite(
-    configPath(options.home),
-    `${JSON.stringify(config, null, 2)}\n`
-  );
-  for (const preview of configPreviews) {
-    const source = await readOptional(preview.path);
-    const next =
-      preview.path.endsWith("hooks.json") ||
-      preview.path.endsWith("settings.json")
-        ? mergeHooks(source, preview.integration!, command)
-        : preview.integration === "codex"
-          ? mergeToml(source, "codex", command)
-          : mergeJson(source, "claude-code", command);
-    await atomicWrite(preview.path, next);
+  await persistMapping();
+  for (const integration of options.integrations) {
+    const plan = harnessConfigPlan(
+      options.home,
+      integration,
+      command,
+      key,
+      mcpScopes[integration]
+    );
+    for (const item of [plan.mcp, plan.hooks]) {
+      if (!item) continue;
+      let source = await readOptional(item.path);
+      if (mcpScopes[integration] === "global" && item === plan.mcp) {
+        source = removeLegacyMcp(source, integration, command, key, item);
+      }
+      await atomicWrite(item.path, item.merge(source));
+    }
+  }
+  if (
+    options.integrations.includes("cursor") &&
+    (mcpScopes.cursor ?? "project") !== "global" &&
+    key !== options.home
+  ) {
+    const legacy = harnessConfigPlan(options.home, "cursor", command).mcp!;
+    const source = await readOptional(legacy.path);
+    const next = legacy.remove(source);
+    if (next !== source) await atomicWrite(legacy.path, next ?? "");
   }
   if ((await inspectLauncher(options.home, sourceCommand)).changed)
     throw new Error("Persistent CLI launcher verification failed");
-  for (const preview of configPreviews) {
-    const source = await readOptional(preview.path);
-    if (
-      preview.path.endsWith("hooks.json") ||
-      preview.path.endsWith("settings.json")
-    )
-      mergeHooks(source, preview.integration!, command);
-    else if (preview.integration === "codex")
-      mergeToml(source, "codex", command);
-    else mergeJson(source, "claude-code", command);
+  for (const integration of options.integrations) {
+    const plan = harnessConfigPlan(
+      options.home,
+      integration,
+      command,
+      key,
+      mcpScopes[integration]
+    );
+    for (const item of [plan.mcp, plan.hooks]) {
+      if (item) item.merge(await readOptional(item.path));
+    }
   }
   const localBin = join(options.home, ".local", "bin");
   const pathEntries = (options.pathEnv ?? process.env.PATH ?? "").split(":");

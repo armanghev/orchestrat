@@ -16,6 +16,13 @@ export async function cliSetupRoutes(
         : "";
     return options.setup.project(token);
   });
+  app.get("/cli/setup/projects", async (request) => {
+    const token =
+      typeof request.headers.authorization === "string"
+        ? (/^Bearer\s+(.+)$/.exec(request.headers.authorization)?.[1] ?? "")
+        : "";
+    return options.setup.projects(token);
+  });
   app.post("/cli/setup", async (request) => {
     const auth = request.headers.authorization;
     const token =

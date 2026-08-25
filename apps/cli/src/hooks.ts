@@ -5,8 +5,30 @@ import type { CredentialReader } from "./keychain.js";
 import { AgentApiClient } from "@orchestrat/sdk";
 import { normalizeCodexHook } from "./codex-hooks.js";
 import { normalizeClaudeHook } from "./claude-hooks.js";
+import { normalizeCursorHook } from "./cursor-hooks.js";
+import { normalizeAntigravityHook } from "./antigravity-hooks.js";
+import type { ConfigurableIntegration } from "./harnesses.js";
 export type { NormalizedHook } from "./hook-types.js";
 export { deterministicSessionId } from "./hook-types.js";
+
+export function hookCwd(
+  integration: ConfigurableIntegration,
+  payload: unknown,
+  fallback: string
+) {
+  if (!payload || typeof payload !== "object") return fallback;
+  const input = payload as Record<string, unknown>;
+  if (typeof input.cwd === "string") return input.cwd;
+  const paths =
+    integration === "cursor"
+      ? input.workspace_roots
+      : integration === "antigravity"
+        ? input.workspacePaths
+        : undefined;
+  return Array.isArray(paths) && typeof paths[0] === "string"
+    ? paths[0]
+    : fallback;
+}
 
 export async function readBoundedStdin(
   stdin: AsyncIterable<Buffer | string> = process.stdin,
@@ -24,25 +46,31 @@ export async function readBoundedStdin(
 }
 
 export async function runHook(input: {
-  integration: "codex" | "claude-code";
+  integration: ConfigurableIntegration;
   cwd: string;
   home: string;
   read?: () => Promise<OrchestratConfig>;
   credentials: CredentialReader;
   payload: unknown;
+  event?: string;
+  eventName?: string;
   api: string;
   fetch?: typeof globalThis.fetch;
 }) {
+  if (input.integration === "opencode")
+    throw new Error("OpenCode does not support hooks");
   const normalized =
     input.integration === "codex"
       ? normalizeCodexHook(input.payload)
-      : normalizeClaudeHook(input.payload);
-  const payloadCwd =
-    input.payload &&
-    typeof input.payload === "object" &&
-    typeof (input.payload as { cwd?: unknown }).cwd === "string"
-      ? (input.payload as { cwd: string }).cwd
-      : input.cwd;
+      : input.integration === "claude-code"
+        ? normalizeClaudeHook(input.payload)
+        : input.integration === "cursor"
+          ? normalizeCursorHook(input.payload)
+          : normalizeAntigravityHook(
+              input.event ?? input.eventName,
+              input.payload
+            );
+  const payloadCwd = hookCwd(input.integration, input.payload, input.cwd);
   const resolved = await resolveInvocation({
     cwd: payloadCwd,
     home: input.home,

@@ -82,6 +82,16 @@ test("second setup is a no-op and malformed settings fails before transport", as
         project_id: "550e8400-e29b-41d4-a716-446655440000",
         credential: "orch_cli_" + "c".repeat(32)
       });
+    if (url.endsWith("/projects"))
+      return response({
+        projects: [
+          {
+            id: "550e8400-e29b-41d4-a716-446655440000",
+            name: "Project",
+            organization_name: "Org"
+          }
+        ]
+      });
     return response({
       agent: { id: randomUUID() },
       credential: { token: "orch_agent_" + "x".repeat(32) }
@@ -131,7 +141,7 @@ test("second setup is a no-op and malformed settings fails before transport", as
     ...options,
     sourceCommand: join(home, ".local", "bin", "orchestrat")
   });
-  assert.equal(calls, firstCalls);
+  assert.equal(calls, firstCalls + 1);
   assert.equal(store.writes, firstWrites);
   assert.equal(opens, 1);
   for (const item of snapshots) {
@@ -271,7 +281,10 @@ test("persistent launcher is an atomic managed runtime and rejects conflicts", a
 test("detects both, one, or no supported integrations", async () => {
   assert.deepEqual(await detectIntegrations(async () => true), [
     "codex",
-    "claude-code"
+    "claude-code",
+    "cursor",
+    "antigravity",
+    "opencode"
   ]);
   assert.deepEqual(
     await detectIntegrations(async (command) => command === "codex"),

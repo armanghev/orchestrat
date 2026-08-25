@@ -220,3 +220,83 @@ test("invokes a registered tool over the official in-memory transport", async ()
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.deepEqual(calls.at(-1), "close");
 });
+
+test("global Cursor requires a selected project before project tools run", async () => {
+  const calls: string[] = [];
+  const client = (name: string) => ({
+    async openSession() {
+      calls.push(`open:${name}`);
+      return { session: { id: `${id}-${name}` } };
+    },
+    async heartbeat() { return {}; },
+    async closeSession() { calls.push(`close:${name}`); return {}; },
+    async listTasks() { calls.push(`tasks:${name}`); return {}; },
+    async getTask() { return {}; },
+    async claimTask() { return {}; },
+    async releaseClaim() { return {}; },
+    async completeClaim() { return {}; },
+    async listEvents() { return {}; },
+    async listDocuments() { return { documents: [], next_cursor: null }; },
+    async readDocument() { return {}; },
+    async createDocument() { return { document: {}, revision: {} }; },
+    async updateDocument() { return {}; }
+  });
+  const first = "550e8400-e29b-41d4-a716-446655440000";
+  const bridge = new McpBridge({
+    integration: "cursor",
+    projects: [
+      { id: first, name: "Org / First", client: client("first") as never },
+      {
+        id: "550e8400-e29b-41d4-a716-446655440001",
+        name: "Org / Second",
+        client: client("second") as never
+      }
+    ]
+  });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await bridge.start();
+  await bridge.server.connect(serverTransport);
+  await clientTransport.start();
+  const request = (message: Record<string, unknown>) =>
+    new Promise<Record<string, any>>((resolve) => {
+      clientTransport.onmessage = (response) => {
+        if ("id" in response && response.id === message.id)
+          resolve(response as Record<string, any>);
+      };
+      void clientTransport.send(message as never);
+    });
+  await request({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
+    params: {
+      protocolVersion: LATEST_PROTOCOL_VERSION,
+      capabilities: {},
+      clientInfo: { name: "test", version: "1" }
+    }
+  });
+  await clientTransport.send({ jsonrpc: "2.0", method: "notifications/initialized" } as never);
+  const blocked = await request({
+    jsonrpc: "2.0",
+    id: 2,
+    method: "tools/call",
+    params: { name: "list_tasks", arguments: {} }
+  });
+  assert.equal(blocked.result.isError, true);
+  assert.match(blocked.result.content[0].text, /Select an Orchestrat project/);
+  const selected = await request({
+    jsonrpc: "2.0",
+    id: 3,
+    method: "tools/call",
+    params: { name: "select_project", arguments: { project_id: first } }
+  });
+  assert.equal(selected.result.isError, undefined);
+  await request({
+    jsonrpc: "2.0",
+    id: 4,
+    method: "tools/call",
+    params: { name: "list_tasks", arguments: {} }
+  });
+  assert.deepEqual(calls, ["open:first", "tasks:first"]);
+  await clientTransport.close();
+});

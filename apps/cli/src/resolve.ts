@@ -5,7 +5,11 @@ import {
   type OrchestratConfig,
   type ResolvedMapping
 } from "./config.js";
-import type { CredentialReader } from "./keychain.js";
+import {
+  agentAccount,
+  legacyAgentAccount,
+  type CredentialReader
+} from "./keychain.js";
 
 export type Invocation = {
   cwd: string;
@@ -36,11 +40,40 @@ export async function resolveInvocation(input: Invocation) {
     );
   if (!input.credentials) throw new Error("Credential reader is unavailable");
   const credential =
-    (await input.credentials.read(`agent:${input.integration}`)) ??
+    (await input.credentials.read(
+      agentAccount(mapping.projectId, input.integration)
+    )) ??
+    (await input.credentials.read(legacyAgentAccount(input.integration))) ??
     (await input.credentials.read(input.integration));
   if (!credential)
     throw new Error(`No ${input.integration} credential found in Keychain`);
   return { mapping, credential, public: publicMapping(mapping) };
+}
+
+export async function resolveGlobalInvocation(input: {
+  integration: Integration;
+  read: (home?: string) => Promise<OrchestratConfig>;
+  credentials: CredentialReader;
+  home?: string;
+}) {
+  const config = await input.read(input.home);
+  const projects = await Promise.all(
+    Object.entries(config.globalProjects?.[input.integration] ?? {}).map(
+      async ([projectId, project]) => {
+        const credential = await input.credentials.read(
+          agentAccount(projectId, input.integration)
+        );
+        if (!credential)
+          throw new Error(
+            `No ${input.integration} credential found in Keychain for ${project.organizationName} / ${project.name}`
+          );
+        return { projectId, ...project, credential };
+      }
+    )
+  );
+  if (!projects.length)
+    throw new Error(`No global ${input.integration} projects are configured`);
+  return projects;
 }
 
 function publicMapping(mapping: ResolvedMapping) {

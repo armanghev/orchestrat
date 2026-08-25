@@ -4,7 +4,6 @@ import { http, HttpResponse } from "msw";
 import { describe, expect, it, vi } from "vitest";
 import type { AuthClient, AuthSnapshot } from "@/features/auth/auth-client";
 import { renderDashboardRoute } from "@/test/render";
-import { organization, project } from "@/test/factories";
 import { CLI_ATTEMPT_KEY, CLI_TERMINAL_KEY } from "./cli.authorize";
 
 const apiUrl = "http://localhost:3001/api/v1";
@@ -41,17 +40,6 @@ function platform() {
     openExternal: vi.fn(async () => undefined),
     onAuthCallback: vi.fn(async () => () => undefined)
   };
-}
-
-function catalogHandlers() {
-  return [
-    http.get(`${apiUrl}/organizations`, () =>
-      HttpResponse.json({ organizations: [organization()] })
-    ),
-    http.get(`${apiUrl}/organizations/:organizationId/projects`, () =>
-      HttpResponse.json({ projects: [project()] })
-    )
-  ];
 }
 
 describe("CLI authorization route", () => {
@@ -92,15 +80,13 @@ describe("CLI authorization route", () => {
     ).toBeNull();
   });
 
-  it("approves with exact attempt and project, then keeps terminal confirmation", async () => {
-    const expected = project();
+  it("approves the exact attempt, then keeps terminal confirmation", async () => {
     let body: unknown;
     await renderDashboardRoute({
       path: `/cli/authorize?attempt=${attempt}`,
       auth: new Auth({ status: "signedIn", identityKey: "user" }),
       platform: platform(),
       handlers: [
-        ...catalogHandlers(),
         http.post(
           `${apiUrl}/cli/authorization/attempts/${attempt}/approve`,
           async ({ request }) => {
@@ -112,14 +98,11 @@ describe("CLI authorization route", () => {
     });
     await userEvent
       .setup()
-      .selectOptions(await screen.findByLabelText("Project"), expected.id);
-    await userEvent
-      .setup()
       .click(screen.getByRole("button", { name: "Approve" }));
     expect(
       await screen.findByRole("heading", { name: "CLI access approved." })
     ).toBeVisible();
-    expect(body).toEqual({ project_id: expected.id });
+    expect(body).toEqual({});
     expect(window.location.search).toBe("");
     expect(
       JSON.parse(window.sessionStorage.getItem(CLI_TERMINAL_KEY)!)
@@ -146,14 +129,13 @@ describe("CLI authorization route", () => {
     ).toBeVisible();
   });
 
-  it("keeps deny available when catalog fails and reports generic errors", async () => {
+  it("keeps deny available and reports terminal confirmation", async () => {
     let denied = false;
     await renderDashboardRoute({
       path: `/cli/authorize?attempt=${attempt}`,
       auth: new Auth({ status: "signedIn", identityKey: "user" }),
       platform: platform(),
       handlers: [
-        http.get(`${apiUrl}/organizations`, () => HttpResponse.error()),
         http.post(
           `${apiUrl}/cli/authorization/attempts/${attempt}/deny`,
           () => {
@@ -179,13 +161,11 @@ describe("CLI authorization route", () => {
   });
 
   it("shows a generic decision error without transport details", async () => {
-    const expected = project();
     await renderDashboardRoute({
       path: `/cli/authorize?attempt=${attempt}`,
       auth: new Auth({ status: "signedIn", identityKey: "user" }),
       platform: platform(),
       handlers: [
-        ...catalogHandlers(),
         http.post(
           `${apiUrl}/cli/authorization/attempts/${attempt}/approve`,
           () =>
@@ -196,9 +176,6 @@ describe("CLI authorization route", () => {
         )
       ]
     });
-    await userEvent
-      .setup()
-      .selectOptions(await screen.findByLabelText("Project"), expected.id);
     await userEvent
       .setup()
       .click(screen.getByRole("button", { name: "Approve" }));

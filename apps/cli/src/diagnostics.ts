@@ -1,21 +1,18 @@
 import { AgentApiClient } from "@orchestrat/sdk";
-import {
-  atomicWrite,
-  mergeHooks,
-  mergeJson,
-  mergeToml,
-  readOptional,
-  removeHooks,
-  removeJson,
-  removeToml
-} from "./safe-files.js";
+import { atomicWrite, readOptional } from "./safe-files.js";
 import {
   configPath,
   findProject,
+  INTEGRATIONS,
   readConfig,
   type Integration
 } from "./config.js";
-import type { CredentialStore } from "./keychain.js";
+import { harnessConfigPlan } from "./harness-config.js";
+import {
+  agentAccount,
+  legacyAgentAccount,
+  type CredentialStore
+} from "./keychain.js";
 import { inspectLauncher } from "./setup.js";
 import { access, lstat, rm } from "node:fs/promises";
 import { constants } from "node:fs";
@@ -40,7 +37,8 @@ export async function runStatus(input: {
   for (const integration of integrations as Integration[]) {
     const mapping = project?.integrations[integration];
     const token =
-      (await input.credentials.read(`agent:${integration}`)) ??
+      (await input.credentials.read(agentAccount(project!.projectId, integration))) ??
+      (await input.credentials.read(legacyAgentAccount(integration))) ??
       (await input.credentials.read(integration));
     if (!token) {
       backend[integration] = redacted(false, "missing credential");
@@ -145,27 +143,23 @@ export async function runDoctor(input: {
     for (const integration of Object.keys(
       project.integrations
     ) as Integration[]) {
-      const mcpPath =
-        integration === "codex"
-          ? join(input.home, ".codex", "config.toml")
-          : join(input.home, ".claude.json");
-      const hookPath =
-        integration === "codex"
-          ? join(input.home, ".codex", "hooks.json")
-          : join(input.home, ".claude", "settings.json");
       try {
-        const mcp = await readOptional(mcpPath);
-        const hooks = await readOptional(hookPath);
-        const mergedMcp =
-          integration === "codex"
-            ? mergeToml(mcp, integration, command)
-            : mergeJson(mcp, integration, command);
-        const mergedHooks = mergeHooks(hooks, integration, command);
+        const plan = harnessConfigPlan(
+          input.home,
+          integration,
+          command,
+          project.cwd,
+          project.mcpScopes?.[integration] ?? "project"
+        );
+        let current = true;
+        for (const item of [plan.mcp, plan.hooks]) {
+          if (!item) continue;
+          const source = await readOptional(item.path);
+          current = current && source === item.merge(source);
+        }
         checks[`config.${integration}`] = redacted(
-          mcp === mergedMcp && hooks === mergedHooks,
-          mcp === mergedMcp && hooks === mergedHooks
-            ? "present"
-            : "missing or outdated"
+          current,
+          current ? "present" : "missing or outdated"
         );
       } catch {
         checks[`config.${integration}`] = redacted(
@@ -180,7 +174,8 @@ export async function runDoctor(input: {
     : []) as Integration[]) {
     const mapping = project!.integrations[integration]!;
     const token =
-      (await input.credentials.read(`agent:${integration}`)) ??
+      (await input.credentials.read(agentAccount(project!.projectId, integration))) ??
+      (await input.credentials.read(legacyAgentAccount(integration))) ??
       (await input.credentials.read(integration));
     checks[`credential.${integration}`] = redacted(
       Boolean(token),
@@ -229,9 +224,7 @@ export async function disconnectLocal(input: {
   const config = await readConfig(input.home);
   const project = findProject(config, input.cwd);
   const selected =
-    input.integration === "all"
-      ? (["codex", "claude-code"] as const)
-      : [input.integration];
+    input.integration === "all" ? INTEGRATIONS : [input.integration];
   const mapped = selected.filter(
     (integration) => project?.integrations[integration]
   );
@@ -242,44 +235,48 @@ export async function disconnectLocal(input: {
     const otherProjectUses = Object.entries(config.projects).some(
       ([cwd, value]) => cwd !== project.cwd && Boolean(value.integrations[name])
     );
-    if (otherProjectUses) continue;
-    const mcpPath =
-      name === "codex"
-        ? join(input.home, ".codex", "config.toml")
-        : join(input.home, ".claude.json");
-    const hookPath =
-      name === "codex"
-        ? join(input.home, ".codex", "hooks.json")
-        : join(input.home, ".claude", "settings.json");
-    const mcp = await readOptional(mcpPath);
-    const hooks = await readOptional(hookPath);
-    const nextMcp =
-      name === "codex"
-        ? removeToml(mcp, name, command)
-        : removeJson(mcp, name, command);
-    const nextHooks = removeHooks(hooks, name, command);
-    if (nextMcp !== mcp)
-      writes.push({
-        path: mcpPath,
-        entries: [
-          name === "codex" ? "mcp_servers.orchestrat" : "mcpServers.orchestrat"
-        ],
-        content: nextMcp ?? ""
-      });
-    if (nextHooks !== hooks)
-      writes.push({
-        path: hookPath,
-        entries: [
-          "SessionStart",
-          "SessionEnd",
-          ...(name === "claude-code" ? ["StopFailure"] : [])
-        ],
-        content: nextHooks ?? ""
-      });
+    const mcpScope = project.mcpScopes?.[name] ?? "project";
+    const globalProjectsRemain =
+      mcpScope === "global" &&
+      Object.keys(config.globalProjects?.[name] ?? {}).some(
+        (projectId) => projectId !== project.projectId
+      );
+    if (
+      (otherProjectUses &&
+        (name !== "cursor" || mcpScope === "global")) ||
+      globalProjectsRemain
+    )
+      continue;
+    const plan = harnessConfigPlan(
+      input.home,
+      name,
+      command,
+      project.cwd,
+      mcpScope
+    );
+    for (const item of [plan.mcp, plan.hooks]) {
+      if (!item) continue;
+      const source = await readOptional(item.path);
+      const next = item.remove(source);
+      if (next !== source)
+        writes.push({
+          path: item.path,
+          entries: item.entries,
+          content: next ?? ""
+        });
+    }
   }
   const nextConfig = structuredClone(config);
   const nextProject = nextConfig.projects[project.cwd]!;
   for (const name of mapped) delete nextProject.integrations[name];
+  for (const name of mapped)
+    if (project.mcpScopes?.[name] === "global") {
+      delete nextConfig.globalProjects?.[name]?.[project.projectId];
+      if (!Object.keys(nextConfig.globalProjects?.[name] ?? {}).length)
+        delete nextConfig.globalProjects?.[name];
+    }
+  if (!Object.keys(nextConfig.globalProjects ?? {}).length)
+    delete nextConfig.globalProjects;
   if (!Object.keys(nextProject.integrations).length)
     delete nextConfig.projects[project.cwd];
   writes.push({
@@ -336,8 +333,8 @@ export async function disconnectLocal(input: {
     const otherProjectUses = Object.entries(config.projects).some(
       ([cwd, value]) => cwd !== project.cwd && Boolean(value.integrations[name])
     );
-    if (otherProjectUses) continue;
-    await input.store.remove(`agent:${name}`);
+    await input.store.remove(agentAccount(project.projectId, name));
+    if (!otherProjectUses) await input.store.remove(legacyAgentAccount(name));
     await input.store.remove(name);
   }
   if (!integrationsRemain) await input.store.remove("cli");

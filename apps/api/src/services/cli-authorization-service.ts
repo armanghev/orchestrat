@@ -6,7 +6,6 @@ import {
 } from "@orchestrat/db";
 import { and, eq } from "drizzle-orm";
 import { ApiError } from "./api-error.js";
-import { PermissionService } from "./permission-service.js";
 
 const hash = (value: string) =>
   createHash("sha256").update(value).digest("hex");
@@ -16,13 +15,10 @@ const POLL_MIN_INTERVAL_MS = 2_000;
 const pollTimes = new Map<string, number>();
 
 export class CliAuthorizationService {
-  private readonly permissions: PermissionService;
   constructor(
     private readonly db: Database,
     private readonly now: () => Date = () => new Date()
-  ) {
-    this.permissions = new PermissionService(db);
-  }
+  ) {}
 
   async createAttempt() {
     const attemptId = `ca_${randomBytes(24).toString("base64url")}`;
@@ -41,8 +37,7 @@ export class CliAuthorizationService {
     };
   }
 
-  async approve(userId: string, attemptId: string, projectId: string) {
-    await this.permissions.projectAccess(userId, projectId);
+  async approve(userId: string, attemptId: string) {
     await this.db.transaction(async (tx) => {
       const [attempt] = await tx
         .select()
@@ -66,7 +61,7 @@ export class CliAuthorizationService {
         );
       await tx
         .update(cliAuthorizationAttempts)
-        .set({ status: "approved", projectId, approvedByUserId: userId })
+        .set({ status: "approved", approvedByUserId: userId })
         .where(eq(cliAuthorizationAttempts.id, attemptId));
     });
     return { status: "approved" as const };
@@ -154,7 +149,6 @@ export class CliAuthorizationService {
     }
     const credential = `orch_cli_${randomBytes(32).toString("base64url")}`;
     let expired = false;
-    let exchangedProjectId: string | null = null;
     await this.db.transaction(async (tx) => {
       const [current] = await tx
         .select()
@@ -175,9 +169,7 @@ export class CliAuthorizationService {
         expired = true;
         return;
       }
-      exchangedProjectId = current.projectId;
       await tx.insert(cliCredentials).values({
-        projectId: current.projectId!,
         userId: current.approvedByUserId!,
         tokenHash: hash(credential)
       });
@@ -198,7 +190,6 @@ export class CliAuthorizationService {
     if (expired) return { status: "expired" as const };
     return {
       status: "approved" as const,
-      project_id: exchangedProjectId!,
       credential
     };
   }
