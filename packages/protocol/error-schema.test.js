@@ -5,10 +5,16 @@ import {
   agentPresenceSchema,
   apiErrorResponseSchema,
   apiErrorSchema,
+  attachmentDownloadQuerySchema,
+  attachmentPartsRequestSchema,
   claimResponseSchema,
+  createAttachmentUploadRequestSchema,
   createDocumentRequestSchema,
+  documentAttachmentUploadParamsSchema,
   documentConflictDetailsSchema,
+  documentHistoryQuerySchema,
   documentPathSchema,
+  editDocumentRequestSchema,
   eventSchema,
   heartbeatRequestSchema,
   projectEventsResponseSchema,
@@ -16,7 +22,8 @@ import {
   realtimeProjectParamsSchema,
   realtimeSocketQuerySchema,
   realtimeTicketRequestSchema,
-  realtimeTicketResponseSchema
+  realtimeTicketResponseSchema,
+  updateDocumentRequestSchema
 } from "./dist/index.js";
 
 const taskError = {
@@ -132,6 +139,61 @@ test("accepts normalized document paths and revision conflicts", () => {
     createDocumentRequestSchema.parse({ path: "README.md", content: "# Notes" })
       .content,
     "# Notes"
+  );
+});
+
+test("validates document edit, history, autosave, and attachment contracts", () => {
+  const id = "00000000-0000-4000-8000-000000000001";
+  assert.deepEqual(
+    editDocumentRequestSchema.parse({
+      base_revision: 2,
+      edits: [{ old_text: "before", new_text: "after" }]
+    }).edits[0],
+    { old_text: "before", new_text: "after" }
+  );
+  assert.throws(() =>
+    editDocumentRequestSchema.parse({
+      base_revision: 2,
+      edits: [{ old_text: "", new_text: "after" }]
+    })
+  );
+  assert.equal(documentHistoryQuerySchema.parse({ limit: 50 }).view, "detail");
+  assert.equal(
+    updateDocumentRequestSchema.parse({
+      base_revision: 2,
+      content: "after",
+      save_kind: "autosave"
+    }).save_kind,
+    "autosave"
+  );
+  assert.deepEqual(
+    documentAttachmentUploadParamsSchema.parse({
+      documentId: id,
+      uploadId: id
+    }),
+    { documentId: id, uploadId: id }
+  );
+  assert.equal(
+    createAttachmentUploadRequestSchema.parse({
+      filename: "notes.txt",
+      size_bytes: 2 * 1024 * 1024 * 1024
+    }).content_type,
+    "application/octet-stream"
+  );
+  assert.throws(() =>
+    createAttachmentUploadRequestSchema.parse({
+      filename: "../notes.txt",
+      size_bytes: 1
+    })
+  );
+  assert.throws(() =>
+    attachmentPartsRequestSchema.parse({
+      part_numbers: Array.from({ length: 101 }, (_, index) => index + 1)
+    })
+  );
+  assert.equal(
+    attachmentDownloadQuerySchema.parse({ ticket: "ticket" }).ticket,
+    "ticket"
   );
 });
 

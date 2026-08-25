@@ -60,7 +60,15 @@ const coordinationErrorCodeSchema = z.enum([
   "CLAIM_NOT_OWNER"
 ]);
 
-const documentErrorCodeSchema = z.enum(["DOCUMENT_CONFLICT"]);
+const documentErrorCodeSchema = z.enum([
+  "DOCUMENT_CONFLICT",
+  "DOCUMENT_EDIT_MISMATCH",
+  "DOCUMENT_CONTENT_UNAVAILABLE",
+  "DOCUMENT_ARCHIVED",
+  "ATTACHMENT_QUOTA_EXCEEDED",
+  "ATTACHMENT_UPLOAD_EXPIRED",
+  "STORAGE_UPLOAD_FAILED"
+]);
 
 export const errorCodeSchema = z.union([
   baseErrorCodeSchema,
@@ -788,6 +796,7 @@ export const documentSchema = z.object({
   project_id: idSchema,
   path: documentPathSchema,
   current_revision: z.number().int().min(1),
+  archived_at: dateSchema.nullable(),
   created_by: documentAuthorSchema.nullable(),
   created_at: dateSchema,
   updated_at: dateSchema
@@ -814,10 +823,20 @@ export const documentDetailSchema = z.object({
 export type DocumentDetail = z.infer<typeof documentDetailSchema>;
 export const documentResponseSchema = documentDetailSchema;
 export type DocumentResponse = z.infer<typeof documentResponseSchema>;
+export const historicalDocumentRevisionResponseSchema = z.object({
+  revision: documentRevisionSchema
+});
+export type HistoricalDocumentRevisionResponse = z.infer<
+  typeof historicalDocumentRevisionResponseSchema
+>;
 
 export const documentListQuerySchema = z.object({
   limit: limitSchema,
-  cursor: cursorSchema.optional()
+  cursor: cursorSchema.optional(),
+  include_archived: z
+    .enum(["true", "false"])
+    .transform((value) => value === "true")
+    .default(false)
 });
 export type DocumentListQuery = z.infer<typeof documentListQuerySchema>;
 
@@ -842,7 +861,8 @@ export type CreateDocumentResponse = z.infer<
 
 export const updateDocumentRequestSchema = z.object({
   content: documentContentSchema,
-  base_revision: z.number().int().min(1)
+  base_revision: z.number().int().min(1),
+  save_kind: z.literal("autosave").optional()
 });
 export type UpdateDocumentRequest = z.infer<typeof updateDocumentRequestSchema>;
 
@@ -857,6 +877,67 @@ export const documentRevisionParamsSchema = z.object({
   id: idSchema,
   revision: z.coerce.number().int().min(1)
 });
+export const documentAttachmentUploadParamsSchema = z.object({
+  documentId: idSchema,
+  uploadId: idSchema
+});
+export const documentAttachmentParamsSchema = z.object({
+  documentId: idSchema,
+  attachmentId: idSchema
+});
+export const attachmentDownloadQuerySchema = z.object({
+  ticket: z.string().min(1).max(256)
+});
+
+export const documentEditSchema = z.object({
+  old_text: z.string().min(1).max(1_000_000),
+  new_text: documentContentSchema
+});
+export type DocumentEdit = z.infer<typeof documentEditSchema>;
+export const editDocumentRequestSchema = z.object({
+  base_revision: z.number().int().min(1),
+  edits: z.array(documentEditSchema).min(1).max(1000)
+});
+export type EditDocumentRequest = z.infer<typeof editDocumentRequestSchema>;
+
+export const renameDocumentRequestSchema = z.object({
+  path: documentPathSchema,
+  expected_revision: z.number().int().min(1)
+});
+export type RenameDocumentRequest = z.infer<typeof renameDocumentRequestSchema>;
+
+export const documentHistoryQuerySchema = z.object({
+  view: z.enum(["summary", "detail"]).default("detail"),
+  limit: limitSchema,
+  cursor: cursorSchema.optional()
+});
+export type DocumentHistoryQuery = z.infer<typeof documentHistoryQuerySchema>;
+
+export const documentRevisionSummarySchema = z.object({
+  id: idSchema,
+  document_id: idSchema,
+  revision_number: z.number().int().min(1),
+  content_size_bytes: z.number().int().nonnegative().nullable(),
+  content_sha256: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .nullable(),
+  author: z.object({
+    type: documentAuthorTypeSchema,
+    id: idSchema
+  }),
+  created_at: dateSchema
+});
+export type DocumentRevisionSummary = z.infer<
+  typeof documentRevisionSummarySchema
+>;
+export const documentRevisionSummaryResponseSchema = z.object({
+  revisions: z.array(documentRevisionSummarySchema),
+  next_cursor: cursorSchema.nullable()
+});
+export type DocumentRevisionSummaryResponse = z.infer<
+  typeof documentRevisionSummaryResponseSchema
+>;
 
 export const documentRevisionsResponseSchema = z.object({
   revisions: z.array(documentRevisionSchema),
@@ -872,6 +953,110 @@ export const documentConflictDetailsSchema = z.object({
 });
 export type DocumentConflictDetails = z.infer<
   typeof documentConflictDetailsSchema
+>;
+export const documentEditMismatchDetailsSchema = z.object({
+  edit_index: z.number().int().min(0),
+  match_count: z.number().int().nonnegative()
+});
+export type DocumentEditMismatchDetails = z.infer<
+  typeof documentEditMismatchDetailsSchema
+>;
+
+export const attachmentUploadModeSchema = z.enum(["direct", "multipart"]);
+export type AttachmentUploadMode = z.infer<typeof attachmentUploadModeSchema>;
+export const attachmentSchema = z.object({
+  id: idSchema,
+  document_id: idSchema,
+  filename: z.string().min(1).max(255),
+  content_type: z.string().max(255).nullable(),
+  size_bytes: z.number().int().nonnegative(),
+  created_at: dateSchema
+});
+export type Attachment = z.infer<typeof attachmentSchema>;
+export const documentAttachmentsResponseSchema = z.object({
+  attachments: z.array(attachmentSchema)
+});
+export type DocumentAttachmentsResponse = z.infer<
+  typeof documentAttachmentsResponseSchema
+>;
+export const createAttachmentUploadRequestSchema = z.object({
+  filename: z
+    .string()
+    .trim()
+    .min(1)
+    .max(255)
+    .refine(
+      (value) =>
+        !value.includes("/") &&
+        !value.includes("\\") &&
+        !/[\0\r\n]/.test(value),
+      { message: "Attachment filenames must be a safe basename." }
+    ),
+  content_type: z.string().trim().max(255).default("application/octet-stream"),
+  size_bytes: z
+    .number()
+    .int()
+    .nonnegative()
+    .max(2 * 1024 * 1024 * 1024)
+});
+export type CreateAttachmentUploadRequest = z.infer<
+  typeof createAttachmentUploadRequestSchema
+>;
+export const attachmentUploadSchema = z.object({
+  id: idSchema,
+  mode: z.enum(["single", "multipart"]),
+  upload_url: z.string().url().optional(),
+  upload_id: z.string().optional(),
+  part_size_bytes: z.number().int().positive().optional(),
+  completed_parts: z
+    .array(
+      z.object({
+        part_number: z.number().int().positive(),
+        etag: z.string().min(1)
+      })
+    )
+    .optional(),
+  expires_at: dateSchema,
+  status: z.string().optional()
+});
+export type AttachmentUpload = z.infer<typeof attachmentUploadSchema>;
+export const attachmentUploadResponseSchema = z.object({
+  upload: attachmentUploadSchema
+});
+export type AttachmentUploadResponse = z.infer<
+  typeof attachmentUploadResponseSchema
+>;
+export const attachmentUploadInspectionResponseSchema =
+  attachmentUploadResponseSchema;
+export type AttachmentUploadInspectionResponse = z.infer<
+  typeof attachmentUploadInspectionResponseSchema
+>;
+export const attachmentPartSchema = z.object({
+  part_number: z.number().int().positive(),
+  upload_url: z.string().url()
+});
+export const attachmentPartsResponseSchema = z.object({
+  parts: z.array(attachmentPartSchema)
+});
+export const attachmentPartsRequestSchema = z.object({
+  part_numbers: z.array(z.number().int().min(1).max(10_000)).min(1).max(100)
+});
+export const completeAttachmentUploadRequestSchema = z.object({
+  parts: z
+    .array(
+      z.object({
+        part_number: z.number().int().positive(),
+        etag: z.string().min(1)
+      })
+    )
+    .optional()
+});
+export const attachmentUploadCompletionResponseSchema = z.object({
+  attachment: attachmentSchema,
+  upload: attachmentUploadSchema.optional()
+});
+export type AttachmentUploadCompletionResponse = z.infer<
+  typeof attachmentUploadCompletionResponseSchema
 >;
 
 export const eventSchema = z.object({
