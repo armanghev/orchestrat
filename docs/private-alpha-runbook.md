@@ -47,6 +47,42 @@ Do not put database URLs, Keychain credentials, agent tokens, Apple
 credentials, or private keys in client bundles, logs, screenshots, or this
 repository.
 
+## Private document storage
+
+Create a private Supabase Storage bucket for document revisions and
+attachments only after separate operator approval. Set
+`SUPABASE_DOCUMENT_BUCKET` to that bucket and never reuse the public avatar
+bucket. The API derives immutable object keys; clients never choose keys or
+receive S3 credentials. Supabase's S3 compatibility layer supports presigned
+and multipart uploads, but not bucket versioning or the `PutBucketCors` and
+`GetBucketCors` operations. Verify signed uploads and downloads from the exact
+web and Tauri origins in staging instead of attempting to configure bucket
+CORS through the S3 API.
+
+The first storage release is additive: new revision bodies are dual-written
+to PostgreSQL and Storage, while reads continue to support older inline-only
+rows. Run and verify the restartable backfill before a later forward migration
+allows null inline content. Keep existing inline bodies for one rollback
+release; object-only writes and inline-body removal are separate, explicitly
+authorized cutovers.
+
+Build the API before running the storage operators. Both commands default to
+dry-run; use `--apply` only after reviewing the output and receiving approval:
+
+```sh
+pnpm --filter @orchestrat/api build
+pnpm --filter @orchestrat/api storage:backfill --dry-run
+pnpm --filter @orchestrat/api storage:backfill --apply
+pnpm --filter @orchestrat/api storage:gc --dry-run
+pnpm --filter @orchestrat/api storage:gc --apply
+```
+
+Backfill is restartable and verifies each object before recording its byte
+length and SHA-256. Garbage collection waits 24 hours before deleting an
+unreferenced object or aborting an orphaned multipart upload. Capture operator
+output without secrets; it reports counts, never document content or signed
+URLs.
+
 ## Vercel projects
 
 Create two separately authorized Vercel projects, only with explicit approval:
@@ -108,6 +144,12 @@ target, not the live database:
 ```sh
 pg_restore --clean --if-exists --dbname="$ORCHESTRAT_RESTORE_DATABASE_URL" /secure/backup/orchestrat-<timestamp>.dump
 ```
+
+PostgreSQL backups do not contain document Storage objects. Before a storage
+cutover, take a separately tracked bucket backup or provider-approved object
+copy and verify a sampled restore by key, byte length, and SHA-256. Treat the
+database revision row and its immutable key as one recovery unit; restoring
+only PostgreSQL can leave document bodies unavailable.
 
 Drizzle migrations are forward-only in this repository. Review the generated
 SQL, run the separate Compose migration profile, and verify `/health` and
