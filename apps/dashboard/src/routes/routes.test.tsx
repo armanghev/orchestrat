@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { http, HttpResponse } from "msw";
@@ -6,6 +6,7 @@ import type { AuthClient, AuthSnapshot } from "@/features/auth/auth-client";
 import { documentDetail, project, taskCard } from "@/test/factories";
 import { renderDashboardRoute } from "@/test/render";
 import { handlers } from "@/test/handlers";
+import { coordinationKeys } from "@/features/coordination/query-options";
 
 class FakeAuthClient implements AuthClient {
   readonly capabilities = { github: true, magicLink: true };
@@ -38,6 +39,20 @@ function platform() {
     },
     openExternal: vi.fn(async () => undefined),
     onAuthCallback: vi.fn(async () => () => undefined)
+  };
+}
+
+function revisionSummary(
+  revision: ReturnType<typeof documentDetail>["revision"]
+) {
+  return {
+    id: revision.id,
+    document_id: revision.document_id,
+    revision_number: revision.revision_number,
+    content_size_bytes: revision.content.length,
+    content_sha256: "a".repeat(64),
+    author: revision.author,
+    created_at: revision.created_at
   };
 }
 
@@ -345,7 +360,7 @@ describe("dashboard routes", () => {
     expect(screen.getAllByText("Task Updated")).toHaveLength(1);
   });
 
-  it("preserves an unsaved document draft after conflict and shows history", async () => {
+  it("preserves an unsaved document draft after conflict and shows summary history", async () => {
     const expectedProject = project();
     const initial = documentDetail({
       document: { ...documentDetail().document, project_id: expectedProject.id }
@@ -381,9 +396,15 @@ describe("dashboard routes", () => {
         `http://localhost:3001/api/v1/documents/${initial.document.id}/revisions`,
         () =>
           HttpResponse.json({
-            revisions: [initial.revision, current.revision],
+            revisions: [initial.revision, current.revision].map(
+              revisionSummary
+            ),
             next_cursor: null
           })
+      ),
+      http.get(
+        `http://localhost:3001/api/v1/documents/${initial.document.id}/revisions/1`,
+        () => HttpResponse.json({ revision: initial.revision })
       ),
       http.patch(
         `http://localhost:3001/api/v1/documents/${initial.document.id}`,
@@ -433,15 +454,547 @@ describe("dashboard routes", () => {
     const editor = await screen.findByLabelText("Markdown content");
     await user.clear(editor);
     await user.type(editor, "Unsaved draft");
-    await user.click(screen.getByRole("button", { name: "Save document" }));
+    await user.click(screen.getByRole("button", { name: "Save now" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "draft is preserved"
+      "Revision conflict"
     );
-    expect(screen.getByDisplayValue("Unsaved draft")).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Retry save" }));
+    expect(screen.getAllByDisplayValue("Unsaved draft")).toHaveLength(2);
+    await user.click(screen.getByRole("button", { name: "Continue merging" }));
+    expect(screen.getByText("Autosave is paused while merging.")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Save mine" }));
     await waitFor(() => expect(patchRequests).toBe(2));
     expect(screen.getByDisplayValue("Unsaved draft")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Revision 1" }));
-    expect(screen.getByDisplayValue("Initial content")).toBeVisible();
+    expect(await screen.findByDisplayValue("Initial content")).toBeVisible();
+  });
+
+  it("debounces autosaves and serializes a queued edit", async () => {
+    const expectedProject = project();
+    const initial = documentDetail({
+      document: { ...documentDetail().document, project_id: expectedProject.id }
+    });
+    let current = initial;
+    let resolveFirst!: () => void;
+    const writes: Array<{
+      content: string;
+      base_revision: number;
+      save_kind?: "autosave";
+    }> = [];
+    const documentHandlers = [
+      http.get(
+        `http://localhost:3001/api/v1/projects/${expectedProject.id}/documents`,
+        () =>
+          HttpResponse.json({
+            documents: [current.document],
+            next_cursor: null
+          })
+      ),
+      http.get(
+        `http://localhost:3001/api/v1/documents/${initial.document.id}`,
+        () => HttpResponse.json(current)
+      ),
+      http.get(
+        `http://localhost:3001/api/v1/documents/${initial.document.id}/revisions`,
+        () =>
+          HttpResponse.json({
+            revisions: [current.revision].map(revisionSummary),
+            next_cursor: null
+          })
+      ),
+      http.patch(
+        `http://localhost:3001/api/v1/documents/${initial.document.id}`,
+        async ({ request }) => {
+          const body = (await request.json()) as {
+            content: string;
+            base_revision: number;
+          };
+          writes.push(body);
+          if (writes.length === 1)
+            return new Promise<Response>((resolve) => {
+              resolveFirst = () => {
+                current = {
+                  ...initial,
+                  document: { ...initial.document, current_revision: 2 },
+                  revision: {
+                    ...initial.revision,
+                    revision_number: 2,
+                    content: body.content
+                  }
+                };
+                resolve(HttpResponse.json(current));
+              };
+            });
+          current = {
+            ...current,
+            document: { ...current.document, current_revision: 3 },
+            revision: {
+              ...current.revision,
+              revision_number: 3,
+              content: body.content
+            }
+          };
+          return HttpResponse.json(current);
+        }
+      ),
+      ...handlers
+    ];
+    await renderDashboardRoute({
+      path: `/projects/${expectedProject.id}/documents`,
+      auth: new FakeAuthClient({
+        status: "signedIn",
+        identityKey: "test-user"
+      }),
+      platform: platform(),
+      handlers: documentHandlers
+    });
+    const editor = await screen.findByLabelText("Markdown content");
+    vi.useFakeTimers();
+    try {
+      fireEvent.change(editor, { target: { value: "First draft" } });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_499);
+      });
+      expect(writes).toHaveLength(0);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(writes).toHaveLength(1);
+      fireEvent.change(editor, { target: { value: "Queued draft" } });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_000);
+      });
+      expect(writes).toHaveLength(1);
+      await act(async () => {
+        resolveFirst();
+        await Promise.resolve();
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_500);
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(writes).toHaveLength(2);
+      expect(writes).toEqual([
+        {
+          content: "First draft",
+          base_revision: 1,
+          save_kind: "autosave"
+        },
+        {
+          content: "Queued draft",
+          base_revision: 2,
+          save_kind: "autosave"
+        }
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("adopts clean remote revisions and preserves a dirty draft against newer revisions", async () => {
+    const expectedProject = project();
+    const initial = documentDetail({
+      document: { ...documentDetail().document, project_id: expectedProject.id }
+    });
+    let current = initial;
+    const documentHandlers = [
+      http.get(
+        `http://localhost:3001/api/v1/projects/${expectedProject.id}/documents`,
+        () =>
+          HttpResponse.json({
+            documents: [current.document],
+            next_cursor: null
+          })
+      ),
+      http.get(
+        `http://localhost:3001/api/v1/documents/${initial.document.id}`,
+        () => HttpResponse.json(current)
+      ),
+      http.get(
+        `http://localhost:3001/api/v1/documents/${initial.document.id}/revisions`,
+        () =>
+          HttpResponse.json({
+            revisions: [current.revision].map(revisionSummary),
+            next_cursor: null
+          })
+      ),
+      ...handlers
+    ];
+    const view = await renderDashboardRoute({
+      path: `/projects/${expectedProject.id}/documents`,
+      auth: new FakeAuthClient({
+        status: "signedIn",
+        identityKey: "test-user"
+      }),
+      platform: platform(),
+      handlers: documentHandlers
+    });
+    const editor = await screen.findByLabelText("Markdown content");
+    current = {
+      ...initial,
+      document: { ...initial.document, current_revision: 2 },
+      revision: {
+        ...initial.revision,
+        revision_number: 2,
+        content: "Clean remote"
+      }
+    };
+    await act(async () => {
+      await view.queryClient.invalidateQueries({
+        queryKey: coordinationKeys.document(initial.document.id)
+      });
+    });
+    expect(await screen.findByDisplayValue("Clean remote")).toBeVisible();
+    fireEvent.change(editor, { target: { value: "Human draft" } });
+    current = {
+      ...current,
+      document: { ...current.document, current_revision: 3 },
+      revision: {
+        ...current.revision,
+        revision_number: 3,
+        content: "Remote three"
+      }
+    };
+    await act(async () => {
+      await view.queryClient.invalidateQueries({
+        queryKey: coordinationKeys.document(initial.document.id)
+      });
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Revision conflict"
+    );
+    expect(screen.getAllByDisplayValue("Human draft")).toHaveLength(2);
+    current = {
+      ...current,
+      document: { ...current.document, current_revision: 4 },
+      revision: {
+        ...current.revision,
+        revision_number: 4,
+        content: "Remote four"
+      }
+    };
+    await act(async () => {
+      await view.queryClient.invalidateQueries({
+        queryKey: coordinationKeys.document(initial.document.id)
+      });
+    });
+    expect(await screen.findByDisplayValue("Remote four")).toBeVisible();
+    expect(screen.getAllByDisplayValue("Human draft")).toHaveLength(2);
+  });
+
+  it("retries an offline autosave after the debounce delay", async () => {
+    const expectedProject = project();
+    const initial = documentDetail({
+      document: { ...documentDetail().document, project_id: expectedProject.id }
+    });
+    const saved = {
+      ...initial,
+      document: { ...initial.document, current_revision: 2 },
+      revision: {
+        ...initial.revision,
+        revision_number: 2,
+        content: "Offline draft"
+      }
+    };
+    let attempts = 0;
+    const documentHandlers = [
+      http.get(
+        `http://localhost:3001/api/v1/projects/${expectedProject.id}/documents`,
+        () =>
+          HttpResponse.json({
+            documents: [initial.document],
+            next_cursor: null
+          })
+      ),
+      http.get(
+        `http://localhost:3001/api/v1/documents/${initial.document.id}`,
+        () => HttpResponse.json(attempts > 1 ? saved : initial)
+      ),
+      http.get(
+        `http://localhost:3001/api/v1/documents/${initial.document.id}/revisions`,
+        () =>
+          HttpResponse.json({
+            revisions: [initial.revision].map(revisionSummary),
+            next_cursor: null
+          })
+      ),
+      http.patch(
+        `http://localhost:3001/api/v1/documents/${initial.document.id}`,
+        () => {
+          attempts += 1;
+          return attempts === 1
+            ? HttpResponse.error()
+            : HttpResponse.json(saved);
+        }
+      ),
+      ...handlers
+    ];
+    await renderDashboardRoute({
+      path: `/projects/${expectedProject.id}/documents`,
+      auth: new FakeAuthClient({
+        status: "signedIn",
+        identityKey: "test-user"
+      }),
+      platform: platform(),
+      handlers: documentHandlers
+    });
+    const editor = await screen.findByLabelText("Markdown content");
+    vi.useFakeTimers();
+    try {
+      fireEvent.change(editor, { target: { value: "Offline draft" } });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_500);
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(attempts).toBe(1);
+      expect(screen.getByRole("status")).toHaveTextContent("Offline, retrying");
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_500);
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(attempts).toBe(2);
+      expect(screen.getByRole("status")).toHaveTextContent("Saved revision 2");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("pauses autosave immediately after a conflict while the remote refetch is pending", async () => {
+    const expectedProject = project();
+    const initial = documentDetail({
+      document: { ...documentDetail().document, project_id: expectedProject.id }
+    });
+    let detailRequests = 0;
+    let resolveRemote!: () => void;
+    let attempts = 0;
+    const documentHandlers = [
+      http.get(
+        `http://localhost:3001/api/v1/projects/${expectedProject.id}/documents`,
+        () =>
+          HttpResponse.json({
+            documents: [initial.document],
+            next_cursor: null
+          })
+      ),
+      http.get(
+        `http://localhost:3001/api/v1/documents/${initial.document.id}`,
+        () => {
+          detailRequests += 1;
+          if (detailRequests === 1) return HttpResponse.json(initial);
+          return new Promise<Response>((resolve) => {
+            resolveRemote = () =>
+              resolve(
+                HttpResponse.json({
+                  ...initial,
+                  document: { ...initial.document, current_revision: 2 },
+                  revision: {
+                    ...initial.revision,
+                    revision_number: 2,
+                    content: "Remote revision"
+                  }
+                })
+              );
+          });
+        }
+      ),
+      http.get(
+        `http://localhost:3001/api/v1/documents/${initial.document.id}/revisions`,
+        () =>
+          HttpResponse.json({
+            revisions: [initial.revision].map(revisionSummary),
+            next_cursor: null
+          })
+      ),
+      http.patch(
+        `http://localhost:3001/api/v1/documents/${initial.document.id}`,
+        () => {
+          attempts += 1;
+          return HttpResponse.json(
+            {
+              error: {
+                code: "DOCUMENT_CONFLICT",
+                message: "Document changed.",
+                details: { current_revision: 2, base_revision: 1 },
+                request_id: "req_document"
+              }
+            },
+            { status: 409 }
+          );
+        }
+      ),
+      ...handlers
+    ];
+    await renderDashboardRoute({
+      path: `/projects/${expectedProject.id}/documents`,
+      auth: new FakeAuthClient({
+        status: "signedIn",
+        identityKey: "test-user"
+      }),
+      platform: platform(),
+      handlers: documentHandlers
+    });
+    const editor = await screen.findByLabelText("Markdown content");
+    fireEvent.change(editor, { target: { value: "Local draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save now" }));
+    await waitFor(() => expect(attempts).toBe(1));
+    await waitFor(() => expect(resolveRemote).toBeTypeOf("function"));
+    vi.useFakeTimers();
+    try {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_000);
+      });
+      expect(attempts).toBe(1);
+    } finally {
+      vi.useRealTimers();
+      await act(async () => {
+        resolveRemote();
+        await Promise.resolve();
+      });
+    }
+  });
+
+  it("keeps a newer remote comparison after an older save acknowledgement", async () => {
+    const expectedProject = project();
+    const initial = documentDetail({
+      document: { ...documentDetail().document, project_id: expectedProject.id }
+    });
+    const acknowledged = {
+      ...initial,
+      document: { ...initial.document, current_revision: 2 },
+      revision: {
+        ...initial.revision,
+        revision_number: 2,
+        content: "Human draft"
+      }
+    };
+    const remote = {
+      ...initial,
+      document: { ...initial.document, current_revision: 3 },
+      revision: {
+        ...initial.revision,
+        revision_number: 3,
+        content: "Agent revision"
+      }
+    };
+    let current = initial;
+    let resolveSave!: () => void;
+    const documentHandlers = [
+      http.get(
+        `http://localhost:3001/api/v1/projects/${expectedProject.id}/documents`,
+        () =>
+          HttpResponse.json({
+            documents: [current.document],
+            next_cursor: null
+          })
+      ),
+      http.get(
+        `http://localhost:3001/api/v1/documents/${initial.document.id}`,
+        () => HttpResponse.json(current)
+      ),
+      http.get(
+        `http://localhost:3001/api/v1/documents/${initial.document.id}/revisions`,
+        () =>
+          HttpResponse.json({
+            revisions: [current.revision].map(revisionSummary),
+            next_cursor: null
+          })
+      ),
+      http.patch(
+        `http://localhost:3001/api/v1/documents/${initial.document.id}`,
+        () =>
+          new Promise<Response>((resolve) => {
+            resolveSave = () => resolve(HttpResponse.json(acknowledged));
+          })
+      ),
+      ...handlers
+    ];
+    const view = await renderDashboardRoute({
+      path: `/projects/${expectedProject.id}/documents`,
+      auth: new FakeAuthClient({
+        status: "signedIn",
+        identityKey: "test-user"
+      }),
+      platform: platform(),
+      handlers: documentHandlers
+    });
+    const editor = await screen.findByLabelText("Markdown content");
+    fireEvent.change(editor, { target: { value: "Human draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save now" }));
+    await waitFor(() => expect(resolveSave).toBeTypeOf("function"));
+    current = remote;
+    await act(async () => {
+      await view.queryClient.invalidateQueries({
+        queryKey: coordinationKeys.document(initial.document.id)
+      });
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Revision conflict"
+    );
+    await act(async () => {
+      resolveSave();
+      await Promise.resolve();
+    });
+    expect(await screen.findByDisplayValue("Agent revision")).toBeVisible();
+    expect(screen.getAllByDisplayValue("Human draft")).toHaveLength(2);
+  });
+
+  it("renders archived documents as readable but non-editable", async () => {
+    const expectedProject = project();
+    const archived = documentDetail({
+      document: {
+        ...documentDetail().document,
+        project_id: expectedProject.id,
+        archived_at: "2026-08-24T00:00:00.000Z"
+      }
+    });
+    const documentHandlers = [
+      http.get(
+        `http://localhost:3001/api/v1/projects/${expectedProject.id}/documents`,
+        () =>
+          HttpResponse.json({
+            documents: [archived.document],
+            next_cursor: null
+          })
+      ),
+      http.get(
+        `http://localhost:3001/api/v1/documents/${archived.document.id}`,
+        () => HttpResponse.json(archived)
+      ),
+      http.get(
+        `http://localhost:3001/api/v1/documents/${archived.document.id}/revisions`,
+        () =>
+          HttpResponse.json({
+            revisions: [archived.revision].map(revisionSummary),
+            next_cursor: null
+          })
+      ),
+      ...handlers
+    ];
+    await renderDashboardRoute({
+      path: `/projects/${expectedProject.id}/documents`,
+      auth: new FakeAuthClient({
+        status: "signedIn",
+        identityKey: "test-user"
+      }),
+      platform: platform(),
+      handlers: documentHandlers
+    });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Archived (1)" }));
+    expect(await screen.findByLabelText("Markdown content")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Restore" })).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Add attachment" })
+    ).toBeDisabled();
+    expect(
+      screen.queryByRole("button", { name: "Rename" })
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Archive" })
+    ).not.toBeInTheDocument();
   });
 });

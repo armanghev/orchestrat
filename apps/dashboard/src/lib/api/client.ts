@@ -23,7 +23,16 @@ import {
   type UpdateOrganizationRequest,
   type UpdateProjectRequest,
   documentDetailSchema,
+  documentSchema,
   documentRevisionsResponseSchema,
+  historicalDocumentRevisionResponseSchema,
+  documentRevisionSummarySchema,
+  documentRevisionSummaryResponseSchema,
+  attachmentSchema,
+  documentAttachmentsResponseSchema,
+  attachmentUploadResponseSchema,
+  attachmentPartsResponseSchema,
+  attachmentUploadCompletionResponseSchema,
   documentsResponseSchema,
   projectEventsResponseSchema,
   taskCommentsResponseSchema,
@@ -61,6 +70,16 @@ import {
 } from "@orchestrat/protocol";
 import { z, type ZodType } from "zod";
 
+const documentLifecycleResponseSchema = z.object({ document: documentSchema });
+
+export type DocumentRevisionSummary = z.infer<
+  typeof documentRevisionSummarySchema
+>;
+export type DocumentAttachment = z.infer<typeof attachmentSchema>;
+export type DocumentAttachmentUpload = z.infer<
+  typeof attachmentUploadResponseSchema
+>["upload"];
+
 export type ApiErrorKind =
   ErrorCode | "INVALID_RESPONSE" | "NETWORK_ERROR" | "CONFIGURATION_ERROR";
 
@@ -88,7 +107,9 @@ type RequestOptions = {
   headers?: HeadersInit;
 };
 
-const queryString = (values: Record<string, string | number | undefined>) => {
+const queryString = (
+  values: Record<string, string | number | boolean | undefined>
+) => {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(values))
     if (value !== undefined) params.set(key, String(value));
@@ -492,6 +513,37 @@ export class ApiClient {
     );
   }
 
+  renameDocument(
+    documentId: string,
+    input: { path: string; expected_revision: number }
+  ): Promise<{ document: z.infer<typeof documentSchema> }> {
+    return this.request(
+      `/api/v1/documents/${encodeURIComponent(documentId)}/path`,
+      { method: "PATCH", body: input },
+      documentLifecycleResponseSchema
+    );
+  }
+
+  archiveDocument(
+    documentId: string
+  ): Promise<{ document: z.infer<typeof documentSchema> }> {
+    return this.request(
+      `/api/v1/documents/${encodeURIComponent(documentId)}/archive`,
+      { method: "POST", body: {} },
+      documentLifecycleResponseSchema
+    );
+  }
+
+  restoreDocument(
+    documentId: string
+  ): Promise<{ document: z.infer<typeof documentSchema> }> {
+    return this.request(
+      `/api/v1/documents/${encodeURIComponent(documentId)}/restore`,
+      { method: "POST", body: {} },
+      documentLifecycleResponseSchema
+    );
+  }
+
   listDocumentRevisions(
     documentId: string
   ): Promise<DocumentRevisionsResponse> {
@@ -502,6 +554,20 @@ export class ApiClient {
     );
   }
 
+  listDocumentRevisionSummaries(
+    documentId: string,
+    cursor?: string
+  ): Promise<{
+    revisions: DocumentRevisionSummary[];
+    next_cursor: string | null;
+  }> {
+    return this.request(
+      `/api/v1/documents/${encodeURIComponent(documentId)}/revisions${queryString({ view: "summary", limit: 50, cursor })}`,
+      { method: "GET" },
+      documentRevisionSummaryResponseSchema
+    );
+  }
+
   getDocumentRevision(
     documentId: string,
     revision: number
@@ -509,11 +575,166 @@ export class ApiClient {
     return this.request(
       `/api/v1/documents/${encodeURIComponent(documentId)}/revisions/${revision}`,
       { method: "GET" },
-      documentRevisionsResponseSchema.shape.revisions.element
+      historicalDocumentRevisionResponseSchema
+    ).then((response) => response.revision);
+  }
+
+  listDocumentAttachments(
+    documentId: string
+  ): Promise<{ attachments: DocumentAttachment[] }> {
+    return this.request(
+      `/api/v1/documents/${encodeURIComponent(documentId)}/attachments`,
+      { method: "GET" },
+      documentAttachmentsResponseSchema
     );
   }
 
-  approveCliAuthorization(attemptId: string): Promise<CliAuthorizationPollResponse> {
+  startDocumentAttachmentUpload(
+    documentId: string,
+    input: { filename: string; content_type: string; size_bytes: number }
+  ): Promise<{ upload: DocumentAttachmentUpload }> {
+    return this.request(
+      `/api/v1/documents/${encodeURIComponent(documentId)}/attachments/uploads`,
+      { method: "POST", body: input },
+      attachmentUploadResponseSchema
+    );
+  }
+
+  getDocumentAttachmentUpload(
+    documentId: string,
+    uploadId: string
+  ): Promise<{ upload: DocumentAttachmentUpload }> {
+    return this.request(
+      `/api/v1/documents/${encodeURIComponent(documentId)}/attachments/uploads/${encodeURIComponent(uploadId)}`,
+      { method: "GET" },
+      attachmentUploadResponseSchema
+    );
+  }
+
+  refreshDocumentAttachmentUpload(
+    documentId: string,
+    uploadId: string
+  ): Promise<{ upload: DocumentAttachmentUpload }> {
+    return this.request(
+      `/api/v1/documents/${encodeURIComponent(documentId)}/attachments/uploads/${encodeURIComponent(uploadId)}/refresh`,
+      { method: "POST", body: {} },
+      attachmentUploadResponseSchema
+    );
+  }
+
+  refreshDocumentAttachmentParts(
+    documentId: string,
+    uploadId: string,
+    part_numbers: number[]
+  ): Promise<{ parts: Array<{ part_number: number; upload_url: string }> }> {
+    return this.request(
+      `/api/v1/documents/${encodeURIComponent(documentId)}/attachments/uploads/${encodeURIComponent(uploadId)}/parts`,
+      { method: "POST", body: { part_numbers } },
+      attachmentPartsResponseSchema
+    );
+  }
+
+  completeDocumentAttachmentUpload(
+    documentId: string,
+    uploadId: string,
+    parts?: Array<{ part_number: number; etag: string }>
+  ): Promise<{ attachment: DocumentAttachment }> {
+    return this.request(
+      `/api/v1/documents/${encodeURIComponent(documentId)}/attachments/uploads/${encodeURIComponent(uploadId)}/complete`,
+      { method: "POST", body: parts === undefined ? {} : { parts } },
+      attachmentUploadCompletionResponseSchema
+    );
+  }
+
+  abortDocumentAttachmentUpload(
+    documentId: string,
+    uploadId: string
+  ): Promise<void> {
+    return this.request(
+      `/api/v1/documents/${encodeURIComponent(documentId)}/attachments/uploads/${encodeURIComponent(uploadId)}`,
+      { method: "DELETE" },
+      z.undefined()
+    );
+  }
+
+  removeDocumentAttachment(
+    documentId: string,
+    attachmentId: string
+  ): Promise<void> {
+    return this.request(
+      `/api/v1/documents/${encodeURIComponent(documentId)}/attachments/${encodeURIComponent(attachmentId)}`,
+      { method: "DELETE" },
+      z.undefined()
+    );
+  }
+
+  downloadDocumentAttachment(
+    documentId: string,
+    attachmentId: string
+  ): Promise<{ download_url: string }> {
+    return this.request(
+      `/api/v1/documents/${encodeURIComponent(documentId)}/attachments/${encodeURIComponent(attachmentId)}/download`,
+      { method: "POST", body: {} },
+      z.object({ download_url: z.string() })
+    ).then(({ download_url }) => ({
+      download_url: new URL(download_url, `${this.baseUrl}/`).toString()
+    }));
+  }
+
+  async putPresignedObject(
+    url: string,
+    body: Blob,
+    onProgress?: (loaded: number) => void,
+    signal?: AbortSignal
+  ): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const request = new XMLHttpRequest();
+      const abort = () => request.abort();
+      request.open("PUT", url);
+      request.upload.onprogress = (event) => {
+        if (event.lengthComputable) onProgress?.(event.loaded);
+      };
+      request.onload = () => {
+        signal?.removeEventListener("abort", abort);
+        if (request.status >= 200 && request.status < 300) {
+          onProgress?.(body.size);
+          resolve();
+          return;
+        }
+        reject(
+          new DashboardApiError(
+            "Attachment upload failed.",
+            "NETWORK_ERROR",
+            request.status,
+            null
+          )
+        );
+      };
+      request.onerror = request.onabort = () => {
+        signal?.removeEventListener("abort", abort);
+        reject(
+          new DashboardApiError(
+            signal?.aborted
+              ? "Attachment upload aborted."
+              : "Attachment upload failed.",
+            "NETWORK_ERROR",
+            null,
+            null
+          )
+        );
+      };
+      if (signal?.aborted) {
+        abort();
+        return;
+      }
+      signal?.addEventListener("abort", abort, { once: true });
+      request.send(body);
+    });
+  }
+
+  approveCliAuthorization(
+    attemptId: string
+  ): Promise<CliAuthorizationPollResponse> {
     return this.request(
       `/api/v1/cli/authorization/attempts/${encodeURIComponent(attemptId)}/approve`,
       { method: "POST", body: {} },

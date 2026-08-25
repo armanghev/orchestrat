@@ -53,7 +53,11 @@ export const coordinationKeys = {
   document: (documentId: string) =>
     [...coordinationKeys.all, "document", documentId] as const,
   revisions: (documentId: string) =>
-    [...coordinationKeys.all, "revisions", documentId] as const
+    [...coordinationKeys.all, "revisions", documentId] as const,
+  revisionSummary: (documentId: string) =>
+    [...coordinationKeys.revisions(documentId), "summary"] as const,
+  attachments: (documentId: string) =>
+    [...coordinationKeys.all, "attachments", documentId] as const
 };
 
 export const tasksQueryOptions = (api: ApiClient, projectId: string) =>
@@ -101,7 +105,7 @@ export const projectEventsQueryOptions = (api: ApiClient, projectId: string) =>
 export const documentsQueryOptions = (api: ApiClient, projectId: string) =>
   queryOptions({
     queryKey: coordinationKeys.documents(projectId),
-    queryFn: () => api.listDocuments(projectId)
+    queryFn: () => api.listDocuments(projectId, { include_archived: true })
   });
 
 export const documentQueryOptions = (api: ApiClient, documentId: string) =>
@@ -117,6 +121,24 @@ export const documentRevisionsQueryOptions = (
   queryOptions({
     queryKey: coordinationKeys.revisions(documentId),
     queryFn: () => api.listDocumentRevisions(documentId)
+  });
+
+export const documentRevisionSummaryQueryOptions = (
+  api: ApiClient,
+  documentId: string
+) =>
+  queryOptions({
+    queryKey: coordinationKeys.revisionSummary(documentId),
+    queryFn: () => api.listDocumentRevisionSummaries(documentId)
+  });
+
+export const documentAttachmentsQueryOptions = (
+  api: ApiClient,
+  documentId: string
+) =>
+  queryOptions({
+    queryKey: coordinationKeys.attachments(documentId),
+    queryFn: () => api.listDocumentAttachments(documentId)
   });
 
 export function invalidateCoordinationQueries(
@@ -147,6 +169,24 @@ export function invalidateRealtimeEvent(
   projectId: string,
   event: RealtimeEventEnvelope
 ) {
+  if (event.entity_type === "document") {
+    const keys = [
+      coordinationKeys.documents(projectId),
+      ...(event.entity_id
+        ? [
+            coordinationKeys.document(event.entity_id),
+            coordinationKeys.revisions(event.entity_id),
+            coordinationKeys.attachments(event.entity_id)
+          ]
+        : [])
+    ];
+    return Promise.all([
+      ...keys.map((queryKey) => queryClient.invalidateQueries({ queryKey })),
+      queryClient.invalidateQueries({
+        queryKey: coordinationKeys.events(projectId)
+      })
+    ]);
+  }
   if (!knownRealtimeEventTypes.has(event.event_type))
     return invalidateCoordinationQueries(queryClient, projectId);
   const entity = event.entity_type;
@@ -182,17 +222,7 @@ export function invalidateRealtimeEvent(
               coordinationKeys.agents(projectId),
               coordinationKeys.presence(projectId)
             ]
-          : entity === "document"
-            ? [
-                coordinationKeys.documents(projectId),
-                ...(event.entity_id
-                  ? [
-                      coordinationKeys.document(event.entity_id),
-                      coordinationKeys.revisions(event.entity_id)
-                    ]
-                  : [])
-              ]
-            : [];
+          : [];
   return Promise.all([
     ...keys.map((queryKey) => queryClient.invalidateQueries({ queryKey })),
     queryClient.invalidateQueries({

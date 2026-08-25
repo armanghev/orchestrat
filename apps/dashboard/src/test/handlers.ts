@@ -83,5 +83,10 @@ export const handlers = [
     assertAuthorization(request);
     assertBodylessRequest(request);
     return HttpResponse.json({ documents: [], next_cursor: null });
+  }),
+  http.get(`${apiUrl}/documents/:documentId/attachments`, ({ request }) => {
+    assertAuthorization(request);
+    assertBodylessRequest(request);
+    return HttpResponse.json({ attachments: [] });
   })
 ];

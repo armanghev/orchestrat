@@ -1,6 +1,7 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { coordinationKeys } from "@/features/coordination/query-options";
+import { groupActivityEvents } from "@/features/coordination/group-activity-events";
 import { DashboardApiError } from "@/lib/api/client";
 
 export const Route = createFileRoute(
@@ -42,6 +43,7 @@ function ActivityRoute() {
         .map((event) => [event.id, event])
     ).values()
   ].sort((left, right) => right.id - left.id);
+  const groups = groupActivityEvents(events);
   return (
     <main
       id="main-content"
@@ -64,10 +66,15 @@ function ActivityRoute() {
         </p>
       ) : (
         <ol className="mt-8 divide-y rounded border">
-          {events.map((event) => (
+          {groups.map(({ event, events: groupedEvents }) => (
             <li key={event.id} className="p-4">
               <div className="flex flex-wrap justify-between gap-2">
-                <span className="font-medium">{formatEvent(event.type)}</span>
+                <span className="font-medium">
+                  {formatEvent(event.type)}
+                  {groupedEvents.length > 1
+                    ? ` (${groupedEvents.length} revisions)`
+                    : ""}
+                </span>
                 <time
                   dateTime={event.occurred_at}
                   className="text-xs text-muted-foreground"

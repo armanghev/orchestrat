@@ -71,6 +71,7 @@ export function documentDetail(
     project_id: project().id,
     path: "README.md",
     current_revision: 1,
+    archived_at: null,
     created_by: {
       type: "human" as const,
       id: "00000000-0000-4000-8000-000000000004"

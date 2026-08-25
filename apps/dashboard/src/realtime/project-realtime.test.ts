@@ -278,7 +278,7 @@ describe("ProjectRealtimeController", () => {
     );
   });
 
-  it("invalidates document list, detail, revisions, and events from entity_id", async () => {
+  it("invalidates document list, detail, revisions, attachments, and events from entity_id", async () => {
     const f = setup();
     f.controller.start();
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -296,6 +296,31 @@ describe("ProjectRealtimeController", () => {
         coordinationKeys.documents(projectId),
         coordinationKeys.document("22222222-2222-4222-8222-222222222222"),
         coordinationKeys.revisions("22222222-2222-4222-8222-222222222222"),
+        coordinationKeys.attachments("22222222-2222-4222-8222-222222222222"),
+        coordinationKeys.events(projectId)
+      ])
+    );
+  });
+
+  it("targets document caches for lifecycle events outside the known event list", async () => {
+    const f = setup();
+    f.controller.start();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    f.socket.onopen?.(new Event("open"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    f.invalidateQueries.mockClear();
+    f.socket.onmessage?.({
+      data: JSON.stringify(event(1, "document.archived"))
+    } as MessageEvent);
+    const keys = f.invalidateQueries.mock.calls.map(
+      ([options]) => options.queryKey
+    );
+    expect(keys).toEqual(
+      expect.arrayContaining([
+        coordinationKeys.documents(projectId),
+        coordinationKeys.document("22222222-2222-4222-8222-222222222222"),
+        coordinationKeys.revisions("22222222-2222-4222-8222-222222222222"),
+        coordinationKeys.attachments("22222222-2222-4222-8222-222222222222"),
         coordinationKeys.events(projectId)
       ])
     );

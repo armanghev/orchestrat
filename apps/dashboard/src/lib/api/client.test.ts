@@ -6,7 +6,7 @@ import {
   type ApiTokenSource
 } from "@/lib/api/client";
 import { DesktopAuthClient } from "@/features/auth/desktop-auth-client";
-import { organization, project } from "@/test/factories";
+import { documentDetail, organization, project } from "@/test/factories";
 import { handlers } from "@/test/handlers";
 import { server } from "@/test/msw-server";
 
@@ -362,6 +362,112 @@ describe("ApiClient", () => {
     ).rejects.toMatchObject({
       kind: "DOCUMENT_CONFLICT",
       details: { current_revision: 3, base_revision: 2 }
+    });
+  });
+
+  it("accepts minimal document lifecycle responses", async () => {
+    const detail = documentDetail();
+    server.use(
+      http.patch(`${apiUrl}/api/v1/documents/${detail.document.id}/path`, () =>
+        HttpResponse.json({ document: detail.document })
+      ),
+      http.post(
+        `${apiUrl}/api/v1/documents/${detail.document.id}/archive`,
+        () => HttpResponse.json({ document: detail.document })
+      ),
+      http.post(
+        `${apiUrl}/api/v1/documents/${detail.document.id}/restore`,
+        () => HttpResponse.json({ document: detail.document })
+      )
+    );
+    const api = new ApiClient(
+      apiUrl,
+      authTokenFixture(["test-token", "test-token", "test-token"])
+    );
+
+    await expect(
+      api.renameDocument(detail.document.id, {
+        path: "renamed.md",
+        expected_revision: 1
+      })
+    ).resolves.toEqual({ document: detail.document });
+    await expect(api.archiveDocument(detail.document.id)).resolves.toEqual({
+      document: detail.document
+    });
+    await expect(api.restoreDocument(detail.document.id)).resolves.toEqual({
+      document: detail.document
+    });
+  });
+
+  it("unwraps a historical document revision response", async () => {
+    const detail = documentDetail();
+    server.use(
+      http.get(
+        `${apiUrl}/api/v1/documents/${detail.document.id}/revisions/1`,
+        () => HttpResponse.json({ revision: detail.revision })
+      )
+    );
+    const api = new ApiClient(apiUrl, authTokenFixture(["test-token"]));
+
+    await expect(
+      api.getDocumentRevision(detail.document.id, 1)
+    ).resolves.toEqual(detail.revision);
+  });
+
+  it("completes a zero-byte direct upload without non-finite progress", async () => {
+    class ZeroByteXmlHttpRequest {
+      status = 200;
+      upload = {} as XMLHttpRequestUpload;
+      onload: XMLHttpRequest["onload"] = null;
+      onerror: XMLHttpRequest["onerror"] = null;
+      onabort: XMLHttpRequest["onabort"] = null;
+      open() {}
+      abort() {}
+      getResponseHeader() {
+        return null;
+      }
+      send() {
+        this.onload?.call(
+          this as unknown as XMLHttpRequest,
+          new ProgressEvent("load")
+        );
+      }
+    }
+    vi.stubGlobal("XMLHttpRequest", ZeroByteXmlHttpRequest);
+    try {
+      const api = new ApiClient(apiUrl, authTokenFixture([]));
+      const progress: number[] = [];
+
+      await api.putPresignedObject(
+        "https://storage.example.test/upload",
+        new Blob(),
+        (loaded) => progress.push(loaded)
+      );
+
+      expect(progress).toEqual([0]);
+      expect(progress.every(Number.isFinite)).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("resolves relative attachment download tickets against the API base", async () => {
+    const detail = documentDetail();
+    server.use(
+      http.post(
+        `${apiUrl}/api/v1/documents/${detail.document.id}/attachments/${detail.document.id}/download`,
+        () =>
+          HttpResponse.json({
+            download_url: "/api/v1/attachments/download?ticket=ticket"
+          })
+      )
+    );
+    const api = new ApiClient(apiUrl, authTokenFixture(["test-token"]));
+
+    await expect(
+      api.downloadDocumentAttachment(detail.document.id, detail.document.id)
+    ).resolves.toEqual({
+      download_url: `${apiUrl}/api/v1/attachments/download?ticket=ticket`
     });
   });
 });
