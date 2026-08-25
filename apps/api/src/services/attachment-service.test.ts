@@ -177,11 +177,30 @@ function apiError(code: string) {
   return (error: unknown) => error instanceof ApiError && error.code === code;
 }
 
+function signsContentLength(url: unknown) {
+  return new URL(String(url)).searchParams
+    .get("X-Amz-SignedHeaders")
+    ?.split(";")
+    .includes("content-length");
+}
+
 test("server selects direct at 100 MiB and multipart above it", async () => {
   const { document, service, userId } = await setup();
   const direct = await service.create(userId, document.id, input(DIRECT_SIZE));
   assert.equal(direct.upload.mode, "single");
-  assert.ok((direct.upload as Record<string, unknown>).upload_url);
+  assert.equal(
+    signsContentLength((direct.upload as Record<string, unknown>).upload_url),
+    true
+  );
+  assert.equal(
+    signsContentLength(
+      (
+        (await service.refresh(userId, direct.upload.id, document.id))
+          .upload as Record<string, unknown>
+      ).upload_url
+    ),
+    true
+  );
   const multipart = await service.create(
     userId,
     document.id,
@@ -242,12 +261,16 @@ test("bounds part signing and refresh/inspection use provider parts", async () =
   const signed = await service.signPartsForUser(
     userId,
     uploadId,
-    [1],
+    [1, 7],
     document.id
   );
-  assert.equal(signed.parts.length, 1);
+  assert.equal(signed.parts.length, 2);
   assert.equal(signed.parts[0].part_number, 1);
   assert.match(signed.parts[0].upload_url, /^https:\/\//);
+  assert.equal(
+    signed.parts.every((part) => signsContentLength(part.upload_url)),
+    true
+  );
   assert.deepEqual(
     (
       (await service.inspect(userId, uploadId, document.id)).upload as Record<

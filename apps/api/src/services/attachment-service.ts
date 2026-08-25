@@ -339,7 +339,8 @@ export class AttachmentService {
                 this.storage! as any,
                 new PutObjectCommand({
                   Bucket: this.config!.bucket,
-                  Key: this.key(projectId, documentId, uploadId)
+                  Key: this.key(projectId, documentId, uploadId),
+                  ContentLength: row.reservedBytes
                 }),
                 { expiresIn: URL_TTL_SECONDS }
               ),
@@ -492,7 +493,11 @@ export class AttachmentService {
               Bucket: this.config!.bucket,
               Key: this.key(row.projectId, row.documentId, row.id),
               UploadId: row.providerUploadId!,
-              PartNumber: part_number
+              PartNumber: part_number,
+              ContentLength: Math.min(
+                PART_SIZE_BYTES,
+                row.reservedBytes - (part_number - 1) * PART_SIZE_BYTES
+              )
             }),
             { expiresIn: URL_TTL_SECONDS }
           )
@@ -540,7 +545,8 @@ export class AttachmentService {
                 this.storage! as any,
                 new PutObjectCommand({
                   Bucket: this.config!.bucket,
-                  Key: this.key(row.projectId, row.documentId, row.id)
+                  Key: this.key(row.projectId, row.documentId, row.id),
+                  ContentLength: row.reservedBytes
                 }),
                 { expiresIn: URL_TTL_SECONDS }
               )
@@ -573,7 +579,8 @@ export class AttachmentService {
                 this.storage! as any,
                 new PutObjectCommand({
                   Bucket: this.config!.bucket,
-                  Key: this.key(row.projectId, row.documentId, row.id)
+                  Key: this.key(row.projectId, row.documentId, row.id),
+                  ContentLength: row.reservedBytes
                 }),
                 { expiresIn: URL_TTL_SECONDS }
               )
