@@ -105,6 +105,113 @@ test("accepts configurable harness commands and explicit hook events", () => {
   );
 });
 
+test("accepts scriptable document commands and keeps attachment paths explicit", () => {
+  assert.deepEqual(
+    parseInvocationArgs([
+      "documents",
+      "list",
+      "--integration",
+      "codex",
+      "--limit",
+      "10"
+    ]),
+    {
+      command: "document",
+      integration: "codex",
+      documentAction: "list",
+      limit: 10
+    }
+  );
+  assert.deepEqual(
+    parseInvocationArgs([
+      "documents",
+      "list",
+      "--integration",
+      "codex",
+      "--include-archived"
+    ]),
+    {
+      command: "document",
+      integration: "codex",
+      documentAction: "list",
+      includeArchived: true
+    }
+  );
+  assert.deepEqual(
+    parseInvocationArgs([
+      "document",
+      "create",
+      "docs/readme.md",
+      "--integration",
+      "codex"
+    ]),
+    {
+      command: "document",
+      integration: "codex",
+      documentAction: "create",
+      path: "docs/readme.md"
+    }
+  );
+  assert.deepEqual(
+    parseInvocationArgs([
+      "document",
+      "patch",
+      "doc-id",
+      "--integration",
+      "codex"
+    ]),
+    {
+      command: "document",
+      integration: "codex",
+      documentAction: "patch",
+      documentId: "doc-id"
+    }
+  );
+  assert.deepEqual(
+    parseInvocationArgs([
+      "document",
+      "download",
+      "document-id",
+      "attachment-id",
+      "/tmp/out",
+      "--integration",
+      "codex"
+    ]),
+    {
+      command: "document",
+      integration: "codex",
+      documentAction: "download",
+      documentId: "document-id",
+      attachmentId: "attachment-id",
+      path: "/tmp/out"
+    }
+  );
+  assert.throws(() => parseInvocationArgs(["document", "read", "doc-id"]));
+  assert.throws(() =>
+    parseInvocationArgs([
+      "document",
+      "read",
+      "doc-id",
+      "--limit",
+      "5",
+      "--integration",
+      "codex"
+    ])
+  );
+  assert.throws(() =>
+    parseInvocationArgs([
+      "document",
+      "upload",
+      "doc-id",
+      "file.bin",
+      "--cursor",
+      "x",
+      "--integration",
+      "codex"
+    ])
+  );
+});
+
 test("built CLI --version matches package metadata", async () => {
   const { stdout } = await execFileAsync(process.execPath, [
     new URL("./main.js", import.meta.url).pathname,
@@ -199,15 +306,11 @@ test("resolves only the configured global Cursor projects", async () => {
         }
       }),
     credentials: new MemoryCredentialReader(
-      new Map([
-        [
-          "agent:550e8400-e29b-41d4-a716-446655440000:cursor",
-          "secret"
-        ]
-      ])
+      new Map([["agent:550e8400-e29b-41d4-a716-446655440000:cursor", "secret"]])
     )
   });
-  assert.deepEqual(projects.map(({ projectId }) => projectId), [
-    "550e8400-e29b-41d4-a716-446655440000"
-  ]);
+  assert.deepEqual(
+    projects.map(({ projectId }) => projectId),
+    ["550e8400-e29b-41d4-a716-446655440000"]
+  );
 });

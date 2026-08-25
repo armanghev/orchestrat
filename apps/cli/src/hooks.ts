@@ -32,14 +32,15 @@ export function hookCwd(
 
 export async function readBoundedStdin(
   stdin: AsyncIterable<Buffer | string> = process.stdin,
-  ceiling = 64 * 1024
+  ceiling = 64 * 1024,
+  errorMessage = "Hook input exceeds 64 KiB"
 ) {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of stdin) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     size += buffer.length;
-    if (size > ceiling) throw new Error("Hook input exceeds 64 KiB");
+    if (size > ceiling) throw new Error(errorMessage);
     chunks.push(buffer);
   }
   return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;

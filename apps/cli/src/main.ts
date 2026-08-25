@@ -31,6 +31,7 @@ import {
   validateApiUrl
 } from "./config.js";
 import { hookCwd, readBoundedStdin, runHook } from "./hooks.js";
+import { runDocumentCommand } from "./documents.js";
 import { disconnectLocal, runDoctor, runStatus } from "./diagnostics.js";
 import {
   finishSetup,
@@ -50,12 +51,36 @@ import {
 
 export function parseInvocationArgs(argv: string[]): {
   command:
-    "status" | "mcp" | "setup" | "hook" | "doctor" | "disconnect" | "version";
+    | "status"
+    | "mcp"
+    | "setup"
+    | "hook"
+    | "doctor"
+    | "disconnect"
+    | "document"
+    | "version";
   integration?: ConfigurableIntegration | "all";
   cwd?: string;
   global?: boolean;
   local?: boolean;
   event?: string;
+  documentAction?:
+    | "list"
+    | "read"
+    | "create"
+    | "write"
+    | "patch"
+    | "history"
+    | "upload"
+    | "download";
+  documentId?: string;
+  attachmentId?: string;
+  path?: string;
+  limit?: number;
+  cursor?: string;
+  baseRevision?: number;
+  resume?: string;
+  includeArchived?: boolean;
 } {
   if (argv.length === 1 && (argv[0] === "--version" || argv[0] === "-v"))
     return { command: "version" };
@@ -66,23 +91,34 @@ export function parseInvocationArgs(argv: string[]): {
       cwd: { type: "string" },
       global: { type: "boolean", default: false },
       local: { type: "boolean", default: false },
-      event: { type: "string" }
+      event: { type: "string" },
+      limit: { type: "string" },
+      cursor: { type: "string" },
+      "base-revision": { type: "string" },
+      resume: { type: "string" },
+      "include-archived": { type: "boolean" }
     },
     allowPositionals: true,
     strict: true
   });
+  const documentCommand =
+    positionals[0] === "document" || positionals[0] === "documents";
   if (
-    (positionals.length !== 1 &&
+    (!documentCommand &&
+      positionals.length !== 1 &&
       !(
         positionals.length === 2 &&
         (positionals[0] === "hook" || positionals[0] === "disconnect")
       )) ||
+    (documentCommand && (positionals.length < 2 || positionals.length > 5)) ||
     (positionals[0] !== "status" &&
       positionals[0] !== "doctor" &&
       positionals[0] !== "disconnect" &&
       positionals[0] !== "hook" &&
       positionals[0] !== "mcp" &&
-      positionals[0] !== "setup")
+      positionals[0] !== "setup" &&
+      positionals[0] !== "document" &&
+      positionals[0] !== "documents")
   )
     usage();
   const integration = values.integration;
@@ -96,7 +132,98 @@ export function parseInvocationArgs(argv: string[]): {
     !isConfigurableIntegration(integration)
   )
     usage();
-  if (integration !== undefined && positionals[0] !== "mcp") usage();
+  if (
+    integration !== undefined &&
+    positionals[0] !== "mcp" &&
+    positionals[0] !== "document" &&
+    positionals[0] !== "documents"
+  )
+    usage();
+  if (positionals[0] === "document" || positionals[0] === "documents") {
+    const action = positionals[1] as
+      | "list"
+      | "read"
+      | "create"
+      | "write"
+      | "patch"
+      | "history"
+      | "upload"
+      | "download";
+    if (!integration || !isConfigurableIntegration(integration)) usage();
+    if (
+      !action ||
+      ![
+        "list",
+        "read",
+        "create",
+        "write",
+        "patch",
+        "history",
+        "upload",
+        "download"
+      ].includes(action)
+    )
+      usage();
+    const documentId = action === "create" ? undefined : positionals[2];
+    const path = action === "create" ? positionals[2] : positionals[3];
+    if (["read", "write", "patch", "history"].includes(action) && !documentId)
+      usage();
+    if (action === "upload" && (!documentId || !path)) usage();
+    if (action === "create" && !path) usage();
+    const expectedPositionals = {
+      list: 2,
+      read: 3,
+      create: 3,
+      write: 3,
+      patch: 3,
+      history: 3,
+      upload: 4,
+      download: 5
+    }[action];
+    if (positionals.length !== expectedPositionals) usage();
+    const limit = values.limit === undefined ? undefined : Number(values.limit);
+    const baseRevision =
+      values["base-revision"] === undefined
+        ? undefined
+        : Number(values["base-revision"]);
+    if (
+      limit !== undefined &&
+      (!Number.isInteger(limit) || limit < 1 || limit > 100)
+    )
+      usage();
+    if (
+      baseRevision !== undefined &&
+      (!Number.isInteger(baseRevision) || baseRevision < 1)
+    )
+      usage();
+    if (values.limit !== undefined && !["list", "history"].includes(action))
+      usage();
+    if (values.cursor !== undefined && !["list", "history"].includes(action))
+      usage();
+    if (
+      values["base-revision"] !== undefined &&
+      !["write", "patch"].includes(action)
+    )
+      usage();
+    if (values.resume !== undefined && action !== "upload") usage();
+    if (values["include-archived"] && action !== "list") usage();
+    return {
+      command: "document",
+      integration,
+      documentAction: action,
+      ...(documentId ? { documentId } : {}),
+      ...(action === "download"
+        ? { attachmentId: positionals[3], path: positionals[4] }
+        : path
+          ? { path }
+          : {}),
+      ...(limit === undefined ? {} : { limit }),
+      ...(values.cursor === undefined ? {} : { cursor: values.cursor }),
+      ...(baseRevision === undefined ? {} : { baseRevision }),
+      ...(values.resume === undefined ? {} : { resume: values.resume }),
+      ...(values["include-archived"] ? { includeArchived: true } : {})
+    };
+  }
   if (positionals[0] === "setup") return { command: "setup" };
   if (positionals[0] === "hook") {
     const hookIntegration = positionals[1];
@@ -144,12 +271,28 @@ export function parseInvocationArgs(argv: string[]): {
 
 function usage(): never {
   throw new Error(
-    "Usage: orchestrat setup | status | doctor | hook <integration> [--event <event>] | disconnect <integration|all> | mcp --integration <integration> [--cwd <project>] [--global]"
+    "Usage: orchestrat setup | status | doctor | hook <integration> [--event <event>] | disconnect <integration|all> | mcp --integration <integration> [--cwd <project>] [--global] | document(s) <list|read|create|write|patch|history|upload|download> --integration <integration>"
   );
 }
 
 export async function main(argv = process.argv.slice(2)): Promise<void> {
-  const { command, integration, local, event, cwd: configuredCwd, global } = parseInvocationArgs(argv);
+  const {
+    command,
+    integration,
+    local,
+    event,
+    cwd: configuredCwd,
+    global,
+    documentAction,
+    documentId,
+    attachmentId,
+    path: documentPath,
+    limit,
+    cursor,
+    baseRevision,
+    resume,
+    includeArchived
+  } = parseInvocationArgs(argv);
   if (command === "version") {
     process.stdout.write(`${packageVersion}\n`);
     return;
@@ -169,6 +312,32 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     validateApiUrl(process.env.ORCHESTRAT_API_URL) ??
     project?.apiUrl ??
     "https://api.orchestrat.dev";
+  if (command === "document") {
+    const resolved = await resolveInvocation({
+      cwd: invocationCwd,
+      integration: integration as ConfigurableIntegration,
+      read: readConfig,
+      credentials: new KeychainCredentialReader()
+    });
+    const client = new AgentApiClient({
+      baseUrl: api,
+      token: resolved.credential!
+    });
+    const result = await runDocumentCommand({
+      action: documentAction!,
+      client,
+      documentId,
+      attachmentId,
+      path: documentPath,
+      limit,
+      cursor,
+      baseRevision,
+      resume,
+      includeArchived
+    });
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+    return;
+  }
   if (command === "hook") {
     if (!integration || integration === "all") usage();
     await runHook({
@@ -241,7 +410,9 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
             store,
             existing !== undefined && existing.apiUrl !== api
           );
-          const selected = await selectProject(result.projects, { interactive });
+          const selected = await selectProject(result.projects, {
+            interactive
+          });
           if (selected.cancelled) {
             process.exitCode = 130;
             return undefined;
@@ -304,11 +475,10 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
           cwd,
           home,
           integrations,
-          authorization:
-            authorization && {
-              credential: authorization.credential,
-              projects: authorization.projects
-            },
+          authorization: authorization && {
+            credential: authorization.credential,
+            projects: authorization.projects
+          },
           projectId: authorization?.projectId,
           mcpScope: mcpScope?.value,
           globalProjects: globalProjects?.values,
