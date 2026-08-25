@@ -10,6 +10,7 @@ import {
   unique,
   jsonb,
   integer,
+  bigint,
   text,
   timestamp,
   uniqueIndex,
@@ -63,6 +64,16 @@ export const agentSessionStatus = pgEnum("agent_session_status", [
 export const documentAuthorType = pgEnum("document_author_type", [
   "human",
   "agent"
+]);
+export const documentUploadMode = pgEnum("document_upload_mode", [
+  "single",
+  "multipart"
+]);
+export const documentUploadStatus = pgEnum("document_upload_status", [
+  "pending",
+  "completed",
+  "aborted",
+  "expired"
 ]);
 
 export const users = pgTable(
@@ -613,6 +624,7 @@ export const documents = pgTable(
       .references(() => projects.id, { onDelete: "cascade" }),
     path: text("path").notNull(),
     currentRevision: integer("current_revision").default(1).notNull(),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
     createdByType: documentAuthorType("created_by_type"),
     createdByUserId: uuid("created_by_user_id").references(() => users.id, {
       onDelete: "restrict"
@@ -656,6 +668,8 @@ export const documentRevisions = pgTable(
     documentId: uuid("document_id").notNull(),
     revisionNumber: integer("revision_number").notNull(),
     contentMarkdown: text("content_markdown").notNull(),
+    contentSizeBytes: bigint("content_size_bytes", { mode: "number" }),
+    contentSha256: text("content_sha256"),
     authorType: documentAuthorType("author_type").notNull(),
     authorUserId: uuid("author_user_id").references(() => users.id, {
       onDelete: "restrict"
@@ -692,6 +706,115 @@ export const documentRevisions = pgTable(
     check(
       "document_revisions_author_consistent",
       sql`(${table.authorType} = 'human' and ${table.authorUserId} is not null and ${table.authorAgentId} is null) or (${table.authorType} = 'agent' and ${table.authorUserId} is null and ${table.authorAgentId} is not null)`
+    ),
+    check(
+      "document_revisions_content_metadata_consistent",
+      sql`(${table.contentSizeBytes} is null and ${table.contentSha256} is null) or (${table.contentSizeBytes} >= 0 and length(${table.contentSha256}) = 64 and regexp_replace(${table.contentSha256}, '[0-9a-f]', '', 'g') = '')`
+    )
+  ]
+);
+
+export const documentAttachments = pgTable(
+  "document_attachments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    projectId: uuid("project_id").notNull(),
+    documentId: uuid("document_id").notNull(),
+    filename: text("filename").notNull(),
+    mimeType: text("mime_type").notNull(),
+    sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),
+    addedByType: documentAuthorType("added_by_type").notNull(),
+    addedByUserId: uuid("added_by_user_id"),
+    addedByAgentId: uuid("added_by_agent_id"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.projectId, table.documentId],
+      foreignColumns: [documents.projectId, documents.id],
+      name: "document_attachments_document_project_fk"
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.addedByUserId],
+      foreignColumns: [users.id],
+      name: "document_attachments_added_by_user_fk"
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [table.projectId, table.addedByAgentId],
+      foreignColumns: [agents.projectId, agents.id],
+      name: "document_attachments_added_by_agent_project_fk"
+    }),
+    index("document_attachments_document_created_idx").on(
+      table.documentId,
+      table.createdAt,
+      table.id
+    ),
+    check(
+      "document_attachments_size_nonnegative",
+      sql`${table.sizeBytes} >= 0`
+    ),
+    check(
+      "document_attachments_author_consistent",
+      sql`(${table.addedByType} = 'human' and ${table.addedByUserId} is not null and ${table.addedByAgentId} is null) or (${table.addedByType} = 'agent' and ${table.addedByUserId} is null and ${table.addedByAgentId} is not null)`
+    )
+  ]
+);
+
+export const documentAttachmentUploads = pgTable(
+  "document_attachment_uploads",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    projectId: uuid("project_id").notNull(),
+    documentId: uuid("document_id").notNull(),
+    filename: text("filename").notNull(),
+    mimeType: text("mime_type").notNull(),
+    reservedBytes: bigint("reserved_bytes", { mode: "number" }).notNull(),
+    uploadMode: documentUploadMode("upload_mode").notNull(),
+    providerUploadId: text("provider_upload_id"),
+    status: documentUploadStatus("status").default("pending").notNull(),
+    actorType: documentAuthorType("actor_type").notNull(),
+    actorUserId: uuid("actor_user_id"),
+    actorAgentId: uuid("actor_agent_id"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.projectId, table.documentId],
+      foreignColumns: [documents.projectId, documents.id],
+      name: "document_attachment_uploads_document_project_fk"
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.actorUserId],
+      foreignColumns: [users.id],
+      name: "document_attachment_uploads_actor_user_fk"
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [table.projectId, table.actorAgentId],
+      foreignColumns: [agents.projectId, agents.id],
+      name: "document_attachment_uploads_actor_agent_project_fk"
+    }),
+    index("document_attachment_uploads_project_status_idx").on(
+      table.projectId,
+      table.status,
+      table.expiresAt
+    ),
+    check(
+      "document_attachment_uploads_reserved_nonnegative",
+      sql`${table.reservedBytes} >= 0`
+    ),
+    check(
+      "document_attachment_uploads_actor_consistent",
+      sql`(${table.actorType} = 'human' and ${table.actorUserId} is not null and ${table.actorAgentId} is null) or (${table.actorType} = 'agent' and ${table.actorUserId} is null and ${table.actorAgentId} is not null)`
+    ),
+    check(
+      "document_attachment_uploads_mode_provider_consistent",
+      sql`(${table.uploadMode} = 'single' and ${table.providerUploadId} is null) or (${table.uploadMode} = 'multipart' and ${table.providerUploadId} is not null)`
     )
   ]
 );

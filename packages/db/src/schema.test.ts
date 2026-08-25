@@ -9,6 +9,7 @@ import {
   agentSessions,
   agents,
   apiIdempotencyKeys,
+  documentAttachmentUploads,
   documentRevisions,
   documents,
   projectEvents,
@@ -53,7 +54,7 @@ test("agent lifecycle idempotency is project/agent scoped and hash-only", async 
       "utf8"
     )
   ) as { entries: { tag: string }[] };
-  assert.equal(journal.entries.at(-1)?.tag, "0009_cli_user_credentials");
+  assert.equal(journal.entries.at(-1)?.tag, "0010_remote_document_storage");
 });
 
 test("CLI credentials can be user-scoped after the authorization migration", async () => {
@@ -315,6 +316,18 @@ test("documents enforce project paths, revisions, and coherent authors", () => {
       (check) => check.name === "document_revisions_author_consistent"
     )
   );
+  assert.ok(
+    revisionConfig.checks.find(
+      (check) => check.name === "document_revisions_content_metadata_consistent"
+    )
+  );
+  const uploadConfig = getTableConfig(documentAttachmentUploads);
+  assert.ok(
+    uploadConfig.checks.find(
+      (check) =>
+        check.name === "document_attachment_uploads_mode_provider_consistent"
+    )
+  );
 });
 
 test("documents migration creates immutable Markdown revision storage", async () => {
@@ -331,4 +344,15 @@ test("documents migration creates immutable Markdown revision storage", async ()
   assert.match(sql, /document_revisions_document_project_fk/);
   assert.match(sql, /documents_author_consistent/);
   assert.match(sql, /document_revisions_author_consistent/);
+});
+
+test("remote document storage migration keeps metadata and upload invariants", async () => {
+  const sql = await readFile(
+    new URL("../drizzle/0010_remote_document_storage.sql", import.meta.url),
+    "utf8"
+  );
+  assert.match(sql, /documents" ADD COLUMN "archived_at"/);
+  assert.match(sql, /document_revisions_content_metadata_consistent/);
+  assert.match(sql, /document_attachment_uploads_mode_provider_consistent/);
+  assert.doesNotMatch(sql, /DROP COLUMN.*content_markdown/);
 });
