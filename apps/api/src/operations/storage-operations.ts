@@ -18,18 +18,16 @@ import {
   documentRevisions,
   type Database
 } from "@orchestrat/db";
+import {
+  readDocumentStorageConfig,
+  type DocumentStorageConfigValues
+} from "../document-storage-config.js";
 
 export const STORAGE_GRACE_MS = 24 * 60 * 60 * 1000;
 
 export type OperatorArgs = { apply: boolean };
 
-export type StorageConfig = {
-  bucket: string;
-  endpoint: string;
-  region: string;
-  accessKeyId: string;
-  secretAccessKey: string;
-};
+export type StorageConfig = DocumentStorageConfigValues;
 
 export function parseOperatorArgs(argv: readonly string[]): OperatorArgs {
   const unknown = argv.filter(
@@ -102,23 +100,10 @@ export function isStaleOrphanMultipart(
 }
 
 export function readStorageConfig(env: NodeJS.ProcessEnv = process.env) {
-  const values = {
-    bucket: env.SUPABASE_DOCUMENT_BUCKET,
-    endpoint: env.SUPABASE_S3_ENDPOINT,
-    region: env.SUPABASE_S3_REGION,
-    accessKeyId: env.SUPABASE_S3_ACCESS_KEY_ID,
-    secretAccessKey: env.SUPABASE_S3_SECRET_ACCESS_KEY
-  };
-  if (Object.values(values).some((value) => !value))
-    throw new Error(
-      "Document storage operations require a complete Supabase S3 configuration."
-    );
-  if (
-    values.bucket === env.SUPABASE_AVATAR_BUCKET &&
-    values.bucket !== undefined
-  )
-    throw new Error("Document storage must not use the avatar bucket.");
-  return values as StorageConfig;
+  const values = readDocumentStorageConfig(env);
+  if (!values)
+    throw new Error("Document storage operations require an S3 configuration.");
+  return values;
 }
 
 export function createStorageClient(config: StorageConfig) {

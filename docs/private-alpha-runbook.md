@@ -34,8 +34,9 @@ secret store; never commit the copy:
 cp deploy/private-alpha.env.example deploy/private-alpha.env
 ```
 
-`ORCHESTRAT_DATABASE_URL` and `SUPABASE_S3_SECRET_ACCESS_KEY` are server
-secrets. The API host/port, JWT settings, allowed origins, optional S3 public
+`ORCHESTRAT_DATABASE_URL`, `SUPABASE_S3_SECRET_ACCESS_KEY`, and
+`DOCUMENT_STORAGE_S3_SECRET_ACCESS_KEY` are server secrets. The API
+host/port, JWT settings, allowed origins, optional avatar and document-storage
 settings, and `ORCHESTRAT_SUPABASE_URL` are server configuration/public
 values. `VITE_*`, landing `SUPABASE_*` values, and the native
 `ORCHESTRAT_SUPABASE_PUBLISHABLE_KEY`, auth environment, redirect URI, and
@@ -49,15 +50,42 @@ repository.
 
 ## Private document storage
 
-Create a private Supabase Storage bucket for document revisions and
-attachments only after separate operator approval. Set
-`SUPABASE_DOCUMENT_BUCKET` to that bucket and never reuse the public avatar
+Use a private Cloudflare R2 bucket for document revisions and attachments only
+after separate operator approval. Set `DOCUMENT_STORAGE_BUCKET` to
+that bucket; keep `SUPABASE_AVATAR_BUCKET` as the separate public Supabase
 bucket. The API derives immutable object keys; clients never choose keys or
-receive S3 credentials. Supabase's S3 compatibility layer supports presigned
-and multipart uploads, but not bucket versioning or the `PutBucketCors` and
-`GetBucketCors` operations. Verify signed uploads and downloads from the exact
-web and Tauri origins in staging instead of attempting to configure bucket
-CORS through the S3 API.
+receive R2 credentials.
+
+Configure the R2 S3 endpoint as
+`https://<ACCOUNT_ID>.r2.cloudflarestorage.com` and the region as
+`auto`. Create a bucket-scoped R2 API token for the API host and inject its
+access-key ID and secret only through the host secret store. Do not enable
+public bucket access or a public custom domain for documents.
+
+Direct browser uploads use presigned URLs, so configure the R2 bucket's CORS
+policy in the Cloudflare dashboard with the exact dashboard origins:
+`https://app.orchestrat.dev`, `http://localhost:5173`, and `tauri://localhost`.
+Use this policy:
+
+```json
+[
+  {
+    "AllowedOrigins": [
+      "https://app.orchestrat.dev",
+      "http://localhost:5173",
+      "tauri://localhost"
+    ],
+    "AllowedMethods": ["PUT"],
+    "AllowedHeaders": ["Content-Type"],
+    "ExposeHeaders": ["ETag"],
+    "MaxAgeSeconds": 3600
+  }
+]
+```
+
+Add further methods or headers only when a browser path needs them. Verify web
+and Tauri uploads in staging before release; do not use a wildcard origin. This
+repository does not create or mutate the R2 bucket or its CORS policy.
 
 The first storage release is additive: new revision bodies are dual-written
 to PostgreSQL and Storage, while reads continue to support older inline-only

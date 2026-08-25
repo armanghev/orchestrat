@@ -4,6 +4,7 @@ import { loadApiConfig } from "@orchestrat/config";
 import { createDatabase } from "@orchestrat/db";
 import { logger } from "@orchestrat/logger";
 import { buildApp } from "./app.js";
+import { readDocumentStorageConfig } from "./document-storage-config.js";
 
 loadEnv({ path: "../../.env" });
 
@@ -17,26 +18,11 @@ const auth = createSupabaseAuth({
   supabaseUrl: config.ORCHESTRAT_SUPABASE_URL
 });
 const avatarBucket = process.env.SUPABASE_AVATAR_BUCKET;
-const documentBucket = process.env.SUPABASE_DOCUMENT_BUCKET;
+const documentStorage = readDocumentStorageConfig();
 const s3Endpoint = process.env.SUPABASE_S3_ENDPOINT;
 const s3Region = process.env.SUPABASE_S3_REGION;
 const s3AccessKeyId = process.env.SUPABASE_S3_ACCESS_KEY_ID;
 const s3SecretAccessKey = process.env.SUPABASE_S3_SECRET_ACCESS_KEY;
-const documentStorageValues = [
-  documentBucket,
-  s3Endpoint,
-  s3Region,
-  s3AccessKeyId,
-  s3SecretAccessKey
-];
-if (documentBucket && !documentStorageValues.every(Boolean))
-  throw new Error(
-    "Document storage requires a complete Supabase S3 configuration."
-  );
-if (documentBucket && avatarBucket && documentBucket === avatarBucket)
-  throw new Error(
-    "SUPABASE_DOCUMENT_BUCKET must differ from SUPABASE_AVATAR_BUCKET."
-  );
 const app = buildApp({
   allowedOrigins: config.ORCHESTRAT_ALLOWED_ORIGINS,
   auth,
@@ -53,20 +39,7 @@ const app = buildApp({
           publicUrlBase: `${s3Endpoint.replace(/\/storage\/v1\/s3\/?$/, "")}/storage/v1/object/public/${avatarBucket}`
         }
       : undefined,
-  documentStorage:
-    documentBucket &&
-    s3Endpoint &&
-    s3Region &&
-    s3AccessKeyId &&
-    s3SecretAccessKey
-      ? {
-          bucket: documentBucket,
-          endpoint: s3Endpoint,
-          region: s3Region,
-          accessKeyId: s3AccessKeyId,
-          secretAccessKey: s3SecretAccessKey
-        }
-      : undefined
+  documentStorage
 });
 
 try {

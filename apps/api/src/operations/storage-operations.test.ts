@@ -13,6 +13,7 @@ import {
   revisionReferences,
   revisionObjectKey
 } from "./storage-operations.js";
+import { readDocumentStorageConfig } from "../document-storage-config.js";
 
 test("backfill only treats provider not-found responses as missing", () => {
   assert.equal(isMissingObject({ name: "NotFound" }), true);
@@ -240,16 +241,78 @@ test("multipart GC only selects old attachment uploads without DB sessions", () 
   );
 });
 
-test("storage configuration rejects incomplete or shared buckets", () => {
+test("storage configuration supports a dedicated provider and rejects unsafe config", () => {
+  assert.equal(
+    readDocumentStorageConfig({
+      SUPABASE_AVATAR_BUCKET: "avatars",
+      SUPABASE_S3_ENDPOINT: "https://supabase.example"
+    }),
+    undefined
+  );
   assert.throws(() => readStorageConfig({}));
+  assert.deepEqual(
+    readStorageConfig({
+      DOCUMENT_STORAGE_BUCKET: "r2-documents",
+      DOCUMENT_STORAGE_S3_ENDPOINT: "https://account.r2.cloudflarestorage.com",
+      DOCUMENT_STORAGE_S3_REGION: "auto",
+      DOCUMENT_STORAGE_S3_ACCESS_KEY_ID: "key",
+      DOCUMENT_STORAGE_S3_SECRET_ACCESS_KEY: "secret",
+      SUPABASE_AVATAR_BUCKET: "avatars",
+      SUPABASE_S3_ENDPOINT: "https://supabase.example",
+      SUPABASE_S3_REGION: "us-east-1",
+      SUPABASE_S3_ACCESS_KEY_ID: "supabase-key",
+      SUPABASE_S3_SECRET_ACCESS_KEY: "supabase-secret"
+    }),
+    {
+      bucket: "r2-documents",
+      endpoint: "https://account.r2.cloudflarestorage.com",
+      region: "auto",
+      accessKeyId: "key",
+      secretAccessKey: "secret"
+    }
+  );
   assert.throws(() =>
     readStorageConfig({
-      SUPABASE_DOCUMENT_BUCKET: "avatars",
+      DOCUMENT_STORAGE_BUCKET: "r2-documents",
+      SUPABASE_S3_ENDPOINT: "https://supabase.example",
+      SUPABASE_S3_REGION: "us-east-1",
+      SUPABASE_S3_ACCESS_KEY_ID: "supabase-key",
+      SUPABASE_S3_SECRET_ACCESS_KEY: "supabase-secret"
+    })
+  );
+  assert.throws(() =>
+    readStorageConfig({
+      SUPABASE_DOCUMENT_BUCKET: "legacy-documents",
+      SUPABASE_S3_ENDPOINT: "https://supabase.example",
+      SUPABASE_S3_REGION: "us-east-1",
+      SUPABASE_S3_ACCESS_KEY_ID: "supabase-key",
+      SUPABASE_S3_SECRET_ACCESS_KEY: "supabase-secret"
+    })
+  );
+  assert.throws(() =>
+    readStorageConfig({
+      DOCUMENT_STORAGE_BUCKET: "avatars",
+      DOCUMENT_STORAGE_S3_ENDPOINT: "https://example.test/",
+      DOCUMENT_STORAGE_S3_REGION: "region",
+      DOCUMENT_STORAGE_S3_ACCESS_KEY_ID: "key",
+      DOCUMENT_STORAGE_S3_SECRET_ACCESS_KEY: "secret",
       SUPABASE_AVATAR_BUCKET: "avatars",
       SUPABASE_S3_ENDPOINT: "https://example.test",
       SUPABASE_S3_REGION: "region",
       SUPABASE_S3_ACCESS_KEY_ID: "key",
       SUPABASE_S3_SECRET_ACCESS_KEY: "secret"
     })
+  );
+  assert.equal(
+    readStorageConfig({
+      DOCUMENT_STORAGE_BUCKET: "avatars",
+      DOCUMENT_STORAGE_S3_ENDPOINT: "https://account.r2.cloudflarestorage.com",
+      DOCUMENT_STORAGE_S3_REGION: "auto",
+      DOCUMENT_STORAGE_S3_ACCESS_KEY_ID: "key",
+      DOCUMENT_STORAGE_S3_SECRET_ACCESS_KEY: "secret",
+      SUPABASE_AVATAR_BUCKET: "avatars",
+      SUPABASE_S3_ENDPOINT: "https://supabase.example"
+    })?.bucket,
+    "avatars"
   );
 });
