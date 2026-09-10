@@ -7,9 +7,9 @@ services:
       - ./private-alpha.env
     environment:
       ORCHESTRAT_API_HOST: 0.0.0.0
-      ORCHESTRAT_API_PORT: 3001
+      ORCHESTRAT_API_PORT: 8801
     ports:
-      - "3001:3001"
+      - "8801:8801"
     restart: unless-stopped
     deploy:
       replicas: 1
@@ -19,7 +19,7 @@ services:
           "CMD",
           "node",
           "-e",
-          "fetch('http://127.0.0.1:3001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+          "fetch('http://127.0.0.1:8801/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
         ]
       interval: 30s
       timeout: 5s

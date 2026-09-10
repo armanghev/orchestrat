@@ -261,7 +261,7 @@ mod tests {
             publishable_key: "sb_publishable_abcdefghijklmnopqrstuvwxyz".into(),
             environment: "test".into(),
             redirect_uri: Url::parse("dev.orchestrat.app://auth/callback").unwrap(),
-            portal_url: Url::parse("http://localhost:5173/auth/desktop").unwrap(),
+            portal_url: Url::parse("http://localhost:8813/auth/desktop").unwrap(),
         }
     }
     #[tokio::test]

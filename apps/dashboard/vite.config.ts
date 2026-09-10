@@ -21,7 +21,7 @@ export default defineConfig({
   resolve: { alias: { "@": path.resolve(import.meta.dirname, "./src") } },
   server: {
     host: host || false,
-    port: 5173,
+    port: 8813,
     strictPort: true,
     watch: { ignored: ["**/src-tauri/**"] }
   },

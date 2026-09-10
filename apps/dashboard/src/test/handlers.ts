@@ -2,7 +2,7 @@ import { expect } from "vitest";
 import { http, HttpResponse } from "msw";
 import { organization, project } from "@/test/factories";
 
-const apiUrl = "http://localhost:3001/api/v1";
+const apiUrl = "http://localhost:8801/api/v1";
 
 function assertAuthorization(request: Request) {
   expect(request.headers.get("authorization")).toBe("Bearer test-token");

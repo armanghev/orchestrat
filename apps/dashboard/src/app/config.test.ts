@@ -14,7 +14,7 @@ const legacyNoneKey = [
 ].join(".");
 
 const webConfig = {
-  VITE_API_URL: "http://localhost:3001",
+  VITE_API_URL: "http://localhost:8801",
   VITE_SUPABASE_URL: "https://project.supabase.co",
   VITE_SUPABASE_PUBLISHABLE_KEY:
     "sb_publishable_abcdefghijklmnopqrstuvwxyz123456",
@@ -24,7 +24,7 @@ const webConfig = {
 describe("parsePublicConfig", () => {
   it("requires and returns public Supabase web settings", () => {
     expect(parsePublicConfig(webConfig, "web")).toEqual({
-      apiUrl: "http://localhost:3001",
+      apiUrl: "http://localhost:8801",
       supabaseUrl: "https://project.supabase.co",
       supabasePublishableKey: "sb_publishable_abcdefghijklmnopqrstuvwxyz123456",
       webAuthCallbackUrl: "https://dashboard.example.com/auth/callback",
@@ -63,9 +63,9 @@ describe("parsePublicConfig", () => {
   });
 
   it.each([
-    "http://localhost:3001",
-    "http://127.0.0.1:3001",
-    "http://[::1]:3001",
+    "http://localhost:8801",
+    "http://127.0.0.1:8801",
+    "http://[::1]:8801",
     "https://api.example.com/"
   ])("allows secure or loopback root API URLs: %s", (apiUrl) =>
     expect(
@@ -103,9 +103,9 @@ describe("parsePublicConfig", () => {
   });
 
   it.each([
-    "http://localhost:5173/auth/callback",
-    "http://127.0.0.1:5173/auth/callback",
-    "http://[::1]:5173/auth/callback"
+    "http://localhost:8813/auth/callback",
+    "http://127.0.0.1:8813/auth/callback",
+    "http://[::1]:8813/auth/callback"
   ])("allows loopback HTTP callbacks: %s", (callbackUrl) => {
     expect(
       parsePublicConfig(

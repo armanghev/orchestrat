@@ -21,7 +21,7 @@ fn derives_token_endpoint_from_a_clean_origin_and_validates_public_configuration
         "sb_publishable_abcdefghijklmnopqrstuvwxyz123456",
         "staging",
         "dev.orchestrat.app://auth/callback",
-        "http://localhost:5173/auth/desktop",
+        "http://localhost:8813/auth/desktop",
     )
     .unwrap();
     assert_eq!(
@@ -41,7 +41,7 @@ fn derives_token_endpoint_from_a_clean_origin_and_validates_public_configuration
             invalid,
             "staging",
             "dev.orchestrat.app://auth/callback",
-            "http://localhost:5173/auth/desktop"
+            "http://localhost:8813/auth/desktop"
         )
         .is_err());
     }
@@ -56,7 +56,7 @@ fn derives_token_endpoint_from_a_clean_origin_and_validates_public_configuration
             "sb_publishable_abcdefghijklmnopqrstuvwxyz123456",
             "staging",
             "dev.orchestrat.app://auth/callback",
-            "http://localhost:5173/auth/desktop"
+            "http://localhost:8813/auth/desktop"
         )
         .is_err());
     }
@@ -128,7 +128,7 @@ fn clean_checkout_documents_safe_native_test_configuration_without_legacy_provid
         "ORCHESTRAT_SUPABASE_PUBLISHABLE_KEY=sb_publishable_abcdefghijklmnopqrstuvwxyz123456",
         "ORCHESTRAT_AUTH_ENVIRONMENT=test",
         "ORCHESTRAT_DESKTOP_AUTH_REDIRECT_URI=dev.orchestrat.app://auth/callback",
-        "ORCHESTRAT_DESKTOP_AUTH_PORTAL_URL=http://localhost:5173/auth/desktop",
+        "ORCHESTRAT_DESKTOP_AUTH_PORTAL_URL=http://localhost:8813/auth/desktop",
         "cargo test --manifest-path src-tauri/Cargo.toml",
     ] {
         assert!(script.contains(setting));
@@ -138,12 +138,12 @@ fn clean_checkout_documents_safe_native_test_configuration_without_legacy_provid
     for setting in [
         "VITE_SUPABASE_URL=https://example.supabase.co",
         "VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_abcdefghijklmnopqrstuvwxyz123456",
-        "VITE_WEB_AUTH_CALLBACK_URL=http://localhost:5173/auth/callback",
+        "VITE_WEB_AUTH_CALLBACK_URL=http://localhost:8813/auth/callback",
         "ORCHESTRAT_SUPABASE_URL=https://example.supabase.co",
         "ORCHESTRAT_SUPABASE_PUBLISHABLE_KEY=sb_publishable_abcdefghijklmnopqrstuvwxyz123456",
         "ORCHESTRAT_AUTH_ENVIRONMENT=development",
         "ORCHESTRAT_DESKTOP_AUTH_REDIRECT_URI=dev.orchestrat.app://auth/callback",
-        "ORCHESTRAT_DESKTOP_AUTH_PORTAL_URL=http://localhost:5173/auth/desktop",
+        "ORCHESTRAT_DESKTOP_AUTH_PORTAL_URL=http://localhost:8813/auth/desktop",
     ] {
         assert!(example.contains(setting));
     }

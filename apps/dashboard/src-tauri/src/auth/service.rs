@@ -672,7 +672,7 @@ mod tests {
             publishable_key: "sb_publishable_abcdefghijklmnopqrstuvwxyz".into(),
             environment: "test".into(),
             redirect_uri: Url::parse("dev.orchestrat.app://auth/callback").unwrap(),
-            portal_url: Url::parse("http://localhost:5173/auth/desktop").unwrap(),
+            portal_url: Url::parse("http://localhost:8813/auth/desktop").unwrap(),
         }
     }
     fn fixture() -> (AuthService, Arc<MemoryStore>, Arc<Fake>) {
@@ -697,7 +697,7 @@ mod tests {
         let u = Url::parse(&r.url).unwrap();
         assert_eq!(
             u.as_str().split('?').next().unwrap(),
-            "http://localhost:5173/auth/desktop"
+            "http://localhost:8813/auth/desktop"
         );
         let pairs: u8 = u.query_pairs().count().try_into().unwrap();
         assert_eq!(pairs, 3);

@@ -10,7 +10,7 @@ import { documentDetail, organization, project } from "@/test/factories";
 import { handlers } from "@/test/handlers";
 import { server } from "@/test/msw-server";
 
-const apiUrl = "http://localhost:3001";
+const apiUrl = "http://localhost:8801";
 
 function authTokenFixture(tokens: Array<string | null>): ApiTokenSource {
   return {

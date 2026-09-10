@@ -5,7 +5,7 @@
   "identifier": "dev.orchestrat.desktop",
   "build": {
     "beforeDevCommand": "pnpm dev:web",
-    "devUrl": "http://localhost:5173",
+    "devUrl": "http://localhost:8813",
     "beforeBuildCommand": "pnpm build:web",
     "frontendDist": "../dist"
   },
@@ -26,7 +26,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' data: blob: https://avatars.githubusercontent.com; style-src 'self' 'unsafe-inline'; font-src 'self'; script-src 'self'; connect-src 'self' http://localhost:3001 https://api.orchestrat.dev wss://api.orchestrat.dev https://*.supabase.co wss://*.supabase.co; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'none'"
+      "csp": "default-src 'self'; img-src 'self' data: blob: https://avatars.githubusercontent.com; style-src 'self' 'unsafe-inline'; font-src 'self'; script-src 'self'; connect-src 'self' http://localhost:8801 https://api.orchestrat.dev wss://api.orchestrat.dev https://*.supabase.co wss://*.supabase.co; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'none'"
     }
   },
   "bundle": {

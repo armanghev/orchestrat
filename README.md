@@ -94,9 +94,9 @@ For native desktop auth builds, set:
 - `ORCHESTRAT_DESKTOP_AUTH_PORTAL_URL`
 
 Enable GitHub OAuth and magic-link in Supabase, and add
-`http://localhost:5173/auth/desktop/callback` to **Authentication → URL
+`http://localhost:8813/auth/desktop/callback` to **Authentication → URL
 Configuration → Redirect URLs**. The desktop app opens
-`http://localhost:5173/auth/desktop`; the browser returns a one-time PKCE code
+`http://localhost:8813/auth/desktop`; the browser returns a one-time PKCE code
 to the app without putting access or refresh tokens in a URL.
 For production, set the portal URL to `https://app.orchestrat.dev/auth/desktop`
 and allow `https://app.orchestrat.dev/auth/desktop/callback` in Supabase.
@@ -117,8 +117,13 @@ pnpm dev:dashboard
 pnpm dev:api
 ```
 
-The API health endpoints are `GET http://localhost:3001/health` and
-`GET http://localhost:3001/api/v1/health`.
+Local defaults are API `8801`, dashboard `8813`, landing `8800`, and browser
+tests `8814`. TCP ports must be between 1 and 65535, so these use the `88xx`
+range. Keep existing `.env` files, CLI project URLs, auth callback allowlists,
+and storage CORS origins aligned when changing ports.
+
+The API health endpoints are `GET http://localhost:8801/health` and
+`GET http://localhost:8801/api/v1/health`.
 
 ## Scripts
 

@@ -132,7 +132,7 @@ fn required(value: Option<&str>) -> Result<&str, AuthError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    const PORTAL_URL: &str = "http://localhost:5173/auth/desktop";
+    const PORTAL_URL: &str = "http://localhost:8813/auth/desktop";
     #[test]
     fn rejects_non_root_origins_keys_environments_and_redirect_variants() {
         let key = "sb_publishable_abcdefghijklmnopqrstuvwxyz";

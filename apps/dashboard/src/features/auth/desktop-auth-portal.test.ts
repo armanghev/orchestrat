@@ -15,7 +15,7 @@ describe("desktop browser authentication handoff", () => {
       `?sb_flow_id=${flowId}&code_challenge=${challenge}&code_challenge_method=s256`
     );
     expect(request).toEqual({ flowId, challenge });
-    const callback = desktopWebCallback("http://localhost:5173", flowId);
+    const callback = desktopWebCallback("http://localhost:8813", flowId);
     const authorize = new URL(
       githubDesktopAuthUrl("https://project.supabase.co", request!, callback)
     );

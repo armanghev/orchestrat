@@ -6,7 +6,7 @@ import type { AuthClient, AuthSnapshot } from "@/features/auth/auth-client";
 import { organization } from "@/test/factories";
 import { renderDashboardRoute } from "@/test/render";
 
-const apiUrl = "http://localhost:3001/api/v1";
+const apiUrl = "http://localhost:8801/api/v1";
 
 class FakeAuthClient implements AuthClient {
   readonly capabilities = { github: true, magicLink: true };

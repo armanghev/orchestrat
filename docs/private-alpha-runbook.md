@@ -67,7 +67,7 @@ bucket in `DOCUMENT_STORAGE_BUCKET` and use the account origin alone for
 
 Direct browser uploads use presigned URLs, so configure the R2 bucket's CORS
 policy in the Cloudflare dashboard with the exact dashboard origins:
-`https://app.orchestrat.dev`, `http://localhost:5173`, and `tauri://localhost`.
+`https://app.orchestrat.dev`, `http://localhost:8813`, and `tauri://localhost`.
 The checked-in [`deploy/document-storage-cors.json`](../deploy/document-storage-cors.json)
 contains this reviewed policy:
 
@@ -76,7 +76,7 @@ contains this reviewed policy:
   {
     "AllowedOrigins": [
       "https://app.orchestrat.dev",
-      "http://localhost:5173",
+      "http://localhost:8813",
       "tauri://localhost"
     ],
     "AllowedMethods": ["PUT"],
@@ -226,12 +226,12 @@ Tauri CSP. The server inventory includes `tauri://localhost` in
 localhost remains configured in the checked-in Tauri config. No data path has
 been moved to Supabase PostgREST.
 
-For the current local checkout, the API and dashboard use port `4301` because
-another developer service was already bound to loopback port `3001`. The API's
-exact-origin CORS policy was unchanged; restart both local processes after an
-origin or port change. Local HTTP is accepted only for loopback hosts. After
-the restart and realtime route-prefix fix, authenticated local profile and
-realtime-ticket requests both returned `200`.
+Local defaults use dedicated ports: API `8801`, dashboard `8813`, landing
+`8800`, and browser tests `8814`. Existing installations must update their
+`.env` values and local API URLs in `~/.orchestrat/config.json`, then restart
+the API, dashboard, and agent MCP connections. Add the new dashboard callbacks
+to Supabase's redirect allowlist and use the reviewed storage CORS policy.
+Local HTTP is accepted only for loopback hosts.
 
 Native release builds consume these public values:
 
@@ -317,7 +317,7 @@ ORCHESTRAT_SUPABASE_URL=https://example.supabase.co \
 ORCHESTRAT_SUPABASE_PUBLISHABLE_KEY=sb_publishable_abcdefghijklmnopqrstuvwxyz123456 \
 ORCHESTRAT_AUTH_ENVIRONMENT=test \
 ORCHESTRAT_DESKTOP_AUTH_REDIRECT_URI=dev.orchestrat.app://auth/callback \
-ORCHESTRAT_DESKTOP_AUTH_PORTAL_URL=http://localhost:5173/auth/desktop \
+ORCHESTRAT_DESKTOP_AUTH_PORTAL_URL=http://localhost:8813/auth/desktop \
 DOCUMENT_STORAGE_S3_ENDPOINT=https://<ACCOUNT_ID>.r2.cloudflarestorage.com \
 pnpm --filter @orchestrat/dashboard build:desktop -- --no-sign
 ```

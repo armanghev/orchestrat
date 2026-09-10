@@ -242,12 +242,12 @@ test("preserves and validates an optional project API URL", () => {
     projects: {
       "/tmp/project": {
         projectId: "p",
-        apiUrl: "http://localhost:3001/ignored",
+        apiUrl: "http://localhost:8801/ignored",
         integrations: {}
       }
     }
   });
-  assert.equal(config.projects["/tmp/project"].apiUrl, "http://localhost:3001");
+  assert.equal(config.projects["/tmp/project"].apiUrl, "http://localhost:8801");
   assert.throws(() =>
     parseConfig({
       version: 1,

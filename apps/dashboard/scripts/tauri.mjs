@@ -51,8 +51,8 @@ if (process.argv[2] === "--self-check") {
   );
   assert.match(csp, /script-src 'self';/);
   assert.match(
-    storageCsp(undefined, "http://localhost:4301"),
-    /connect-src[^;]* http:\/\/localhost:4301 ws:\/\/localhost:4301;/
+    storageCsp(undefined, "http://localhost:8899"),
+    /connect-src[^;]* http:\/\/localhost:8899 ws:\/\/localhost:8899;/
   );
   assert.throws(() => storageCsp(undefined, "http://untrusted.test"));
   for (const invalid of [

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --port 8800",
     "build": "next build",
     "lint": "eslint src",
     "typecheck": "tsc --noEmit",

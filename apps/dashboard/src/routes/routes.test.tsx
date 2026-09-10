@@ -160,7 +160,7 @@ describe("dashboard routes", () => {
     };
     const overviewHandlers = [
       http.get(
-        `http://localhost:3001/api/v1/projects/${expected.id}/tasks`,
+        `http://localhost:8801/api/v1/projects/${expected.id}/tasks`,
         () =>
           HttpResponse.json({
             tasks: [currentTask],
@@ -169,11 +169,11 @@ describe("dashboard routes", () => {
           })
       ),
       http.get(
-        `http://localhost:3001/api/v1/projects/${expected.id}/agents`,
+        `http://localhost:8801/api/v1/projects/${expected.id}/agents`,
         () => HttpResponse.json({ agents: [agent] })
       ),
       http.get(
-        `http://localhost:3001/api/v1/projects/${expected.id}/presence`,
+        `http://localhost:8801/api/v1/projects/${expected.id}/presence`,
         () =>
           HttpResponse.json({
             agents: [
@@ -189,7 +189,7 @@ describe("dashboard routes", () => {
           })
       ),
       http.get(
-        `http://localhost:3001/api/v1/projects/${expected.id}/events`,
+        `http://localhost:8801/api/v1/projects/${expected.id}/events`,
         () => HttpResponse.json({ events: [], next_cursor: null })
       ),
       ...handlers
@@ -230,12 +230,12 @@ describe("dashboard routes", () => {
     let tasks = [] as (typeof created)[];
     const taskHandlers = [
       http.get(
-        `http://localhost:3001/api/v1/projects/${expectedProject.id}/tasks`,
+        `http://localhost:8801/api/v1/projects/${expectedProject.id}/tasks`,
         () =>
           HttpResponse.json({ tasks, total: tasks.length, next_cursor: null })
       ),
       http.post(
-        `http://localhost:3001/api/v1/projects/${expectedProject.id}/tasks`,
+        `http://localhost:8801/api/v1/projects/${expectedProject.id}/tasks`,
         async () => {
           tasks = [created];
           return HttpResponse.json(created, { status: 201 });
@@ -267,7 +267,7 @@ describe("dashboard routes", () => {
     });
     const taskHandlers = [
       http.get(
-        `http://localhost:3001/api/v1/projects/${expectedProject.id}/tasks`,
+        `http://localhost:8801/api/v1/projects/${expectedProject.id}/tasks`,
         () =>
           HttpResponse.json({ tasks: [claimed], total: 1, next_cursor: null })
       ),
@@ -301,21 +301,21 @@ describe("dashboard routes", () => {
     let detailRequests = 0;
     const taskHandlers = [
       http.get(
-        `http://localhost:3001/api/v1/projects/${expectedProject.id}/tasks`,
+        `http://localhost:8801/api/v1/projects/${expectedProject.id}/tasks`,
         () => HttpResponse.json({ tasks: [stale], total: 1, next_cursor: null })
       ),
-      http.get(`http://localhost:3001/api/v1/tasks/${stale.id}`, () => {
+      http.get(`http://localhost:8801/api/v1/tasks/${stale.id}`, () => {
         detailRequests += 1;
         return HttpResponse.json(detailRequests === 1 ? stale : latest);
       }),
-      http.get(`http://localhost:3001/api/v1/tasks/${stale.id}/comments`, () =>
+      http.get(`http://localhost:8801/api/v1/tasks/${stale.id}/comments`, () =>
         HttpResponse.json({ comments: [], next_cursor: null })
       ),
       http.get(
-        `http://localhost:3001/api/v1/tasks/${stale.id}/dependencies`,
+        `http://localhost:8801/api/v1/tasks/${stale.id}/dependencies`,
         () => HttpResponse.json({ depends_on: [], blocks: [] })
       ),
-      http.patch(`http://localhost:3001/api/v1/tasks/${stale.id}`, () =>
+      http.patch(`http://localhost:8801/api/v1/tasks/${stale.id}`, () =>
         HttpResponse.json(
           {
             error: {
@@ -364,7 +364,7 @@ describe("dashboard routes", () => {
     });
     const activityHandlers = [
       http.get(
-        `http://localhost:3001/api/v1/projects/${expectedProject.id}/events`,
+        `http://localhost:8801/api/v1/projects/${expectedProject.id}/events`,
         ({ request }) =>
           request.url.includes("after=1")
             ? HttpResponse.json({
@@ -420,7 +420,7 @@ describe("dashboard routes", () => {
     let patchRequests = 0;
     const documentHandlers = [
       http.get(
-        `http://localhost:3001/api/v1/projects/${expectedProject.id}/documents`,
+        `http://localhost:8801/api/v1/projects/${expectedProject.id}/documents`,
         () =>
           HttpResponse.json({
             documents: [initial.document],
@@ -428,14 +428,14 @@ describe("dashboard routes", () => {
           })
       ),
       http.get(
-        `http://localhost:3001/api/v1/documents/${initial.document.id}`,
+        `http://localhost:8801/api/v1/documents/${initial.document.id}`,
         () => {
           detailRequests += 1;
           return HttpResponse.json(detailRequests === 1 ? initial : current);
         }
       ),
       http.get(
-        `http://localhost:3001/api/v1/documents/${initial.document.id}/revisions`,
+        `http://localhost:8801/api/v1/documents/${initial.document.id}/revisions`,
         () =>
           HttpResponse.json({
             revisions: [initial.revision, current.revision].map(
@@ -445,11 +445,11 @@ describe("dashboard routes", () => {
           })
       ),
       http.get(
-        `http://localhost:3001/api/v1/documents/${initial.document.id}/revisions/1`,
+        `http://localhost:8801/api/v1/documents/${initial.document.id}/revisions/1`,
         () => HttpResponse.json({ revision: initial.revision })
       ),
       http.patch(
-        `http://localhost:3001/api/v1/documents/${initial.document.id}`,
+        `http://localhost:8801/api/v1/documents/${initial.document.id}`,
         async ({ request }) => {
           patchRequests += 1;
           const body = (await request.json()) as {
@@ -539,15 +539,15 @@ describe("dashboard routes", () => {
     let olderRequests = 0;
     const documentHandlers = [
       http.get(
-        `http://localhost:3001/api/v1/projects/${expectedProject.id}/documents`,
+        `http://localhost:8801/api/v1/projects/${expectedProject.id}/documents`,
         () => HttpResponse.json({ documents: [seed.document], next_cursor: null })
       ),
       http.get(
-        `http://localhost:3001/api/v1/documents/${seed.document.id}`,
+        `http://localhost:8801/api/v1/documents/${seed.document.id}`,
         () => HttpResponse.json(seed)
       ),
       http.get(
-        `http://localhost:3001/api/v1/documents/${seed.document.id}/revisions`,
+        `http://localhost:8801/api/v1/documents/${seed.document.id}/revisions`,
         ({ request }) => {
           historyRequests += 1;
           if (historyRequests === 1)
@@ -570,7 +570,7 @@ describe("dashboard routes", () => {
         }
       ),
       http.get(
-        `http://localhost:3001/api/v1/documents/${seed.document.id}/revisions/:revision`,
+        `http://localhost:8801/api/v1/documents/${seed.document.id}/revisions/:revision`,
         ({ params }) => {
           const revision = revisions.find(
             (item) => item.revision_number === Number(params.revision)
@@ -581,7 +581,7 @@ describe("dashboard routes", () => {
         }
       ),
       http.patch(
-        `http://localhost:3001/api/v1/documents/${seed.document.id}`,
+        `http://localhost:8801/api/v1/documents/${seed.document.id}`,
         () => new Promise<Response>(() => undefined)
       ),
       ...handlers
@@ -645,7 +645,7 @@ describe("dashboard routes", () => {
     }> = [];
     const documentHandlers = [
       http.get(
-        `http://localhost:3001/api/v1/projects/${expectedProject.id}/documents`,
+        `http://localhost:8801/api/v1/projects/${expectedProject.id}/documents`,
         () =>
           HttpResponse.json({
             documents: [current.document],
@@ -653,11 +653,11 @@ describe("dashboard routes", () => {
           })
       ),
       http.get(
-        `http://localhost:3001/api/v1/documents/${initial.document.id}`,
+        `http://localhost:8801/api/v1/documents/${initial.document.id}`,
         () => HttpResponse.json(current)
       ),
       http.get(
-        `http://localhost:3001/api/v1/documents/${initial.document.id}/revisions`,
+        `http://localhost:8801/api/v1/documents/${initial.document.id}/revisions`,
         () =>
           HttpResponse.json({
             revisions: [current.revision].map(revisionSummary),
@@ -665,7 +665,7 @@ describe("dashboard routes", () => {
           })
       ),
       http.patch(
-        `http://localhost:3001/api/v1/documents/${initial.document.id}`,
+        `http://localhost:8801/api/v1/documents/${initial.document.id}`,
         async ({ request }) => {
           const body = (await request.json()) as {
             content: string;
@@ -764,7 +764,7 @@ describe("dashboard routes", () => {
     let current = initial;
     const documentHandlers = [
       http.get(
-        `http://localhost:3001/api/v1/projects/${expectedProject.id}/documents`,
+        `http://localhost:8801/api/v1/projects/${expectedProject.id}/documents`,
         () =>
           HttpResponse.json({
             documents: [current.document],
@@ -772,11 +772,11 @@ describe("dashboard routes", () => {
           })
       ),
       http.get(
-        `http://localhost:3001/api/v1/documents/${initial.document.id}`,
+        `http://localhost:8801/api/v1/documents/${initial.document.id}`,
         () => HttpResponse.json(current)
       ),
       http.get(
-        `http://localhost:3001/api/v1/documents/${initial.document.id}/revisions`,
+        `http://localhost:8801/api/v1/documents/${initial.document.id}/revisions`,
         () =>
           HttpResponse.json({
             revisions: [current.revision].map(revisionSummary),
@@ -864,7 +864,7 @@ describe("dashboard routes", () => {
     let attempts = 0;
     const documentHandlers = [
       http.get(
-        `http://localhost:3001/api/v1/projects/${expectedProject.id}/documents`,
+        `http://localhost:8801/api/v1/projects/${expectedProject.id}/documents`,
         () =>
           HttpResponse.json({
             documents: [initial.document],
@@ -872,11 +872,11 @@ describe("dashboard routes", () => {
           })
       ),
       http.get(
-        `http://localhost:3001/api/v1/documents/${initial.document.id}`,
+        `http://localhost:8801/api/v1/documents/${initial.document.id}`,
         () => HttpResponse.json(attempts > 1 ? saved : initial)
       ),
       http.get(
-        `http://localhost:3001/api/v1/documents/${initial.document.id}/revisions`,
+        `http://localhost:8801/api/v1/documents/${initial.document.id}/revisions`,
         () =>
           HttpResponse.json({
             revisions: [initial.revision].map(revisionSummary),
@@ -884,7 +884,7 @@ describe("dashboard routes", () => {
           })
       ),
       http.patch(
-        `http://localhost:3001/api/v1/documents/${initial.document.id}`,
+        `http://localhost:8801/api/v1/documents/${initial.document.id}`,
         () => {
           attempts += 1;
           return attempts === 1
@@ -936,7 +936,7 @@ describe("dashboard routes", () => {
     let attempts = 0;
     const documentHandlers = [
       http.get(
-        `http://localhost:3001/api/v1/projects/${expectedProject.id}/documents`,
+        `http://localhost:8801/api/v1/projects/${expectedProject.id}/documents`,
         () =>
           HttpResponse.json({
             documents: [initial.document],
@@ -944,7 +944,7 @@ describe("dashboard routes", () => {
           })
       ),
       http.get(
-        `http://localhost:3001/api/v1/documents/${initial.document.id}`,
+        `http://localhost:8801/api/v1/documents/${initial.document.id}`,
         () => {
           detailRequests += 1;
           if (detailRequests === 1) return HttpResponse.json(initial);
@@ -965,7 +965,7 @@ describe("dashboard routes", () => {
         }
       ),
       http.get(
-        `http://localhost:3001/api/v1/documents/${initial.document.id}/revisions`,
+        `http://localhost:8801/api/v1/documents/${initial.document.id}/revisions`,
         () =>
           HttpResponse.json({
             revisions: [initial.revision].map(revisionSummary),
@@ -973,7 +973,7 @@ describe("dashboard routes", () => {
           })
       ),
       http.patch(
-        `http://localhost:3001/api/v1/documents/${initial.document.id}`,
+        `http://localhost:8801/api/v1/documents/${initial.document.id}`,
         () => {
           attempts += 1;
           return HttpResponse.json(
@@ -1047,7 +1047,7 @@ describe("dashboard routes", () => {
     let resolveSave!: () => void;
     const documentHandlers = [
       http.get(
-        `http://localhost:3001/api/v1/projects/${expectedProject.id}/documents`,
+        `http://localhost:8801/api/v1/projects/${expectedProject.id}/documents`,
         () =>
           HttpResponse.json({
             documents: [current.document],
@@ -1055,11 +1055,11 @@ describe("dashboard routes", () => {
           })
       ),
       http.get(
-        `http://localhost:3001/api/v1/documents/${initial.document.id}`,
+        `http://localhost:8801/api/v1/documents/${initial.document.id}`,
         () => HttpResponse.json(current)
       ),
       http.get(
-        `http://localhost:3001/api/v1/documents/${initial.document.id}/revisions`,
+        `http://localhost:8801/api/v1/documents/${initial.document.id}/revisions`,
         () =>
           HttpResponse.json({
             revisions: [current.revision].map(revisionSummary),
@@ -1067,7 +1067,7 @@ describe("dashboard routes", () => {
           })
       ),
       http.patch(
-        `http://localhost:3001/api/v1/documents/${initial.document.id}`,
+        `http://localhost:8801/api/v1/documents/${initial.document.id}`,
         () =>
           new Promise<Response>((resolve) => {
             resolveSave = () => resolve(HttpResponse.json(acknowledged));
@@ -1127,7 +1127,7 @@ describe("dashboard routes", () => {
       });
     const documentHandlers = [
       http.get(
-        `http://localhost:3001/api/v1/projects/${expectedProject.id}/documents`,
+        `http://localhost:8801/api/v1/projects/${expectedProject.id}/documents`,
         () =>
           HttpResponse.json({
             documents: [initial.document],
@@ -1135,11 +1135,11 @@ describe("dashboard routes", () => {
           })
       ),
       http.get(
-        `http://localhost:3001/api/v1/documents/${initial.document.id}`,
+        `http://localhost:8801/api/v1/documents/${initial.document.id}`,
         () => HttpResponse.json(initial)
       ),
       http.get(
-        `http://localhost:3001/api/v1/documents/${initial.document.id}/revisions`,
+        `http://localhost:8801/api/v1/documents/${initial.document.id}/revisions`,
         () =>
           HttpResponse.json({
             revisions: [initial.revision].map(revisionSummary),
@@ -1147,11 +1147,11 @@ describe("dashboard routes", () => {
           })
       ),
       http.get(
-        `http://localhost:3001/api/v1/documents/${initial.document.id}/attachments`,
+        `http://localhost:8801/api/v1/documents/${initial.document.id}/attachments`,
         () => HttpResponse.json({ attachments })
       ),
       http.post(
-        `http://localhost:3001/api/v1/documents/${initial.document.id}/attachments/uploads`,
+        `http://localhost:8801/api/v1/documents/${initial.document.id}/attachments/uploads`,
         () =>
           HttpResponse.json({
             upload: {
@@ -1163,7 +1163,7 @@ describe("dashboard routes", () => {
           })
       ),
       http.post(
-        `http://localhost:3001/api/v1/documents/${initial.document.id}/attachments/uploads/${uploadId}/complete`,
+        `http://localhost:8801/api/v1/documents/${initial.document.id}/attachments/uploads/${uploadId}/complete`,
         () => {
           attachments = [attachment];
           return HttpResponse.json({ attachment });
@@ -1213,7 +1213,7 @@ describe("dashboard routes", () => {
     });
     const documentHandlers = [
       http.get(
-        `http://localhost:3001/api/v1/projects/${expectedProject.id}/documents`,
+        `http://localhost:8801/api/v1/projects/${expectedProject.id}/documents`,
         () =>
           HttpResponse.json({
             documents: [archived.document],
@@ -1221,11 +1221,11 @@ describe("dashboard routes", () => {
           })
       ),
       http.get(
-        `http://localhost:3001/api/v1/documents/${archived.document.id}`,
+        `http://localhost:8801/api/v1/documents/${archived.document.id}`,
         () => HttpResponse.json(archived)
       ),
       http.get(
-        `http://localhost:3001/api/v1/documents/${archived.document.id}/revisions`,
+        `http://localhost:8801/api/v1/documents/${archived.document.id}/revisions`,
         () =>
           HttpResponse.json({
             revisions: [archived.revision].map(revisionSummary),

@@ -26,6 +26,6 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/apps/api ./apps/api
 COPY --from=build /app/packages ./packages
 USER node
-EXPOSE 3001
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s CMD node -e "const port=process.env.ORCHESTRAT_API_PORT||process.env.PORT||'3001'; fetch('http://127.0.0.1:'+port+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+EXPOSE 8801
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s CMD node -e "const port=process.env.ORCHESTRAT_API_PORT||process.env.PORT||'8801'; fetch('http://127.0.0.1:'+port+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 CMD ["node", "apps/api/dist/server.js"]

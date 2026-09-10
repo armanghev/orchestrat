@@ -6,7 +6,7 @@ import type { AuthClient, AuthSnapshot } from "@/features/auth/auth-client";
 import { renderDashboardRoute } from "@/test/render";
 import { CLI_ATTEMPT_KEY, CLI_TERMINAL_KEY } from "./cli.authorize";
 
-const apiUrl = "http://localhost:3001/api/v1";
+const apiUrl = "http://localhost:8801/api/v1";
 const attempt = "ca_12345678901234567890";
 
 class Auth implements AuthClient {

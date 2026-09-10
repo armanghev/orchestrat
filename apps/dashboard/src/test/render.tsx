@@ -29,7 +29,7 @@ export async function renderDashboardRoute({
 }) {
   server.use(...handlers);
   const queryClient = createDashboardQueryClient();
-  const api = new ApiClient("http://localhost:3001", auth);
+  const api = new ApiClient("http://localhost:8801", auth);
   const history = createMemoryHistory({ initialEntries: [path] });
   const context = { api, auth, platform, queryClient };
   const router = createAppRouter(context, history);

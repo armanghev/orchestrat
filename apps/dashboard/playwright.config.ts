@@ -6,13 +6,13 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   reporter: process.env.CI ? "github" : "list",
   use: {
-    baseURL: "http://127.0.0.1:4173",
+    baseURL: "http://127.0.0.1:8814",
     trace: "on-first-retry"
   },
   webServer: {
     command:
-      "VITE_API_URL=https://api.orchestrat.test VITE_SUPABASE_URL=https://e2e-placeholder.supabase.co VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_e2eplaceholderabcdefghijklmnopqrstuvwxyz VITE_WEB_AUTH_CALLBACK_URL=http://127.0.0.1:4173/auth/callback VITE_E2E_AUTH=1 pnpm exec vite --mode e2e --host 127.0.0.1 --port 4173 --strictPort",
-    port: 4173,
+      "VITE_API_URL=https://api.orchestrat.test VITE_SUPABASE_URL=https://e2e-placeholder.supabase.co VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_e2eplaceholderabcdefghijklmnopqrstuvwxyz VITE_WEB_AUTH_CALLBACK_URL=http://127.0.0.1:8814/auth/callback VITE_E2E_AUTH=1 pnpm exec vite --mode e2e --host 127.0.0.1 --port 8814 --strictPort",
+    port: 8814,
     reuseExistingServer: !process.env.CI
   },
   projects: [

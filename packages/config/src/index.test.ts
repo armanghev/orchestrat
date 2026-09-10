@@ -9,6 +9,20 @@ const env = {
   ORCHESTRAT_SUPABASE_URL: "https://example.supabase.co"
 };
 
+test("defaults to dedicated local ports and rejects invalid TCP ports", () => {
+  const config = loadApiConfig(env);
+  assert.equal(config.ORCHESTRAT_API_PORT, 8801);
+  assert.deepEqual(config.ORCHESTRAT_ALLOWED_ORIGINS, [
+    "http://localhost:8813"
+  ]);
+  for (const port of ["0", "65536", "88001", "1.5"])
+    assert.throws(() => loadApiConfig({ ...env, ORCHESTRAT_API_PORT: port }));
+  assert.equal(
+    loadApiConfig({ ...env, ORCHESTRAT_API_PORT: "65535" }).ORCHESTRAT_API_PORT,
+    65535
+  );
+});
+
 test("loads Supabase human JWT configuration independently from CORS", () => {
   const config = loadApiConfig({
     ...env,
@@ -35,10 +49,10 @@ test("prefers Orchestrat host and port over provider-injected fallbacks", () => 
     HOST: "provider-host",
     PORT: "8080",
     ORCHESTRAT_API_HOST: "0.0.0.0",
-    ORCHESTRAT_API_PORT: "3001"
+    ORCHESTRAT_API_PORT: "8801"
   });
   assert.equal(config.ORCHESTRAT_API_HOST, "0.0.0.0");
-  assert.equal(config.ORCHESTRAT_API_PORT, 3001);
+  assert.equal(config.ORCHESTRAT_API_PORT, 8801);
 });
 
 test("accepts standard host and port fallbacks", () => {
