@@ -40,7 +40,11 @@ export function harnessConfigPlan(
     {
       codex: join(home, ".codex", "config.toml"),
       "claude-code": join(home, ".claude.json"),
-      cursor: join(mcpScope === "global" ? home : projectRoot, ".cursor", "mcp.json"),
+      cursor: join(
+        mcpScope === "global" ? home : projectRoot,
+        ".cursor",
+        "mcp.json"
+      ),
       antigravity: join(home, ".gemini", "config", "mcp_config.json"),
       opencode: join(home, ".config", "opencode", "opencode.json")
     } as Record<ConfigurableIntegration, string>
@@ -63,7 +67,7 @@ export function harnessConfigPlan(
       path: mcpPath,
       entries: [
         integration === "opencode"
-          ? "mcp.servers.orchestrat"
+          ? "mcp.orchestrat"
           : integration === "codex"
             ? "mcp_servers.orchestrat"
             : "mcpServers.orchestrat"

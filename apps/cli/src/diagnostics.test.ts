@@ -567,7 +567,9 @@ test("global diagnostics check each configured origin and scoped credential with
     );
     await writeFile(
       join(fixture.home, ".claude.json"),
-      mergeJson(undefined, "claude-code", fixture.command, true)
+      JSON.stringify(
+        JSON.parse(mergeJson(undefined, "claude-code", fixture.command, true))
+      )
     );
     fixture.store.values.set(`agent:${id(1)}:codex`, "scoped-codex-secret");
     fixture.store.values.set(

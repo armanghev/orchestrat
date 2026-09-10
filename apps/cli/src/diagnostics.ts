@@ -19,7 +19,7 @@ import { access, lstat, rm } from "node:fs/promises";
 import { constants } from "node:fs";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { isDeepStrictEqual, promisify } from "node:util";
 
 const redacted = (ok: boolean, detail: string) => ({ ok, detail });
 const execFileAsync = promisify(execFile);
@@ -231,7 +231,13 @@ export async function runDoctor(input: {
         for (const item of [plan.mcp, plan.hooks]) {
           if (!item) continue;
           const source = await readOptional(item.path);
-          current = current && source === item.merge(source);
+          const merged = item.merge(source);
+          current =
+            current &&
+            (source === merged ||
+              (item.path.endsWith(".json") &&
+                source !== undefined &&
+                isDeepStrictEqual(JSON.parse(source), JSON.parse(merged))));
         }
         checks[`config.${integration}`] = redacted(
           current,

@@ -60,6 +60,20 @@ belong in the JSON/TOML config or mapping.
 
 ## Daily commands
 
+For personal use from this checkout, `pnpm cli:install` builds and replaces the
+managed CLI runtime while preserving project mappings and Keychain credentials.
+Restart agent MCP connections after an update so they load the new tool list.
+Use `pnpm dev:api` (port `8801`) and `pnpm dev:dashboard` (port `8813`) for the
+local services. New local setup uses:
+
+```bash
+ORCHESTRAT_API_URL=http://localhost:8801 ORCHESTRAT_WEB_URL=http://localhost:8813 orchestrat setup
+```
+
+Existing project connections use the API origins saved in
+`~/.orchestrat/config.json`; changing an API port also requires updating those
+saved local origins.
+
 ```bash
 orchestrat setup
 orchestrat status
@@ -116,7 +130,7 @@ formats and hook contracts:
 - [Cursor hooks](https://cursor.com/docs/hooks)
 - [Antigravity MCP](https://antigravity.google/docs/mcp)
 - [Antigravity hooks](https://antigravity.google/docs/hooks)
-- [OpenCode v2 MCP](https://opencode.ai/v2/docs/mcp-servers)
+- [OpenCode MCP](https://opencode.ai/docs/mcp-servers/)
 
 ## Current limits
 

@@ -63,7 +63,12 @@ export function mergeJson(
     JSON.stringify(current) !==
       JSON.stringify({
         command,
-        args: ["mcp", "--integration", integration, ...(global ? ["--global"] : [])]
+        args: [
+          "mcp",
+          "--integration",
+          integration,
+          ...(global ? ["--global"] : [])
+        ]
       })
   )
     throw new Error("Existing Orchestrat MCP entry conflicts");
@@ -203,7 +208,12 @@ export function removeJson(
     JSON.stringify(current) !==
     JSON.stringify({
       command,
-      args: ["mcp", "--integration", integration, ...(global ? ["--global"] : [])]
+      args: [
+        "mcp",
+        "--integration",
+        integration,
+        ...(global ? ["--global"] : [])
+      ]
     })
   )
     throw new Error("Existing Orchestrat MCP entry conflicts");
@@ -287,18 +297,24 @@ export function mergeHarnessMcp(
       typeof mcp.servers === "object" &&
       !Array.isArray(mcp.servers)
         ? mcp.servers
-        : {};
+        : mcp;
     const expected = {
       type: "local",
       command: commandArgs(command, integration, cwd, global)
     };
     if (
       servers.orchestrat !== undefined &&
-      JSON.stringify(servers.orchestrat) !== JSON.stringify(expected)
+      (servers.orchestrat.type !== expected.type ||
+        JSON.stringify(servers.orchestrat.command) !==
+          JSON.stringify(expected.command))
     )
       throw new Error("Existing Orchestrat MCP entry conflicts");
-    servers.orchestrat = expected;
-    root.mcp = { ...mcp, servers };
+    servers.orchestrat = {
+      ...servers.orchestrat,
+      ...expected,
+      ...(servers.orchestrat?.enabled === false ? { enabled: true } : {})
+    };
+    root.mcp = mcp;
   } else {
     const mcp =
       root.mcpServers &&
@@ -335,16 +351,27 @@ export function removeHarnessMcp(
     return removeJson(text, integration, command, global);
   const root = jsonObject(text, "Harness configuration must be a JSON object");
   const parent =
-    integration === "opencode" ? root.mcp?.servers : root.mcpServers;
+    integration === "opencode"
+      ? (root.mcp?.servers ?? root.mcp)
+      : root.mcpServers;
   const expected =
     integration === "opencode"
-      ? { type: "local", command: commandArgs(command, integration, cwd, global) }
+      ? {
+          type: "local",
+          command: commandArgs(command, integration, cwd, global)
+        }
       : {
           command,
           args: commandArgs(command, integration, cwd, global).slice(1)
         };
   if (parent?.orchestrat === undefined) return text;
-  if (JSON.stringify(parent.orchestrat) !== JSON.stringify(expected))
+  if (
+    integration === "opencode"
+      ? parent.orchestrat.type !== expected.type ||
+        JSON.stringify(parent.orchestrat.command) !==
+          JSON.stringify(expected.command)
+      : JSON.stringify(parent.orchestrat) !== JSON.stringify(expected)
+  )
     throw new Error("Existing Orchestrat MCP entry conflicts");
   delete parent.orchestrat;
   return `${JSON.stringify(root, null, 2)}\n`;
