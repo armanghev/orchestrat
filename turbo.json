@@ -5,6 +5,7 @@
     "dev": { "cache": false, "persistent": true },
     "lint": { "dependsOn": ["^lint"] },
     "typecheck": { "dependsOn": ["^build"] },
+    "@orchestrat/landing#typecheck": { "dependsOn": ["build"] },
     "test": {
       "dependsOn": ["build"],
       "outputs": ["coverage/**"],
