@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { parseEnv } from "node:util";
 
 const apiRequire = createRequire(
   new URL("../../api/package.json", import.meta.url)
@@ -25,16 +26,13 @@ const ids = {
 const now = "2026-09-06T00:00:00.000Z";
 
 function storageEnvironment() {
-  const values = new Map<string, string>();
-  for (const line of readFileSync(
-    new URL("../../../.worktrees/realtime-documents-storage/.env", import.meta.url),
-    "utf8"
-  ).split(/\r?\n/)) {
-    const match = line.match(/^([A-Z0-9_]+)=(.*)$/);
-    if (match) values.set(match[1], match[2]);
-  }
+  const envPath = new URL("../../../.env", import.meta.url);
+  const values = {
+    ...(existsSync(envPath) ? parseEnv(readFileSync(envPath, "utf8")) : {}),
+    ...process.env
+  };
   const required = (name: string) => {
-    const value = values.get(name);
+    const value = values[name];
     if (!value) throw new Error(`Missing ${name} in the R2 test environment.`);
     return value;
   };
@@ -490,12 +488,13 @@ test("@r2 browser attachment UI uploads through an actual signed R2 PUT", async 
       }
     );
     await page.goto(`/projects/${ids.project}/documents`);
-    await page.getByRole("button", { name: "Choose File" }).setInputFiles({
+    const fileChooser = page.waitForEvent("filechooser");
+    await page.getByRole("button", { name: "Add attachment" }).click();
+    await (await fileChooser).setFiles({
       name: "browser-upload.txt",
       mimeType: "text/plain",
       buffer: bytes
     });
-    await page.getByRole("button", { name: "Add attachment" }).click();
     await expect.poll(() => completed).toBe(true);
 
     const stored = await client.send(
