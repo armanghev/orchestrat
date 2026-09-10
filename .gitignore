@@ -3,6 +3,8 @@ node_modules
 dist
 .next
 coverage
+apps/dashboard/test-results/
+apps/dashboard/playwright-report/
 .env
 .env.local
 *.tsbuildinfo

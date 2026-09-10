@@ -18,7 +18,8 @@ import type {
   PaginationQuery,
   ProjectEventsResponse,
   AgentLifecycleHookRequest,
-  AgentLifecycleHookResponse
+  AgentLifecycleHookResponse,
+  Project
 } from "@orchestrat/protocol";
 import { agentCredentialTokenSchema } from "@orchestrat/protocol";
 import { and, asc, desc, eq, gt, inArray, isNull } from "drizzle-orm";
@@ -107,6 +108,26 @@ export class AgentService {
 
   constructor(private readonly db: Database) {
     this.permissions = new PermissionService(db);
+  }
+
+  async projectForAgent(principal: AgentPrincipal): Promise<Project> {
+    const [project] = await this.db
+      .select()
+      .from(projects)
+      .where(eq(projects.id, principal.projectId))
+      .limit(1);
+    if (!project) throw new ApiError(404, "NOT_FOUND", "Project not found.");
+    return {
+      id: project.id,
+      organization_id: project.organizationId,
+      name: project.name,
+      slug: project.slug,
+      description: project.description,
+      status: project.status,
+      created_at: project.createdAt.toISOString(),
+      updated_at: project.updatedAt.toISOString(),
+      archived_at: project.archivedAt?.toISOString() ?? null
+    };
   }
 
   async authenticate(token: string): Promise<AgentPrincipal> {

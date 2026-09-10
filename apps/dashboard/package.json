@@ -6,10 +6,11 @@
   "scripts": {
     "dev": "vite",
     "dev:web": "vite",
-    "dev:desktop": "tauri dev",
+    "dev:desktop": "node scripts/tauri.mjs dev",
     "build": "pnpm build:web",
     "build:web": "tsc -p tsconfig.build.json && vite build",
-    "build:desktop": "tauri build",
+    "build:desktop": "node scripts/tauri.mjs build",
+    "test:desktop-config": "node scripts/tauri.mjs --self-check",
     "verify:macos": "sh scripts/verify-macos-artifacts.sh",
     "lint": "eslint src vite.config.ts",
     "typecheck": "tsc -b --pretty false",
@@ -19,6 +20,13 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@codemirror/lang-markdown": "6.5.2",
+    "@codemirror/language": "6.12.4",
+    "@codemirror/merge": "6.12.2",
+    "@codemirror/state": "6.7.4",
+    "@codemirror/view": "6.43.11",
+    "@lezer/highlight": "1.2.3",
+    "@mdxeditor/editor": "4.2.3",
     "@orchestrat/protocol": "workspace:*",
     "@supabase/supabase-js": "^2.112.3",
     "@tanstack/react-query": "^5.101.4",

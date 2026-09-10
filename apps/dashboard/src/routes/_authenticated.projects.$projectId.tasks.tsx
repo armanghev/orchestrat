@@ -162,8 +162,7 @@ function TasksRoute() {
     tasks: tasks.data.tasks.filter((task) => task.status === status)
   }));
   return (
-    <main
-      id="main-content"
+    <div
       className="mx-auto w-full max-w-6xl p-6 md:p-8"
       aria-labelledby="tasks-heading"
     >
@@ -277,7 +276,7 @@ function TasksRoute() {
           }
         />
       ) : null}
-    </main>
+    </div>
   );
 }
 
@@ -408,7 +407,7 @@ function TaskDetail({
     id: string;
     body_markdown: string;
     created_at: string;
-    author: { full_name: string };
+    author: { type: "human" | "agent"; full_name: string };
   }>;
   dependencies?: { depends_on: Task[]; blocks: Task[] };
   archived: boolean;
@@ -551,8 +550,11 @@ function TaskDetail({
             {comments.length ? (
               comments.map((item) => (
                 <p key={item.id} className="rounded bg-muted/50 p-2 text-sm">
-                  <span className="font-medium">{item.author.full_name}</span>:{" "}
-                  {item.body_markdown}
+                  <span className="font-medium">
+                    {item.author.full_name}
+                    {item.author.type === "agent" ? " (agent)" : ""}
+                  </span>
+                  : {item.body_markdown}
                 </p>
               ))
             ) : (
@@ -599,7 +601,7 @@ function TaskMessage({
   onRetry?: () => unknown;
 }) {
   return (
-    <main
+    <div
       className="mx-auto w-full max-w-3xl p-6 md:p-8"
       aria-labelledby="task-message-heading"
     >
@@ -622,6 +624,6 @@ function TaskMessage({
           Retry
         </Button>
       ) : null}
-    </main>
+    </div>
   );
 }

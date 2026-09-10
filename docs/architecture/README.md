@@ -4,11 +4,11 @@ Orchestrat is a hosted coordination service with a local macOS bridge. Coding
 agents remain inside Codex, Claude Code, or another runtime; Orchestrat supplies
 shared state, exclusive claims, project documents, and an observable event log.
 
-Sections marked **Current** describe implemented code. Sections marked
-**Private-alpha target** describe the agreed MVP architecture and must not be
-read as existing API behavior.
+Sections marked **Current** describe implemented source. Hosted deployment,
+native distribution, and clean-Mac multi-agent acceptance remain separate,
+unverified private-alpha gates.
 
-## System shape — private-alpha target
+## System shape — current source candidate
 
 ```text
 Codex / Claude Code
@@ -71,9 +71,9 @@ Human requests use:
 Authorization: Bearer <Supabase access token>
 ```
 
-## Agent identity and local bridge — private-alpha target
+## Agent identity and local bridge — current
 
-Each integration becomes a distinct agent with a distinct project-scoped,
+Each integration is a distinct agent with a distinct project-scoped,
 revocable credential:
 
 ```text
@@ -101,6 +101,11 @@ resolved by heartbeat expiry.
 
 The same credential boundary serves long-lived MCP calls and short-lived hook
 commands. Remote MCP and standardized MCP OAuth are deferred.
+
+A project-scoped MCP connection has one configured project. A global MCP
+connection can list authorized projects but must explicitly select one before
+project tools run. The selected credential remains the authority, and
+`get_project` returns the corresponding project from the API.
 
 ## Local setup — private alpha
 
@@ -137,7 +142,7 @@ cross projects or form cycles. Archived projects allow reads but reject writes.
 Human mutations cannot select `claimed`. Agent claim routes and services enforce
 exclusive ownership through the database claim table and partial constraints.
 
-### Private-alpha target
+### Current
 
 Claims are exclusive leases tied to an agent and session. Claiming, renewing,
 releasing, expiring, and completing work must update the task and claim record
@@ -148,16 +153,27 @@ never two apparent owners. Expired claims become available without requiring a
 second-by-second scheduler; expiration may be reconciled when tasks are read or
 claimed until volume proves a worker is necessary.
 
-## Documents — private-alpha target
+Agents use the same task service to list and read tasks, create backlog or ready
+tasks, edit title/description/priority with `expected_version`, and read or add
+Markdown comments. Those metadata edits cannot change claim ownership or task
+status. Task and comment records retain a discriminated human or agent author;
+historical human authors remain intact.
+
+## Documents — current
 
 Documents are project-scoped Markdown identified by path. Content changes create
 immutable revisions. A writer supplies `base_revision`; a stale write returns
 `DOCUMENT_CONFLICT` with the current and supplied revisions.
 
-This prevents lost updates without rich text, CRDTs, collaborative cursors, or a
-separate document service.
+The dashboard edits Markdown with MDXEditor. Human and agent routes also support
+exact text edits, path changes, archive/restore, and multipart attachments in
+R2-compatible object storage. Upload metadata remains in PostgreSQL and access
+is authorized through the owning document and project.
 
-## Events and activity — private-alpha target
+This prevents lost updates without CRDTs, collaborative cursors, local
+filesystem synchronization, or a separate document service.
+
+## Events and activity — current
 
 Meaningful state changes insert ordered, project-scoped events in the same
 database transaction as their domain mutation. Examples include agent
@@ -170,7 +186,7 @@ Transport handlers do not independently construct activity or broadcast state.
 Fine-grained tool telemetry is separate from the durable user-facing Activity
 feed and waits until real usage justifies its storage and retention policy.
 
-## Realtime — private-alpha target
+## Realtime — current
 
 WebSockets are a notification layer, not reliable storage. Services publish
 only after their database transaction commits.
@@ -192,7 +208,7 @@ REST remains usable while the socket is disconnected.
 Start with one API replica and an in-memory map of project connections. Redis
 Pub/Sub is added only when multiple API replicas exist.
 
-## Hooks and activity safety — private-alpha target
+## Hooks and activity safety — current
 
 MCP performs intentional actions. Hooks normalize automatic lifecycle signals
 such as session start, stop, and failure. A hook credential determines its agent
@@ -205,9 +221,8 @@ action.
 ## Errors and correctness — current and target
 
 Every HTTP response carries `x-request-id`; errors use the shared structured
-envelope. Current human task creation is idempotent and updates use expected
-versions. The private-alpha agent, document, and event operations extend those
-same patterns.
+envelope. Human and agent task/comment creation is principal-scoped and
+idempotent, and task/document updates use expected versions.
 
 Security and correctness checks that remain mandatory:
 
@@ -220,13 +235,10 @@ Security and correctness checks that remain mandatory:
 - reject stale document revisions
 - keep Keychain secrets out of config, URLs, logs, and the renderer
 
-## Build sequence
+## Remaining private-alpha gates
 
-1. Agent credentials, sessions, claims, leases, and durable events.
-2. Persistent CLI and generic local MCP bridge for one agent, then the second.
-3. Markdown documents and revision conflicts.
-4. Real Tasks, Agents, Documents, Activity, and Overview dashboard data.
-5. Realtime tickets, event catch-up, and query invalidation.
-6. Safe setup, minimal hooks, diagnostics, cleanup, and integration status.
-7. Notifications, hosted deployment, DMG distribution, and clean-Mac
-   two-agent acceptance.
+The source candidate contains the API, CLI/MCP, dashboard, realtime, document,
+attachment, and native packaging paths. Package publication, hosted deployment
+and migration, R2 production configuration, signed/notarized DMG distribution,
+and clean-Mac multi-agent acceptance are not verified by the source checkout.
+The [operations runbook](../private-alpha-runbook.md) tracks those gates.

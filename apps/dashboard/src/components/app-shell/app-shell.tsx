@@ -144,17 +144,19 @@ export function AppShell({
           className="pointer-events-auto absolute left-22 top-1.75"
         />
       </div>
-      <ContextSidebar
-        catalog={catalog}
-        activeProjectId={activeProjectId}
-        activeRoute={activeRoute}
-        onNavigate={navigateToRoute}
-        onSelectProject={selectProject}
-        onOpenCommands={openCommands}
-        onOpenPreferences={openPreferences}
-        onSignOut={signOut}
-        profile={profile}
-      />
+      <aside aria-label="Project navigation" className="contents">
+        <ContextSidebar
+          catalog={catalog}
+          activeProjectId={activeProjectId}
+          activeRoute={activeRoute}
+          onNavigate={navigateToRoute}
+          onSelectProject={selectProject}
+          onOpenCommands={openCommands}
+          onOpenPreferences={openPreferences}
+          onSignOut={signOut}
+          profile={profile}
+        />
+      </aside>
       <div className="flex w-full min-w-0 flex-1 flex-col">
         <TopToolbar
           context={current}
@@ -162,7 +164,7 @@ export function AppShell({
           collapsed={preferences.contextSidebarCollapsed}
           commandTriggerRef={defaultCommandTriggerRef}
         />
-        <main id="main-content" tabIndex={-1} className="min-h-0 flex-1 overflow-auto">
+        <main id="main-content" tabIndex={0} className="min-h-0 flex-1 overflow-auto">
           <ConnectivityBanner />
           {catalog.failures.length ? (
             <div

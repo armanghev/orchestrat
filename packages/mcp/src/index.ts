@@ -7,7 +7,10 @@ import {
   documentEditMismatchDetailsSchema,
   documentListQuerySchema,
   updateDocumentRequestSchema,
-  editDocumentRequestSchema
+  editDocumentRequestSchema,
+  agentCreateTaskRequestSchema,
+  updateTaskRequestSchema,
+  createTaskCommentRequestSchema
 } from "@orchestrat/protocol";
 import { z } from "zod";
 import { cliSetupIntegrationSchema } from "@orchestrat/protocol";
@@ -19,8 +22,14 @@ type Client = Pick<
   | "openSession"
   | "heartbeat"
   | "closeSession"
+  | "getProject"
   | "listTasks"
   | "getTask"
+  | "createTask"
+  | "updateTask"
+  | "listTaskComments"
+  | "addTaskComment"
+  | "listAgents"
   | "claimTask"
   | "releaseClaim"
   | "completeClaim"
@@ -68,7 +77,11 @@ export function mapMcpError(error: unknown) {
       ? documentConflictDetailsSchema.safeParse(error.details)
       : known && error.code === "DOCUMENT_EDIT_MISMATCH"
         ? documentEditMismatchDetailsSchema.safeParse(error.details)
-        : undefined;
+        : known && error.code === "TASK_VERSION_CONFLICT"
+          ? z
+              .object({ current_version: z.number().int().min(1) })
+              .safeParse(error.details)
+          : undefined;
   const details = parsedDetails?.success ? parsedDetails.data : undefined;
   return {
     isError: true,
@@ -207,6 +220,14 @@ export class McpBridge {
       );
     }
     this.server.registerTool(
+      "get_project",
+      {
+        description: "Get the selected project for this authenticated agent.",
+        inputSchema: {}
+      },
+      async () => this.call(() => this.activeClient().getProject())
+    );
+    this.server.registerTool(
       "list_tasks",
       {
         description: "List project tasks visible to this authenticated agent.",
@@ -223,6 +244,85 @@ export class McpBridge {
       },
       async ({ task_id }) =>
         this.call(() => this.activeClient().getTask(task_id))
+    );
+    this.server.registerTool(
+      "create_task",
+      {
+        description:
+          "Create a task authored by this agent. Supply a stable idempotency_key and reuse the same key and body after an ambiguous response.",
+        inputSchema: {
+          ...agentCreateTaskRequestSchema.shape,
+          idempotency_key: z.string().trim().min(1).max(128)
+        }
+      },
+      async ({ idempotency_key, ...input }) =>
+        this.call(() =>
+          this.activeClient().createTask(
+            agentCreateTaskRequestSchema.parse(input),
+            idempotency_key
+          )
+        )
+    );
+    this.server.registerTool(
+      "update_task",
+      {
+        description:
+          "Update task title, description, or priority using the current expected_version. Ownership and status transitions require claim/release/complete tools.",
+        inputSchema: {
+          ...taskIdInput,
+          ...updateTaskRequestSchema.shape
+        }
+      },
+      async ({ task_id, ...input }) =>
+        this.call(() =>
+          this.activeClient().updateTask(
+            task_id,
+            updateTaskRequestSchema.parse(input)
+          )
+        )
+    );
+    this.server.registerTool(
+      "list_task_comments",
+      {
+        description: "Read chronological human and agent comments on a task.",
+        inputSchema: {
+          ...taskIdInput,
+          limit: z.number().int().min(1).max(100).optional(),
+          cursor: z.string().min(1).optional()
+        }
+      },
+      async ({ task_id, limit, cursor }) =>
+        this.call(() =>
+          this.activeClient().listTaskComments(task_id, { limit, cursor })
+        )
+    );
+    this.server.registerTool(
+      "add_task_comment",
+      {
+        description:
+          "Add an agent-authored Markdown comment. Supply a stable idempotency_key and reuse it with the same body after an ambiguous response; commenting does not claim the task.",
+        inputSchema: {
+          ...taskIdInput,
+          ...createTaskCommentRequestSchema.shape,
+          idempotency_key: z.string().trim().min(1).max(128)
+        }
+      },
+      async ({ task_id, idempotency_key, ...input }) =>
+        this.call(() =>
+          this.activeClient().addTaskComment(
+            task_id,
+            createTaskCommentRequestSchema.parse(input),
+            idempotency_key
+          )
+        )
+    );
+    this.server.registerTool(
+      "list_agents",
+      {
+        description: "List existing agent presence for the selected project.",
+        inputSchema: {}
+      },
+      async () => this.call(() => this.activeClient().listAgents())
     );
     this.server.registerTool(
       "claim_task",

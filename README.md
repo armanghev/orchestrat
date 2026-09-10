@@ -4,9 +4,10 @@ orchestrat is a macOS-first coordination plane for humans and autonomous coding
 agents. It provides shared tasks, exclusive ownership, project knowledge, and
 activity around agent work; it is not an agent runtime.
 
-The private-alpha goal is to connect supported coding agents to the same project
-through a local Orchestrat CLI, let exactly one agent claim shared work, and make
-that coordination visible in the macOS app.
+The private-alpha candidate connects one developer and multiple coding agents to
+the same project through a local Orchestrat CLI. Agents can select a project,
+create and edit task metadata, coordinate through comments, and claim shared
+work while the developer follows the same state in the macOS app.
 
 ## Repository layout
 
@@ -32,11 +33,14 @@ Implemented:
 - Supabase human authentication for web and Tauri, including native Keychain
   session ownership, GitHub OAuth, magic links, and deep-link callbacks
 - organization and project management
-- the human Tasks API, including comments, dependencies, idempotent creation,
-  and optimistic concurrency
+- human and agent task APIs, including truthful authorship, comments,
+  dependencies, idempotent creation, and optimistic concurrency
 - agent credentials, sessions, heartbeat, presence, and exclusive claim APIs,
   plus the local MCP bridge
-- versioned Markdown documents and lifecycle event ingestion
+- project-scoped MCP connections and global connections with explicit project
+  selection
+- versioned Markdown documents, MDXEditor dashboard editing, R2-backed
+  attachments, and lifecycle event ingestion
 - private-alpha CLI setup, status, doctor, disconnect, hooks, durable managed
   runtime packaging, and read-only desktop integration status
 - project-scoped realtime catch-up, dashboard synchronization, and selective
@@ -145,6 +149,8 @@ Known external limitations:
   human authorization; none is claimed by this checkout.
 - Local sandbox restrictions can block network-backed or loopback-dependent
   tests; report those as environment limitations rather than alpha evidence.
+- Local filesystem document synchronization and multi-user team collaboration
+  are deferred beyond this private-alpha candidate.
 
 ## Migration acceptance notes
 

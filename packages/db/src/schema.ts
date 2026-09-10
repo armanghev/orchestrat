@@ -185,9 +185,11 @@ export const tasks = pgTable(
     status: taskStatus("status").default("backlog").notNull(),
     position: integer("position").default(0).notNull(),
     version: integer("version").default(1).notNull(),
-    createdByUserId: uuid("created_by_user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "restrict" }),
+    createdByType: documentAuthorType("created_by_type").notNull(),
+    createdByUserId: uuid("created_by_user_id").references(() => users.id, {
+      onDelete: "restrict"
+    }),
+    createdByAgentId: uuid("created_by_agent_id"),
     ...timestamps,
     startedAt: timestamp("started_at", { withTimezone: true }),
     completedAt: timestamp("completed_at", { withTimezone: true }),
@@ -207,6 +209,16 @@ export const tasks = pgTable(
       table.id
     ),
     index("tasks_created_by_user_id_idx").on(table.createdByUserId),
+    index("tasks_created_by_agent_id_idx").on(table.createdByAgentId),
+    foreignKey({
+      columns: [table.projectId, table.createdByAgentId],
+      foreignColumns: [agents.projectId, agents.id],
+      name: "tasks_created_by_agent_project_fk"
+    }),
+    check(
+      "tasks_author_consistent",
+      sql`(${table.createdByType} = 'human' and ${table.createdByUserId} is not null and ${table.createdByAgentId} is null) or (${table.createdByType} = 'agent' and ${table.createdByUserId} is null and ${table.createdByAgentId} is not null)`
+    ),
     check("tasks_task_number_positive", sql`${table.taskNumber} > 0`),
     check("tasks_position_non_negative", sql`${table.position} >= 0`),
     check("tasks_version_positive", sql`${table.version} > 0`)
@@ -220,9 +232,13 @@ export const taskComments = pgTable(
     taskId: uuid("task_id")
       .notNull()
       .references(() => tasks.id, { onDelete: "cascade" }),
-    authorUserId: uuid("author_user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "restrict" }),
+    projectId: uuid("project_id").notNull(),
+    authorType: documentAuthorType("author_type").notNull(),
+    authorUserId: uuid("author_user_id").references(() => users.id, {
+      onDelete: "restrict"
+    }),
+    authorAgentId: uuid("author_agent_id"),
+    authorName: text("author_name").notNull(),
     bodyMarkdown: text("body_markdown").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true, precision: 3 })
       .defaultNow()
@@ -233,6 +249,20 @@ export const taskComments = pgTable(
       table.taskId,
       table.createdAt,
       table.id
+    ),
+    foreignKey({
+      columns: [table.projectId, table.authorAgentId],
+      foreignColumns: [agents.projectId, agents.id],
+      name: "task_comments_author_agent_project_fk"
+    }),
+    foreignKey({
+      columns: [table.projectId, table.taskId],
+      foreignColumns: [tasks.projectId, tasks.id],
+      name: "task_comments_task_project_fk"
+    }).onDelete("cascade"),
+    check(
+      "task_comments_author_consistent",
+      sql`(${table.authorType} = 'human' and ${table.authorUserId} is not null and ${table.authorAgentId} is null) or (${table.authorType} = 'agent' and ${table.authorUserId} is null and ${table.authorAgentId} is not null)`
     ),
     check(
       "task_comments_body_not_blank",
@@ -591,9 +621,10 @@ export const apiIdempotencyKeys = pgTable(
   "api_idempotency_keys",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    userId: uuid("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+    agentId: uuid("agent_id").references(() => agents.id, {
+      onDelete: "cascade"
+    }),
     operation: text("operation").notNull(),
     resourceId: uuid("resource_id").notNull(),
     idempotencyKey: text("idempotency_key").notNull(),
@@ -605,11 +636,20 @@ export const apiIdempotencyKeys = pgTable(
       .notNull()
   },
   (table) => [
-    uniqueIndex("api_idempotency_scope_unique").on(
-      table.userId,
-      table.operation,
-      table.resourceId,
-      table.idempotencyKey
+    uniqueIndex("api_idempotency_user_scope_unique")
+      .on(table.userId, table.operation, table.resourceId, table.idempotencyKey)
+      .where(sql`${table.userId} is not null`),
+    uniqueIndex("api_idempotency_agent_scope_unique")
+      .on(
+        table.agentId,
+        table.operation,
+        table.resourceId,
+        table.idempotencyKey
+      )
+      .where(sql`${table.agentId} is not null`),
+    check(
+      "api_idempotency_principal_consistent",
+      sql`(${table.userId} is not null and ${table.agentId} is null) or (${table.userId} is null and ${table.agentId} is not null)`
     )
     // ponytail: no retention job yet; add bounded cleanup when idempotency volume requires it.
   ]

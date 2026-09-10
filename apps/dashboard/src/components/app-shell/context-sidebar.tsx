@@ -115,7 +115,10 @@ export function ContextSidebar({
     profile?.full_name ?? profile?.username ?? profile?.email ?? "Account";
 
   return (
-    <Sidebar collapsible="offcanvas" className="relative select-none md:bg-sidebar md:pt-12 px-2">
+    <Sidebar
+      collapsible="offcanvas"
+      className="relative select-none md:bg-sidebar md:pt-12 px-2"
+    >
       <div className="absolute inset-x-0 top-0 hidden h-12 md:block">
         <WindowDragRegion />
       </div>

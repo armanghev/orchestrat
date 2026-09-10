@@ -311,7 +311,7 @@ export function ProfileSettingsPage({
         </p>
       ) : null}
       {profile.user_id ? (
-        <p className="mt-10 break-all font-mono text-xs text-foreground/50">
+          <p className="mt-10 break-all font-mono text-xs text-muted-foreground">
           User ID: {profile.user_id}
         </p>
       ) : null}

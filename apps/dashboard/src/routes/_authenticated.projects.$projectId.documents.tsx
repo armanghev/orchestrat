@@ -1,15 +1,30 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import type { MDXEditorMethods } from "@mdxeditor/editor";
+import {
+  Archive,
+  FileText,
+  MoreHorizontal,
+  Paperclip,
+  Pencil,
+  Plus,
+  RotateCcw
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger
+} from "@/components/ui/dropdown-menu";
+import { MarkdownEditor } from "@/features/documents/markdown-editor";
+import { DocumentHistory } from "@/features/documents/document-history";
 import {
   coordinationKeys,
   documentAttachmentsQueryOptions,
   documentQueryOptions,
-  documentRevisionSummaryQueryOptions,
   documentsQueryOptions
 } from "@/features/coordination/query-options";
 import {
@@ -77,9 +92,8 @@ function DocumentsRoute() {
     visible.find((item) => item.id === selectedId) ?? visible[0] ?? null;
   const projectArchived = project?.project.status === "archived";
   return (
-    <main
-      id="main-content"
-      className="mx-auto w-full max-w-6xl p-6 md:p-8"
+    <div
+      className="document-workspace mx-auto flex min-h-full w-full max-w-7xl flex-col p-4 md:p-6"
       aria-labelledby="documents-heading"
     >
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -91,8 +105,8 @@ function DocumentsRoute() {
           >
             Documents
           </h1>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Shared Markdown files and immutable revisions.
+          <p className="mt-1 text-sm text-muted-foreground">
+            Plans, notes, and context for your project.
           </p>
         </div>
         {!projectArchived ? (
@@ -127,7 +141,10 @@ function DocumentsRoute() {
               </Button>
             </form>
           ) : (
-            <Button onClick={() => setCreating(true)}>New document</Button>
+            <Button onClick={() => setCreating(true)}>
+              <Plus aria-hidden="true" />
+              New document
+            </Button>
           )
         ) : null}
       </div>
@@ -143,45 +160,61 @@ function DocumentsRoute() {
           This project is archived and read-only.
         </p>
       ) : null}
-      <div className="mt-6 flex gap-2" role="group" aria-label="Document state">
-        <Button
-          variant={!showArchived ? "secondary" : "outline"}
-          size="sm"
-          onClick={() => setShowArchived(false)}
-        >
-          Active ({active.length})
-        </Button>
-        <Button
-          variant={showArchived ? "secondary" : "outline"}
-          size="sm"
-          onClick={() => setShowArchived(true)}
-        >
-          Archived ({archived.length})
-        </Button>
-      </div>
-      {visible.length === 0 ? (
-        <p className="mt-6 rounded border border-dashed p-8 text-center text-sm text-muted-foreground">
-          {showArchived
-            ? "No archived documents."
-            : "No Markdown documents are available yet."}
-        </p>
-      ) : (
-        <div className="mt-6 grid gap-6 lg:grid-cols-[240px_minmax(0,1fr)]">
-          <nav aria-label="Project documents" className="rounded border p-2">
-            {visible.map((item) => (
-              <button
-                type="button"
-                key={item.id}
-                onClick={() => setSelectedId(item.id)}
-                className={`w-full rounded px-3 py-2 text-left text-sm hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring ${selected?.id === item.id ? "bg-muted" : ""}`}
-                aria-current={selected?.id === item.id ? "page" : undefined}
+      <div className="mt-6 flex min-h-0 flex-1 overflow-hidden rounded-xl border bg-card">
+        <div className="grid min-h-0 w-full md:grid-cols-[180px_minmax(0,1fr)] xl:grid-cols-[216px_minmax(0,1fr)]">
+          <nav
+            aria-label="Project documents"
+            className="min-w-0 border-b bg-muted/20 md:border-r md:border-b-0"
+          >
+            <div
+              className="flex flex-wrap gap-1 border-b p-3"
+              role="group"
+              aria-label="Document state"
+            >
+              <Button
+                variant={!showArchived ? "secondary" : "ghost"}
+                size="xs"
+                aria-pressed={!showArchived}
+                onClick={() => setShowArchived(false)}
               >
-                {item.path}
-                <span className="mt-1 block font-mono text-xs text-muted-foreground">
-                  Revision {item.current_revision}
-                </span>
-              </button>
-            ))}
+                Active ({active.length})
+              </Button>
+              <Button
+                variant={showArchived ? "secondary" : "ghost"}
+                size="xs"
+                aria-pressed={showArchived}
+                onClick={() => setShowArchived(true)}
+              >
+                Archived ({archived.length})
+              </Button>
+            </div>
+            <div className="max-h-40 space-y-1 overflow-y-auto p-2 md:max-h-[70dvh]">
+              {visible.map((item) => (
+                <button
+                  type="button"
+                  key={item.id}
+                  onClick={() => setSelectedId(item.id)}
+                  className={`flex w-full items-start gap-2 rounded-lg px-2.5 py-3 text-left text-sm transition-colors hover:bg-muted ${selected?.id === item.id ? "bg-accent text-accent-foreground" : "text-muted-foreground"}`}
+                  aria-current={selected?.id === item.id ? "page" : undefined}
+                >
+                  <FileText
+                    className="mt-0.5 size-4 shrink-0"
+                    aria-hidden="true"
+                  />
+                  <span className="min-w-0">
+                    <span
+                      className="block truncate font-medium"
+                      title={item.path}
+                    >
+                      {item.path}
+                    </span>
+                    <span className="mt-1 block text-xs text-muted-foreground">
+                      Revision {item.current_revision}
+                    </span>
+                  </span>
+                </button>
+              ))}
+            </div>
           </nav>
           {selected ? (
             <DocumentEditor
@@ -192,10 +225,22 @@ function DocumentsRoute() {
               projectArchived={projectArchived}
               queryClient={queryClient}
             />
-          ) : null}
+          ) : (
+            <div className="flex min-h-72 flex-col items-center justify-center gap-3 p-8 text-center">
+              <FileText
+                className="size-7 text-muted-foreground"
+                aria-hidden="true"
+              />
+              <p className="text-sm text-muted-foreground">
+                {showArchived
+                  ? "No archived documents."
+                  : "Create a document to start sharing project context."}
+              </p>
+            </div>
+          )}
         </div>
-      )}
-    </main>
+      </div>
+    </div>
   );
 }
 
@@ -213,9 +258,6 @@ function DocumentEditor({
   queryClient: ReturnType<typeof useQueryClient>;
 }) {
   const document = useQuery(documentQueryOptions(api, documentId));
-  const history = useQuery(
-    documentRevisionSummaryQueryOptions(api, documentId)
-  );
   const attachments = useQuery(
     documentAttachmentsQueryOptions(api, documentId)
   );
@@ -228,10 +270,9 @@ function DocumentEditor({
   const [status, setStatus] = useState("Saved");
   const [rename, setRename] = useState(false);
   const [path, setPath] = useState("");
-  const [historyRevision, setHistoryRevision] = useState<number | null>(null);
-  const [editorView, setEditorView] = useState<"editing" | "preview">(
-    "editing"
-  );
+  const [editorError, setEditorError] = useState<string | null>(null);
+  const editorRef = useRef<MDXEditorMethods>(null);
+  const programmaticMarkdownRef = useRef<string | null>(null);
   const draftRef = useRef(draft);
   const baseContentRef = useRef(baseContent);
   const baseRevisionRef = useRef(baseRevision);
@@ -339,6 +380,7 @@ function DocumentEditor({
         draftRef.current === baseContentRef.current ||
         remoteRef.current !== null ||
         awaitingRemoteRef.current ||
+        editorError !== null ||
         projectArchived
       )
         return;
@@ -350,7 +392,7 @@ function DocumentEditor({
         ...(saveKind ? { save_kind: saveKind } : {})
       });
     },
-    [projectArchived, save]
+    [editorError, projectArchived, save]
   );
   useEffect(() => {
     const next = document.data;
@@ -379,6 +421,8 @@ function DocumentEditor({
       baseContentRef.current = content;
       baseRevisionRef.current = revision;
       setDraft(content);
+      programmaticMarkdownRef.current = content;
+      editorRef.current?.setMarkdown(content);
       setBaseContent(content);
       setBaseRevision(revision);
       setStatus(`Revision ${revision} saved by ${actor}`);
@@ -456,10 +500,10 @@ function DocumentEditor({
   };
   return (
     <section
-      className="min-w-0 rounded border p-5"
+      className="flex min-h-0 min-w-0 flex-col bg-background"
       aria-labelledby="document-editor-heading"
     >
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="flex shrink-0 flex-wrap items-start justify-between gap-3 border-b px-5 py-4">
         <div className="min-w-0">
           {rename && !archived ? (
             <div className="flex flex-wrap gap-2">
@@ -485,64 +529,87 @@ function DocumentEditor({
           ) : (
             <h2
               id="document-editor-heading"
-              className="truncate text-lg font-semibold"
+              className="truncate text-base font-semibold"
+              title={current.document.path}
             >
               {current.document.path}
             </h2>
           )}
-          <p className="mt-1 font-mono text-xs text-muted-foreground">
-            Revision {baseRevision ?? current.revision.revision_number}
-            {archived ? " · archived" : ""}
+          <p
+            role="status"
+            aria-live="polite"
+            className="mt-1 text-xs text-muted-foreground"
+          >
+            {status}
+            {archived ? " · Archived" : ""}
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          {!archived && !rename ? (
-            <Button variant="outline" size="sm" onClick={() => setRename(true)}>
-              Rename
-            </Button>
-          ) : null}
-          {archived && !projectArchived ? (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() =>
-                void api.restoreDocument(documentId).then(invalidateDocument)
-              }
-            >
-              Restore
-            </Button>
-          ) : null}
+        <div className="flex shrink-0 items-center gap-1.5">
+          <DocumentHistory
+            api={api}
+            documentId={documentId}
+            path={current.document.path}
+            currentRevision={current.revision}
+            hasUnsavedChanges={dirty}
+          />
           {!archived ? (
             <Button
-              variant="outline"
               size="sm"
-              onClick={() =>
-                void api.archiveDocument(documentId).then(invalidateDocument)
-              }
-            >
-              Archive
-            </Button>
-          ) : null}
-          {!archived ? (
-            <Button
               onClick={() => saveNow()}
               disabled={!dirty || save.isPending || Boolean(remote) || merging}
             >
               {save.isPending ? "Saving…" : "Save now"}
             </Button>
           ) : null}
+          {!archived || !projectArchived ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Document actions"
+                >
+                  <MoreHorizontal aria-hidden="true" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-40">
+                {!archived ? (
+                  <>
+                    <DropdownMenuItem onSelect={() => setRename(true)}>
+                      <Pencil aria-hidden="true" />
+                      Rename
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onSelect={() =>
+                        void api
+                          .archiveDocument(documentId)
+                          .then(invalidateDocument)
+                      }
+                    >
+                      <Archive aria-hidden="true" />
+                      Archive
+                    </DropdownMenuItem>
+                  </>
+                ) : (
+                  <DropdownMenuItem
+                    onSelect={() =>
+                      void api
+                        .restoreDocument(documentId)
+                        .then(invalidateDocument)
+                    }
+                  >
+                    <RotateCcw aria-hidden="true" />
+                    Restore
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null}
         </div>
       </div>
-      <p
-        role="status"
-        aria-live="polite"
-        className="mt-3 text-sm text-muted-foreground"
-      >
-        {status}
-      </p>
       {remote ? (
         <div
-          className="mt-4 rounded border border-amber-500/50 p-3"
+          className="m-5 shrink-0 rounded-lg border border-warning/50 p-3"
           role="alert"
           aria-labelledby="conflict-heading"
         >
@@ -585,6 +652,9 @@ function DocumentEditor({
                 baseContentRef.current = remote.content;
                 baseRevisionRef.current = remote.revision;
                 setDraft(remote.content);
+                programmaticMarkdownRef.current = remote.content;
+                editorRef.current?.setMarkdown(remote.content);
+                setEditorError(null);
                 setBaseContent(remote.content);
                 setBaseRevision(remote.revision);
                 setRemote(null);
@@ -632,56 +702,48 @@ function DocumentEditor({
           </div>
         </div>
       ) : null}
-      <section className="mt-5" aria-label="Markdown editor">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          {editorView === "editing" ? (
-            <label htmlFor="document-content" className="text-sm font-medium">
-              Markdown content
-            </label>
+      <section className="document-editor-surface flex min-h-0 flex-1 flex-col" aria-label="Markdown editor">
+        <label htmlFor="document-content" className="sr-only">
+          Markdown content
+        </label>
+        <div className="flex min-h-0 flex-1 flex-col">
+          {baseRevision === null ? (
+            <p className="p-4 text-sm text-muted-foreground">Loading editor…</p>
           ) : (
-            <span className="text-sm font-medium">Markdown preview</span>
-          )}
-          <div aria-label="Document view" className="flex gap-1">
-            <Button
-              aria-pressed={editorView === "editing"}
-              size="sm"
-              variant={editorView === "editing" ? "default" : "outline"}
-              onClick={() => setEditorView("editing")}
-            >
-              Editing
-            </Button>
-            <Button
-              aria-pressed={editorView === "preview"}
-              size="sm"
-              variant={editorView === "preview" ? "default" : "outline"}
-              onClick={() => setEditorView("preview")}
-            >
-              Preview
-            </Button>
-          </div>
-        </div>
-        {editorView === "editing" ? (
-          <div className="mt-2 overflow-hidden rounded-lg border border-input">
-            <textarea
-              id="document-content"
-              value={draft}
-              onChange={(event) => {
-                setDraft(event.target.value);
+            <MarkdownEditor
+              ref={editorRef}
+              markdown={draft}
+              readOnly={archived}
+              onChange={(markdown, initialMarkdownNormalize) => {
+                if (programmaticMarkdownRef.current !== null) {
+                  programmaticMarkdownRef.current = null;
+                  return;
+                }
+                if (initialMarkdownNormalize) return;
+                setEditorError(null);
+                draftRef.current = markdown;
+                setDraft(markdown);
                 if (!remote && !merging) setStatus("Unsaved");
               }}
-              disabled={archived}
-              rows={16}
-              className="block w-full bg-transparent p-3 font-mono text-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+              onError={({ error, source }) => {
+                draftRef.current = source;
+                setDraft(source);
+                setEditorError(error);
+                setStatus(
+                  "Markdown could not be rendered. Your source is preserved; fix it in Source mode."
+                );
+              }}
             />
-          </div>
-        ) : (
-          <div className="mt-2 min-h-[24rem] overflow-auto rounded-lg border border-input p-4">
-            <MarkdownPreview content={draft} />
-          </div>
-        )}
+          )}
+        </div>
       </section>
+      {editorError ? (
+        <p role="alert" className="shrink-0 px-5 py-3 text-sm text-destructive">
+          Markdown could not be rendered. Switch to Source mode to recover it.
+        </p>
+      ) : null}
       {merging && !remote && !archived ? (
-        <div className="mt-3 flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2 px-5 py-3">
           <p className="text-sm text-amber-500">
             Autosave is paused while merging.
           </p>
@@ -701,91 +763,7 @@ function DocumentEditor({
         attachments={attachments.data?.attachments ?? []}
         onChanged={invalidateDocument}
       />
-      <section
-        className="mt-6 border-t pt-5"
-        aria-labelledby="revision-history-heading"
-      >
-        <h3 id="revision-history-heading" className="text-sm font-semibold">
-          Revision history
-        </h3>
-        {history.isError ? (
-          <p className="mt-2 text-sm text-destructive">
-            Unable to load revision history.
-          </p>
-        ) : null}
-        <div className="mt-2 flex flex-wrap gap-2">
-          {history.data?.revisions.map((revision) => (
-            <Button
-              key={revision.revision_number}
-              variant={
-                historyRevision === revision.revision_number
-                  ? "secondary"
-                  : "outline"
-              }
-              size="sm"
-              onClick={() => setHistoryRevision(revision.revision_number)}
-            >
-              Revision {revision.revision_number}
-            </Button>
-          ))}
-        </div>
-        {historyRevision ? (
-          <HistoricalRevision
-            api={api}
-            documentId={documentId}
-            revision={historyRevision}
-          />
-        ) : null}
-      </section>
     </section>
-  );
-}
-
-function MarkdownPreview({ content }: { content: string }) {
-  if (!content.trim())
-    return <p className="text-sm text-muted-foreground">Nothing to preview.</p>;
-  return (
-    <div className="text-sm leading-6 [&_a]:text-primary [&_a]:underline [&_blockquote]:my-4 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_h1]:mb-4 [&_h1]:text-3xl [&_h1]:font-semibold [&_h1]:tracking-tight [&_h2]:mb-3 [&_h2]:mt-8 [&_h2]:text-2xl [&_h2]:font-semibold [&_h3]:mb-2 [&_h3]:mt-6 [&_h3]:text-xl [&_h3]:font-semibold [&_li]:my-1 [&_ol]:my-4 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-4 [&_pre]:my-4 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_table]:my-4 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-border [&_td]:p-2 [&_th]:border [&_th]:border-border [&_th]:bg-muted [&_th]:p-2 [&_ul]:my-4 [&_ul]:list-disc [&_ul]:pl-6">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
-    </div>
-  );
-}
-
-function HistoricalRevision({
-  api,
-  documentId,
-  revision
-}: {
-  api: Parameters<typeof documentsQueryOptions>[0];
-  documentId: string;
-  revision: number;
-}) {
-  const detail = useQuery({
-    queryKey: [...coordinationKeys.revisions(documentId), "detail", revision],
-    queryFn: () => api.getDocumentRevision(documentId, revision)
-  });
-  if (detail.isPending)
-    return (
-      <p className="mt-3 text-sm text-muted-foreground">
-        Loading revision {revision}…
-      </p>
-    );
-  if (detail.isError || !detail.data)
-    return (
-      <p className="mt-3 text-sm text-destructive">
-        Unable to load revision {revision}.
-      </p>
-    );
-  return (
-    <label className="mt-4 block text-sm font-medium">
-      Revision {revision} (read-only)
-      <textarea
-        value={detail.data.content}
-        readOnly
-        rows={8}
-        className="mt-2 w-full rounded-lg border border-input bg-muted/30 p-3 font-mono text-sm"
-      />
-    </label>
   );
 }
 
@@ -980,16 +958,18 @@ function AttachmentSection({
     (uploading.failed && !uploading.uploadId);
   return (
     <section
-      className="mt-6 border-t pt-5"
+      className="shrink-0 border-t px-5 py-4"
       aria-labelledby="attachments-heading"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h3 id="attachments-heading" className="text-sm font-semibold">
+          <h3 id="attachments-heading" className="flex items-center gap-2 text-sm font-medium">
+            <Paperclip className="size-4 text-muted-foreground" aria-hidden="true" />
             Attachments
+            {attachments.length > 0 ? <span className="text-xs text-muted-foreground">{attachments.length}</span> : null}
           </h3>
           <p className="mt-1 text-xs text-muted-foreground">
-            Private files are downloaded as attachments.
+            {attachments.length > 0 ? "Private files shared with this document." : "Add supporting files for your project."}
           </p>
         </div>
         <input
@@ -1304,13 +1284,13 @@ function DocumentMessage({
   message: string;
 }) {
   return (
-    <main className="mx-auto w-full max-w-3xl p-6 md:p-8">
+    <div className="mx-auto w-full max-w-3xl p-6 md:p-8">
       <h1 tabIndex={-1} className="text-2xl font-semibold">
         {title}
       </h1>
       <p role="status" className="mt-3 text-sm text-muted-foreground">
         {message}
       </p>
-    </main>
+    </div>
   );
 }

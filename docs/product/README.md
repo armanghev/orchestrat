@@ -7,13 +7,13 @@ an observable history.
 
 ## Private-alpha outcome
 
-The MVP succeeds when a developer can connect Codex and Claude Code to one
-project, create shared work, and see exactly which agent owns what.
+The MVP succeeds when one developer can connect multiple coding agents to a
+project, create shared work, and see exactly which agent owns and authored what.
 
 The acceptance flow is:
 
 1. A human signs in and creates a project.
-2. The setup CLI connects Codex and Claude Code as separate agent identities.
+2. The setup CLI connects supported runtimes as separate agent identities.
 3. Both agents discover the same ready task.
 4. They attempt to claim it, but exactly one succeeds.
 5. The winner heartbeats, comments, updates shared Markdown, and completes it.
@@ -34,8 +34,8 @@ The macOS app and web dashboard share one React frontend with these routes:
   comments, and optimistic versions.
 - **Agents** — runtime, presence, current session, heartbeat, current task, and
   recent activity.
-- **Documents** — shared Markdown files with immutable revisions and conflict
-  protection.
+- **Documents** — MDXEditor-based Markdown editing, immutable revisions,
+  conflict protection, and R2-backed attachments.
 - **Activity** — durable meaningful project events, not a stream of every tool
   call.
 - **Settings** — project and local integration status.
@@ -49,6 +49,11 @@ is deliberately deferred.
 the locally installed Node CLI. It provides a generic stdio MCP bridge and
 lightweight lifecycle hooks for both Codex and Claude Code; see the
 [private-alpha setup guide](../agent-setup.md).
+
+Project-scoped setup binds one MCP connection to one project. Global setup
+exposes `list_projects` and requires an explicit `select_project` before
+project work; `get_project` reports the active project. Selection is never
+inferred from a request body.
 
 Each integration has its own project-scoped, revocable credential stored in
 macOS Keychain. Agent configuration files contain no API secrets. The backend
@@ -80,20 +85,21 @@ Implemented today:
 - Human Tasks API for create/list/detail/update/move, comments, dependencies,
   idempotent creation, and optimistic concurrency.
 - Agent credentials, sessions, heartbeat, presence, exclusive claims, and the
-  local MCP bridge.
-- Versioned Markdown documents and normalized lifecycle events.
+  local MCP bridge. Agents can get the active project, list project agents,
+  create and read tasks, edit task metadata with an expected version, and read
+  or post comments with truthful agent authorship.
+- Versioned Markdown documents, exact edits, rename/archive/restore operations,
+  normalized lifecycle events, MDXEditor dashboard editing, and multipart
+  R2-backed attachments for humans and agents.
 - Private-alpha CLI setup, status, doctor, disconnect, hooks, and read-only
   desktop integration status; see the [setup guide](../agent-setup.md).
-- Shared web/Tauri dashboard shell.
+- Shared web/Tauri dashboard with Tasks, Agents, Documents, Activity, Overview,
+  and Settings data wired to the API.
 
-Still planned:
-
-- Dashboard wiring for Tasks and every agent-facing surface.
-- Activity and project-scoped realtime delivery.
-- Notifications and alpha distribution.
-
-The current Tasks API migration and full end-to-end native flow still require
-verification against the production-like PostgreSQL and macOS environments.
+The source candidate is implemented and covered by repository checks. Hosted
+deployment, database migration, package publication, signed/notarized native
+distribution, and clean-Mac multi-agent acceptance remain unverified. See the
+[private-alpha operations runbook](../private-alpha-runbook.md) for those gates.
 
 ## Deferred until after private alpha
 
@@ -101,7 +107,8 @@ verification against the production-like PostgreSQL and macOS environments.
 - Workflow builders, automatic assignment, and capability matching
 - GitHub, Slack, Linear, and marketplace integrations
 - Remote MCP/OAuth, cloud agents, and CI agents
-- Rich text, CRDTs, and collaborative cursors
+- Local filesystem document synchronization, CRDTs, and collaborative cursors
+- Multi-user team collaboration beyond the single-developer alpha
 - Detailed tool telemetry and advanced analytics
 - Advanced RBAC, billing, and enterprise controls
 - Windows, Linux, menu-bar mode, and sophisticated agent auto-detection

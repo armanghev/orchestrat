@@ -2,14 +2,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { POST } from "../app/api/waitlist/route";
 
-function request(email: string, company = "") {
+function request(email: string, company = "", json = false) {
   const formData = new FormData();
   formData.set("email", email);
   formData.set("company", company);
 
   return new Request("https://landing.test/api/waitlist", {
     body: formData,
-    method: "POST"
+    method: "POST",
+    headers: json ? { Accept: "application/json" } : undefined
   });
 }
 
@@ -39,9 +40,27 @@ test("validates emails and writes normalized values to Supabase", async () => {
       "https://landing.test/?waitlist=joined#waitlist"
     );
     assert.equal(sent?.body, JSON.stringify({ email: "dev@example.com" }));
+
+    const accepted = await POST(request("dev@example.com", "", true));
+    assert.equal(accepted.status, 200);
+    assert.deepEqual(await accepted.json(), { status: "joined" });
+    globalThis.fetch = async () => new Response(null, { status: 409 });
+    assert.deepEqual(
+      await (await POST(request("dev@example.com", "", true))).json(),
+      { status: "joined" }
+    );
+    const invalidJson = await POST(request("invalid", "", true));
+    assert.equal(invalidJson.status, 400);
+    assert.deepEqual(await invalidJson.json(), { status: "invalid" });
+    delete process.env.SUPABASE_URL;
+    const unavailable = await POST(request("dev@example.com", "", true));
+    assert.equal(unavailable.status, 503);
+    assert.deepEqual(await unavailable.json(), { status: "unavailable" });
   } finally {
     globalThis.fetch = originalFetch;
-    process.env.SUPABASE_URL = originalUrl;
-    process.env.SUPABASE_PUBLISHABLE_KEY = originalKey;
+    if (originalUrl === undefined) delete process.env.SUPABASE_URL;
+    else process.env.SUPABASE_URL = originalUrl;
+    if (originalKey === undefined) delete process.env.SUPABASE_PUBLISHABLE_KEY;
+    else process.env.SUPABASE_PUBLISHABLE_KEY = originalKey;
   }
 });

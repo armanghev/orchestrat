@@ -51,6 +51,10 @@ export function taskCard(overrides: Partial<TaskCard> = {}): TaskCard {
     status: "ready",
     position: 0,
     version: 1,
+    created_by: {
+      type: "human",
+      id: "00000000-0000-4000-8000-000000000004"
+    },
     created_by_user_id: "00000000-0000-4000-8000-000000000004",
     created_at: timestamp,
     updated_at: timestamp,

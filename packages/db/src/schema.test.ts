@@ -54,7 +54,7 @@ test("agent lifecycle idempotency is project/agent scoped and hash-only", async 
       "utf8"
     )
   ) as { entries: { tag: string }[] };
-  assert.equal(journal.entries.at(-1)?.tag, "0010_remote_document_storage");
+  assert.equal(journal.entries.at(-1)?.tag, "0011_agent_task_authors");
 });
 
 test("CLI credentials can be user-scoped after the authorization migration", async () => {
@@ -162,9 +162,19 @@ test("claims and idempotency schema retain their safety constraints", () => {
   );
 
   const idempotencyConfig = getTableConfig(apiIdempotencyKeys);
+  for (const name of [
+    "api_idempotency_user_scope_unique",
+    "api_idempotency_agent_scope_unique"
+  ]) {
+    const index = idempotencyConfig.indexes.find(
+      (candidate) => candidate.config.name === name
+    );
+    assert.equal(index?.config.unique, true);
+    assert.ok(index?.config.where);
+  }
   assert.ok(
-    idempotencyConfig.indexes.find(
-      (index) => index.config.name === "api_idempotency_scope_unique"
+    idempotencyConfig.checks.find(
+      (check) => check.name === "api_idempotency_principal_consistent"
     )
   );
 });

@@ -157,3 +157,125 @@
   outline: none !important;
   box-shadow: none !important;
 }
+
+/* Typography for rendered Markdown. */
+.document-markdown {
+  color: var(--foreground);
+  font-size: 0.875rem;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+
+  :where(h1, h2, h3, h4, h5, h6) {
+    margin: 1.75em 0 0.6em;
+    font-weight: 600;
+    line-height: 1.3;
+    letter-spacing: -0.02em;
+  }
+  :where(h1) { font-size: 2rem; }
+  :where(h2) { font-size: 1.5rem; }
+  :where(h3) { font-size: 1.25rem; }
+  :where(h4) { font-size: 1.125rem; }
+  :where(h5) { font-size: 1rem; }
+  :where(h6) { font-size: 0.875rem; }
+  :where(p, ul, ol, blockquote, pre, table) { margin: 1rem 0; }
+  > :first-child { margin-top: 0; }
+  > :last-child { margin-bottom: 0; }
+  :where(a) { color: var(--primary-text); text-decoration: underline; }
+  :where(ul) { list-style-type: disc; padding-inline-start: 1.5rem; }
+  :where(ol) { list-style-type: decimal; padding-inline-start: 1.5rem; }
+  :where(li) { margin: 0.25rem 0; }
+  :where(li > ul, li > ol) { margin-block: 0.25rem; }
+  :where(blockquote) {
+    border-inline-start: 3px solid var(--border);
+    padding-inline-start: 1rem;
+    color: var(--muted-foreground);
+  }
+  :where(code) {
+    border-radius: 0.25rem;
+    background: var(--muted);
+    padding: 0.125rem 0.25rem;
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+  }
+  :where(pre) {
+    overflow-x: auto;
+    border-radius: var(--radius);
+    background: var(--muted);
+    padding: 1rem;
+  }
+  :where(pre code) { background: transparent; padding: 0; }
+  :where(hr) { margin: 1.5rem 0; border-color: var(--border); }
+
+  /* Plain Markdown tables; editable tables keep their row and column controls. */
+  > table {
+    width: 100%;
+    border-collapse: collapse;
+    :where(th, td) { border: 1px solid var(--border); padding: 0.5rem; }
+    :where(th) { background: var(--muted); text-align: start; }
+  }
+  :where(ul.contains-task-list) { list-style: none; padding-inline-start: 0; }
+  :where(.task-list-item input) { margin-inline-end: 0.5rem; accent-color: var(--primary); }
+}
+
+/* MDXEditor copies this class to its portal, so menus share the app theme. */
+.orchestrat-markdown-editor:is(.mdxeditor, .mdxeditor-popup-container) {
+  --basePageBg: var(--popover);
+  --baseBase: var(--background);
+  --baseBgSubtle: var(--card);
+  --baseBg: var(--muted);
+  --baseBgHover: var(--accent);
+  --baseBgActive: var(--accent);
+  --baseLine: var(--border);
+  --baseBorder: var(--border);
+  --baseBorderHover: var(--muted-foreground);
+  --baseText: var(--muted-foreground);
+  --baseTextContrast: var(--foreground);
+  --accentBg: var(--accent);
+  --accentBgHover: var(--accent);
+  --accentBgActive: var(--accent);
+  --accentBorder: var(--ring);
+  --accentSolid: var(--primary);
+  --accentSolidHover: var(--primary);
+  --accentText: var(--primary-text);
+  --accentTextContrast: var(--foreground);
+  --font-body: var(--font-sans);
+  color: var(--foreground);
+
+  .mdxeditor-toolbar {
+    flex-wrap: wrap;
+    border-bottom: 1px solid var(--border);
+    border-radius: 0;
+    background: var(--card);
+  }
+  .mdxeditor-contenteditable-wrapper > .document-markdown { padding: 1.25rem; }
+  .document-markdown .cm-editor { margin-top: 1.5rem; }
+  .mdxeditor-select-content { border: 1px solid var(--border); border-radius: var(--radius); }
+  /* Restore keyboard focus inside the editor despite the app-wide reset. */
+  :is(button, input, [role="combobox"], [role="radio"], [role="checkbox"]):focus-visible {
+    outline: 2px solid var(--ring) !important;
+    outline-offset: 2px;
+  }
+}
+
+.document-editor-surface .mdxeditor-toolbar {
+  padding: 0.625rem 1rem;
+  background: transparent;
+}
+
+.document-workspace :is(button, input):focus-visible,
+.document-history-dialog :is(button, [tabindex="0"]):focus-visible {
+  outline: 2px solid var(--ring) !important;
+  outline-offset: -2px;
+}
+
+.document-history-dialog {
+  gap: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .document-workspace *,
+  .document-history-dialog {
+    animation: none !important;
+    transition: none !important;
+  }
+}

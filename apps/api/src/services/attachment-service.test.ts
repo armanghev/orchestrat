@@ -13,6 +13,7 @@ import { fixture } from "../test/fixture.js";
 import type { AgentPrincipal } from "./agent-service.js";
 import { ApiError } from "./api-error.js";
 import { AttachmentService } from "./attachment-service.js";
+import { expireUploads } from "../operations/storage-operations.js";
 
 const AUTH_SUBJECT = "550e8400-e29b-41d4-a716-446655440000";
 const DIRECT_SIZE = 100 * 1024 * 1024;
@@ -38,9 +39,11 @@ class FakeS3 {
   completeParts: Array<{ PartNumber: number; ETag: string }> = [];
   completeCalls = 0;
   failCompleteAfterCommit = false;
+  beforeSend?: (name: string) => Promise<void>;
 
   async send(command: Command) {
     const name = command.constructor.name;
+    await this.beforeSend?.(name);
     const input = command.input;
     this.commands.push(name);
     const key = String(input.Key ?? "");
@@ -434,7 +437,16 @@ test("abort clears direct and multipart sessions; expired sessions are rejected"
     .select()
     .from(documentAttachmentUploads)
     .where(eq(documentAttachmentUploads.id, expiredUpload.upload.id));
-  assert.equal(expiredRow.status, "expired");
+  assert.equal(expiredRow.status, "pending");
+  const cleanup = await expireUploads(
+    expired.db,
+    storageClient(expired.fake),
+    config,
+    new Date(),
+    true
+  );
+  assert.equal(cleanup.expired, 1);
+  assert.ok(expired.fake.commands.includes("DeleteObjectCommand"));
 });
 
 test("archived documents reject attachment uploads", async () => {
@@ -541,4 +553,79 @@ test("completed upload completion is idempotent", async () => {
   );
   assert.deepEqual(second, first);
   assert.equal(fake.commands.length, commandCount);
+});
+
+test("abort commits cancellation before cleanup can race with completion", async () => {
+  const { db, document, service, fake, userId } = await setup();
+  const { upload } = await service.create(userId, document.id, input(10));
+  const key = `document-attachments/v1/${document.project_id}/${document.id}/${upload.id}`;
+  fake.objects.set(key, 10);
+  let raced = false;
+  fake.beforeSend = async (name) => {
+    if (name !== "DeleteObjectCommand") return;
+    fake.beforeSend = undefined;
+    raced = true;
+    await assert.rejects(
+      service.complete(userId, upload.id, [], document.id),
+      apiError("CONFLICT")
+    );
+  };
+  await service.abort(userId, upload.id, document.id);
+  assert.equal(raced, true);
+  assert.equal(fake.objects.has(key), false);
+  assert.equal(
+    (
+      await db
+        .select()
+        .from(documentAttachments)
+        .where(eq(documentAttachments.id, upload.id))
+    ).length,
+    0
+  );
+});
+
+test("stale abort and expiry candidates preserve a completed attachment", async () => {
+  const { db, document, service, fake, userId } = await setup();
+  const { upload } = await service.create(userId, document.id, input(10));
+  const [pending] = await db
+    .select()
+    .from(documentAttachmentUploads)
+    .where(eq(documentAttachmentUploads.id, upload.id));
+  const key = `document-attachments/v1/${document.project_id}/${document.id}/${upload.id}`;
+  fake.objects.set(key, 10);
+  await service.complete(userId, upload.id, [], document.id);
+  const commands = fake.commands.length;
+  await assert.rejects(
+    (
+      service as unknown as {
+        abortProject: (row: typeof pending) => Promise<void>;
+      }
+    ).abortProject(pending),
+    apiError("CONFLICT")
+  );
+  // Supply the expiry worker's already-read candidate, while its conditional
+  // write still uses the real database containing the winning completion.
+  const stale = Object.create(db) as typeof db;
+  stale.select = (() => ({
+    from: () => ({ where: async () => [pending] })
+  })) as unknown as typeof db.select;
+  const result = await expireUploads(
+    stale,
+    storageClient(fake),
+    config,
+    new Date(pending.expiresAt.getTime() + 1),
+    true
+  );
+  assert.equal(result.expired, 0);
+  assert.equal(fake.commands.length, commands);
+  assert.equal(fake.objects.get(key), 10);
+  assert.equal(
+    (
+      await db
+        .select()
+        .from(documentAttachments)
+        .where(eq(documentAttachments.id, upload.id))
+    ).length,
+    1
+  );
 });

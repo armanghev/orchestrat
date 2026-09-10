@@ -263,7 +263,7 @@ export async function backfill(
   return { apply, scanned: rows.length, planned, uploaded, updated, skipped };
 }
 
-async function expireUploads(
+export async function expireUploads(
   db: Database,
   storage: S3Client,
   config: StorageConfig,
@@ -282,6 +282,20 @@ async function expireUploads(
   if (!apply) return { scanned: rows.length, expired: 0 };
   let expired = 0;
   for (const row of rows) {
+    // The conditional update must commit before touching storage: completion
+    // can have won since the candidate query, in which case its object is live.
+    const [claimed] = await db
+      .update(documentAttachmentUploads)
+      .set({ status: "expired" })
+      .where(
+        and(
+          eq(documentAttachmentUploads.id, row.id),
+          eq(documentAttachmentUploads.status, "pending"),
+          lte(documentAttachmentUploads.expiresAt, now)
+        )
+      )
+      .returning({ id: documentAttachmentUploads.id });
+    if (!claimed) continue;
     const key = attachmentObjectKey(row.projectId, row.documentId, row.id);
     if (row.providerUploadId)
       await storage
@@ -297,17 +311,7 @@ async function expireUploads(
       await storage
         .send(new DeleteObjectCommand({ Bucket: config.bucket, Key: key }))
         .catch(() => undefined);
-    const result = await db
-      .update(documentAttachmentUploads)
-      .set({ status: "expired" })
-      .where(
-        and(
-          eq(documentAttachmentUploads.id, row.id),
-          eq(documentAttachmentUploads.status, "pending"),
-          lte(documentAttachmentUploads.expiresAt, now)
-        )
-      );
-    expired += result.rowCount ?? 0;
+    expired += 1;
   }
   return { scanned: rows.length, expired };
 }

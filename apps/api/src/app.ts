@@ -228,6 +228,7 @@ export function buildApp(options: AppOptions) {
       });
       api.register(v1Routes, { projects, profiles, tasks });
       api.register(realtimeTicketRoutes, {
+        prefix: "/realtime",
         projects,
         tickets: realtimeTickets
       });

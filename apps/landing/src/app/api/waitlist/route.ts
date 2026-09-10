@@ -1,6 +1,13 @@
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function redirect(request: Request, waitlist: string) {
+  if (request.headers.get("accept")?.includes("application/json"))
+    return Response.json(
+      { status: waitlist },
+      {
+        status: waitlist === "joined" ? 200 : waitlist === "invalid" ? 400 : 503
+      }
+    );
   return Response.redirect(
     new URL(`/?waitlist=${waitlist}#waitlist`, request.url),
     303

@@ -5,6 +5,10 @@
     "dev": { "cache": false, "persistent": true },
     "lint": { "dependsOn": ["^lint"] },
     "typecheck": { "dependsOn": ["^build"] },
-    "test": { "dependsOn": ["build"], "outputs": ["coverage/**"] }
+    "test": {
+      "dependsOn": ["build"],
+      "outputs": ["coverage/**"],
+      "env": ["ORCHESTRAT_TEST_POSTGRES_URL"]
+    }
   }
 }

@@ -174,6 +174,88 @@ test("ingests lifecycle hooks with agent auth and idempotency", async () => {
   });
 });
 
+test("maps agent task authoring and comments with stable idempotency keys", async () => {
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const task = {
+    id,
+    project_id: id,
+    key: "AT-1",
+    title: "Follow up",
+    description: null,
+    priority: "none",
+    status: "backlog",
+    position: 0,
+    version: 1,
+    created_by: { type: "agent", id },
+    created_by_user_id: null,
+    created_at: timestamp,
+    updated_at: timestamp,
+    started_at: null,
+    completed_at: null,
+    cancelled_at: null
+  };
+  const comment = {
+    id,
+    task_id: id,
+    author: {
+      type: "agent",
+      id,
+      user_id: null,
+      agent_id: id,
+      username: null,
+      full_name: "Builder",
+      avatar_url: null
+    },
+    body_markdown: "Done",
+    created_at: timestamp
+  };
+  const project = {
+    id,
+    organization_id: id,
+    name: "Tasks",
+    slug: "tasks",
+    description: null,
+    status: "active",
+    created_at: timestamp,
+    updated_at: timestamp,
+    archived_at: null
+  };
+  const client = new AgentApiClient({
+    baseUrl: "https://api.test",
+    token,
+    fetch: async (url, init) => {
+      calls.push({ url: String(url), init });
+      const path = new URL(String(url)).pathname;
+      return new Response(
+        JSON.stringify(
+          path.endsWith("/project")
+            ? project
+            : path.endsWith("/comments")
+              ? init?.method === "GET"
+                ? { comments: [comment], next_cursor: null }
+                : comment
+              : task
+        )
+      );
+    }
+  });
+  assert.equal((await client.getProject()).id, id);
+  await client.createTask({ title: "Follow up" }, "task-key");
+  await client.updateTask(id, { priority: "high", expected_version: 1 });
+  await client.listTaskComments(id);
+  await client.addTaskComment(id, { body_markdown: "Done" }, "comment-key");
+  assert.deepEqual(
+    calls.map(
+      ({ init }) => (init?.headers as Record<string, string>)["idempotency-key"]
+    ),
+    [undefined, "task-key", undefined, undefined, "comment-key"]
+  );
+  assert.deepEqual(JSON.parse(String(calls[2]!.init?.body)), {
+    priority: "high",
+    expected_version: 1
+  });
+});
+
 test("maps typed agent document routes and sends revision preconditions", async () => {
   const document = {
     id,

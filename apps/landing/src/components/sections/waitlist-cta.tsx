@@ -10,6 +10,7 @@ export function WaitlistCtaSection() {
   const [focus, setFocus] = useState<string[]>(["tasks", "agents"]);
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const options = [
     { id: "tasks", label: "Task coordination" },
@@ -30,13 +31,24 @@ export function WaitlistCtaSection() {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (loading) return;
     setLoading(true);
+    setError(null);
 
     try {
       const formData = new FormData();
       formData.set("email", email);
-      await fetch("/api/waitlist", { method: "POST", body: formData });
+      const response = await fetch("/api/waitlist", {
+        method: "POST",
+        body: formData,
+        headers: { Accept: "application/json" }
+      });
+      const result = await response.json();
+      if (!response.ok || result.status !== "joined")
+        throw new Error("Waitlist request was not accepted.");
       setSubmitted(true);
+    } catch {
+      setError("We couldn't save your place. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -61,6 +73,8 @@ export function WaitlistCtaSection() {
               {!submitted ? (
                 <motion.form
                   key="form"
+                  action="/api/waitlist"
+                  method="post"
                   initial={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
                   onSubmit={submit}
@@ -76,6 +90,7 @@ export function WaitlistCtaSection() {
                         return (
                           <button
                             type="button"
+                            aria-pressed={selected}
                             key={option.id}
                             onClick={() => toggle(option.id)}
                             className={`flex cursor-pointer items-center gap-1.5 rounded-lg border px-3 py-1.5 font-mono text-[12px] transition-colors duration-200 ${
@@ -97,6 +112,9 @@ export function WaitlistCtaSection() {
                   <div className="flex max-w-lg flex-col gap-3 sm:flex-row">
                     <input
                       type="email"
+                      name="email"
+                      aria-label="Email address"
+                      aria-describedby={error ? "waitlist-error" : undefined}
                       value={email}
                       onChange={(event) => setEmail(event.target.value)}
                       placeholder="you@company.com"
@@ -118,6 +136,15 @@ export function WaitlistCtaSection() {
                       )}
                     </button>
                   </div>
+                  {error && (
+                    <p
+                      id="waitlist-error"
+                      role="alert"
+                      className="text-sm text-red-300"
+                    >
+                      {error}
+                    </p>
+                  )}
                 </motion.form>
               ) : (
                 <motion.div

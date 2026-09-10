@@ -4,11 +4,15 @@ import {
   claimMutationRequestSchema,
   claimTaskRequestSchema,
   completeClaimRequestSchema,
+  createTaskCommentRequestSchema,
+  agentCreateTaskRequestSchema,
   idParamsSchema,
   idempotencyKeySchema,
   openAgentSessionRequestSchema,
   paginationQuerySchema,
-  taskListQuerySchema
+  taskListQuerySchema,
+  taskCommentsQuerySchema,
+  updateTaskRequestSchema
 } from "@orchestrat/protocol";
 import type { FastifyInstance } from "fastify";
 import type { AgentService } from "../services/agent-service.js";
@@ -35,6 +39,9 @@ export async function agentActionRoutes(
           openAgentSessionRequestSchema.parse(request.body)
         )
       )
+  );
+  app.get("/project", (request) =>
+    options.agents.projectForAgent(request.agentPrincipal!)
   );
   app.post("/hooks/lifecycle", async (request) => {
     const key = request.headers["idempotency-key"];
@@ -68,12 +75,45 @@ export async function agentActionRoutes(
       taskListQuerySchema.parse(request.query)
     )
   );
+  app.post("/tasks", async (request, reply) => {
+    const result = await options.tasks.createForAgent(
+      request.agentPrincipal!,
+      agentCreateTaskRequestSchema.parse(request.body),
+      request.headers["idempotency-key"] as string | undefined
+    );
+    return reply.code(result.status).send(result.body);
+  });
   app.get("/tasks/:id", (request) =>
     options.tasks.getForAgent(
       request.agentPrincipal!,
       taskParamsSchema.parse(request.params).id
     )
   );
+  app.patch("/tasks/:id", (request) =>
+    options.tasks.updateForAgent(
+      request.agentPrincipal!,
+      taskParamsSchema.parse(request.params).id,
+      updateTaskRequestSchema.parse(request.body)
+    )
+  );
+  app.get("/tasks/:id/comments", (request) => {
+    const query = taskCommentsQuerySchema.parse(request.query);
+    return options.tasks.commentsForAgent(
+      request.agentPrincipal!,
+      taskParamsSchema.parse(request.params).id,
+      query.limit,
+      query.cursor
+    );
+  });
+  app.post("/tasks/:id/comments", async (request, reply) => {
+    const result = await options.tasks.createCommentForAgent(
+      request.agentPrincipal!,
+      taskParamsSchema.parse(request.params).id,
+      createTaskCommentRequestSchema.parse(request.body),
+      request.headers["idempotency-key"] as string | undefined
+    );
+    return reply.code(result.status).send(result.body);
+  });
   app.post("/tasks/:id/claim", (request) =>
     options.claims.claim(
       request.agentPrincipal!,

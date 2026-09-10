@@ -58,6 +58,10 @@ test("opens, heartbeats, and closes one session", async () => {
     async getTask() {
       return {};
     },
+    async getProject() {
+      calls.push("project");
+      return {};
+    },
     async claimTask() {
       return {};
     },
@@ -122,6 +126,33 @@ test("invokes a registered tool over the official in-memory transport", async ()
     },
     async getTask() {
       return {};
+    },
+    async getProject() {
+      calls.push("project");
+      return {};
+    },
+    async createTask(input: unknown, key: string) {
+      calls.push({ createTask: input, key });
+      return {};
+    },
+    async updateTask(_id: string, input: unknown) {
+      calls.push({ updateTask: input });
+      throw new AgentApiError(
+        409,
+        "TASK_VERSION_CONFLICT",
+        "Task version is stale.",
+        { current_version: 2 }
+      );
+    },
+    async listTaskComments() {
+      return { comments: [], next_cursor: null };
+    },
+    async addTaskComment(_id: string, input: unknown, key: string) {
+      calls.push({ comment: input, key });
+      return {};
+    },
+    async listAgents() {
+      return { agents: [] };
     },
     async claimTask() {
       return {};
@@ -204,6 +235,13 @@ test("invokes a registered tool over the official in-memory transport", async ()
     params: { name: "list_tasks", arguments: { limit: 3 } }
   });
   assert.deepEqual(calls, [{ limit: 3 }]);
+  const selectedProject = await request({
+    jsonrpc: "2.0",
+    id: 21,
+    method: "tools/call",
+    params: { name: "get_project", arguments: {} }
+  });
+  assert.equal(selectedProject.result.isError, undefined);
   assert.equal(result.result.isError, undefined);
   const created = await request({
     jsonrpc: "2.0",
@@ -215,6 +253,27 @@ test("invokes a registered tool over the official in-memory transport", async ()
     }
   });
   assert.equal(created.result.isError, undefined);
+  const taskCreated = await request({
+    jsonrpc: "2.0",
+    id: 31,
+    method: "tools/call",
+    params: {
+      name: "create_task",
+      arguments: { title: "Follow up", idempotency_key: "task-key" }
+    }
+  });
+  assert.equal(taskCreated.result.isError, undefined);
+  const taskStale = await request({
+    jsonrpc: "2.0",
+    id: 32,
+    method: "tools/call",
+    params: {
+      name: "update_task",
+      arguments: { task_id: id, priority: "high", expected_version: 1 }
+    }
+  });
+  assert.equal(taskStale.result.isError, true);
+  assert.match(taskStale.result.content[0].text, /current_version/);
   const stale = await request({
     jsonrpc: "2.0",
     id: 4,

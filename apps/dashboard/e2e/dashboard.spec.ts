@@ -3,19 +3,20 @@ import AxeBuilder from "@axe-core/playwright";
 
 const ids = {
   organization: "00000000-0000-4000-8000-000000000001",
-  workspace: "00000000-0000-4000-8000-000000000002",
-  otherWorkspace: "00000000-0000-4000-8000-000000000003",
+  otherOrganization: "00000000-0000-4000-8000-000000000002",
   alpha: "00000000-0000-4000-8000-000000000004",
   beta: "00000000-0000-4000-8000-000000000005",
-  missing: "00000000-0000-4000-8000-000000000006"
+  missing: "00000000-0000-4000-8000-000000000006",
+  user: "00000000-0000-4000-8000-000000000007",
+  task: "00000000-0000-4000-8000-000000000008",
+  agent: "00000000-0000-4000-8000-000000000009"
 } as const;
 const now = "2026-01-01T00:00:00.000Z";
 
 type HierarchyState = {
   organizations: Array<Record<string, unknown>>;
-  workspaces: Record<string, Array<Record<string, unknown>>>;
   projects: Record<string, Array<Record<string, unknown>>>;
-  failingWorkspaceId?: string;
+  failingOrganizationId?: string;
   abortOrganizations?: boolean;
   unauthorized?: "once" | "always";
 };
@@ -30,24 +31,14 @@ function organization(id = ids.organization, name = "Acme") {
     updated_at: now
   };
 }
-function workspace(
-  id = ids.workspace,
+function project(
+  id = ids.alpha,
   organizationId = ids.organization,
-  name = "Product"
+  name = "Alpha"
 ) {
   return {
     id,
     organization_id: organizationId,
-    name,
-    slug: name.toLowerCase().replaceAll(" ", "-"),
-    created_at: now,
-    updated_at: now
-  };
-}
-function project(id = ids.alpha, workspaceId = ids.workspace, name = "Alpha") {
-  return {
-    id,
-    workspace_id: workspaceId,
     name,
     slug: name.toLowerCase().replaceAll(" ", "-"),
     description: null,
@@ -60,9 +51,8 @@ function project(id = ids.alpha, workspaceId = ids.workspace, name = "Alpha") {
 function populatedState(): HierarchyState {
   return {
     organizations: [organization()],
-    workspaces: { [ids.organization]: [workspace()] },
     projects: {
-      [ids.workspace]: [project(), project(ids.beta, ids.workspace, "Beta")]
+      [ids.organization]: [project(), project(ids.beta, ids.organization, "Beta")]
     }
   };
 }
@@ -104,39 +94,48 @@ async function mockHierarchy(page: Page, state: HierarchyState) {
       state.organizations = [created];
       return route.fulfill({ json: created });
     }
-    const workspaceMatch = path.match(
-      /^\/api\/v1\/organizations\/([^/]+)\/workspaces$/
-    );
-    if (workspaceMatch) {
-      const organizationId = workspaceMatch[1];
-      if (method === "GET")
-        return route.fulfill({
-          json: { workspaces: state.workspaces[organizationId] ?? [] }
-        });
-      const body = route.request().postDataJSON() as { name: string };
-      const created = workspace(ids.workspace, organizationId, body.name);
-      state.workspaces[organizationId] = [created];
-      return route.fulfill({ json: created });
-    }
     const projectMatch = path.match(
-      /^\/api\/v1\/workspaces\/([^/]+)\/projects$/
+      /^\/api\/v1\/organizations\/([^/]+)\/projects$/
     );
     if (projectMatch) {
-      const workspaceId = projectMatch[1];
-      if (state.failingWorkspaceId === workspaceId && method === "GET")
+      const organizationId = projectMatch[1];
+      if (state.failingOrganizationId === organizationId && method === "GET")
         return route.abort("failed");
       if (method === "GET")
         return route.fulfill({
-          json: { projects: state.projects[workspaceId] ?? [] }
+          json: { projects: state.projects[organizationId] ?? [] }
         });
       const body = route.request().postDataJSON() as {
         name: string;
         description?: string | null;
       };
-      const created = project(ids.alpha, workspaceId, body.name);
-      state.projects[workspaceId] = [created];
+      const created = project(ids.alpha, organizationId, body.name);
+      state.projects[organizationId] = [created];
       return route.fulfill({ json: created });
     }
+    if (path === "/api/v1/profile")
+      return route.fulfill({
+        json: {
+          user_id: ids.user,
+          provider: "github",
+          username: "e2e_user",
+          full_name: "E2E User",
+          email: "e2e@example.com",
+          avatar_url: null
+        }
+      });
+    if (/^\/api\/v1\/projects\/[^/]+\/tasks$/.test(path))
+      return route.fulfill({ json: { tasks: [], total: 0, next_cursor: null } });
+    if (/^\/api\/v1\/projects\/[^/]+\/agents$/.test(path))
+      return route.fulfill({ json: { agents: [] } });
+    if (/^\/api\/v1\/projects\/[^/]+\/presence$/.test(path))
+      return route.fulfill({ json: { agents: [] } });
+    if (/^\/api\/v1\/projects\/[^/]+\/events$/.test(path))
+      return route.fulfill({ json: { events: [], next_cursor: null } });
+    if (path === "/api/v1/realtime/tickets")
+      return route.fulfill({
+        json: { ticket: "e2e-realtime-ticket", expires_at: now }
+      });
     throw new Error(`Unexpected API request: ${method} ${path}`);
   });
 }
@@ -163,7 +162,6 @@ test("@auth signed-out users continue in browser and reach setup", async ({
   await seed(page, "signedOut");
   await mockHierarchy(page, {
     organizations: [],
-    workspaces: {},
     projects: {}
   });
   await page.goto("/");
@@ -183,7 +181,6 @@ test("@auth magic-link rejects invalid email, shows masked sent state, and compl
   await seed(page, "signedOut");
   await mockHierarchy(page, {
     organizations: [],
-    workspaces: {},
     projects: {}
   });
   await page.goto("/");
@@ -214,7 +211,7 @@ test("sign-out survives reload", async ({ page }) => {
   await seed(page);
   await mockHierarchy(page, populatedState());
   await page.goto(`/projects/${ids.alpha}/overview`);
-  await page.getByRole("button", { name: /Command/ }).click();
+  await page.getByRole("button", { name: "Command ⌘ K", exact: true }).click();
   await page.getByPlaceholder("Search commands…").fill("Sign out");
   await page.getByText("Sign out", { exact: true }).click();
   await expect(
@@ -272,20 +269,17 @@ test("the e2e adapter rejects arbitrary persisted auth modes", async ({
   ).toBeVisible();
 });
 
-test("creates organization, workspace, and project sequentially", async ({
+test("creates organization and project sequentially", async ({
   page
 }) => {
   await seed(page);
   await mockHierarchy(page, {
     organizations: [],
-    workspaces: {},
     projects: {}
   });
   await page.goto("/setup");
   await page.getByLabel("Organization name").fill("Acme");
   await page.getByRole("button", { name: "Create organization" }).click();
-  await page.getByLabel("Workspace name").fill("Product");
-  await page.getByRole("button", { name: "Create workspace" }).click();
   await page.getByLabel("Project name").fill("Alpha");
   await page.getByRole("button", { name: "Create project" }).click();
   await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
@@ -299,40 +293,135 @@ test("project shell switches projects and persists recency", async ({
   await mockHierarchy(page, populatedState());
   await page.goto(`/projects/${ids.alpha}/overview`);
   await expect(
-    page.getByRole("complementary", { name: "Projects" })
-  ).toBeVisible();
-  await expect(
     page.getByRole("complementary", { name: "Project navigation" })
   ).toBeVisible();
   await expect(page.getByRole("banner")).toContainText("Alpha");
-  await page.getByRole("button", { name: /Command/ }).click();
+  await page.getByRole("button", { name: "Command ⌘ K", exact: true }).click();
   await page.getByPlaceholder("Search commands…").fill("Beta");
   await page.getByText("Open Beta", { exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/projects/${ids.beta}/overview$`));
   await page.reload();
-  await expect(page.getByRole("link", { name: "Open Beta" })).toHaveAttribute(
-    "aria-current",
-    "page"
-  );
+  await expect(page.getByRole("banner")).toContainText("Beta");
+  await expect
+    .poll(() =>
+      page.evaluate(
+        (projectId) =>
+          JSON.parse(
+            localStorage.getItem("orchestrat.preferences.v1") ?? "{}"
+          ).recentProjectIds?.[0] === projectId,
+        ids.beta
+      )
+    )
+    .toBe(true);
   await expectNoAxe(page);
 });
 
-test("Tasks is explicitly unavailable without fake task controls", async ({
+test("creates, edits, and comments on a task with human and agent authors", async ({
   page
 }) => {
   await seed(page);
   await mockHierarchy(page, populatedState());
-  await page.goto(`/projects/${ids.alpha}/tasks`);
-  await expect(page.getByText("Task service unavailable")).toBeVisible();
-  await expect(
-    page.getByText("The task API is not part of this dashboard build.")
-  ).toBeVisible();
-  await expect(page.getByRole("row")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: /create task/i })).toHaveCount(
-    0
+  let task: Record<string, unknown> | null = null;
+  let comments = [
+    {
+      id: "00000000-0000-4000-8000-000000000010",
+      task_id: ids.task,
+      author: {
+        type: "agent",
+        id: ids.agent,
+        user_id: null,
+        agent_id: ids.agent,
+        username: null,
+        full_name: "Codex",
+        avatar_url: null
+      },
+      body_markdown: "Agent context is ready.",
+      created_at: now
+    }
+  ];
+  const taskCard = () => ({
+    ...task,
+    comment_count: comments.length,
+    unresolved_blocker_count: 0
+  });
+  await page.route(
+    `https://api.orchestrat.test/api/v1/projects/${ids.alpha}/tasks**`,
+    async (route) => {
+      if (route.request().method() === "GET")
+        return route.fulfill({
+          json: { tasks: task ? [taskCard()] : [], total: task ? 1 : 0, next_cursor: null }
+        });
+      const body = route.request().postDataJSON() as Record<string, unknown>;
+      task = {
+        id: ids.task,
+        project_id: ids.alpha,
+        key: "ALPHA-1",
+        title: body.title,
+        description: body.description ?? null,
+        priority: body.priority ?? "medium",
+        status: body.status ?? "backlog",
+        position: 0,
+        version: 1,
+        created_by: { type: "human", id: ids.user },
+        created_by_user_id: ids.user,
+        created_at: now,
+        updated_at: now,
+        started_at: null,
+        completed_at: null,
+        cancelled_at: null
+      };
+      return route.fulfill({ json: task });
+    }
   );
-  await page.getByRole("link", { name: "Return to overview" }).click();
-  await expect(page).toHaveURL(new RegExp(`/projects/${ids.alpha}/overview$`));
+  await page.route(
+    `https://api.orchestrat.test/api/v1/tasks/${ids.task}**`,
+    async (route) => {
+      const path = new URL(route.request().url()).pathname;
+      const method = route.request().method();
+      if (path.endsWith("/comments")) {
+        if (method === "GET")
+          return route.fulfill({ json: { comments, next_cursor: null } });
+        const body = route.request().postDataJSON() as { body_markdown: string };
+        const created = {
+          id: "00000000-0000-4000-8000-000000000011",
+          task_id: ids.task,
+          author: {
+            type: "human",
+            id: ids.user,
+            user_id: ids.user,
+            agent_id: null,
+            username: "e2e_user",
+            full_name: "E2E User",
+            avatar_url: null
+          },
+          body_markdown: body.body_markdown,
+          created_at: now
+        };
+        comments = [...comments, created];
+        return route.fulfill({ json: created });
+      }
+      if (path.endsWith("/dependencies"))
+        return route.fulfill({ json: { depends_on: [], blocks: [] } });
+      if (method === "GET") return route.fulfill({ json: task });
+      const body = route.request().postDataJSON() as Record<string, unknown>;
+      task = { ...task, ...body, version: Number(task!.version) + 1, updated_at: now };
+      delete task.expected_version;
+      return route.fulfill({ json: task });
+    }
+  );
+  await page.goto(`/projects/${ids.alpha}/tasks`);
+  await page.getByLabel("Title").fill("Ship editor");
+  await page.getByLabel("Description (Markdown)").fill("Use MDXEditor");
+  await page.getByRole("button", { name: "Create task" }).click();
+  await expect(page.getByRole("button", { name: /ALPHA-1 Ship editor/ })).toBeVisible();
+  await page.getByRole("button", { name: /ALPHA-1 Ship editor/ }).click();
+  await expect(page.getByText("Codex (agent): Agent context is ready.")).toBeVisible();
+  await page.getByLabel("Title", { exact: true }).nth(1).fill("Ship rich editor");
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.getByRole("heading", { name: "Ship rich editor" })).toBeVisible();
+  await page.getByLabel("Add comment").fill("Human review complete.");
+  await page.getByRole("button", { name: "Comment" }).click();
+  await expect(page.getByText("E2E User: Human review complete.")).toBeVisible();
   await expectNoAxe(page);
 });
 
@@ -342,9 +431,8 @@ test("theme preference survives reload for Dark and System light", async ({
   await page.emulateMedia({ colorScheme: "light" });
   await seed(page);
   await mockHierarchy(page, populatedState());
-  await page.goto(`/projects/${ids.alpha}/overview`);
-  await page.getByRole("button", { name: "Open preferences" }).click();
-  await page.getByRole("radio", { name: "Dark" }).check({ force: true });
+  await page.goto("/profile");
+  await page.getByText("Dark", { exact: true }).click();
   await page.waitForFunction(
     () =>
       JSON.parse(localStorage.getItem("orchestrat.preferences.v1") ?? "{}")
@@ -353,10 +441,10 @@ test("theme preference survives reload for Dark and System light", async ({
   await page.reload();
   await expect(page.locator("html")).toHaveClass(/dark/);
   await expect(
-    page.getByRole("heading", { name: "Preferences" })
+    page.getByRole("heading", { name: "Profile", exact: true })
   ).toBeVisible();
   await expectNoAxe(page);
-  await page.getByRole("radio", { name: "System" }).check({ force: true });
+  await page.getByText("System", { exact: true }).click();
   await page.waitForFunction(
     () =>
       JSON.parse(localStorage.getItem("orchestrat.preferences.v1") ?? "{}")
@@ -365,7 +453,7 @@ test("theme preference survives reload for Dark and System light", async ({
   await page.reload();
   await expect(page.locator("html")).not.toHaveClass(/dark/);
   await expect(
-    page.getByRole("heading", { name: "Preferences" })
+    page.getByRole("heading", { name: "Profile", exact: true })
   ).toBeVisible();
   await expectNoAxe(page);
 });
@@ -374,20 +462,20 @@ test("preserves successful projects when one hierarchy branch fails", async ({
   page
 }) => {
   const state = populatedState();
-  state.workspaces[ids.organization].push(
-    workspace(ids.otherWorkspace, ids.organization, "Broken")
+  state.organizations.push(
+    organization(ids.otherOrganization, "Broken organization")
   );
-  state.projects[ids.otherWorkspace] = [
-    project(ids.missing, ids.otherWorkspace, "Hidden")
+  state.projects[ids.otherOrganization] = [
+    project(ids.missing, ids.otherOrganization, "Hidden")
   ];
-  state.failingWorkspaceId = ids.otherWorkspace;
+  state.failingOrganizationId = ids.otherOrganization;
   await seed(page);
   await mockHierarchy(page, state);
   await page.goto(`/projects/${ids.alpha}/overview`);
   await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
-  await expect(page.getByRole("status")).toContainText(
+  await expect(page.getByText(
     "Some projects could not be loaded."
-  );
+  )).toBeVisible();
 });
 
 test("does not silently switch when project access is lost", async ({
@@ -411,7 +499,6 @@ test("shows explicit network retry state when the API is unavailable", async ({
   await seed(page);
   await mockHierarchy(page, {
     organizations: [],
-    workspaces: {},
     projects: {},
     abortOrganizations: true
   });
@@ -441,7 +528,10 @@ test("command palette search selects a project and restores focus", async ({
   await page.getByPlaceholder("Search commands…").fill("Beta");
   await page.getByText("Open Beta", { exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/projects/${ids.beta}/overview$`));
-  const trigger = page.getByRole("button", { name: /Command/ });
+  const trigger = page.getByRole("button", {
+    name: "Command ⌘ K",
+    exact: true
+  });
   await trigger.focus();
   await page.keyboard.press("Meta+k");
   await page.keyboard.press("Escape");
@@ -468,13 +558,12 @@ test("compact shell collapses and restores sidebar without horizontal overflow",
   ).toBe(true);
 });
 
-test("has no axe violations on setup, overview, Tasks, Preferences, and themes", async ({
+test("has no axe violations on setup, overview, Tasks, profile, and themes", async ({
   page
 }) => {
   await seed(page);
   await mockHierarchy(page, {
     organizations: [],
-    workspaces: {},
     projects: {}
   });
   await page.goto("/setup");
@@ -490,13 +579,17 @@ test("has no axe violations on setup, overview, Tasks, Preferences, and themes",
   await page.goto(`/projects/${ids.alpha}/tasks`);
   await expect(page.getByRole("heading", { name: "Tasks" })).toBeVisible();
   await expectNoAxe(page);
-  await page.goto("/preferences");
+  await page.goto("/profile");
   await expect(
-    page.getByRole("heading", { name: "Preferences" })
+    page.getByRole("heading", { name: "Profile", exact: true })
   ).toBeVisible();
   await expectNoAxe(page);
-  await page.getByRole("radio", { name: "Dark" }).check({ force: true });
+  await page.getByText("Dark", { exact: true }).click();
+  await expect(page.locator("html")).toHaveClass(/dark/);
+  await page.waitForTimeout(250);
   await expectNoAxe(page);
-  await page.getByRole("radio", { name: "Light" }).check({ force: true });
+  await page.getByText("Light", { exact: true }).click();
+  await expect(page.locator("html")).not.toHaveClass(/dark/);
+  await page.waitForTimeout(250);
   await expectNoAxe(page);
 });

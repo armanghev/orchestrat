@@ -319,7 +319,7 @@ const limitSchema = z.coerce.number().int().min(1).max(100).default(50);
 const expectedVersionSchema = z.number().int().min(1);
 export const idempotencyKeySchema = z.string().trim().min(1).max(128);
 
-export const taskSchema = z.object({
+const taskObjectSchema = z.object({
   id: idSchema,
   project_id: idSchema,
   key: taskKeySchema,
@@ -329,19 +329,34 @@ export const taskSchema = z.object({
   status: taskStatusSchema,
   position: z.number().int().min(0),
   version: z.number().int().min(1),
-  created_by_user_id: idSchema,
+  created_by: z.discriminatedUnion("type", [
+    z.object({ type: z.literal("human"), id: idSchema }),
+    z.object({ type: z.literal("agent"), id: idSchema })
+  ]),
+  created_by_user_id: idSchema.nullable(),
   created_at: dateSchema,
   updated_at: dateSchema,
   started_at: dateSchema.nullable(),
   completed_at: dateSchema.nullable(),
   cancelled_at: dateSchema.nullable()
 });
+const taskCreatorConsistent = (task: z.infer<typeof taskObjectSchema>) =>
+  task.created_by.type === "human"
+    ? task.created_by_user_id === task.created_by.id
+    : task.created_by_user_id === null;
+export const taskSchema = taskObjectSchema.refine(taskCreatorConsistent, {
+  message: "Task creator fields are inconsistent."
+});
 export type Task = z.infer<typeof taskSchema>;
 
-export const taskCardSchema = taskSchema.extend({
-  comment_count: z.number().int().min(0),
-  unresolved_blocker_count: z.number().int().min(0)
-});
+export const taskCardSchema = taskObjectSchema
+  .extend({
+    comment_count: z.number().int().min(0),
+    unresolved_blocker_count: z.number().int().min(0)
+  })
+  .refine(taskCreatorConsistent, {
+    message: "Task creator fields are inconsistent."
+  });
 export type TaskCard = z.infer<typeof taskCardSchema>;
 
 export const createTaskRequestSchema = z.object({
@@ -351,6 +366,12 @@ export const createTaskRequestSchema = z.object({
   status: humanTaskStatusSchema.optional()
 });
 export type CreateTaskRequest = z.infer<typeof createTaskRequestSchema>;
+export const agentCreateTaskRequestSchema = createTaskRequestSchema.extend({
+  status: z.enum(["backlog", "ready"]).optional()
+});
+export type AgentCreateTaskRequest = z.infer<
+  typeof agentCreateTaskRequestSchema
+>;
 
 export const taskListQuerySchema = z.object({
   status: taskStatusSchema.optional(),
@@ -393,15 +414,30 @@ export const moveTaskRequestSchema = z.object({
 });
 export type MoveTaskRequest = z.infer<typeof moveTaskRequestSchema>;
 
+const taskCommentAuthorFields = {
+  username: usernameSchema.nullable(),
+  full_name: z.string(),
+  avatar_url: avatarUrlSchema
+};
 export const taskCommentSchema = z.object({
   id: idSchema,
   task_id: idSchema,
-  author: z.object({
-    user_id: idSchema,
-    username: usernameSchema.nullable(),
-    full_name: z.string(),
-    avatar_url: avatarUrlSchema
-  }),
+  author: z.discriminatedUnion("type", [
+    z.object({
+      type: z.literal("human"),
+      id: idSchema,
+      user_id: idSchema,
+      agent_id: z.null(),
+      ...taskCommentAuthorFields
+    }),
+    z.object({
+      type: z.literal("agent"),
+      id: idSchema,
+      user_id: z.null(),
+      agent_id: idSchema,
+      ...taskCommentAuthorFields
+    })
+  ]),
   body_markdown: markdownSchema,
   created_at: dateSchema
 });

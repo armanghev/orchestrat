@@ -5,6 +5,8 @@ import websocket from "@fastify/websocket";
 import Fastify from "fastify";
 import test from "node:test";
 import type { RealtimeEventEnvelope } from "@orchestrat/protocol";
+import type { Database } from "@orchestrat/db";
+import { buildApp } from "../app.js";
 import {
   RealtimeRegistry,
   RealtimeTicketStore,
@@ -29,6 +31,25 @@ class FakeSocket extends EventEmitter {
     this.terminated = true;
   }
 }
+
+test("the integrated app registers the ticket route at the dashboard contract", async (t) => {
+  const app = buildApp({
+    allowedOrigins: [],
+    auth: {
+      async authenticate() {
+        return null;
+      }
+    },
+    db: {} as Database
+  });
+  t.after(async () => app.close());
+  await app.ready();
+  assert.equal(
+    app.hasRoute({ method: "POST", url: "/api/v1/realtime/tickets" }),
+    true
+  );
+  assert.equal(app.hasRoute({ method: "POST", url: "/api/v1/tickets" }), false);
+});
 
 test("realtime tickets are high entropy, single use, scoped, and expire", () => {
   let now = 1000;

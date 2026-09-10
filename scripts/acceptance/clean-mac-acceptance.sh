@@ -11,11 +11,12 @@ fail() {
 }
 
 snapshot_paths() {
+  config_root=${ORCHESTRAT_ACCEPTANCE_CONFIG_ROOT:-$HOME}
   cat <<EOF
-$HOME/.codex/config.toml
-$HOME/.codex/hooks.json
-$HOME/.claude.json
-$HOME/.claude/settings.json
+$config_root/.codex/config.toml
+$config_root/.codex/hooks.json
+$config_root/.claude.json
+$config_root/.claude/settings.json
 EOF
 }
 
@@ -42,14 +43,15 @@ compare_snapshot() {
 self_check() {
   self_home=$(mktemp -d "${TMPDIR:-/tmp}/orchestrat-acceptance.XXXXXX")
   trap 'rm -rf "$self_home"' EXIT HUP INT TERM
-  HOME=$self_home
-  mkdir -p "$HOME/.codex" "$HOME/.claude"
-  printf 'fixture = true\n' >"$HOME/.codex/config.toml"
+  ORCHESTRAT_ACCEPTANCE_CONFIG_ROOT=$self_home
+  export ORCHESTRAT_ACCEPTANCE_CONFIG_ROOT
+  mkdir -p "$self_home/.codex" "$self_home/.claude"
+  printf 'fixture = true\n' >"$self_home/.codex/config.toml"
   baseline="$self_home/baseline.txt"
   current="$self_home/current.txt"
   snapshot_files "$baseline"
   compare_snapshot "$baseline" "$current" || fail "self-check rejected unchanged fixture"
-  printf 'changed\n' >>"$HOME/.codex/config.toml"
+  printf 'changed\n' >>"$self_home/.codex/config.toml"
   if compare_snapshot "$baseline" "$current"; then
     fail "self-check accepted a changed fixture"
   fi

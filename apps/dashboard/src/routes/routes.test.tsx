@@ -1,5 +1,6 @@
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { forwardRef, useImperativeHandle, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { http, HttpResponse } from "msw";
 import type { AuthClient, AuthSnapshot } from "@/features/auth/auth-client";
@@ -8,6 +9,45 @@ import { renderDashboardRoute } from "@/test/render";
 import { handlers } from "@/test/handlers";
 import { coordinationKeys } from "@/features/coordination/query-options";
 import { ApiClient } from "@/lib/api/client";
+
+vi.mock("@/features/documents/markdown-editor", () => ({
+  MarkdownEditor: forwardRef<
+    { setMarkdown: (markdown: string) => void },
+    {
+      markdown: string;
+      readOnly: boolean;
+      onChange: (markdown: string, initialMarkdownNormalize?: boolean) => void;
+    }
+  >(function TestMarkdownEditor({ markdown, readOnly, onChange }, ref) {
+    const [value, setValue] = useState(markdown);
+    useImperativeHandle(ref, () => ({
+      setMarkdown(next) {
+        setValue(next);
+        onChange(next);
+      }
+    }), [onChange]);
+    return (
+      <textarea
+        aria-label="Markdown content"
+        value={value}
+        disabled={readOnly}
+        onChange={(event) => {
+          setValue(event.target.value);
+          onChange(event.target.value);
+        }}
+      />
+    );
+  })
+}));
+
+vi.mock("@/features/documents/document-diff", () => ({
+  DocumentDiff: ({ original, current }: { original: string; current: string }) => (
+    <div aria-label="Revision comparison">
+      <textarea aria-label="Original revision" value={original} readOnly />
+      <textarea aria-label="Current saved revision" value={current} readOnly />
+    </div>
+  )
+}));
 
 class FakeAuthClient implements AuthClient {
   readonly capabilities = { github: true, magicLink: true };
@@ -371,6 +411,7 @@ describe("dashboard routes", () => {
       document: { ...initial.document, current_revision: 2 },
       revision: {
         ...initial.revision,
+        id: `${initial.revision.id.slice(0, -1)}2`,
         revision_number: 2,
         content: "Server content"
       }
@@ -465,63 +506,129 @@ describe("dashboard routes", () => {
     await user.click(screen.getByRole("button", { name: "Save mine" }));
     await waitFor(() => expect(patchRequests).toBe(2));
     expect(screen.getByDisplayValue("Unsaved draft")).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Revision 1" }));
-    expect(await screen.findByDisplayValue("Initial content")).toBeVisible();
+    expect(screen.queryByRole("button", { name: /^Revision 1\b/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "History" }));
+    expect(await screen.findByRole("dialog", { name: "Document history" })).toBeVisible();
+    await user.click(await screen.findByRole("button", { name: /^Revision 1\b/ }));
+    expect(await screen.findByLabelText("Original revision")).toHaveValue(
+      "Initial content"
+    );
   });
 
-  it("renders GFM in preview without changing the editor draft", async () => {
+  it("retries and paginates document history without replacing the draft", async () => {
     const expectedProject = project();
-    const content =
-      "# Plan\n\n- [x] Preview works\n\n| Item | Status |\n| --- | --- |\n| Document | Ready |";
-    const initial = documentDetail({
+    const seed = documentDetail({
       document: {
         ...documentDetail().document,
-        project_id: expectedProject.id
+        project_id: expectedProject.id,
+        current_revision: 6
       },
-      revision: { ...documentDetail().revision, content }
+      revision: {
+        ...documentDetail().revision,
+        revision_number: 6,
+        content: "Current saved content"
+      }
     });
+    const revisions = Array.from({ length: 6 }, (_, index) => ({
+      ...seed.revision,
+      id: `${seed.revision.id.slice(0, -1)}${6 - index}`,
+      revision_number: 6 - index,
+      content: `Saved content ${6 - index}`
+    }));
+    let historyRequests = 0;
+    let olderRequests = 0;
     const documentHandlers = [
       http.get(
         `http://localhost:3001/api/v1/projects/${expectedProject.id}/documents`,
-        () =>
-          HttpResponse.json({
-            documents: [initial.document],
-            next_cursor: null
-          })
+        () => HttpResponse.json({ documents: [seed.document], next_cursor: null })
       ),
       http.get(
-        `http://localhost:3001/api/v1/documents/${initial.document.id}`,
-        () => HttpResponse.json(initial)
+        `http://localhost:3001/api/v1/documents/${seed.document.id}`,
+        () => HttpResponse.json(seed)
       ),
       http.get(
-        `http://localhost:3001/api/v1/documents/${initial.document.id}/revisions`,
-        () =>
-          HttpResponse.json({
-            revisions: [initial.revision].map(revisionSummary),
-            next_cursor: null
-          })
+        `http://localhost:3001/api/v1/documents/${seed.document.id}/revisions`,
+        ({ request }) => {
+          historyRequests += 1;
+          if (historyRequests === 1)
+            return HttpResponse.json(
+              { error: { code: "TEMPORARY" } },
+              { status: 500 }
+            );
+          const older = new URL(request.url).searchParams.get("cursor") === "older";
+          if (older && ++olderRequests === 1)
+            return HttpResponse.json({ error: { code: "TEMPORARY" } }, { status: 500 });
+          return HttpResponse.json({
+            revisions: (older ? revisions.slice(3) : [
+              { ...seed.revision, revision_number: 7 },
+              ...revisions.slice(0, 3)
+            ]).map(
+              revisionSummary
+            ),
+            next_cursor: older ? null : "older"
+          });
+        }
+      ),
+      http.get(
+        `http://localhost:3001/api/v1/documents/${seed.document.id}/revisions/:revision`,
+        ({ params }) => {
+          const revision = revisions.find(
+            (item) => item.revision_number === Number(params.revision)
+          );
+          return revision
+            ? HttpResponse.json({ revision })
+            : HttpResponse.json({}, { status: 404 });
+        }
+      ),
+      http.patch(
+        `http://localhost:3001/api/v1/documents/${seed.document.id}`,
+        () => new Promise<Response>(() => undefined)
       ),
       ...handlers
     ];
     await renderDashboardRoute({
       path: `/projects/${expectedProject.id}/documents`,
-      auth: new FakeAuthClient({
-        status: "signedIn",
-        identityKey: "test-user"
-      }),
+      auth: new FakeAuthClient({ status: "signedIn", identityKey: "test-user" }),
       platform: platform(),
       handlers: documentHandlers
     });
     const user = userEvent.setup();
-    expect(await screen.findByLabelText("Markdown content")).toHaveValue(
-      content
+    const editor = await screen.findByLabelText("Markdown content");
+    expect(screen.queryByRole("button", { name: /^Revision 5\b/ })).not.toBeInTheDocument();
+    await user.clear(editor);
+    await user.type(editor, "Unsaved draft");
+    await user.click(screen.getByRole("button", { name: "History" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Document history" });
+    expect(dialog).toHaveTextContent(
+      "Unsaved draft changes are excluded. Comparisons use the current saved version."
     );
-    await user.click(screen.getByRole("button", { name: "Preview" }));
-    expect(screen.getByRole("heading", { name: "Plan" })).toBeVisible();
-    expect(screen.getByRole("checkbox", { checked: true })).toBeDisabled();
-    expect(screen.getByRole("table")).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Editing" }));
-    expect(screen.getByLabelText("Markdown content")).toHaveValue(content);
+    expect(await screen.findByText("Could not load history.")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    const newestPrior = await screen.findByRole("button", { name: /^Revision 5\b/ });
+    expect(newestPrior).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: /^Revision 6\b/ })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /^Revision 7\b/ })).not.toBeInTheDocument();
+    expect(await screen.findByLabelText("Original revision")).toHaveValue(
+      "Saved content 5"
+    );
+    expect(screen.getByLabelText("Current saved revision")).toHaveValue(
+      "Current saved content"
+    );
+    expect(screen.getByLabelText("Original revision")).toHaveAttribute("readonly");
+
+    await user.click(screen.getByRole("button", { name: "Load older revisions" }));
+    expect(await screen.findByRole("button", { name: "Retry older revisions" })).toBeVisible();
+    expect(newestPrior).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByLabelText("Original revision")).toHaveValue("Saved content 5");
+    await user.click(screen.getByRole("button", { name: "Retry older revisions" }));
+    await user.click(await screen.findByRole("button", { name: /^Revision 2\b/ }));
+    expect(await screen.findByLabelText("Original revision")).toHaveValue(
+      "Saved content 2"
+    );
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog", { name: "Document history" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Markdown content")).toHaveValue("Unsaved draft");
   });
 
   it("debounces autosaves and serializes a queued edit", async () => {
@@ -1141,10 +1248,11 @@ describe("dashboard routes", () => {
       await screen.findByRole("button", { name: "Archived (1)" })
     );
     expect(await screen.findByLabelText("Markdown content")).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Restore" })).toBeVisible();
     expect(
       screen.getByRole("button", { name: "Add attachment" })
     ).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Document actions" }));
+    expect(screen.getByRole("menuitem", { name: "Restore" })).toBeVisible();
     expect(
       screen.queryByRole("button", { name: "Rename" })
     ).not.toBeInTheDocument();

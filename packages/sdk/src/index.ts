@@ -10,8 +10,15 @@ import {
   agentPresenceSchema,
   claimTaskRequestSchema,
   taskCardSchema,
+  taskSchema,
   taskListQuerySchema,
   taskListResponseSchema,
+  taskCommentsQuerySchema,
+  taskCommentsResponseSchema,
+  taskCommentSchema,
+  agentCreateTaskRequestSchema,
+  updateTaskRequestSchema,
+  createTaskCommentRequestSchema,
   claimMutationRequestSchema,
   createDocumentRequestSchema,
   createDocumentResponseSchema,
@@ -23,7 +30,8 @@ import {
   updateDocumentRequestSchema,
   updateDocumentResponseSchema,
   agentLifecycleHookResponseSchema,
-  agentLifecycleHookRequestSchema
+  agentLifecycleHookRequestSchema,
+  projectSchema
 } from "@orchestrat/protocol";
 import type {
   ClaimTaskRequest,
@@ -32,6 +40,10 @@ import type {
   OpenAgentSessionRequest,
   PaginationQuery,
   TaskListQuery,
+  TaskCommentsQuery,
+  AgentCreateTaskRequest,
+  UpdateTaskRequest,
+  CreateTaskCommentRequest,
   CreateDocumentRequest,
   DocumentListQuery,
   UpdateDocumentRequest,
@@ -142,6 +154,10 @@ export class AgentApiClient {
     );
   }
 
+  getProject() {
+    return this.request("GET", "/project", projectSchema, undefined, true);
+  }
+
   listTasks(query: Partial<TaskListQuery> = {}) {
     const parsed = taskListQuerySchema.parse(query);
     return this.request(
@@ -160,6 +176,52 @@ export class AgentApiClient {
       taskCardSchema,
       undefined,
       true
+    );
+  }
+
+  createTask(input: AgentCreateTaskRequest, idempotencyKey: string) {
+    return this.request(
+      "POST",
+      "/tasks",
+      taskSchema,
+      agentCreateTaskRequestSchema.parse(input),
+      false,
+      { "idempotency-key": idempotencyKey }
+    );
+  }
+
+  updateTask(taskId: string, input: UpdateTaskRequest) {
+    return this.request(
+      "PATCH",
+      `/tasks/${encodeURIComponent(taskId)}`,
+      taskSchema,
+      updateTaskRequestSchema.parse(input)
+    );
+  }
+
+  listTaskComments(taskId: string, query: Partial<TaskCommentsQuery> = {}) {
+    const parsed = taskCommentsQuerySchema.parse(query);
+    return this.request(
+      "GET",
+      `/tasks/${encodeURIComponent(taskId)}/comments${queryString(parsed)}`,
+      taskCommentsResponseSchema,
+      undefined,
+      true
+    );
+  }
+
+  addTaskComment(
+    taskId: string,
+    input: CreateTaskCommentRequest,
+    idempotencyKey: string
+  ) {
+    return this.request(
+      "POST",
+      `/tasks/${encodeURIComponent(taskId)}/comments`,
+      taskCommentSchema,
+      createTaskCommentRequestSchema.parse(input),
+      false,
+      { "idempotency-key": idempotencyKey }
     );
   }
 
@@ -198,6 +260,10 @@ export class AgentApiClient {
       undefined,
       true
     );
+  }
+
+  listAgents() {
+    return this.getPresence();
   }
 
   listEvents(query: Partial<PaginationQuery> = {}) {

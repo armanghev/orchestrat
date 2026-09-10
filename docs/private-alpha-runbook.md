@@ -61,11 +61,15 @@ Configure the R2 S3 endpoint as
 `auto`. Create a bucket-scoped R2 API token for the API host and inject its
 access-key ID and secret only through the host secret store. Do not enable
 public bucket access or a public custom domain for documents.
+Configuration rejects bucket names embedded in the endpoint path: keep the
+bucket in `DOCUMENT_STORAGE_BUCKET` and use the account origin alone for
+`DOCUMENT_STORAGE_S3_ENDPOINT`.
 
 Direct browser uploads use presigned URLs, so configure the R2 bucket's CORS
 policy in the Cloudflare dashboard with the exact dashboard origins:
 `https://app.orchestrat.dev`, `http://localhost:5173`, and `tauri://localhost`.
-Use this policy:
+The checked-in [`deploy/document-storage-cors.json`](../deploy/document-storage-cors.json)
+contains this reviewed policy:
 
 ```json
 [
@@ -103,6 +107,20 @@ pnpm --filter @orchestrat/api storage:backfill --dry-run
 pnpm --filter @orchestrat/api storage:backfill --apply
 pnpm --filter @orchestrat/api storage:gc --dry-run
 pnpm --filter @orchestrat/api storage:gc --apply
+```
+
+Run the disposable PostgreSQL acceptance with a local or CI role allowed to
+create and drop databases. Add the R2 opt-in only when the document-storage
+values are already present in the environment; never paste them into the
+command or logs:
+
+```sh
+ORCHESTRAT_TEST_POSTGRES_URL="$DISPOSABLE_POSTGRES_ADMIN_URL" \
+  pnpm --filter @orchestrat/api test:postgres
+
+ORCHESTRAT_TEST_POSTGRES_URL="$DISPOSABLE_POSTGRES_ADMIN_URL" \
+ORCHESTRAT_TEST_R2=1 \
+  pnpm --filter @orchestrat/api test:postgres
 ```
 
 Backfill is restartable and verifies each object before recording its byte
@@ -187,6 +205,18 @@ when its schema remains compatible, then ship a reviewed forward repair
 migration. Restore the database only under the provider's recovery procedure
 after confirming the blast radius and recovery point.
 
+With explicit user approval, migration `0011` was applied to the local
+PostgreSQL 18 development database using `pnpm db:migrate`. The local schema
+now records 12 migrations, and all four existing human-authored tasks retained
+their human creators. This is local evidence only; the hosted migration remains
+**NOT RUN**.
+
+A private local backup was created with mode `0600` and restored into an
+isolated PostgreSQL 17 database. The restore contained the expected four tasks,
+six document revisions, and one attachment; two restored Documents reads also
+retrieved and verified their R2-backed content. No private backup contents are
+part of this runbook or repository.
+
 ## Dashboard and native origins
 
 The production API origin is `https://api.orchestrat.dev`; realtime uses
@@ -195,6 +225,13 @@ Tauri CSP. The server inventory includes `tauri://localhost` in
 `ORCHESTRAT_ALLOWED_ORIGINS` for the packaged native app, while development
 localhost remains configured in the checked-in Tauri config. No data path has
 been moved to Supabase PostgREST.
+
+For the current local checkout, the API and dashboard use port `4301` because
+another developer service was already bound to loopback port `3001`. The API's
+exact-origin CORS policy was unchanged; restart both local processes after an
+origin or port change. Local HTTP is accepted only for loopback hosts. After
+the restart and realtime route-prefix fix, authenticated local profile and
+realtime-ticket requests both returned `200`.
 
 Native release builds consume these public values:
 
@@ -210,14 +247,35 @@ ORCHESTRAT_DESKTOP_AUTH_PORTAL_URL
 ## CLI install and setup
 
 The publishable CLI requires Node.js `>=20` and bundles its SDK/MCP runtime.
+Agent-authored tasks make `created_by_user_id` nullable, so testers must upgrade
+to `0.1.0-alpha.1` before agent task creation is enabled. Older clients may
+reject a task list containing an agent-authored task; no human creator is
+fabricated for compatibility.
+
+Before publication, build, pack, and install the exact alpha into a disposable
+prefix:
+
+```sh
+mkdir -p /private/tmp/orchestrat-alpha/install
+pnpm --filter @orchestrat/cli build
+pnpm --filter @orchestrat/cli pack --pack-destination /private/tmp/orchestrat-alpha
+npm install --prefix /private/tmp/orchestrat-alpha/install \
+  --cache /private/tmp/orchestrat-alpha/npm-cache \
+  --ignore-scripts --no-audit --no-fund \
+  /private/tmp/orchestrat-alpha/orchestrat-cli-0.1.0-alpha.1.tgz
+scripts/acceptance/verify-cli-alpha.sh \
+  /private/tmp/orchestrat-alpha/install/node_modules/.bin/orchestrat
+```
+
 After an authorized npm publication exists, the intended clean-Mac command is:
 
 ```sh
 npx @orchestrat/cli@latest setup
 ```
 
-That registry flow is **not currently verified**. A local build validation
-alternative (not clean-Mac setup or installation testing) is:
+That registry flow is **not currently verified**. The disposable-prefix check
+validates the packed local artifact and bundled MCP registry, but it is not a
+registry publication or clean-Mac setup test. A source build check is:
 
 ```sh
 pnpm --filter @orchestrat/cli build
@@ -249,7 +307,9 @@ enables `hardenedRuntime`. No entitlements were added: the current
 outside-App-Store features do not require an entitlement, and adding App
 Sandbox/App Store entitlements would change the product boundary.
 
-Build locally with safe public build values only:
+Build locally with safe public build values only. Always use the checked-in
+`build:desktop` wrapper: it derives the native CSP from `VITE_API_URL` and
+`DOCUMENT_STORAGE_S3_ENDPOINT` and accepts local HTTP only for loopback hosts.
 
 ```sh
 VITE_API_URL=https://api.orchestrat.dev \
@@ -258,13 +318,15 @@ ORCHESTRAT_SUPABASE_PUBLISHABLE_KEY=sb_publishable_abcdefghijklmnopqrstuvwxyz123
 ORCHESTRAT_AUTH_ENVIRONMENT=test \
 ORCHESTRAT_DESKTOP_AUTH_REDIRECT_URI=dev.orchestrat.app://auth/callback \
 ORCHESTRAT_DESKTOP_AUTH_PORTAL_URL=http://localhost:5173/auth/desktop \
-pnpm --filter @orchestrat/dashboard exec tauri build --no-sign
+DOCUMENT_STORAGE_S3_ENDPOINT=https://<ACCOUNT_ID>.r2.cloudflarestorage.com \
+pnpm --filter @orchestrat/dashboard build:desktop -- --no-sign
 ```
 
-This is a structural unsigned/test build, not an alpha DMG build with real
-production public configuration. The observed local outputs below were not
-launched or auth-tested; their embedded runtime configuration is not
-acceptance evidence. Outputs are under:
+An unsigned Apple Silicon app and DMG were built locally with the actual public
+API, Supabase, callback, and R2 origins. Only the sign-in screen was observed in
+an earlier test build. Final hosted authentication, native R2 uploads,
+notifications, signing/notarization, and clean-Mac behavior remain **NOT RUN**.
+Outputs are under:
 `apps/dashboard/src-tauri/target/release/bundle/macos/Orchestrat.app` and
 `apps/dashboard/src-tauri/target/release/bundle/dmg/Orchestrat_0.1.0_aarch64.dmg`.
 Architecture/version names may differ on another runner. An unsigned/ad-hoc
@@ -282,7 +344,7 @@ From the repository root, an authorized signed/notarized build uses the same
 Tauri environment and omits `--no-sign`:
 
 ```sh
-pnpm --filter @orchestrat/dashboard exec tauri build --bundles app,dmg
+pnpm --filter @orchestrat/dashboard build:desktop -- --bundles app,dmg
 ```
 
 From the repository root, the checked-in verifier runs codesign,
@@ -297,6 +359,40 @@ pnpm --filter @orchestrat/dashboard verify:macos -- \
 The command is expected to fail at signature/trust gates for an unsigned local
 artifact. Signing, notarization, stapling, Gatekeeper trust, distribution,
 and upload remain **NOT RUN**.
+
+## Current local source evidence
+
+This evidence supports the source candidate; it does not satisfy the hosted or
+clean-Mac checklist:
+
+- Root lint, typecheck, and test commands pass. The dashboard has 274 passing
+  unit tests, and the API's final Turbo run with disposable PostgreSQL has 76
+  passing tests with 2 intentional skips: the external document-storage case
+  and optional R2 integration. The Rust suite has 65 passing tests.
+- The full Playwright suite has 44 passing tests, including two real R2 browser
+  attachment workflows at both tested viewport widths.
+- The operator applied the exact-origin R2 policy from
+  `deploy/document-storage-cors.json`; wildcard storage origins were not used.
+- Five existing R2 objects used a legacy duplicated-bucket prefix. Canonical
+  copies were created and verified by byte count and SHA-256; the legacy
+  objects were retained for safe rollback.
+- The integrated disposable PostgreSQL plus actual R2 acceptance has 10/10
+  passing subtests: legacy task/comment author migration, concurrent task and
+  comment idempotency, optimistic task edits, exclusive claims, lease expiry
+  takeover, dependency gating, same-base document conflicts, restartable
+  backfill dry-run/apply/rerun, and attachment transfer. The attachment case
+  covers a 100 MiB multipart upload, concurrent completion, exact downloaded
+  bytes, single-use download tickets, and cancellation cleanup.
+- The locally packed CLI `0.1.0-alpha.1` reports the expected version and its
+  installed bundle passes a real stdio MCP initialize and exact tool-list
+  verification. This is not npm publication evidence.
+- CI defines a PostgreSQL 17 service, passes hashed test environment inputs to
+  Turbo, and runs the WebKit job with its default browser fixtures. That job
+  does not use R2. Real R2 and the optional waitlist test remain opt-in; the
+  waitlist test runs only when the `LANDING` environment is configured.
+
+Final hosted auth, native R2, native notifications, clean-Mac installation,
+signed/notarized distribution, and pilot acceptance remain **NOT RUN**.
 
 ## Acceptance and recovery
 

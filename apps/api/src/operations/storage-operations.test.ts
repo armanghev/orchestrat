@@ -242,6 +242,18 @@ test("multipart GC only selects old attachment uploads without DB sessions", () 
 });
 
 test("storage configuration supports a dedicated provider and rejects unsafe config", () => {
+  assert.throws(
+    () =>
+      readDocumentStorageConfig({
+        DOCUMENT_STORAGE_BUCKET: "documents",
+        DOCUMENT_STORAGE_S3_ENDPOINT:
+          "https://account.r2.cloudflarestorage.com/documents",
+        DOCUMENT_STORAGE_S3_REGION: "auto",
+        DOCUMENT_STORAGE_S3_ACCESS_KEY_ID: "key",
+        DOCUMENT_STORAGE_S3_SECRET_ACCESS_KEY: "secret"
+      }),
+    /without a bucket path/
+  );
   assert.equal(
     readDocumentStorageConfig({
       SUPABASE_AVATAR_BUCKET: "avatars",

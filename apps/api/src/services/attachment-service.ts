@@ -407,15 +407,8 @@ export class AttachmentService {
       .limit(1);
     if (!row) throw new ApiError(404, "NOT_FOUND", "Upload session not found.");
     if (row.expiresAt <= new Date() && row.status === "pending") {
-      await this.db
-        .update(documentAttachmentUploads)
-        .set({ status: "expired" })
-        .where(
-          and(
-            eq(documentAttachmentUploads.id, id),
-            eq(documentAttachmentUploads.status, "pending")
-          )
-        );
+      // Keep it eligible for the expiry worker, which commits the transition
+      // before cleaning up the provider object or multipart session.
       throw new ApiError(
         409,
         "ATTACHMENT_UPLOAD_EXPIRED",
@@ -710,18 +703,7 @@ export class AttachmentService {
         "Storage could not inspect the attachment upload."
       );
     if (Number(head.ContentLength ?? -1) !== row.reservedBytes) {
-      await storage
-        .send(
-          new DeleteObjectCommand({
-            Bucket: config.bucket,
-            Key: this.key(row.projectId, row.documentId, row.id)
-          })
-        )
-        .catch(() => undefined);
-      await this.db
-        .update(documentAttachmentUploads)
-        .set({ status: "aborted" })
-        .where(eq(documentAttachmentUploads.id, row.id));
+      await this.abortProject(row);
       throw new ApiError(
         409,
         "STORAGE_UPLOAD_FAILED",
@@ -736,8 +718,16 @@ export class AttachmentService {
         .from(documentAttachmentUploads)
         .where(eq(documentAttachmentUploads.id, row.id))
         .for("update");
+      if (current?.status === "completed")
+        return this.completedProject(current);
       if (!current || current.status !== "pending")
         throw new ApiError(409, "CONFLICT", "Upload session is not pending.");
+      if (current.expiresAt <= new Date())
+        throw new ApiError(
+          409,
+          "ATTACHMENT_UPLOAD_EXPIRED",
+          "Upload session has expired."
+        );
       const [attachment] = await tx
         .insert(documentAttachments)
         .values({
@@ -848,6 +838,20 @@ export class AttachmentService {
   ) {
     if (row.status !== "pending")
       throw new ApiError(409, "CONFLICT", "Upload session is not pending.");
+    // Commit the cancellation before deleting provider state. A completion
+    // holding this row's lock either wins first or observes the cancellation.
+    const [aborted] = await this.db
+      .update(documentAttachmentUploads)
+      .set({ status: "aborted" })
+      .where(
+        and(
+          eq(documentAttachmentUploads.id, row.id),
+          eq(documentAttachmentUploads.status, "pending")
+        )
+      )
+      .returning();
+    if (!aborted)
+      throw new ApiError(409, "CONFLICT", "Upload session is not pending.");
     if (this.storage && this.config) {
       if (row.providerUploadId)
         await this.storage
@@ -869,10 +873,6 @@ export class AttachmentService {
           )
           .catch(() => undefined);
     }
-    await this.db
-      .update(documentAttachmentUploads)
-      .set({ status: "aborted" })
-      .where(eq(documentAttachmentUploads.id, row.id));
     return undefined;
   }
   private issueDownloadTicket(row: typeof documentAttachments.$inferSelect) {

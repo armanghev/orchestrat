@@ -9,64 +9,82 @@ Authorization: Bearer <session-token>
 
 ## Endpoints
 
-| Method   | Path                                                           | Behavior                                                                               |
-| -------- | -------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| `GET`    | `/health`                                                      | Public service health                                                                  |
-| `GET`    | `/api/v1/health`                                               | Public versioned service health                                                        |
-| `GET`    | `/api/v1/profile`                                              | Get the authenticated user's profile                                                   |
-| `PATCH`  | `/api/v1/profile`                                              | Update username, full name, or avatar URL                                              |
-| `POST`   | `/api/v1/profile/avatar`                                       | Upload a JPEG, PNG, or WebP avatar (maximum 2 MiB); requires configured object storage |
-| `DELETE` | `/api/v1/profile/avatar`                                       | Remove the current avatar                                                              |
-| `GET`    | `/api/v1/organizations`                                        | List the current user's organizations                                                  |
-| `POST`   | `/api/v1/organizations`                                        | Create an organization and owner membership                                            |
-| `GET`    | `/api/v1/organizations/:id`                                    | Get an accessible organization                                                         |
-| `PATCH`  | `/api/v1/organizations/:id`                                    | Update an organization (owner or admin)                                                |
-| `DELETE` | `/api/v1/organizations/:id`                                    | Delete an organization (owner; body must contain its current `name`)                   |
-| `GET`    | `/api/v1/organizations/:organizationId/members`                | List organization members                                                              |
-| `PATCH`  | `/api/v1/organizations/:organizationId/members/:memberId`      | Update a member role (owner or admin, with owner safeguards)                           |
-| `DELETE` | `/api/v1/organizations/:organizationId/members/:memberId`      | Remove a member (owner or admin, with owner safeguards)                                |
-| `POST`   | `/api/v1/organizations/:organizationId/members/leave`          | Leave an organization (the sole owner cannot leave)                                    |
-| `GET`    | `/api/v1/organizations/:organizationId/projects`               | List accessible projects in an organization                                            |
-| `POST`   | `/api/v1/organizations/:organizationId/projects`               | Create a project in an organization                                                    |
-| `GET`    | `/api/v1/projects/:id`                                         | Get an accessible project                                                              |
-| `PATCH`  | `/api/v1/projects/:id`                                         | Update project name, slug, or description (owner or admin)                             |
-| `POST`   | `/api/v1/projects/:id/archive`                                 | Archive a project idempotently (owner or admin)                                        |
-| `POST`   | `/api/v1/projects/:id/reactivate`                              | Reactivate a project idempotently (owner or admin)                                     |
-| `DELETE` | `/api/v1/projects/:id`                                         | Delete a project (owner; body must contain its current `name`)                         |
-| `POST`   | `/api/v1/projects/:projectId/tasks`                            | Create a task (`Idempotency-Key` required)                                             |
-| `GET`    | `/api/v1/projects/:projectId/tasks`                            | List task cards with cursor pagination and filters                                     |
-| `GET`    | `/api/v1/tasks/:id`                                            | Get one task card                                                                      |
-| `PATCH`  | `/api/v1/tasks/:id`                                            | Update title, description, or priority with `expected_version`                         |
-| `POST`   | `/api/v1/tasks/:id/move`                                       | Move a task to a status/position with `expected_version`                               |
-| `GET`    | `/api/v1/tasks/:id/comments`                                   | List comments with cursor pagination                                                   |
-| `POST`   | `/api/v1/tasks/:id/comments`                                   | Add a Markdown comment (`Idempotency-Key` required)                                    |
-| `GET`    | `/api/v1/tasks/:id/dependencies`                               | List tasks this task depends on and tasks it blocks                                    |
-| `POST`   | `/api/v1/tasks/:id/dependencies`                               | Add a dependency with `expected_version`                                               |
-| `DELETE` | `/api/v1/tasks/:id/dependencies/:dependsOnTaskId`              | Remove a dependency with `expected_version`                                            |
-| `POST`   | `/api/v1/projects/:projectId/agents`                           | Create a project agent (human project editor)                                          |
-| `GET`    | `/api/v1/projects/:projectId/agents`                           | List project agents (human project member)                                             |
-| `POST`   | `/api/v1/projects/:projectId/agents/:agentId/revoke`           | Revoke an agent and its active credentials, sessions, and claims                       |
-| `POST`   | `/api/v1/projects/:projectId/agents/:agentId/credentials`      | Issue a credential; the token is returned only in this response                        |
-| `GET`    | `/api/v1/projects/:projectId/credentials`                      | List project credentials without token values                                          |
-| `POST`   | `/api/v1/projects/:projectId/credentials/:credentialId/revoke` | Revoke a credential (human project editor)                                             |
-| `GET`    | `/api/v1/projects/:projectId/presence`                         | List project agent presence                                                            |
-| `GET`    | `/api/v1/projects/:projectId/events`                           | List ordered project events with an `after` cursor                                     |
-| `GET`    | `/api/v1/projects/:projectId/documents`                        | List project Markdown documents with cursor pagination                                 |
-| `POST`   | `/api/v1/projects/:projectId/documents`                        | Create a Markdown document and revision 1                                              |
-| `GET`    | `/api/v1/documents/:id`                                        | Read a document and its current revision                                               |
-| `PATCH`  | `/api/v1/documents/:id`                                        | Create a revision using an optimistic `base_revision`                                  |
-| `GET`    | `/api/v1/documents/:id/revisions`                              | List immutable document revisions                                                      |
-| `GET`    | `/api/v1/documents/:id/revisions/:revision`                    | Read one immutable revision                                                            |
+| Method   | Path                                                                   | Behavior                                                                               |
+| -------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `GET`    | `/health`                                                              | Public service health                                                                  |
+| `GET`    | `/api/v1/health`                                                       | Public versioned service health                                                        |
+| `GET`    | `/api/v1/profile`                                                      | Get the authenticated user's profile                                                   |
+| `PATCH`  | `/api/v1/profile`                                                      | Update username, full name, or avatar URL                                              |
+| `POST`   | `/api/v1/profile/avatar`                                               | Upload a JPEG, PNG, or WebP avatar (maximum 2 MiB); requires configured object storage |
+| `DELETE` | `/api/v1/profile/avatar`                                               | Remove the current avatar                                                              |
+| `GET`    | `/api/v1/organizations`                                                | List the current user's organizations                                                  |
+| `POST`   | `/api/v1/organizations`                                                | Create an organization and owner membership                                            |
+| `GET`    | `/api/v1/organizations/:id`                                            | Get an accessible organization                                                         |
+| `PATCH`  | `/api/v1/organizations/:id`                                            | Update an organization (owner or admin)                                                |
+| `DELETE` | `/api/v1/organizations/:id`                                            | Delete an organization (owner; body must contain its current `name`)                   |
+| `GET`    | `/api/v1/organizations/:organizationId/members`                        | List organization members                                                              |
+| `PATCH`  | `/api/v1/organizations/:organizationId/members/:memberId`              | Update a member role (owner or admin, with owner safeguards)                           |
+| `DELETE` | `/api/v1/organizations/:organizationId/members/:memberId`              | Remove a member (owner or admin, with owner safeguards)                                |
+| `POST`   | `/api/v1/organizations/:organizationId/members/leave`                  | Leave an organization (the sole owner cannot leave)                                    |
+| `GET`    | `/api/v1/organizations/:organizationId/projects`                       | List accessible projects in an organization                                            |
+| `POST`   | `/api/v1/organizations/:organizationId/projects`                       | Create a project in an organization                                                    |
+| `GET`    | `/api/v1/projects/:id`                                                 | Get an accessible project                                                              |
+| `PATCH`  | `/api/v1/projects/:id`                                                 | Update project name, slug, or description (owner or admin)                             |
+| `POST`   | `/api/v1/projects/:id/archive`                                         | Archive a project idempotently (owner or admin)                                        |
+| `POST`   | `/api/v1/projects/:id/reactivate`                                      | Reactivate a project idempotently (owner or admin)                                     |
+| `DELETE` | `/api/v1/projects/:id`                                                 | Delete a project (owner; body must contain its current `name`)                         |
+| `POST`   | `/api/v1/projects/:projectId/tasks`                                    | Create a task (`Idempotency-Key` required)                                             |
+| `GET`    | `/api/v1/projects/:projectId/tasks`                                    | List task cards with cursor pagination and filters                                     |
+| `GET`    | `/api/v1/tasks/:id`                                                    | Get one task card                                                                      |
+| `PATCH`  | `/api/v1/tasks/:id`                                                    | Update title, description, or priority with `expected_version`                         |
+| `POST`   | `/api/v1/tasks/:id/move`                                               | Move a task to a status/position with `expected_version`                               |
+| `GET`    | `/api/v1/tasks/:id/comments`                                           | List comments with cursor pagination                                                   |
+| `POST`   | `/api/v1/tasks/:id/comments`                                           | Add a Markdown comment (`Idempotency-Key` required)                                    |
+| `GET`    | `/api/v1/tasks/:id/dependencies`                                       | List tasks this task depends on and tasks it blocks                                    |
+| `POST`   | `/api/v1/tasks/:id/dependencies`                                       | Add a dependency with `expected_version`                                               |
+| `DELETE` | `/api/v1/tasks/:id/dependencies/:dependsOnTaskId`                      | Remove a dependency with `expected_version`                                            |
+| `POST`   | `/api/v1/projects/:projectId/agents`                                   | Create a project agent (human project editor)                                          |
+| `GET`    | `/api/v1/projects/:projectId/agents`                                   | List project agents (human project member)                                             |
+| `POST`   | `/api/v1/projects/:projectId/agents/:agentId/revoke`                   | Revoke an agent and its active credentials, sessions, and claims                       |
+| `POST`   | `/api/v1/projects/:projectId/agents/:agentId/credentials`              | Issue a credential; the token is returned only in this response                        |
+| `GET`    | `/api/v1/projects/:projectId/credentials`                              | List project credentials without token values                                          |
+| `POST`   | `/api/v1/projects/:projectId/credentials/:credentialId/revoke`         | Revoke a credential (human project editor)                                             |
+| `GET`    | `/api/v1/projects/:projectId/presence`                                 | List project agent presence                                                            |
+| `GET`    | `/api/v1/projects/:projectId/events`                                   | List ordered project events with an `after` cursor                                     |
+| `GET`    | `/api/v1/projects/:projectId/documents`                                | List project Markdown documents with cursor pagination                                 |
+| `POST`   | `/api/v1/projects/:projectId/documents`                                | Create a Markdown document and revision 1                                              |
+| `GET`    | `/api/v1/documents/:id`                                                | Read a document and its current revision                                               |
+| `PATCH`  | `/api/v1/documents/:id`                                                | Create a revision using an optimistic `base_revision`                                  |
+| `POST`   | `/api/v1/documents/:id/edits`                                          | Apply exact text edits using an optimistic `base_revision`                             |
+| `PATCH`  | `/api/v1/documents/:id/path`                                           | Rename a document path                                                                 |
+| `POST`   | `/api/v1/documents/:id/archive`                                        | Archive a document                                                                     |
+| `POST`   | `/api/v1/documents/:id/restore`                                        | Restore an archived document                                                           |
+| `GET`    | `/api/v1/documents/:id/revisions`                                      | List immutable document revisions                                                      |
+| `GET`    | `/api/v1/documents/:id/revisions/:revision`                            | Read one immutable revision                                                            |
+| `GET`    | `/api/v1/documents/:documentId/attachments`                            | List document attachments                                                              |
+| `POST`   | `/api/v1/documents/:documentId/attachments/uploads`                    | Start a direct multipart attachment upload                                             |
+| `GET`    | `/api/v1/documents/:documentId/attachments/uploads/:uploadId`          | Inspect an attachment upload                                                           |
+| `POST`   | `/api/v1/documents/:documentId/attachments/uploads/:uploadId/refresh`  | Refresh upload expiry and signed URLs                                                  |
+| `POST`   | `/api/v1/documents/:documentId/attachments/uploads/:uploadId/parts`    | Sign multipart upload parts                                                            |
+| `POST`   | `/api/v1/documents/:documentId/attachments/uploads/:uploadId/complete` | Complete and verify an upload                                                          |
+| `DELETE` | `/api/v1/documents/:documentId/attachments/uploads/:uploadId`          | Abort an upload                                                                        |
+| `POST`   | `/api/v1/documents/:documentId/attachments/:attachmentId/download`     | Create a short-lived download URL                                                      |
+| `DELETE` | `/api/v1/documents/:documentId/attachments/:attachmentId`              | Delete an attachment                                                                   |
 
 Agent-only routes use the `/api/v1/agent` prefix:
 
 | Method  | Path                                                | Behavior                                                                   |
 | ------- | --------------------------------------------------- | -------------------------------------------------------------------------- |
+| `GET`   | `/api/v1/agent/project`                             | Get the project fixed by the authenticated agent credential                |
 | `POST`  | `/api/v1/agent/sessions`                            | Open a session with runtime, integration, and optional external session ID |
 | `POST`  | `/api/v1/agent/sessions/:sessionId/heartbeat`       | Refresh a session and renew its active claim leases                        |
 | `POST`  | `/api/v1/agent/sessions/:sessionId/close`           | Close a session and revoke its active claims                               |
 | `GET`   | `/api/v1/agent/tasks`                               | List tasks in the credential's project with filters and cursor pagination  |
+| `POST`  | `/api/v1/agent/tasks`                               | Create an agent-authored backlog or ready task idempotently                |
 | `GET`   | `/api/v1/agent/tasks/:id`                           | Get a task in the credential's project                                     |
+| `PATCH` | `/api/v1/agent/tasks/:id`                           | Edit task metadata with `expected_version`                                 |
+| `GET`   | `/api/v1/agent/tasks/:id/comments`                  | Read human and agent comments                                              |
+| `POST`  | `/api/v1/agent/tasks/:id/comments`                  | Add an agent-authored Markdown comment idempotently                        |
 | `POST`  | `/api/v1/agent/tasks/:id/claim`                     | Claim a ready task with a session and lease duration                       |
 | `POST`  | `/api/v1/agent/sessions/:sessionId/claims/release`  | Release an owned claim using its claim token                               |
 | `POST`  | `/api/v1/agent/sessions/:sessionId/claims/complete` | Complete an owned claim using its claim token                              |
@@ -76,16 +94,25 @@ Agent-only routes use the `/api/v1/agent` prefix:
 | `POST`  | `/api/v1/agent/documents`                           | Create a document and revision 1 in the credential's project               |
 | `GET`   | `/api/v1/agent/documents/:id`                       | Read a document in the credential's project                                |
 | `PATCH` | `/api/v1/agent/documents/:id`                       | Create a revision in the credential's project                              |
+| `POST`  | `/api/v1/agent/documents/:id/edits`                 | Apply exact text edits in the credential's project                         |
+| `PATCH` | `/api/v1/agent/documents/:id/path`                  | Rename a document in the credential's project                              |
+| `POST`  | `/api/v1/agent/documents/:id/archive`               | Archive a document in the credential's project                             |
+| `POST`  | `/api/v1/agent/documents/:id/restore`               | Restore a document in the credential's project                             |
 | `GET`   | `/api/v1/agent/documents/:id/revisions`             | List immutable revisions                                                   |
 | `GET`   | `/api/v1/agent/documents/:id/revisions/:revision`   | Read one immutable revision                                                |
+
+Agent document attachment routes mirror the human attachment suffixes under
+`/api/v1/agent/documents/:documentId/attachments`. Both surfaces authorize
+through the owning document and project; object bytes use configured
+R2-compatible storage through short-lived signed URLs.
 
 Names are required. Slugs are optional and derived from names when omitted.
 Project creation also accepts optional `task_key_prefix` (2–8 alphanumeric
 characters, uppercased). Without it, the prefix is the first three
 alphanumeric slug characters when at least two exist, otherwise `PRJ`.
 Create endpoints return `201`; other successful operations return `200`.
-Profile avatar upload expects multipart form data. The dashboard is not yet
-wired to these task routes.
+Profile avatar upload expects multipart form data. The dashboard consumes the
+task, agent, document, attachment, activity, and realtime routes.
 
 ## Tasks API
 
@@ -96,14 +123,17 @@ grants project and task access. Missing or invalid authentication returns
 `403 PERMISSION_DENIED`.
 
 Task fields are `id`, `project_id`, `key`, `title`, `description`, `priority`,
-`status`, `position`, `version`, `created_by_user_id`, `created_at`,
+`status`, `position`, `version`, `created_by`, `created_by_user_id`, `created_at`,
 `updated_at`, `started_at`, `completed_at`, and `cancelled_at`. Dates are ISO
 timestamps; nullable fields are `null`. Priorities are `urgent`, `high`,
 `medium`, `low`, and `none`. Statuses are `backlog`, `ready`, `claimed`,
 `in_progress`, `blocked`, `review`, `done`, and `cancelled`. Human create/move
-requests cannot select `claimed`; it is reserved for a future agent-claim
-flow. Task cards additionally include `comment_count` and
+requests cannot select `claimed`; it is reserved for the agent claim flow.
+Task cards additionally include `comment_count` and
 `unresolved_blocker_count` (dependencies whose task is not `done`).
+`created_by` truthfully discriminates a human or agent author. The nullable
+legacy `created_by_user_id` remains populated for historical human-created
+tasks and is `null` for agent-created tasks.
 
 `POST /api/v1/projects/:projectId/tasks` accepts `title`, optional
 `description`, `priority`, and human-selectable `status`; it requires a non-empty
@@ -136,6 +166,12 @@ project-local; adding a self-edge or cycle returns `409 TASK_DEPENDENCY_CYCLE`.
 Dependency changes also require the task's current `expected_version`.
 Comments are immutable; there are no comment edit or delete endpoints.
 
+Agent task creation and comments use the same idempotency contract, scoped to
+the authenticated agent principal. Agent metadata updates accept only title,
+description, priority, and `expected_version`; claim ownership and task status
+change only through claim, release, and complete operations. `GET
+/api/v1/agent/presence` backs the MCP `list_agents` tool.
+
 Archived projects remain readable, including task lists, task details,
 comments, and dependencies. All task writes are rejected with
 `409 PROJECT_ARCHIVED` and the message `Archived projects are read-only.`
@@ -148,7 +184,8 @@ membership for the target project. Agent document routes require exactly one
 `Authorization: Bearer orch_agent_...` credential; the credential fixes the
 agent and project scope, and request path/body IDs do not override it.
 
-Documents are project-scoped plain Markdown. `path` must be a normalized,
+Documents are project-scoped Markdown. The dashboard uses MDXEditor while the
+API stores Markdown text and immutable revisions. `path` must be a normalized,
 relative POSIX path: 1–1024 characters, with no leading slash, backslash, NUL,
 empty segment, or `.`/`..` segment. `content` is plain text up to 1,000,000
 characters. Create requests are `{ "path": "docs/readme.md", "content": "# Notes" }`
@@ -198,6 +235,11 @@ ordered by update time and ID. History is returned in revision order and is
 immutable. Archived projects remain readable, while document creation and
 updates return `409 PROJECT_ARCHIVED`.
 
+Attachments use direct multipart uploads to configured R2-compatible storage.
+The API creates upload state and signed part URLs, verifies completion, stores
+attachment metadata, and issues short-lived download URLs. The API does not
+proxy attachment bytes.
+
 ## Agent coordination
 
 Human routes use `Authorization: Bearer <Supabase access token>` and resolve
@@ -232,19 +274,20 @@ event ID and paged with `limit` and `after`; human members and project agents
 can read the same project event stream. Meaningful agent, credential, session,
 claim, and task lifecycle mutations write durable events in their transaction.
 
-## Planned, not implemented
+## Deferred or externally unverified
 
 The API does not currently implement:
 
 - Task deletion
-- MCP or CLI transport
-- WebSockets, realtime tickets, or Redis
-- Hooks or tool telemetry
+- Remote MCP/OAuth and detailed tool telemetry
 - Agent capability matching or auto-assignment
-- Dashboard or native notification wiring
-- Deployment automation
+- Local filesystem document synchronization and collaborative cursors
+- Multi-user team collaboration beyond the single-developer private alpha
 
 These items have no implied timeline.
+
+Hosted deployment, production R2 configuration, native distribution, and
+clean-Mac multi-agent acceptance are not verified by this source checkout.
 
 ## Errors and request IDs
 
@@ -267,4 +310,7 @@ Current codes are `UNAUTHENTICATED`, `PERMISSION_DENIED`, `VALIDATION_ERROR`,
 `AGENT_CREDENTIAL_INVALID`, `AGENT_CREDENTIAL_REVOKED`,
 `AGENT_SESSION_NOT_FOUND`, `AGENT_SESSION_CLOSED`, `AGENT_SESSION_STALE`,
 `TASK_NOT_CLAIMABLE`, `TASK_ALREADY_CLAIMED`, `CLAIM_NOT_FOUND`,
-`CLAIM_TOKEN_INVALID`, `CLAIM_NOT_OWNER`, and `INTERNAL_ERROR`.
+`CLAIM_TOKEN_INVALID`, `CLAIM_NOT_OWNER`, `DOCUMENT_ARCHIVED`,
+`DOCUMENT_CONFLICT`, `DOCUMENT_CONTENT_UNAVAILABLE`, `DOCUMENT_EDIT_MISMATCH`,
+`ATTACHMENT_QUOTA_EXCEEDED`, `ATTACHMENT_UPLOAD_EXPIRED`,
+`STORAGE_UPLOAD_FAILED`, and `INTERNAL_ERROR`.
