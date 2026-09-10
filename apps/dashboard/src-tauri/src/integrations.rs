@@ -45,35 +45,26 @@ fn json_mcp_valid(text: &str, command: &str, integration: &str, global: bool) ->
 }
 
 fn codex_mcp_valid(text: &str, command: &str, global: bool) -> bool {
-    let mut section = None;
-    for (index, line) in text.lines().enumerate() {
-        if line.trim() == "[mcp_servers.orchestrat]" {
-            section = Some(index);
-            break;
-        }
+    let mut expected = vec!["mcp", "--integration", "codex"];
+    if global {
+        expected.push("--global");
     }
-    let Some(start) = section else { return false };
-    let lines: Vec<&str> = text.lines().collect();
-    let end = lines
-        .iter()
-        .enumerate()
-        .skip(start + 1)
-        .find(|(_, line)| {
-            let trimmed = line.trim();
-            trimmed.starts_with('[') && trimmed.ends_with(']')
+    text.parse::<toml::Table>()
+        .ok()
+        .and_then(|root| root.get("mcp_servers")?.get("orchestrat").cloned())
+        .map(|entry| {
+            entry.get("command").and_then(toml::Value::as_str) == Some(command)
+                && entry
+                    .get("args")
+                    .and_then(toml::Value::as_array)
+                    .map(|args| {
+                        args.iter()
+                            .map(toml::Value::as_str)
+                            .eq(expected.iter().map(|arg| Some(*arg)))
+                    })
+                    .unwrap_or(false)
         })
-        .map(|(index, _)| index)
-        .unwrap_or(lines.len());
-    let body = lines[start + 1..end].join("\n");
-    body.lines()
-        .any(|line| line.trim() == format!("command = \"{command}\""))
-        && body.lines().any(|line| {
-            line.trim()
-                == format!(
-                    "args = [\"mcp\", \"--integration\", \"codex\"{}]",
-                    if global { ", \"--global\"" } else { "" }
-                )
-        })
+        .unwrap_or(false)
 }
 
 fn hooks_valid(text: &str, integration: &str, command: &str) -> bool {
@@ -292,7 +283,7 @@ mod tests {
                 .credential
         );
         write(home.join(".orchestrat/config.json"), r#"{"version":1,"projects":{},"globalProjects":{"codex":{"p1":{"agentId":"a1"}},"claude-code":{"p1":{"agentId":"a2"}}}}"#).unwrap();
-        write(home.join(".codex/config.toml"), format!("[mcp_servers.orchestrat]\ncommand = \"{}\"\nargs = [\"mcp\", \"--integration\", \"codex\", \"--global\"]\n", command.display())).unwrap();
+        write(home.join(".codex/config.toml"), format!("[mcp_servers.orchestrat]\ncommand=\"{}\" # installed launcher\nargs = [\n  \"mcp\", \"--integration\", \"codex\", \"--global\",\n]\n", command.display())).unwrap();
         write(home.join(".claude.json"), serde_json::json!({"mcpServers":{"orchestrat":{"command":command.to_string_lossy(),"args":["mcp","--integration","claude-code","--global"]}}}).to_string()).unwrap();
         let global = inspect_local(&home, "p1", |account| {
             matches!(account, "agent:p1:codex" | "agent:p1:claude-code")
