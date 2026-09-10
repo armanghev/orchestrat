@@ -117,10 +117,13 @@ export async function selectProject(
     isCancel?: (answer: unknown) => boolean;
   }
 ): Promise<{ cancelled: false; value: ProjectChoice } | Cancelled> {
-  if (!projects.length) throw new Error("No projects are available to this account");
+  if (!projects.length)
+    throw new Error("No projects are available to this account");
   if (!options.interactive) {
     if (projects.length !== 1)
-      throw new Error("Select a project by running setup in an interactive terminal");
+      throw new Error(
+        "Select a project by running setup in an interactive terminal"
+      );
     return { cancelled: false, value: projects[0]! };
   }
   const components = options.components ?? defaultComponents;
@@ -171,7 +174,8 @@ export async function selectGlobalProjects(
     isCancel?: (answer: unknown) => boolean;
   }
 ): Promise<Selection<ProjectChoice> | Cancelled> {
-  if (!projects.length) throw new Error("No projects are available to this account");
+  if (!projects.length)
+    throw new Error("No projects are available to this account");
   if (!options.interactive) return { cancelled: false, values: [...projects] };
   const components = options.components ?? defaultComponents;
   const answer = await components.multiselect({
@@ -293,6 +297,7 @@ export function renderPreview(
 export function renderStatus(result: unknown, write: UiWriter): void {
   const value = result as {
     configured?: boolean;
+    scope?: "project" | "global";
     cwd?: string;
     project_id?: string | null;
     backend?: Record<
@@ -301,7 +306,9 @@ export function renderStatus(result: unknown, write: UiWriter): void {
     >;
   };
   write(`Status: ${value.configured ? "configured" : "not configured"}\n`);
-  if (value.cwd)
+  if (value.configured && value.scope === "global")
+    write("Projects: global connections; select a project in MCP\n");
+  else if (value.cwd)
     write(`Project: ${value.project_id ?? "none"}\n  ${value.cwd}\n`);
   for (const [name, state] of Object.entries(value.backend ?? {}))
     write(

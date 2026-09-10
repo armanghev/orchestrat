@@ -5,7 +5,8 @@ import {
   findProject,
   INTEGRATIONS,
   readConfig,
-  type Integration
+  type Integration,
+  type OrchestratConfig
 } from "./config.js";
 import { harnessConfigPlan } from "./harness-config.js";
 import {
@@ -23,6 +24,52 @@ import { promisify } from "node:util";
 const redacted = (ok: boolean, detail: string) => ({ ok, detail });
 const execFileAsync = promisify(execFile);
 
+function diagnosticConnections(
+  config: OrchestratConfig,
+  cwd: string,
+  api: string
+) {
+  const project = findProject(config, cwd);
+  const connections = project
+    ? INTEGRATIONS.filter(
+        (integration) => project.integrations[integration]
+      ).map((integration) => ({
+        key: integration as string,
+        integration,
+        projectId: project.projectId,
+        agentId: project.integrations[integration]!.agentId,
+        api,
+        scope: project.mcpScopes?.[integration] ?? "project"
+      }))
+    : INTEGRATIONS.flatMap((integration) =>
+        Object.entries(config.globalProjects?.[integration] ?? {}).map(
+          ([projectId, mapping]) => ({
+            key: `${integration}:${projectId}`,
+            integration,
+            projectId,
+            agentId: mapping.agentId,
+            api: mapping.apiUrl ?? api,
+            scope: "global" as const
+          })
+        )
+      );
+  return { project, connections };
+}
+
+async function connectionCredential(
+  credentials: { read(account: string): Promise<string | undefined> },
+  connection: ReturnType<typeof diagnosticConnections>["connections"][number]
+) {
+  const token = await credentials.read(
+    agentAccount(connection.projectId, connection.integration)
+  );
+  if (token || connection.scope === "global") return token;
+  return (
+    (await credentials.read(legacyAgentAccount(connection.integration))) ??
+    credentials.read(connection.integration)
+  );
+}
+
 export async function runStatus(input: {
   home: string;
   cwd: string;
@@ -31,41 +78,48 @@ export async function runStatus(input: {
   fetch?: typeof globalThis.fetch;
 }) {
   const config = await readConfig(input.home);
-  const project = findProject(config, input.cwd);
-  const integrations = project ? Object.keys(project.integrations) : [];
+  const { project, connections } = diagnosticConnections(
+    config,
+    input.cwd,
+    input.api
+  );
+  const integrations = [
+    ...new Set(connections.map((connection) => connection.integration))
+  ];
   const backend: Record<string, unknown> = {};
-  for (const integration of integrations as Integration[]) {
-    const mapping = project?.integrations[integration];
-    const token =
-      (await input.credentials.read(agentAccount(project!.projectId, integration))) ??
-      (await input.credentials.read(legacyAgentAccount(integration))) ??
-      (await input.credentials.read(integration));
+  for (const connection of connections) {
+    const token = await connectionCredential(input.credentials, connection);
     if (!token) {
-      backend[integration] = redacted(false, "missing credential");
+      backend[connection.key] = redacted(false, "missing credential");
       continue;
     }
     try {
       const presence = await new AgentApiClient({
-        baseUrl: input.api,
+        baseUrl: connection.api,
         token,
         fetch: input.fetch
       }).getPresence();
       const agent = presence.agents.find(
-        (item) => item.agent_id === mapping?.agentId
+        (item) => item.agent_id === connection.agentId
       );
-      backend[integration] = {
+      backend[connection.key] = {
         reachable: true,
-        agent_id: mapping?.agentId ?? null,
+        ok: Boolean(agent),
+        agent_id: connection.agentId,
         status: agent?.status ?? "missing",
         session_id: agent?.session_id ?? null,
         last_heartbeat_at: agent?.last_heartbeat_at ?? null
       };
     } catch {
-      backend[integration] = redacted(false, "API unreachable or unauthorized");
+      backend[connection.key] = redacted(
+        false,
+        "API unreachable or unauthorized"
+      );
     }
   }
   return {
-    configured: Boolean(project),
+    configured: connections.length > 0,
+    scope: project ? "project" : "global",
     cwd: input.cwd,
     project_id: project?.projectId ?? null,
     integrations,
@@ -89,31 +143,51 @@ export async function runDoctor(input: {
   } catch {
     checks.config = redacted(false, "malformed");
   }
-  const project = config ? findProject(config, input.cwd) : undefined;
-  checks.mapping = redacted(Boolean(project), project ? "present" : "missing");
+  const { project, connections } = config
+    ? diagnosticConnections(config, input.cwd, input.api)
+    : { project: undefined, connections: [] };
+  checks.mapping = redacted(
+    connections.length > 0,
+    project
+      ? "present"
+      : connections.length
+        ? "global projects configured; select a project in MCP"
+        : "missing"
+  );
   const cliToken = await input.credentials.read("cli");
   checks.cli_credential = redacted(
     Boolean(cliToken),
     cliToken ? "present" : "missing"
   );
-  if (cliToken) {
+  const origins = [...new Set(connections.map((connection) => connection.api))];
+  if (!origins.length) origins.push(input.api);
+  for (const origin of cliToken ? origins : []) {
+    const key = origins.length === 1 ? "cli_project" : `cli_project:${origin}`;
     try {
       const response = await (input.fetch ?? globalThis.fetch)(
-        `${input.api}/api/v1/cli/setup/project`,
+        `${origin}/api/v1/cli/setup/projects`,
         {
-          headers: { authorization: `Bearer ${cliToken}` }
+          headers: { authorization: `Bearer ${cliToken}` },
+          signal: AbortSignal.timeout(5000)
         }
       );
       if (!response.ok) throw new Error("unreachable");
-      const remote = (await response.json()) as { project_id?: string };
-      checks.cli_project = redacted(
-        remote.project_id === project?.projectId,
-        remote.project_id === project?.projectId
-          ? "matches"
-          : "different project"
+      const remote = (await response.json()) as { projects?: { id: string }[] };
+      const matches =
+        Array.isArray(remote.projects) &&
+        connections
+          .filter((connection) => connection.api === origin)
+          .every((connection) =>
+            remote.projects!.some((item) => item.id === connection.projectId)
+          );
+      checks[key] = redacted(
+        matches,
+        matches
+          ? "configured projects authorized"
+          : "configured project unavailable"
       );
     } catch {
-      checks.cli_project = redacted(false, "unreachable or unauthorized");
+      checks[key] = redacted(false, "unreachable or unauthorized");
     }
   }
   if (input.sourceCommand) {
@@ -138,18 +212,20 @@ export async function runDoctor(input: {
       checks.launcher = redacted(false, "conflict or invalid");
     }
   }
-  if (project && input.sourceCommand) {
+  if (input.sourceCommand) {
     const command = join(input.home, ".local", "bin", "orchestrat");
-    for (const integration of Object.keys(
-      project.integrations
-    ) as Integration[]) {
+    const checked = new Set<Integration>();
+    for (const connection of connections) {
+      const { integration } = connection;
+      if (checked.has(integration)) continue;
+      checked.add(integration);
       try {
         const plan = harnessConfigPlan(
           input.home,
           integration,
           command,
-          project.cwd,
-          project.mcpScopes?.[integration] ?? "project"
+          project?.cwd ?? input.cwd,
+          connection.scope
         );
         let current = true;
         for (const item of [plan.mcp, plan.hooks]) {
@@ -169,36 +245,30 @@ export async function runDoctor(input: {
       }
     }
   }
-  for (const integration of (project
-    ? Object.keys(project.integrations)
-    : []) as Integration[]) {
-    const mapping = project!.integrations[integration]!;
-    const token =
-      (await input.credentials.read(agentAccount(project!.projectId, integration))) ??
-      (await input.credentials.read(legacyAgentAccount(integration))) ??
-      (await input.credentials.read(integration));
-    checks[`credential.${integration}`] = redacted(
+  for (const connection of connections) {
+    const token = await connectionCredential(input.credentials, connection);
+    checks[`credential.${connection.key}`] = redacted(
       Boolean(token),
       token ? "present" : "missing"
     );
     if (token) {
       try {
         const presence = await new AgentApiClient({
-          baseUrl: input.api,
+          baseUrl: connection.api,
           token,
           fetch: input.fetch
         }).getPresence();
         const agent = presence.agents.find(
-          (item) => item.agent_id === mapping.agentId
+          (item) => item.agent_id === connection.agentId
         );
-        checks[`backend.${integration}`] = redacted(
+        checks[`backend.${connection.key}`] = redacted(
           Boolean(agent),
           agent
             ? `mapped ${agent.status} session ${agent.session_id ?? "none"} heartbeat ${agent.last_heartbeat_at ?? "none"}`
             : "mapped agent missing"
         );
       } catch {
-        checks[`backend.${integration}`] = redacted(
+        checks[`backend.${connection.key}`] = redacted(
           false,
           "unreachable or unauthorized"
         );
@@ -242,8 +312,7 @@ export async function disconnectLocal(input: {
         (projectId) => projectId !== project.projectId
       );
     if (
-      (otherProjectUses &&
-        (name !== "cursor" || mcpScope === "global")) ||
+      (otherProjectUses && (name !== "cursor" || mcpScope === "global")) ||
       globalProjectsRemain
     )
       continue;

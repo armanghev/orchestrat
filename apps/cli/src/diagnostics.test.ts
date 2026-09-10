@@ -433,7 +433,7 @@ test("status and doctor redact credentials and report partial backend failure", 
                 ]
               })
             )
-          : new Response(JSON.stringify({ project_id: id(1) }));
+          : new Response(JSON.stringify({ projects: [{ id: id(1) }] }));
     const status = await runStatus({
       home: fixture.home,
       cwd: fixture.project,
@@ -479,7 +479,7 @@ test("status and doctor redact credentials and report partial backend failure", 
                 ]
               })
             )
-          : new Response(JSON.stringify({ project_id: id(1) }))
+          : new Response(JSON.stringify({ projects: [{ id: id(1) }] }))
     });
     assert.equal(healthy.checks.mapping?.ok, true);
     assert.equal(healthy.checks["credential.codex"]?.ok, true);
@@ -516,10 +516,132 @@ test("doctor rejects a persistent launcher with an unresolvable version", async 
       credentials: fixture.store,
       api: "https://api.test",
       sourceCommand: fixture.source,
-      fetch: async () => new Response(JSON.stringify({ project_id: id(1) }))
+      fetch: async () =>
+        new Response(JSON.stringify({ projects: [{ id: id(1) }] }))
     });
     assert.equal(result.checks.launcher?.ok, false);
     assert.equal(result.checks.launcher?.detail, "conflict or invalid");
+  } finally {
+    await rm(fixture.home, { recursive: true, force: true });
+  }
+});
+
+test("global diagnostics check each configured origin and scoped credential without selecting a project", async () => {
+  const fixture = await setupHome();
+  try {
+    await writeFile(
+      configPath(fixture.home),
+      JSON.stringify({
+        version: 1,
+        projects: {},
+        globalProjects: {
+          codex: {
+            [id(1)]: {
+              name: "First",
+              organizationName: "Test",
+              agentId: id(2),
+              apiUrl: "http://localhost:8801"
+            },
+            [id(5)]: {
+              name: "Second",
+              organizationName: "Test",
+              agentId: id(6),
+              apiUrl: "https://other.api.test"
+            }
+          },
+          "claude-code": {
+            [id(1)]: {
+              name: "First",
+              organizationName: "Test",
+              agentId: id(3),
+              apiUrl: "http://localhost:8801"
+            }
+          }
+        }
+      })
+    );
+    const configBefore = await readFile(configPath(fixture.home), "utf8");
+    await writeFile(
+      join(fixture.home, ".codex", "config.toml"),
+      mergeToml(undefined, "codex", fixture.command, true)
+    );
+    await writeFile(
+      join(fixture.home, ".claude.json"),
+      mergeJson(undefined, "claude-code", fixture.command, true)
+    );
+    fixture.store.values.set(`agent:${id(1)}:codex`, "scoped-codex-secret");
+    fixture.store.values.set(
+      `agent:${id(1)}:claude-code`,
+      "scoped-claude-secret"
+    );
+    const calls: string[] = [];
+    const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push(url);
+      const authorization = new Headers(init?.headers).get("authorization");
+      if (url.endsWith("/cli/setup/projects"))
+        return new Response(
+          JSON.stringify({
+            projects: [{ id: url.startsWith("https://other") ? id(5) : id(1) }]
+          })
+        );
+      assert.equal(url, "http://localhost:8801/api/v1/agent/presence");
+      assert.ok(
+        ["Bearer scoped-codex-secret", "Bearer scoped-claude-secret"].includes(
+          authorization!
+        )
+      );
+      return new Response(
+        JSON.stringify({
+          agents: [
+            {
+              agent_id:
+                authorization === "Bearer scoped-codex-secret" ? id(2) : id(3),
+              project_id: id(1),
+              session_id: null,
+              status: "offline",
+              last_heartbeat_at: null,
+              current_task_id: null
+            }
+          ]
+        })
+      );
+    };
+    const input = {
+      home: fixture.home,
+      cwd: fixture.project,
+      credentials: fixture.store,
+      api: "https://unused.api.test",
+      fetch,
+      sourceCommand: fixture.source
+    };
+    const status = await runStatus(input);
+    const doctor = await runDoctor(input);
+    assert.equal(status.configured, true);
+    assert.equal(status.project_id, null);
+    assert.equal(status.scope, "global");
+    assert.equal(doctor.checks.mapping?.ok, true);
+    assert.equal(doctor.checks["config.codex"]?.ok, true);
+    assert.equal(doctor.checks["config.claude-code"]?.ok, true);
+    assert.equal(doctor.checks["cli_project:http://localhost:8801"]?.ok, true);
+    assert.equal(doctor.checks["cli_project:https://other.api.test"]?.ok, true);
+    assert.equal(doctor.checks[`backend.codex:${id(1)}`]?.ok, true);
+    assert.equal(doctor.checks[`backend.claude-code:${id(1)}`]?.ok, true);
+    assert.equal(doctor.checks[`credential.codex:${id(5)}`]?.ok, false);
+    assert.deepEqual(status.backend[`codex:${id(5)}`], {
+      ok: false,
+      detail: "missing credential"
+    });
+    assert.ok(calls.every((url) => !url.includes("unused.api.test")));
+    assert.equal(
+      await readFile(configPath(fixture.home), "utf8"),
+      configBefore
+    );
+    assert.equal(fixture.store.writes, 0);
+    assert.doesNotMatch(
+      JSON.stringify({ status, doctor }),
+      /secret|orch_(?:cli|agent)_/
+    );
   } finally {
     await rm(fixture.home, { recursive: true, force: true });
   }
@@ -536,7 +658,8 @@ test("doctor safely rejects nonzero and timed-out launcher versions", async () =
         credentials: fixture.store,
         api: "https://api.test",
         sourceCommand: fixture.source,
-        fetch: async () => new Response(JSON.stringify({ project_id: id(1) }))
+        fetch: async () =>
+          new Response(JSON.stringify({ projects: [{ id: id(1) }] }))
       });
       assert.equal(result.checks.launcher?.ok, false);
       assert.equal(result.checks.launcher?.detail, "conflict or invalid");

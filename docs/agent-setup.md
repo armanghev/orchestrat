@@ -94,6 +94,10 @@ backups.
 
 `status` and `doctor` report redacted local mappings, managed-entry readiness,
 credential presence, launcher state, and backend reachability/session details.
+When the current directory has no project mapping, they inspect the configured
+global connections using each project's saved API URL and scoped credential.
+They do not select a project or change the MCP session. Desktop integration
+status also recognizes global connections and project-scoped Keychain entries.
 They never print credential values, tokens, authorization URLs, or raw hook
 payloads. The desktop Project Settings integration section is read-only; it
 does not perform setup or repair.

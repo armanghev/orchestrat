@@ -21,7 +21,11 @@ pub(crate) struct LocalIntegrationStatus {
     pub error: Option<String>,
 }
 
-fn json_mcp_valid(text: &str, command: &str, integration: &str) -> bool {
+fn json_mcp_valid(text: &str, command: &str, integration: &str, global: bool) -> bool {
+    let mut expected = vec!["mcp", "--integration", integration];
+    if global {
+        expected.push("--global");
+    }
     serde_json::from_str::<Value>(text)
         .ok()
         .and_then(|root| root.get("mcpServers")?.get("orchestrat").cloned())
@@ -31,18 +35,16 @@ fn json_mcp_valid(text: &str, command: &str, integration: &str) -> bool {
                     .get("args")
                     .and_then(Value::as_array)
                     .map(|args| {
-                        args == &[
-                            Value::String("mcp".into()),
-                            Value::String("--integration".into()),
-                            Value::String(integration.into()),
-                        ]
+                        args.iter()
+                            .map(Value::as_str)
+                            .eq(expected.iter().map(|arg| Some(*arg)))
                     })
                     .unwrap_or(false)
         })
         .unwrap_or(false)
 }
 
-fn codex_mcp_valid(text: &str, command: &str) -> bool {
+fn codex_mcp_valid(text: &str, command: &str, global: bool) -> bool {
     let mut section = None;
     for (index, line) in text.lines().enumerate() {
         if line.trim() == "[mcp_servers.orchestrat]" {
@@ -65,9 +67,13 @@ fn codex_mcp_valid(text: &str, command: &str) -> bool {
     let body = lines[start + 1..end].join("\n");
     body.lines()
         .any(|line| line.trim() == format!("command = \"{command}\""))
-        && body
-            .lines()
-            .any(|line| line.trim() == "args = [\"mcp\", \"--integration\", \"codex\"]")
+        && body.lines().any(|line| {
+            line.trim()
+                == format!(
+                    "args = [\"mcp\", \"--integration\", \"codex\"{}]",
+                    if global { ", \"--global\"" } else { "" }
+                )
+        })
 }
 
 fn hooks_valid(text: &str, integration: &str, command: &str) -> bool {
@@ -143,23 +149,37 @@ pub(crate) fn inspect_local(
                         .is_some()
             })
         });
-    let mapped_codex = project
-        .filter(|_| valid_version)
-        .and_then(|value| value.get("integrations"))
-        .and_then(|value| value.get("codex"))
-        .and_then(Value::as_object)
-        .and_then(|value| value.get("agentId"))
-        .and_then(Value::as_str)
-        .is_some_and(|value| !value.is_empty());
-    let mapped_claude = project
-        .filter(|_| valid_version)
-        .and_then(|value| value.get("integrations"))
-        .and_then(|value| value.get("claude-code"))
-        .and_then(Value::as_object)
-        .and_then(|value| value.get("agentId"))
-        .and_then(Value::as_str)
-        .is_some_and(|value| !value.is_empty());
-    let mapped = valid_version && project.is_some();
+    let mapping = |integration: &str| {
+        let local = project.and_then(|value| value.get("integrations")?.get(integration));
+        let global = config.as_ref().and_then(|value| {
+            value
+                .get("globalProjects")?
+                .get(integration)?
+                .get(project_id)
+        });
+        let valid = |value: Option<&Value>| {
+            value
+                .and_then(|value| value.get("agentId"))
+                .and_then(Value::as_str)
+                .is_some_and(|value| !value.is_empty())
+        };
+        let global_scope = project
+            .and_then(|value| value.get("mcpScopes")?.get(integration))
+            .and_then(Value::as_str)
+            == Some("global")
+            || (!valid(local) && valid(global));
+        (
+            valid_version && (valid(local) || valid(global)),
+            global_scope,
+        )
+    };
+    let (mapped_codex, global_codex) = mapping("codex");
+    let (mapped_claude, global_claude) = mapping("claude-code");
+    let mapped = mapped_codex || mapped_claude;
+    let has_credential = |integration: &str, global: bool| {
+        credential(&format!("agent:{project_id}:{integration}"))
+            || (!global && (credential(&format!("agent:{integration}")) || credential(integration)))
+    };
     let cli_exists = home.join(".local/bin/orchestrat").exists();
     let command = home
         .join(".local/bin/orchestrat")
@@ -167,7 +187,7 @@ pub(crate) fn inspect_local(
         .to_string();
     let codex_mcp = fs::read_to_string(home.join(".codex/config.toml"))
         .ok()
-        .map(|text| codex_mcp_valid(&text, &command))
+        .map(|text| codex_mcp_valid(&text, &command, global_codex))
         .unwrap_or(false);
     let codex_hooks = fs::read_to_string(home.join(".codex/hooks.json"))
         .ok()
@@ -175,7 +195,7 @@ pub(crate) fn inspect_local(
         .unwrap_or(false);
     let claude_mcp = fs::read_to_string(home.join(".claude.json"))
         .ok()
-        .map(|text| json_mcp_valid(&text, &command, "claude-code"))
+        .map(|text| json_mcp_valid(&text, &command, "claude-code", global_claude))
         .unwrap_or(false);
     let claude_hooks = fs::read_to_string(home.join(".claude/settings.json"))
         .ok()
@@ -188,7 +208,7 @@ pub(crate) fn inspect_local(
                 mapped: mapped_codex,
                 mcp: mapped_codex && codex_mcp,
                 hooks: mapped_codex && codex_hooks,
-                credential: mapped_codex && credential("agent:codex"),
+                credential: mapped_codex && has_credential("codex", global_codex),
             },
         ),
         (
@@ -197,7 +217,7 @@ pub(crate) fn inspect_local(
                 mapped: mapped_claude,
                 mcp: mapped_claude && claude_mcp,
                 hooks: mapped_claude && claude_hooks,
-                credential: mapped_claude && credential("agent:claude-code"),
+                credential: mapped_claude && has_credential("claude-code", global_claude),
             },
         ),
     ]);
@@ -267,6 +287,26 @@ mod tests {
         assert!(!inspect_local(&home, "p1", |_| true).integrations["codex"].mcp);
         write(home.join(".codex/hooks.json"), r#"{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"/bin/foo hook codex"}]}],"SessionEnd":[{"hooks":[{"type":"command","command":"/bin/foo hook codex"}]}]}}"#).unwrap();
         assert!(!inspect_local(&home, "p1", |_| true).integrations["codex"].hooks);
+        assert!(
+            inspect_local(&home, "p1", |account| account == "agent:p1:codex").integrations["codex"]
+                .credential
+        );
+        write(home.join(".orchestrat/config.json"), r#"{"version":1,"projects":{},"globalProjects":{"codex":{"p1":{"agentId":"a1"}},"claude-code":{"p1":{"agentId":"a2"}}}}"#).unwrap();
+        write(home.join(".codex/config.toml"), format!("[mcp_servers.orchestrat]\ncommand = \"{}\"\nargs = [\"mcp\", \"--integration\", \"codex\", \"--global\"]\n", command.display())).unwrap();
+        write(home.join(".claude.json"), serde_json::json!({"mcpServers":{"orchestrat":{"command":command.to_string_lossy(),"args":["mcp","--integration","claude-code","--global"]}}}).to_string()).unwrap();
+        let global = inspect_local(&home, "p1", |account| {
+            matches!(account, "agent:p1:codex" | "agent:p1:claude-code")
+        });
+        assert!(global.project_mapping);
+        assert!(global
+            .integrations
+            .values()
+            .all(|item| item.mapped && item.mcp && item.credential));
+        assert!(!inspect_local(&home, "p2", |_| true).project_mapping);
+        assert!(
+            !inspect_local(&home, "p1", |account| account == "agent:codex").integrations["codex"]
+                .credential
+        );
         write(home.join(".orchestrat/config.json"), "not json").unwrap();
         let malformed = inspect_local(&home, "p1", |_| true);
         assert!(!malformed.project_mapping);
