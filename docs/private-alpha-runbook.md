@@ -392,19 +392,35 @@ Verified against the installed application and local API:
   rendered document history, and uploaded a disposable attachment to R2.
   The QA tasks are done; the QA document and attachment are archived.
 
-Remaining local provider gate: authenticated provider settings access is
-needed to verify Supabase's `http://localhost:8813/auth/callback` redirect and
-add the browser upload origins `http://localhost:8813` and
-`http://127.0.0.1:8814` to the bucket CORS policy. Preflight checks currently
-return `403` for both browser origins and `204` for `tauri://localhost`.
-Preserve other allowed origins and the existing private bucket permissions.
-Fresh OAuth/magic-link login and browser R2 uploads remain unverified on these
-new ports until that gate is completed. Native session restoration and native
-attachment upload passed independently.
+The local provider configuration gate was completed after provider sign-in:
+
+- Supabase Site URL is `http://localhost:8813`. Redirect URLs now include
+  `http://localhost:8813/auth/callback` and
+  `http://localhost:8813/auth/desktop/callback`. Existing production, native,
+  and legacy callback entries were retained. A fresh GitHub sign-in reached
+  the authenticated project overview on port `8813`.
+- Cloudflare R2 allows upload origins `http://localhost:8813` and
+  `http://127.0.0.1:8814`, alongside the existing production, native, and
+  legacy local origins. The policy permits `PUT` with `Content-Type`, exposes
+  `ETag`, and caches preflight for 3600 seconds. The bucket remains private.
+- Both new browser origins and `tauri://localhost` return preflight `204` with
+  the exact matching origin; an unrelated HTTPS origin returns `403`.
+- The optional R2 browser test now reads this checkout's root `.env` with
+  process environment overrides and uses the current attachment chooser.
+  Both viewport checks passed with actual signed R2 uploads, exact downloaded
+  bytes, no browser errors, and disposable object cleanup. Re-run with
+  `R2_BROWSER_E2E=1 pnpm --filter @orchestrat/dashboard test:e2e --grep @r2`.
+
+The callback list follows [Supabase redirect configuration](https://supabase.com/docs/guides/auth/redirect-urls);
+the upload settings follow [Cloudflare R2 CORS](https://developers.cloudflare.com/r2/buckets/cors/).
+Fresh magic-link login and a new native OAuth round trip remain separate
+manual checks; native session restoration and attachment upload already
+passed independently.
 
 Local evidence is in `/private/tmp/orchestrat-personal-*.log` and
-`/private/tmp/orchestrat-personal-mcp-evidence.json`; those temporary files are
-not release artifacts. Restart existing agent MCP connections after updating
+`/private/tmp/orchestrat-personal-mcp-evidence.json`; the provider upload check
+is in `/private/tmp/orchestrat-provider-r2-browser.log`. Those temporary files
+are not release artifacts. Restart existing agent MCP connections after updating
 the CLI so they load its current tool list. Use `pnpm cli:install` for future
 checkout updates and the commands in [agent setup](agent-setup.md) to start
 the local services.
