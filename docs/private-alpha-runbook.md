@@ -360,7 +360,56 @@ The command is expected to fail at signature/trust gates for an unsigned local
 artifact. Signing, notarization, stapling, Gatekeeper trust, distribution,
 and upload remain **NOT RUN**.
 
-## Current local source evidence
+## Personal development verification (2026-09-09)
+
+The existing Mac now has CLI `0.1.0-alpha.1` and the rebuilt unsigned
+`/Applications/Orchestrat.app`. Local API connections were updated to `8801`;
+dashboard/auth portal uses `8813`, landing uses `8800`, and browser tests use
+`8814`. TCP ports stop at `65535`, so `88xxx` cannot be used. The prior app,
+launcher, and connection configuration were backed up privately before the
+local update. No hosted deployment or package publication was performed.
+
+Verified against the installed application and local API:
+
+- All 52 Turbo build/lint/typecheck/test tasks passed without cached results:
+  dashboard 274 tests, CLI 66 tests, and API 67 tests with 2 opt-in skips.
+- All 65 native Rust tests passed. The installed executable's SHA-256 matches
+  the build output: `0f0ea12b87cb4bf8c0a9228570bee89a6092f3b5dedb1f41d1fc7b190ed2dd46`.
+- Playwright passed 44 checks with 4 opt-in skips (R2 browser and waitlist at
+  two viewport widths). This run did not exercise browser R2 uploads.
+- The isolated real PostgreSQL/R2 suite passed all 10 checks, including
+  100 MiB multipart transfer and cleanup. It created and dropped its own
+  database; it did not migrate the development database.
+- Installed `orchestrat doctor` passed all 70 checks. Two fresh
+  installed MCP processes authenticated through separate Codex/Claude Code
+  Keychain credentials and each exposed all 22 tools. Live checks passed for
+  idempotent task/comment creation, stale edit conflicts, exclusive claims,
+  heartbeat, completion, document history, reconnect persistence, and takeover
+  after killing a process with a 30-second claim. These were stdio transport
+  checks, not a clean-Mac run of the model harnesses themselves.
+- The installed native app restored the existing session, showed both
+  integrations Ready, displayed completed agent tasks and attributed comments,
+  rendered document history, and uploaded a disposable attachment to R2.
+  The QA tasks are done; the QA document and attachment are archived.
+
+Remaining local provider gate: authenticated provider settings access is
+needed to verify Supabase's `http://localhost:8813/auth/callback` redirect and
+add the browser upload origins `http://localhost:8813` and
+`http://127.0.0.1:8814` to the bucket CORS policy. Preflight checks currently
+return `403` for both browser origins and `204` for `tauri://localhost`.
+Preserve other allowed origins and the existing private bucket permissions.
+Fresh OAuth/magic-link login and browser R2 uploads remain unverified on these
+new ports until that gate is completed. Native session restoration and native
+attachment upload passed independently.
+
+Local evidence is in `/private/tmp/orchestrat-personal-*.log` and
+`/private/tmp/orchestrat-personal-mcp-evidence.json`; those temporary files are
+not release artifacts. Restart existing agent MCP connections after updating
+the CLI so they load its current tool list. Use `pnpm cli:install` for future
+checkout updates and the commands in [agent setup](agent-setup.md) to start
+the local services.
+
+## Earlier source candidate evidence (2026-09-06)
 
 This evidence supports the source candidate; it does not satisfy the hosted or
 clean-Mac checklist:
