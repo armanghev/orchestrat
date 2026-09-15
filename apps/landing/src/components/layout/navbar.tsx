@@ -18,41 +18,44 @@ export function Navbar() {
 
   const links = [
     { label: "Workspace", href: "#workspace" },
-    { label: "Protocol", href: "#protocol" },
-    { label: "Control", href: "#control" }
+    { label: "Protocol", href: "#protocol" }
   ];
 
   return (
     <>
       <ScrollProgress />
-      <nav
-        className={`fixed left-1/2 z-50 flex -translate-x-1/2 flex-col justify-center transition-all duration-300 ${
-          mobileOpen
-            ? "top-3 w-[calc(100%-2rem)] rounded-2xl border border-white/10 bg-zinc-950/95 px-6 py-4 shadow-2xl backdrop-blur-xl"
-            : scrolled
-              ? "top-3 h-12 w-[calc(100%-2rem)] max-w-5xl rounded-[24px] border border-white/10 bg-zinc-950/75 px-6 shadow-lg shadow-black/40 backdrop-blur-xl"
-              : "max-w-container-lg top-5 h-14 w-[calc(100%-2rem)] rounded-[28px] border border-white/6 bg-zinc-950/40 px-6 backdrop-blur-md"
+      <header
+        className={`fixed inset-x-0 top-0 z-50 border-b transition-colors duration-200 ${
+          scrolled || mobileOpen
+            ? "border-border bg-background/90 backdrop-blur-md"
+            : "border-transparent bg-background/40 backdrop-blur-sm"
         }`}
       >
-        <div className="flex h-full w-full items-center justify-between">
-          {/* Left: Logo */}
+        <nav className="max-w-container-lg mx-auto flex h-14 items-center justify-between gap-4 px-6">
           <Link href="/" onClick={() => setMobileOpen(false)}>
             <OrchestratLogo />
           </Link>
 
-          {/* Right: CTA */}
-          <div className="hidden items-center gap-4 md:flex">
+          <div className="hidden items-center gap-8 md:flex">
+            {links.map((l) => (
+              <Link
+                key={l.href}
+                href={l.href}
+                className="font-mono text-[11px] tracking-[0.12em] text-muted-foreground uppercase transition-colors hover:text-foreground"
+              >
+                {l.label}
+              </Link>
+            ))}
             <Link
               href="#waitlist"
-              className="rounded-full bg-zinc-50 px-4 py-1.5 text-[13px] font-medium text-zinc-950 transition-colors duration-200 hover:bg-white"
+              className="rounded-md bg-primary px-3.5 py-1.5 text-[13px] font-medium text-primary-foreground transition-opacity hover:opacity-90"
             >
-              Join waitlist
+              Waitlist
             </Link>
           </div>
 
-          {/* Mobile toggle */}
           <button
-            className="text-zinc-500 transition-colors hover:text-zinc-200 md:hidden"
+            className="text-muted-foreground transition-colors hover:text-foreground md:hidden"
             onClick={() => setMobileOpen(!mobileOpen)}
             aria-label="Toggle menu"
           >
@@ -62,33 +65,32 @@ export function Navbar() {
               <Menu className="h-5 w-5" strokeWidth={1.5} />
             )}
           </button>
-        </div>
+        </nav>
 
-        {/* Mobile drawer */}
         {mobileOpen && (
-          <div className="mt-4 flex w-full flex-col gap-4 border-t border-white/6 pt-4 md:hidden">
-            {links.map((l) => (
-              <Link
-                key={l.href}
-                href={l.href}
-                className="py-1 text-sm text-zinc-400 transition-colors hover:text-zinc-100"
-                onClick={() => setMobileOpen(false)}
-              >
-                {l.label}
-              </Link>
-            ))}
-            <div className="border-t border-white/6 pt-2">
+          <div className="border-t border-border px-6 py-4 md:hidden">
+            <div className="flex flex-col gap-3">
+              {links.map((l) => (
+                <Link
+                  key={l.href}
+                  href={l.href}
+                  className="font-mono text-xs tracking-wider text-muted-foreground uppercase"
+                  onClick={() => setMobileOpen(false)}
+                >
+                  {l.label}
+                </Link>
+              ))}
               <Link
                 href="#waitlist"
                 onClick={() => setMobileOpen(false)}
-                className="block w-full rounded-full bg-zinc-50 px-4 py-2.5 text-center text-sm font-medium text-zinc-950"
+                className="mt-1 rounded-md bg-primary px-4 py-2.5 text-center text-sm font-medium text-primary-foreground"
               >
-                Join waitlist
+                Waitlist
               </Link>
             </div>
           </div>
         )}
-      </nav>
+      </header>
     </>
   );
 }

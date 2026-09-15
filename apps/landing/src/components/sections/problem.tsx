@@ -1,83 +1,80 @@
 "use client";
 
-import React from "react";
-import { AlertCircle, Zap, ShieldAlert, Ghost } from "lucide-react";
-import { Reveal, RevealStagger, RevealItem } from "@/components/motion/reveal";
+import { Reveal } from "@/components/motion/reveal";
+
+const failures = [
+  {
+    code: "01",
+    title: "Duplicate work",
+    detail:
+      "Without atomic claims, two agents can start the same task before either sees the other."
+  },
+  {
+    code: "02",
+    title: "Stale ownership",
+    detail:
+      "When heartbeats stop, work stays locked with no clear owner and no recovery path."
+  },
+  {
+    code: "03",
+    title: "Lost context",
+    detail:
+      "Decisions, messages, and project knowledge disappear inside isolated model sessions."
+  },
+  {
+    code: "04",
+    title: "Low visibility",
+    detail:
+      "Humans cannot review, redirect, or stop work they cannot see in a shared activity trail."
+  }
+];
 
 export function ProblemSection() {
-  const problems = [
-    {
-      icon: Zap,
-      title: "Duplicate work",
-      description:
-        "Without atomic claims, two agents can start the same task before either sees the other."
-    },
-    {
-      icon: Ghost,
-      title: "Stale ownership",
-      description:
-        "When a process stops reporting heartbeats, work can remain locked with no clear owner."
-    },
-    {
-      icon: AlertCircle,
-      title: "Context lost between sessions",
-      description:
-        "Decisions, messages, and project knowledge disappear inside isolated model sessions."
-    },
-    {
-      icon: ShieldAlert,
-      title: "Invisible agent activity",
-      description:
-        "Humans cannot review, redirect, or stop work they cannot see in a shared activity history."
-    }
-  ];
-
   return (
-    <section
-      id="problem"
-      className="line-b relative overflow-hidden py-24 md:py-32"
-    >
-      <div className="max-w-container-lg relative z-10 mx-auto px-6">
+    <section id="problem" className="line-b py-20 md:py-24">
+      <div className="max-w-container-lg mx-auto px-6">
         <Reveal>
-          <div className="mx-auto mb-16 max-w-2xl space-y-3 text-center">
-            <h2 className="text-2xl leading-tight font-semibold tracking-[-0.03em] text-zinc-50 sm:text-3xl">
-              Running agents is easy. Coordinating them is hard.
-            </h2>
-            <p className="text-sm leading-relaxed font-light text-zinc-500">
-              Separate agent sessions hide ownership, decisions, and progress.
-              orchestrat turns that invisible work into durable shared project
-              state.
+          <div className="mb-10 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+            <div className="max-w-2xl space-y-2">
+              <p className="font-mono text-[11px] tracking-[0.14em] text-primary-text uppercase">
+                Failure modes
+              </p>
+              <h2 className="text-2xl leading-tight font-semibold tracking-[-0.03em] text-foreground sm:text-3xl">
+                Running agents is easy. Coordinating them is hard.
+              </h2>
+            </div>
+            <p className="max-w-sm text-sm leading-relaxed font-light text-muted-foreground">
+              Separate sessions hide ownership, decisions, and progress.
+              orchestrat makes that state shared and durable.
             </p>
           </div>
         </Reveal>
 
-        <RevealStagger
-          className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4"
-          staggerDelay={0.06}
-        >
-          {problems.map((p, i) => {
-            const Icon = p.icon;
-            return (
-              <RevealItem key={i}>
-                <div className="group flex h-full flex-col justify-between space-y-4 rounded-xl border border-white/5 bg-zinc-900/30 p-5 transition-all duration-300 hover:border-white/9">
-                  <div className="space-y-4">
-                    <div className="w-fit rounded-lg border border-white/5 bg-zinc-950 p-2 text-zinc-500 transition-colors group-hover:text-zinc-400">
-                      <Icon className="h-4 w-4" strokeWidth={1.5} />
-                    </div>
-                    <div className="space-y-1.5">
-                      <h3 className="text-sm font-medium text-zinc-200">
-                        {p.title}
-                      </h3>
-                      <p className="text-xs leading-relaxed font-light text-zinc-500">
-                        {p.description}
-                      </p>
-                    </div>
+        <Reveal delay={0.08} yOffset={12}>
+          <div className="overflow-hidden rounded-lg border border-border">
+            <div className="grid grid-cols-1 divide-y divide-border md:grid-cols-4 md:divide-x md:divide-y-0">
+              {failures.map((f) => (
+                <article
+                  key={f.code}
+                  className="bg-card px-5 py-5 transition-colors hover:bg-surface-raised"
+                >
+                  <div className="mb-3 flex items-baseline justify-between gap-3">
+                    <span className="font-mono text-[10px] text-muted-foreground">
+                      {f.code}
+                    </span>
+                    <span className="h-1.5 w-1.5 rounded-full bg-destructive/80" />
                   </div>
-                </div>
-              </RevealItem>
-            );
-          })}
-        </RevealStagger>
+                  <h3 className="text-sm font-medium text-foreground">
+                    {f.title}
+                  </h3>
+                  <p className="mt-2 text-xs leading-relaxed font-light text-muted-foreground">
+                    {f.detail}
+                  </p>
+                </article>
+              ))}
+            </div>
+          </div>
+        </Reveal>
       </div>
     </section>
   );
