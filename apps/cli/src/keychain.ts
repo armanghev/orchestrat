@@ -25,7 +25,7 @@ export class KeychainCredentialReader implements CredentialReader {
   async read(account: string): Promise<string | undefined> {
     try {
       const result = await execFileAsync(
-        "security",
+        "/usr/bin/security",
         ["find-generic-password", "-a", account, "-s", this.service, "-w"],
         {
           windowsHide: true,
@@ -47,25 +47,47 @@ export class KeychainCredentialStore
   implements CredentialStore
 {
   async write(account: string, value: string) {
-    await execFileAsync(
-      "security",
-      [
-        "add-generic-password",
-        "-U",
-        "-a",
-        account,
-        "-s",
-        this.service,
-        "-w",
-        value
-      ],
-      { windowsHide: true }
-    );
+    const failure = () =>
+      new Error("Unable to write Orchestrat credential to Keychain");
+    const args = [
+      "add-generic-password",
+      "-U",
+      "-a",
+      account,
+      "-s",
+      this.service,
+      "-w",
+      value
+    ];
+    // security -i reads a single bounded line; never allow another command or truncation.
+    if (args.some((arg) => /[\r\n\0]/.test(arg))) throw failure();
+    const command =
+      args
+        .map(
+          (arg) => `"${arg.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`
+        )
+        .join(" ") + "\n";
+    if (Buffer.byteLength(command) >= 4096) throw failure();
+    await new Promise<void>((resolve, reject) => {
+      const child = execFile(
+        "/usr/bin/security",
+        ["-i"],
+        { windowsHide: true },
+        (error, _stdout, stderr) => {
+          if (error || stderr.trim()) reject(failure());
+          else resolve();
+        }
+      );
+      child.stdin!.on("error", () => reject(failure()));
+      child.stdin!.end(command);
+    }).catch(() => {
+      throw failure();
+    });
   }
   async remove(account: string) {
     try {
       await execFileAsync(
-        "security",
+        "/usr/bin/security",
         ["delete-generic-password", "-a", account, "-s", this.service],
         { windowsHide: true }
       );
