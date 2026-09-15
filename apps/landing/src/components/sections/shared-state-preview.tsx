@@ -1,20 +1,13 @@
 "use client";
 
 import React, { useState } from "react";
-import {
-  ShieldAlert,
-  CheckCircle2,
-  Copy,
-  Check,
-  Lock,
-  Globe
-} from "lucide-react";
+import { CheckCircle2, Copy, Check, Lock, Globe, ShieldAlert } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Reveal, RevealStagger, RevealItem } from "@/components/motion/reveal";
 
 export function SharedStatePreviewSection() {
-  const [activeCase, setActiveCase] = useState<number>(0);
-  const [copied, setCopied] = useState<boolean>(false);
+  const [activeCase, setActiveCase] = useState(0);
+  const [copied, setCopied] = useState(false);
 
   const cases = [
     {
@@ -35,7 +28,8 @@ export function SharedStatePreviewSection() {
   "error": {
     "code": "TASK_ALREADY_CLAIMED",
     "task_id": "ORC-142",
-    "claimed_by": "backend-agent"
+    "claimed_by": "backend-agent",
+    "lease_expires_at": "2026-09-15T06:12:00Z"
   }
 }`
     },
@@ -47,7 +41,7 @@ export function SharedStatePreviewSection() {
       problem:
         "architecture.md is now revision 19; this edit used revision 18.",
       explanation:
-        "Revision checks prevent one agent from silently overwriting another agent's update. The stale writer reads, merges, and retries.",
+        "Revision checks prevent silent overwrites. The stale writer reads, merges, and retries against the current revision.",
       file: "architecture.md · revision 19",
       beforeCode: `update_document({
   path: "architecture.md",
@@ -57,6 +51,7 @@ export function SharedStatePreviewSection() {
       afterCode: `{
   "error": {
     "code": "DOCUMENT_CONFLICT",
+    "path": "architecture.md",
     "current_revision": 19,
     "base_revision": 18
   }
@@ -69,7 +64,7 @@ export function SharedStatePreviewSection() {
       severity: "Review",
       problem: "review-agent moved ORC-138 into the review queue.",
       explanation:
-        "A human can inspect the task history, approve or reject the work, request clarification, or reassign ownership.",
+        "A human can inspect history, approve or reject, request clarification, or reassign ownership.",
       file: "ORC-138 · review requested",
       beforeCode: `update_task({
   task_id: "ORC-138",
@@ -87,36 +82,38 @@ export function SharedStatePreviewSection() {
 
   const current = cases[activeCase];
 
-  const handleCopyCode = () => {
+  function handleCopyCode() {
     navigator.clipboard.writeText(current.afterCode);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
-  };
+  }
 
   const severityStyle: Record<string, string> = {
-    Conflict: "text-red-400/70 bg-red-950/40 border-red-900/30",
-    Review: "text-amber-400/60 bg-amber-950/40 border-amber-900/30"
+    Conflict:
+      "text-destructive border-destructive/30 bg-destructive/10",
+    Review: "text-warning border-warning/30 bg-warning/10"
   };
 
   return (
-    <section id="workspace" className="line-b relative py-24 md:py-32">
+    <section id="workspace" className="line-b relative py-20 md:py-24">
       <div className="max-w-container-lg mx-auto px-6">
-        {/* Section Header */}
         <Reveal>
           <div className="max-w-xl space-y-3">
-            <h2 className="text-2xl leading-tight font-semibold tracking-tight text-zinc-100 sm:text-3xl">
-              One shared state for every participant.
+            <p className="font-mono text-[11px] tracking-[0.14em] text-primary-text uppercase">
+              Shared state
+            </p>
+            <h2 className="text-2xl leading-tight font-semibold tracking-tight text-foreground sm:text-3xl">
+              Honest conflicts beat silent overwrites.
             </h2>
-            <p className="text-sm leading-relaxed font-light text-zinc-500">
+            <p className="text-sm leading-relaxed font-light text-muted-foreground">
               Tasks, claims, documents, messages, and events stay available
-              across agent sessions, with conflicts surfaced instead of silently
-              overwritten.
+              across agent sessions — with protocol samples that match how
+              orchestrat actually responds.
             </p>
           </div>
         </Reveal>
 
-        {/* Tabs Switcher */}
-        <RevealStagger className="mt-10 flex flex-wrap gap-2">
+        <RevealStagger className="mt-8 flex flex-wrap gap-2">
           {cases.map((item, idx) => {
             const Icon = item.icon;
             const isSelected = activeCase === idx;
@@ -124,10 +121,10 @@ export function SharedStatePreviewSection() {
               <RevealItem key={idx}>
                 <button
                   onClick={() => setActiveCase(idx)}
-                  className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3.5 py-2 font-mono text-xs transition-all ${
+                  className={`flex cursor-pointer items-center gap-2 rounded-md border px-3.5 py-2 font-mono text-xs transition-colors ${
                     isSelected
-                      ? "border-white/1 bg-zinc-800 text-zinc-200"
-                      : "border-transparent bg-transparent text-zinc-600 hover:text-zinc-400"
+                      ? "border-border bg-accent text-accent-foreground"
+                      : "border-transparent text-muted-foreground hover:text-foreground"
                   }`}
                 >
                   <Icon className="h-3.5 w-3.5" strokeWidth={1.5} />
@@ -143,7 +140,6 @@ export function SharedStatePreviewSection() {
           })}
         </RevealStagger>
 
-        {/* Selected shared-state detail and response */}
         <Reveal delay={0.12} yOffset={16}>
           <AnimatePresence mode="wait">
             <motion.div
@@ -152,96 +148,80 @@ export function SharedStatePreviewSection() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.15 }}
-              className="mt-6 grid grid-cols-1 items-start gap-6 lg:grid-cols-[380px_1fr]"
+              className="mt-6 grid grid-cols-1 items-start gap-5 lg:grid-cols-[360px_1fr]"
             >
-              {/* Left Side: Context */}
-              <div className="h-full rounded-2xl border border-white/6 bg-zinc-900/40 p-1.5">
-                <div className="space-y-4 rounded-xl border border-white/5 bg-zinc-950 p-5 font-mono text-xs">
-                  <div className="flex items-center justify-between border-b border-white/5 pb-3">
-                    <div>
-                      <span className="block text-[10px] tracking-wider text-zinc-600 uppercase">
-                        {current.category}
-                      </span>
-                      <span className="mt-0.5 block text-[11px] font-medium text-zinc-400">
-                        Shared state
-                      </span>
-                    </div>
-                    <span
-                      className={`rounded border px-1.5 py-0.5 text-[9px] ${severityStyle[current.severity]}`}
-                    >
-                      {current.severity}
+              <div className="mc-panel overflow-hidden">
+                <div className="mc-panel-chrome">
+                  <span className="mc-panel-title">{current.category}</span>
+                  <span
+                    className={`rounded border px-1.5 py-0.5 font-mono text-[9px] ${severityStyle[current.severity]}`}
+                  >
+                    {current.severity}
+                  </span>
+                </div>
+                <div className="space-y-4 p-5 font-mono text-xs">
+                  <div>
+                    <span className="block text-[10px] tracking-wider text-muted-foreground uppercase">
+                      Current state
                     </span>
+                    <p className="mt-1 leading-relaxed font-light text-secondary-foreground">
+                      {current.problem}
+                    </p>
                   </div>
-
-                  <div className="space-y-3.5">
-                    <div>
-                      <span className="block text-[10px] text-zinc-700 uppercase">
-                        Current state:
-                      </span>
-                      <p className="mt-0.5 leading-relaxed font-light text-zinc-300">
-                        {current.problem}
-                      </p>
-                    </div>
-
-                    <div>
-                      <span className="block text-[10px] text-zinc-700 uppercase">
-                        Why it matters:
-                      </span>
-                      <p className="mt-0.5 leading-relaxed font-light text-zinc-500">
-                        {current.explanation}
-                      </p>
-                    </div>
-
-                    <div className="border-t border-white/5 pt-3">
-                      <span className="block text-[10px] text-zinc-700 uppercase">
-                        Entity:
-                      </span>
-                      <code className="mt-0.5 block text-[11px] break-all text-zinc-400">
-                        {current.file}
-                      </code>
-                    </div>
+                  <div>
+                    <span className="block text-[10px] tracking-wider text-muted-foreground uppercase">
+                      Why it matters
+                    </span>
+                    <p className="mt-1 leading-relaxed font-light text-muted-foreground">
+                      {current.explanation}
+                    </p>
+                  </div>
+                  <div className="border-t border-border pt-3">
+                    <span className="block text-[10px] tracking-wider text-muted-foreground uppercase">
+                      Entity
+                    </span>
+                    <code className="mt-1 block text-[11px] break-all text-primary-text">
+                      {current.file}
+                    </code>
                   </div>
                 </div>
               </div>
 
-              {/* Right Side: Before/After Code */}
               <div className="space-y-4 font-mono text-xs">
-                {/* Before */}
-                <div className="overflow-hidden rounded-xl border border-red-500/15 bg-zinc-950/80">
-                  <div className="flex items-center justify-between border-b border-red-500/10 bg-red-950/10 px-4 py-2 text-red-400/70">
+                <div className="overflow-hidden rounded-lg border border-destructive/25 bg-card">
+                  <div className="flex items-center justify-between border-b border-destructive/20 bg-destructive/5 px-4 py-2 text-destructive">
                     <span>Agent request</span>
-                    <span className="text-[9px] text-red-500/50 uppercase">
+                    <span className="text-[9px] uppercase opacity-70">
                       Request
                     </span>
                   </div>
-                  <pre className="overflow-x-auto p-4 leading-relaxed text-red-400/60 select-none">
+                  <pre className="overflow-x-auto p-4 leading-relaxed text-destructive/80 select-none">
                     <code>{current.beforeCode}</code>
                   </pre>
                 </div>
 
-                {/* After */}
-                <div className="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950/80">
-                  <div className="flex items-center justify-between border-b border-white/5 bg-zinc-900/30 px-4 py-2 text-zinc-400">
-                    <span className="flex items-center gap-1.5 text-zinc-300">
+                <div className="overflow-hidden rounded-lg border border-border bg-card">
+                  <div className="flex items-center justify-between border-b border-border bg-surface-raised px-4 py-2">
+                    <span className="flex items-center gap-1.5 text-secondary-foreground">
                       <CheckCircle2
-                        className="h-3.5 w-3.5 text-zinc-500"
+                        className="h-3.5 w-3.5 text-muted-foreground"
                         strokeWidth={1.5}
                       />
                       orchestrat response
                     </span>
                     <button
                       onClick={handleCopyCode}
-                      className="flex cursor-pointer items-center gap-1.5 rounded border border-white/5 bg-zinc-900 px-2.5 py-1 text-[11px] text-zinc-400 transition-colors hover:bg-zinc-800"
+                      className="flex cursor-pointer items-center gap-1.5 rounded-md border border-border bg-muted px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
                     >
                       {copied ? (
-                        <Check className="h-3 w-3 text-zinc-500" />
+                        <Check className="h-3 w-3 text-success" />
                       ) : (
                         <Copy className="h-3 w-3" />
                       )}
                       <span>{copied ? "Copied" : "Copy"}</span>
                     </button>
                   </div>
-                  <pre className="overflow-x-auto p-4 leading-relaxed text-zinc-300">
+                  <pre className="overflow-x-auto p-4 leading-relaxed text-secondary-foreground">
                     <code>{current.afterCode}</code>
                   </pre>
                 </div>
