@@ -28,7 +28,7 @@ export function recordProjectEvent(tx: Transaction, event: ProjectEvent) {
 
 export function withRealtimePublisher(
   db: Database,
-  publish: (envelope: RealtimeEventEnvelope) => void
+  publish: (envelope: RealtimeEventEnvelope) => void | Promise<void>
 ): Database {
   return new Proxy(db, {
     get(target, property, receiver) {
@@ -45,12 +45,16 @@ export function withRealtimePublisher(
           const [entityType] = event.type.split(".");
           if (!entityTypes.has(entityType)) continue;
           try {
-            publish({
-              project_id: event.projectId,
-              sequence: event.id,
-              event_type: event.type,
-              entity_type: entityType as RealtimeEventEnvelope["entity_type"],
-              entity_id: event.entityId
+            void Promise.resolve(
+              publish({
+                project_id: event.projectId,
+                sequence: event.id,
+                event_type: event.type,
+                entity_type: entityType as RealtimeEventEnvelope["entity_type"],
+                entity_id: event.entityId
+              })
+            ).catch(() => {
+              // Authorization and delivery must not delay or reject a committed mutation.
             });
           } catch {
             // Realtime is best effort and must never fail a committed mutation.
@@ -162,15 +166,21 @@ export class AttachmentDownloadTicketStore {
 
 export class RealtimeRegistry {
   // ponytail: in-memory connections only support one replica; use Redis/shared state for scale-out.
-  private readonly connections = new Map<string, Set<WebSocket>>();
+  private readonly connections = new Map<
+    string,
+    Map<WebSocket, { userId: string; pending: Promise<void> }>
+  >();
   private readonly timers = new WeakMap<WebSocket, NodeJS.Timeout>();
 
-  constructor(private readonly heartbeatMs = 30_000) {}
+  constructor(
+    readonly authorize: (userId: string, projectId: string) => Promise<unknown>,
+    private readonly heartbeatMs = 30_000
+  ) {}
 
-  add(projectId: string, socket: WebSocket) {
+  add(projectId: string, userId: string, socket: WebSocket) {
     let sockets = this.connections.get(projectId);
-    if (!sockets) this.connections.set(projectId, (sockets = new Set()));
-    sockets.add(socket);
+    if (!sockets) this.connections.set(projectId, (sockets = new Map()));
+    sockets.set(socket, { userId, pending: Promise.resolve() });
     let alive = true;
     const interval = setInterval(() => {
       if (!alive) {
@@ -178,7 +188,15 @@ export class RealtimeRegistry {
         return this.remove(projectId, socket);
       }
       alive = false;
-      socket.ping();
+      void this.checkAccess(projectId, userId, socket).then((allowed) => {
+        if (allowed) {
+          try {
+            socket.ping();
+          } catch {
+            this.close(projectId, socket);
+          }
+        }
+      });
     }, this.heartbeatMs);
     interval.unref();
     this.timers.set(socket, interval);
@@ -207,16 +225,53 @@ export class RealtimeRegistry {
     if (sockets.size === 0) this.connections.delete(projectId);
   }
 
-  publish(envelope: RealtimeEventEnvelope) {
-    for (const socket of this.connections.get(envelope.project_id) ?? []) {
-      try {
-        if (socket.readyState === socket.OPEN)
-          socket.send(JSON.stringify(envelope));
-      } catch {
-        socket.terminate();
-        this.remove(envelope.project_id, socket);
-      }
+  private close(projectId: string, socket: WebSocket) {
+    this.remove(projectId, socket);
+    socket.terminate();
+  }
+
+  private async checkAccess(
+    projectId: string,
+    userId: string,
+    socket: WebSocket
+  ) {
+    if (!this.connections.get(projectId)?.has(socket)) return false;
+    try {
+      await this.authorize(userId, projectId);
+      return (
+        this.connections.get(projectId)?.has(socket) &&
+        socket.readyState === socket.OPEN
+      );
+    } catch {
+      this.close(projectId, socket);
+      return false;
     }
+  }
+
+  async publish(envelope: RealtimeEventEnvelope) {
+    await Promise.all(
+      [...(this.connections.get(envelope.project_id) ?? [])].map(
+        ([socket, connection]) => {
+          // Serialize each socket's checks so asynchronous authorization cannot reorder events.
+          connection.pending = connection.pending.then(async () => {
+            if (
+              await this.checkAccess(
+                envelope.project_id,
+                connection.userId,
+                socket
+              )
+            ) {
+              try {
+                socket.send(JSON.stringify(envelope));
+              } catch {
+                this.close(envelope.project_id, socket);
+              }
+            }
+          });
+          return connection.pending;
+        }
+      )
+    );
   }
 
   size(projectId: string) {

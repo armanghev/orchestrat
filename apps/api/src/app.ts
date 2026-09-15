@@ -17,6 +17,7 @@ import { ApiError } from "./services/api-error.js";
 import { AgentService } from "./services/agent-service.js";
 import { TaskClaimService } from "./services/task-claim-service.js";
 import { IdentityService } from "./services/identity-service.js";
+import { PermissionService } from "./services/permission-service.js";
 import { ProjectService } from "./services/project-service.js";
 import {
   ProfileService,
@@ -80,7 +81,10 @@ export function buildApp(options: AppOptions) {
   });
   const realtimeTickets = new RealtimeTicketStore();
   const attachmentDownloadTickets = new AttachmentDownloadTicketStore();
-  const realtimeRegistry = new RealtimeRegistry();
+  const permissions = new PermissionService(options.db);
+  const realtimeRegistry = new RealtimeRegistry((userId, projectId) =>
+    permissions.projectAccess(userId, projectId)
+  );
   const db = withRealtimePublisher(options.db, (event) =>
     realtimeRegistry.publish(event)
   );

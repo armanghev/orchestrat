@@ -49,13 +49,15 @@ export async function realtimeSocketRoutes(
             "UNAUTHENTICATED",
             "Realtime ticket is invalid."
           );
+        await options.registry.authorize(record.userId, projectId);
+        request.userId = record.userId;
       }
     },
     (socket: WebSocket, request) => {
       const projectId = realtimeProjectParamsSchema.parse(
         request.params
       ).projectId;
-      options.registry.add(projectId, socket);
+      options.registry.add(projectId, request.userId, socket);
       socket.on("message", () =>
         socket.close(1003, "Client messages are not supported.")
       );

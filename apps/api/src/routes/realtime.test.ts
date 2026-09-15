@@ -69,16 +69,16 @@ test("realtime tickets are high entropy, single use, scoped, and expire", () => 
   assert.equal(store.consume(third.ticket, "project-a", "user-b"), null);
 });
 
-test("registry broadcasts and cleans sockets independently", () => {
-  const registry = new RealtimeRegistry();
+test("registry broadcasts and cleans sockets independently", async () => {
+  const registry = new RealtimeRegistry(async () => {});
   const first = new FakeSocket();
   const second = new FakeSocket();
   first.send = () => {
     throw new Error("socket failed");
   };
-  registry.add("project-a", first as never);
-  registry.add("project-a", second as never);
-  registry.publish({
+  registry.add("project-a", "user-a", first as never);
+  registry.add("project-a", "user-a", second as never);
+  await registry.publish({
     project_id: "project-a",
     sequence: 1,
     event_type: "task.created",
@@ -105,7 +105,7 @@ test("committed project events publish once, rollback publishes zero, and failur
     }
   };
   const published: RealtimeEventEnvelope[] = [];
-  const wrapped = withRealtimePublisher(db as never, (event) => {
+  const wrapped = withRealtimePublisher(db as never, async (event) => {
     published.push(event);
     if (event.sequence === 2) throw new Error("socket failure");
   });
@@ -149,9 +149,9 @@ test("committed project events publish once, rollback publishes zero, and failur
 });
 
 test("registry pings and terminates sockets that miss the next pong", async () => {
-  const registry = new RealtimeRegistry(10);
+  const registry = new RealtimeRegistry(async () => {}, 10);
   const socket = new FakeSocket();
-  registry.add("project-a", socket as never);
+  registry.add("project-a", "user-a", socket as never);
   await wait(15);
   assert.equal(socket.pingCount, 1);
   socket.emit("pong");
@@ -173,7 +173,7 @@ test("ticket and websocket routes enforce project scope and single use", async (
     () => 1000,
     () => Buffer.alloc(32, 8)
   );
-  const registry = new RealtimeRegistry();
+  const registry = new RealtimeRegistry(async () => {});
   await app.register(realtimeTicketRoutes, {
     prefix: "/api/v1/realtime",
     projects: {
@@ -210,4 +210,174 @@ test("ticket and websocket routes enforce project scope and single use", async (
   await assert.rejects(() =>
     app.injectWS(`/api/v1/realtime/projects/${projectB}?ticket=${wrongProject}`)
   );
+});
+
+test("registry reauthorizes queued events, fails closed, and closes revoked idle sockets", async (t) => {
+  const denied = new Set<string>();
+  let release: (() => void) | undefined;
+  let stalled = false;
+  const registry = new RealtimeRegistry(async (userId) => {
+    if (stalled && userId === "allowed") {
+      stalled = false;
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    }
+    if (denied.has(userId))
+      throw new Error("membership removed or lookup failed");
+  }, 15);
+  const allowed = new FakeSocket(),
+    revoked = new FakeSocket();
+  registry.add("project-a", "allowed", allowed as never);
+  registry.add("project-a", "revoked", revoked as never);
+  t.after(() => {
+    allowed.emit("close");
+    revoked.emit("close");
+  });
+  const envelope = (sequence: number): RealtimeEventEnvelope => ({
+    project_id: "project-a",
+    sequence,
+    event_type: "task.created",
+    entity_type: "task",
+    entity_id: null
+  });
+  await registry.publish(envelope(1));
+  denied.add("revoked");
+  stalled = true;
+  const second = registry.publish(envelope(2));
+  const third = registry.publish(envelope(3));
+  await wait(0);
+  release!();
+  await Promise.all([second, third]);
+  assert.deepEqual(
+    allowed.sent.map((value) => JSON.parse(value).sequence),
+    [1, 2, 3]
+  );
+  assert.equal(revoked.sent.length, 1);
+  assert.equal(revoked.terminated, true);
+  denied.add("allowed");
+  await wait(25);
+  assert.equal(allowed.terminated, true);
+  assert.equal(registry.size("project-a"), 0);
+});
+
+test("membership removal and leave reject preissued tickets and established subscriptions", async (t) => {
+  const { fixture } = await import("../test/fixture.js");
+  const { PermissionService } =
+    await import("../services/permission-service.js");
+  const { ProjectService } = await import("../services/project-service.js");
+  const { organizationMembers, users } = await import("@orchestrat/db");
+  const { app, db } = await fixture();
+  t.after(() => app.close());
+  const organization = (
+    await app.inject({
+      method: "POST",
+      url: "/api/v1/organizations",
+      headers: { authorization: "Bearer alice" },
+      payload: { name: "Realtime" }
+    })
+  ).json();
+  const project = (
+    await app.inject({
+      method: "POST",
+      url: `/api/v1/organizations/${organization.id}/projects`,
+      headers: { authorization: "Bearer alice" },
+      payload: { name: "Private" }
+    })
+  ).json();
+  const [alice] = await db.select().from(users);
+  const bob = "550e8400-e29b-41d4-a716-446655440001";
+  await db.insert(users).values({
+    id: bob,
+    authProvider: "supabase",
+    authSubject: bob,
+    name: "bob",
+    email: "bob@example.com"
+  });
+  const permissions = new PermissionService(db);
+  const projects = new ProjectService(db);
+  const tickets = new RealtimeTicketStore();
+  const registry = new RealtimeRegistry((userId, projectId) =>
+    permissions.projectAccess(userId, projectId)
+  );
+  const wsApp = Fastify();
+  wsApp.register(websocket);
+  wsApp.decorateRequest("userId", "");
+  await wsApp.register(realtimeSocketRoutes, { tickets, registry });
+  await wsApp.ready();
+  t.after(() => wsApp.close());
+  for (const leave of [false, true]) {
+    await db
+      .insert(organizationMembers)
+      .values({ organizationId: organization.id, userId: bob, role: "member" });
+    const pending = tickets.issue(project.id, bob).ticket;
+    const live = await wsApp.injectWS(
+      `/projects/${project.id}?ticket=${tickets.issue(project.id, bob).ticket}`
+    );
+    const messages: string[] = [];
+    live.on("message", (data) => messages.push(String(data)));
+    const event: RealtimeEventEnvelope = {
+      project_id: project.id,
+      sequence: 1,
+      event_type: "task.created",
+      entity_type: "task",
+      entity_id: null
+    };
+    await registry.publish(event);
+    await wait(0);
+    assert.equal(messages.length, 1);
+    if (leave) await projects.leaveOrganization(bob, organization.id);
+    else await projects.removeMember(alice!.id, organization.id, bob);
+    await registry.publish({ ...event, sequence: 2 });
+    assert.equal(registry.size(project.id), 0);
+    assert.equal(messages.length, 1);
+    await assert.rejects(
+      wsApp.injectWS(`/projects/${project.id}?ticket=${pending}`)
+    );
+    live.terminate();
+  }
+});
+
+test("stalled socket authorization cannot delay a committed mutation or disclose events", async (t) => {
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  t.after(release);
+  const registry = new RealtimeRegistry(() => blocked, 10);
+  const socket = new FakeSocket();
+  registry.add("project-a", "user-a", socket as never);
+  t.after(() => socket.emit("close"));
+  const tx = {};
+  const db = {
+    transaction: async (callback: (tx: object) => Promise<unknown>) => {
+      await callback(tx);
+      return "committed";
+    }
+  };
+  const wrapped = withRealtimePublisher(db as never, (event) =>
+    registry.publish(event)
+  );
+  const result = wrapped.transaction(async () =>
+    recordProjectEvent(tx as never, {
+      id: 1,
+      projectId: "project-a",
+      type: "task.updated",
+      actorAgentId: null,
+      actorUserId: null,
+      entityId: null,
+      payload: {},
+      occurredAt: new Date()
+    })
+  );
+  assert.equal(
+    await Promise.race([result, wait(100).then(() => "blocked")]),
+    "committed"
+  );
+  await wait(30);
+  assert.equal(registry.size("project-a"), 0);
+  assert.equal(socket.sent.length, 0);
+  release();
+  await wait(0);
+  assert.equal(socket.sent.length, 0);
 });
