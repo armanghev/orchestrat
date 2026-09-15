@@ -11,6 +11,7 @@ import {
   readlink,
   symlink
 } from "node:fs/promises";
+import { link, lstat, rm } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -38,6 +39,31 @@ class Store implements CredentialStore {
 }
 const response = (v: unknown, status = 200) =>
   new Response(JSON.stringify(v), { status });
+
+test("atomic backups replace links without changing their targets", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "orch-backup-security-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  for (const makeLink of [symlink, link]) {
+    const path = join(
+      directory,
+      makeLink === symlink ? "symlink-config" : "hardlink-config"
+    );
+    const target = `${path}.sentinel`;
+    const backup = `${path}.orchestrat-backup`;
+    await writeFile(path, "original");
+    await writeFile(target, "untouched");
+    await makeLink(target, backup);
+    assert.equal(await atomicWrite(path, "updated"), true);
+    assert.equal(await readFile(target, "utf8"), "untouched");
+    assert.equal(await readFile(backup, "utf8"), "original");
+    assert.equal((await lstat(backup)).isSymbolicLink(), false);
+    assert.equal((await stat(backup)).mode & 0o777, 0o600);
+    assert.equal(await atomicWrite(path, "updated"), false);
+    assert.equal(await readFile(backup, "utf8"), "original");
+    await atomicWrite(path, "latest");
+    assert.equal(await readFile(backup, "utf8"), "updated");
+  }
+});
 test("second setup is a no-op and malformed settings fails before transport", async () => {
   const home = await mkdtemp(join(tmpdir(), "orch-safe-"));
   const sourceCommand = join(home, "cli", "dist", "main.js");
@@ -294,4 +320,57 @@ test("detects both, one, or no supported integrations", async () => {
     () => detectIntegrations(async () => false),
     /No supported agent integrations/
   );
+});
+
+test("Cursor setup rejects repository config and parent symlinks before any side effects", async (t) => {
+  const home = await mkdtemp(join(tmpdir(), "orch-cursor-links-"));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const cwd = join(home, "project"),
+    outside = join(home, "outside");
+  const sourceCommand = join(home, "cli", "dist", "main.js");
+  await mkdir(dirname(sourceCommand), { recursive: true });
+  await writeFile(sourceCommand, "#!/usr/bin/env node\n");
+  await writeFile(join(home, "cli", "package.json"), '{"version":"0.1.0"}\n');
+  await chmod(sourceCommand, 0o700);
+  await mkdir(cwd);
+  await mkdir(outside);
+  const target = join(outside, "mcp.json");
+  await writeFile(target, '{"mcpServers":{"other":{"command":"keep"}}}\n');
+  const original = await readFile(target);
+  const store = new Store();
+  const options = {
+    home,
+    cwd,
+    sourceCommand,
+    store,
+    integrations: ["cursor"] as const,
+    api: "https://api.test",
+    fetch: async () => {
+      assert.fail("must reject before network");
+    },
+    open: async () => {
+      assert.fail("must reject before authorization");
+    },
+    sleep: async () => {}
+  };
+  await symlink(outside, join(cwd, ".cursor"));
+  await assert.rejects(
+    runSetup({ ...options, integrations: [...options.integrations] }),
+    /must not use symbolic links/
+  );
+  await rm(join(cwd, ".cursor"));
+  await mkdir(join(cwd, ".cursor"));
+  await symlink(target, join(cwd, ".cursor", "mcp.json"));
+  await assert.rejects(
+    runSetup({ ...options, integrations: [...options.integrations] }),
+    /must not use symbolic links/
+  );
+  assert.deepEqual(await readFile(target), original);
+  assert.equal(store.writes, 0);
+  await assert.rejects(readFile(`${target}.orchestrat-backup`), {
+    code: "ENOENT"
+  });
+  await assert.rejects(lstat(join(home, ".local", "bin", "orchestrat")), {
+    code: "ENOENT"
+  });
 });

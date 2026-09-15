@@ -1,5 +1,4 @@
 import {
-  copyFile,
   mkdir,
   mkdtemp,
   readFile,
@@ -27,12 +26,18 @@ export async function atomicWrite(
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   const existing = await readOptional(path);
   if (existing === content) return false;
-  if (existing !== undefined && backup)
-    await copyFile(path, `${path}.orchestrat-backup`);
-  afterBackup?.();
   const directory = await mkdtemp(join(dirname(path), ".orchestrat-"));
   const temporary = join(directory, "config");
   try {
+    if (existing !== undefined && backup) {
+      const stagedBackup = join(directory, "backup");
+      await writeFile(stagedBackup, existing, {
+        encoding: "utf8",
+        mode: 0o600
+      });
+      await rename(stagedBackup, `${path}.orchestrat-backup`);
+    }
+    afterBackup?.();
     await writeFile(temporary, content, { encoding: "utf8", mode: 0o600 });
     await rename(temporary, path);
   } finally {

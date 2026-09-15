@@ -1,4 +1,5 @@
-import { join } from "node:path";
+import { lstatSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type { McpScope } from "./config.js";
 import type { ConfigurableIntegration } from "./harnesses.js";
 import { harness } from "./harnesses.js";
@@ -49,6 +50,19 @@ export function harnessConfigPlan(
       opencode: join(home, ".config", "opencode", "opencode.json")
     } as Record<ConfigurableIntegration, string>
   )[integration];
+  if (integration === "cursor" && mcpScope === "project") {
+    // Repository-supplied links must not redirect setup or disconnect outside the project.
+    for (const path of [dirname(mcpPath), mcpPath]) {
+      try {
+        if (lstatSync(path).isSymbolicLink())
+          throw new Error(
+            "Cursor project configuration must not use symbolic links"
+          );
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+    }
+  }
   const hookPath = (
     {
       codex: join(home, ".codex", "hooks.json"),
