@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type WebSocketRoute } from "@playwright/test";
 import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { parseEnv } from "node:util";
@@ -6,12 +6,8 @@ import { parseEnv } from "node:util";
 const apiRequire = createRequire(
   new URL("../../api/package.json", import.meta.url)
 );
-const {
-  DeleteObjectCommand,
-  GetObjectCommand,
-  PutObjectCommand,
-  S3Client
-} = apiRequire("@aws-sdk/client-s3") as typeof import("@aws-sdk/client-s3");
+const { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } =
+  apiRequire("@aws-sdk/client-s3") as typeof import("@aws-sdk/client-s3");
 const { getSignedUrl } = apiRequire(
   "@aws-sdk/s3-request-presigner"
 ) as typeof import("@aws-sdk/s3-request-presigner");
@@ -57,8 +53,16 @@ async function seed(page: Page) {
 async function mockDocuments(
   page: Page,
   initialContent = "# Shared plan\n\n- [x] Existing work\n\n| Owner | Status |\n| --- | --- |\n| Human | Ready |",
-  history: Array<{ revision_number: number; content: string }> = []
+  history: Array<{ revision_number: number; content: string }> = [],
+  archived = false
 ) {
+  let socket: WebSocketRoute | undefined;
+  await page.routeWebSocket(
+    "wss://api.orchestrat.test/api/v1/realtime/**",
+    (ws) => {
+      socket = ws;
+    }
+  );
   let content = initialContent;
   let revision = history[0]?.revision_number ?? 1;
   let savedBody: { content: string; base_revision: number } | null = null;
@@ -78,7 +82,7 @@ async function mockDocuments(
     project_id: ids.project,
     path: "README.md",
     current_revision: revision,
-    archived_at: null,
+    archived_at: archived ? now : null,
     created_by: { type: "human", id: ids.user },
     created_at: now,
     updated_at: now
@@ -129,9 +133,11 @@ async function mockDocuments(
       });
     if (pathname === `/api/v1/projects/${ids.project}/presence`)
       return route.fulfill({ json: { agents: [] } });
+    if (pathname === `/api/v1/projects/${ids.project}/events`)
+      return route.fulfill({ json: { events: [], next_cursor: null } });
     if (pathname === "/api/v1/realtime/tickets")
       return route.fulfill({
-        json: { ticket: "e2e-realtime-ticket", expires_at: now }
+        json: { ticket: "a".repeat(43), expires_at: now }
       });
     if (pathname === `/api/v1/projects/${ids.project}/documents`)
       return route.fulfill({
@@ -182,15 +188,28 @@ async function mockDocuments(
       return route.fulfill({ json: { attachments: [] } });
     if (pathname === `/api/v1/documents/${ids.document}` && method === "GET")
       return route.fulfill({ json: detail() });
-    if (pathname === `/api/v1/documents/${ids.document}` && method === "PATCH") {
+    if (
+      pathname === `/api/v1/documents/${ids.document}` &&
+      method === "PATCH"
+    ) {
       savedBody = route.request().postDataJSON() as typeof savedBody;
       content = savedBody!.content;
       revision += 1;
       return route.fulfill({ json: detail() });
     }
-    return route.fulfill({ status: 404, json: { error: { code: "NOT_FOUND" } } });
+    return route.fulfill({
+      status: 404,
+      json: { error: { code: "NOT_FOUND" } }
+    });
   });
-  return { getSavedBody: () => savedBody };
+  return {
+    getSocket: () => socket,
+    getSavedBody: () => savedBody,
+    setRemote: (value: string) => {
+      content = value;
+      revision++;
+    }
+  };
 }
 
 test("MDXEditor edits rich text, exposes source, and saves Markdown", async ({
@@ -205,9 +224,16 @@ test("MDXEditor edits rich text, exposes source, and saves Markdown", async ({
   const state = await mockDocuments(page);
   await page.goto(`/projects/${ids.project}/documents`);
 
-  await expect(page.getByRole("heading", { name: "Shared plan" })).toBeVisible();
-  await expect(page.getByRole("button", { name: /^(Preview|Editing)$/ })).toHaveCount(0);
-  await expect(page.getByText("Human", { exact: true })).toHaveCSS("margin-top", "0px");
+  await expect(
+    page.getByRole("heading", { name: "Shared plan" })
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /^(Preview|Editing)$/ })
+  ).toHaveCount(0);
+  await expect(page.getByText("Human", { exact: true })).toHaveCSS(
+    "margin-top",
+    "0px"
+  );
   if (testInfo.project.name === "macos-default")
     await page.screenshot({
       path: "/private/tmp/orchestrat-mvp-editor.png",
@@ -219,14 +245,16 @@ test("MDXEditor edits rich text, exposes source, and saves Markdown", async ({
   const source = page.locator(".cm-content");
   await expect(source).toContainText("# Shared plan");
   await source.click();
-  await page.keyboard.press(process.platform === "darwin" ? "Meta+End" : "Control+End");
+  await page.keyboard.press(
+    process.platform === "darwin" ? "Meta+End" : "Control+End"
+  );
   await page.keyboard.type("\n\n## Browser edit");
   await page.getByRole("button", { name: "Save now" }).click();
 
   await expect.poll(() => state.getSavedBody()).not.toBeNull();
   expect(state.getSavedBody()).toMatchObject({ base_revision: 1 });
   expect(state.getSavedBody()!.content).toContain("## Browser edit");
-  await expect(page.getByRole("status")).toContainText("Saved revision 2");
+  await expect(page.getByRole("status")).toContainText(/revision 2/i);
   expect(consoleErrors).toEqual([]);
 });
 
@@ -236,8 +264,14 @@ test("document history compares saved revisions and keeps the draft", async ({
   const current = "# Roadmap\n\nCurrent saved direction.\n\nShared line";
   const revisions = [
     { revision_number: 6, content: current },
-    { revision_number: 5, content: "# Roadmap\n\nPrevious direction.\n\nShared line" },
-    { revision_number: 4, content: "# Roadmap\n\nRetired direction.\n\nShared line" },
+    {
+      revision_number: 5,
+      content: "# Roadmap\n\nPrevious direction.\n\nShared line"
+    },
+    {
+      revision_number: 4,
+      content: "# Roadmap\n\nRetired direction.\n\nShared line"
+    },
     { revision_number: 3, content: "# Roadmap\n\nThird direction." },
     { revision_number: 2, content: "# Roadmap\n\nOlder direction." },
     { revision_number: 1, content: "# Roadmap\n\nFirst direction." }
@@ -253,23 +287,28 @@ test("document history compares saved revisions and keeps the draft", async ({
   );
   await page.goto(`/projects/${ids.project}/documents`);
   await expect(page.getByRole("heading", { name: "Documents" })).toBeVisible();
-  await expect(page.getByRole("button", { name: /^Revision 5\b/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^Revision 5\b/ })).toHaveCount(
+    0
+  );
 
   await page.getByRole("radio", { name: "Source mode" }).click();
   const editor = page.locator(".mdxeditor-source-editor .cm-content");
   await editor.click();
-  await page.keyboard.press(process.platform === "darwin" ? "Meta+End" : "Control+End");
+  await page.keyboard.press(
+    process.platform === "darwin" ? "Meta+End" : "Control+End"
+  );
   await page.keyboard.type("\n\nUnsaved browser draft.");
   await page.getByRole("button", { name: "History" }).click();
 
   const dialog = page.getByRole("dialog", { name: "Document history" });
   await expect(dialog).toBeVisible();
   await expect(dialog).toContainText("Unsaved draft changes are excluded");
-  await expect(page.getByRole("button", { name: /^Revision 5\b/ })).toHaveAttribute(
-    "aria-pressed",
-    "true"
-  );
-  await expect(page.getByRole("button", { name: /^Revision 6\b/ })).toBeDisabled();
+  await expect(
+    page.getByRole("button", { name: /^Revision 5\b/ })
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(
+    page.getByRole("button", { name: /^Revision 6\b/ })
+  ).toBeDisabled();
   const comparison = page.getByRole("textbox", { name: "Revision comparison" });
   await expect(comparison).toHaveAttribute("contenteditable", "false");
   await expect(comparison).toContainText("Previous direction.");
@@ -308,7 +347,9 @@ test("the rich-text toolbar creates a saved link and preserves an unlabeled code
   await page.keyboard.press("End");
   await page.getByRole("button", { name: "Create link" }).click();
   const linkDialog = page.getByRole("dialog");
-  await linkDialog.locator('input[name="url"]').fill("https://orchestrat.dev/docs");
+  await linkDialog
+    .locator('input[name="url"]')
+    .fill("https://orchestrat.dev/docs");
   await page.getByLabel("Anchor text").fill("Documentation");
   await page.getByRole("button", { name: "Set URL" }).click();
   await page.getByRole("button", { name: "Save now" }).click();
@@ -318,14 +359,19 @@ test("the rich-text toolbar creates a saved link and preserves an unlabeled code
     "[Documentation](https://orchestrat.dev/docs)"
   );
   expect(state.getSavedBody()!.content).toContain("const ok = true;");
-  expect(state.getSavedBody()!.content).toMatch(/```(?:text)?\nconst ok = true;\n```/);
+  expect(state.getSavedBody()!.content).toMatch(
+    /```(?:text)?\nconst ok = true;\n```/
+  );
 });
 
 test("a conversion error preserves source and never autosaves empty content", async ({
   page
 }) => {
   await seed(page);
-  const state = await mockDocuments(page, "# Agent note\n\n<Unknown value={draft} />");
+  const state = await mockDocuments(
+    page,
+    "# Agent note\n\n<Unknown value={draft} />"
+  );
   await page.goto(`/projects/${ids.project}/documents`);
 
   await expect(page.getByRole("alert")).toContainText(
@@ -348,24 +394,36 @@ test("document typography and editor menus follow the theme without changing Mar
     if (message.type() === "error") errors.push(message.text());
   });
   await seed(page);
-  const state = await mockDocuments(page,
+  const state = await mockDocuments(
+    page,
     '# Shared plan\n\nCoordinate the next release.\n\n## Next steps\n\n- Review the changes\n\n- [x] Connect an agent\n\n> Keep the team in sync.\n\n```javascript\n// Agent status\nconst status = "Ready for review";\n```'
   );
   await page.emulateMedia({ colorScheme: "dark" });
   await page.goto(`/projects/${ids.project}/documents`);
-  const heading = page.getByRole("heading", { name: "Shared plan", exact: true });
-  const blockType = page.getByRole("combobox", { name: "Block type", exact: true });
+  const heading = page.getByRole("heading", {
+    name: "Shared plan",
+    exact: true
+  });
+  const blockType = page.getByRole("combobox", {
+    name: "Block type",
+    exact: true
+  });
 
   for (const theme of ["dark", "light"] as const) {
     await page.emulateMedia({ colorScheme: theme });
     await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
     await heading.click();
     await expect(blockType).toHaveText("Heading 1");
-    await page.locator(".mdxeditor").evaluate((element) => element.scrollIntoView({ block: "start" }));
+    await page
+      .locator(".mdxeditor")
+      .evaluate((element) => element.scrollIntoView({ block: "start" }));
     await blockType.click();
     const menu = page.getByRole("listbox");
     await expect(menu).toBeVisible();
-    await page.screenshot({ path: `/private/tmp/orchestrat-editor-${theme}-${testInfo.project.name}.png`, animations: "disabled" });
+    await page.screenshot({
+      path: `/private/tmp/orchestrat-editor-${theme}-${testInfo.project.name}.png`,
+      animations: "disabled"
+    });
     const colors = await menu.evaluate((element) => {
       const style = getComputedStyle(element);
       return {
@@ -380,17 +438,32 @@ test("document typography and editor menus follow the theme without changing Mar
     await page.keyboard.press("Escape");
     await expect(heading).toHaveCSS("font-size", "32px");
     await expect(heading).toHaveCSS("font-weight", "600");
-    await expect(page.getByRole("heading", { name: "Next steps" })).toHaveCSS("font-size", "24px");
-    const background = await page.locator("html").evaluate((element) =>
-      getComputedStyle(element).getPropertyValue("--background").trim()
+    await expect(page.getByRole("heading", { name: "Next steps" })).toHaveCSS(
+      "font-size",
+      "24px"
     );
-    await expect(page.locator(".cm-editor")).toHaveCSS("background-color", background);
-    const keywordColor = await page.locator("html").evaluate((element) =>
-      getComputedStyle(element).getPropertyValue("--primary-text").trim()
+    const background = await page
+      .locator("html")
+      .evaluate((element) =>
+        getComputedStyle(element).getPropertyValue("--background").trim()
+      );
+    await expect(page.locator(".cm-editor")).toHaveCSS(
+      "background-color",
+      background
     );
-    await expect(page.locator(".cm-line").getByText("const", { exact: true })).toHaveCSS("color", keywordColor);
+    const keywordColor = await page
+      .locator("html")
+      .evaluate((element) =>
+        getComputedStyle(element).getPropertyValue("--primary-text").trim()
+      );
+    await expect(
+      page.locator(".cm-line").getByText("const", { exact: true })
+    ).toHaveCSS("color", keywordColor);
     await page.getByRole("radio", { name: "Source mode" }).click();
-    await expect(page.locator(".mdxeditor-source-editor .cm-editor")).toHaveCSS("background-color", background);
+    await expect(page.locator(".mdxeditor-source-editor .cm-editor")).toHaveCSS(
+      "background-color",
+      background
+    );
     await page.getByRole("radio", { name: "Rich text", exact: true }).click();
     expect(state.getSavedBody()).toBeNull();
   }
@@ -398,24 +471,43 @@ test("document typography and editor menus follow the theme without changing Mar
   await page.getByText("Coordinate the next release.", { exact: true }).click();
   await blockType.click();
   await page.getByRole("option", { name: "Heading 3", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Coordinate the next release.", level: 3 })).toHaveCSS("font-size", "20px");
+  await expect(
+    page.getByRole("heading", {
+      name: "Coordinate the next release.",
+      level: 3
+    })
+  ).toHaveCSS("font-size", "20px");
   await blockType.focus();
   await page.keyboard.press("Tab");
-  await expect(page.locator(".orchestrat-markdown-editor :focus")).toHaveCSS("outline-style", "solid");
+  await expect(page.locator(".orchestrat-markdown-editor :focus")).toHaveCSS(
+    "outline-style",
+    "solid"
+  );
   await page.getByRole("radio", { name: "Source mode" }).click();
   const source = page.locator(".mdxeditor-source-editor .cm-content");
   await source.click();
-  await page.keyboard.press(process.platform === "darwin" ? "Meta+End" : "Control+End");
+  await page.keyboard.press(
+    process.platform === "darwin" ? "Meta+End" : "Control+End"
+  );
   await page.keyboard.type("\n\nKeep this draft.");
-  const selectionBefore = await source.evaluate(() => window.getSelection()?.anchorOffset);
+  const selectionBefore = await source.evaluate(
+    () => window.getSelection()?.anchorOffset
+  );
   await page.emulateMedia({ colorScheme: "dark" });
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await expect(source).toBeFocused();
   await expect(source).toContainText("Keep this draft.");
-  expect(await source.evaluate(() => window.getSelection()?.anchorOffset)).toBe(selectionBefore);
-  await page.screenshot({ path: `/private/tmp/orchestrat-editor-source-${testInfo.project.name}.png`, animations: "disabled" });
+  expect(await source.evaluate(() => window.getSelection()?.anchorOffset)).toBe(
+    selectionBefore
+  );
+  await page.screenshot({
+    path: `/private/tmp/orchestrat-editor-source-${testInfo.project.name}.png`,
+    animations: "disabled"
+  });
   await page.getByRole("button", { name: "Save now" }).click();
-  await expect.poll(() => state.getSavedBody()?.content).toContain("### Coordinate the next release.");
+  await expect
+    .poll(() => state.getSavedBody()?.content)
+    .toContain("### Coordinate the next release.");
   expect(state.getSavedBody()?.content).toContain("Keep this draft.");
   await page.getByRole("radio", { name: "Rich text", exact: true }).click();
   await expect(heading).toHaveCSS("font-size", "32px");
@@ -425,7 +517,10 @@ test("document typography and editor menus follow the theme without changing Mar
 test("@r2 browser attachment UI uploads through an actual signed R2 PUT", async ({
   page
 }) => {
-  test.skip(!process.env.R2_BROWSER_E2E, "Set R2_BROWSER_E2E=1 to use the test bucket.");
+  test.skip(
+    !process.env.R2_BROWSER_E2E,
+    "Set R2_BROWSER_E2E=1 to use the test bucket."
+  );
   const config = storageEnvironment();
   expect(config.bucket).toBe("orchestrat-documents");
   const client = new S3Client({
@@ -490,7 +585,9 @@ test("@r2 browser attachment UI uploads through an actual signed R2 PUT", async 
     await page.goto(`/projects/${ids.project}/documents`);
     const fileChooser = page.waitForEvent("filechooser");
     await page.getByRole("button", { name: "Add attachment" }).click();
-    await (await fileChooser).setFiles({
+    await (
+      await fileChooser
+    ).setFiles({
       name: "browser-upload.txt",
       mimeType: "text/plain",
       buffer: bytes
@@ -500,7 +597,9 @@ test("@r2 browser attachment UI uploads through an actual signed R2 PUT", async 
     const stored = await client.send(
       new GetObjectCommand({ Bucket: config.bucket, Key: objectKey })
     );
-    expect(Buffer.from(await stored.Body!.transformToByteArray())).toEqual(bytes);
+    expect(Buffer.from(await stored.Body!.transformToByteArray())).toEqual(
+      bytes
+    );
     expect(consoleErrors).toEqual([]);
   } finally {
     await client.send(
@@ -509,3 +608,86 @@ test("@r2 browser attachment UI uploads through an actual signed R2 PUT", async 
     client.destroy();
   }
 });
+
+for (const archived of [false, true]) {
+  test(`shared HTML remains inert in ${archived ? "archived" : "editable"} documents and source switching`, async ({
+    page
+  }) => {
+    await seed(page);
+    const payload =
+      '# Agent note\n\n<iframe srcdoc="&lt;script>parent.document.documentElement.dataset.executed=1&lt;/script>"></iframe>\n\n<video oncanplay="document.documentElement.dataset.executed=2" src="data:video/mp4,"></video>';
+    const state = await mockDocuments(page, payload, [], archived);
+    await page.goto(`/projects/${ids.project}/documents`);
+    if (archived)
+      await page
+        .getByRole("button", { name: "Archived (1)", exact: true })
+        .click();
+    await expect(
+      page.locator(".mdxeditor.orchestrat-markdown-editor")
+    ).toBeVisible();
+    await expect(
+      page.locator(
+        ".orchestrat-markdown-editor iframe, .orchestrat-markdown-editor video, .orchestrat-markdown-editor [oncanplay]"
+      )
+    ).toHaveCount(0);
+    await page.getByRole("radio", { name: "Source mode" }).click();
+    await expect
+      .poll(() => page.locator(".cm-content .cm-line").allTextContents())
+      .toEqual(payload.split("\n"));
+    await page.getByRole("radio", { name: "Rich text" }).click();
+    await expect(
+      page.locator(
+        ".orchestrat-markdown-editor iframe, .orchestrat-markdown-editor video"
+      )
+    ).toHaveCount(0);
+    expect(await page.locator("html").getAttribute("data-executed")).toBeNull();
+    await page.waitForTimeout(1700);
+    expect(state.getSavedBody()).toBeNull();
+  });
+}
+
+for (const dirty of [false, true]) {
+  test(`remote Markdown ${dirty ? "use-remote" : "adoption"} keeps active HTML inert`, async ({
+    page
+  }) => {
+    await seed(page);
+    const state = await mockDocuments(page, "# Original");
+    await page.goto(`/projects/${ids.project}/documents`);
+    await expect(
+      page.getByRole("heading", { name: "Original", exact: true })
+    ).toBeVisible();
+    if (dirty) {
+      const rich = page.locator(".document-markdown[contenteditable=true]");
+      await rich.press("End");
+      await rich.pressSequentially(" local draft");
+    }
+    const payload =
+      '# Remote\n\n<iframe srcdoc="&lt;script>parent.document.documentElement.dataset.executed=1&lt;/script>"></iframe>';
+    state.setRemote(payload);
+    await expect.poll(() => Boolean(state.getSocket())).toBe(true);
+    state.getSocket()!.send(
+      JSON.stringify({
+        project_id: ids.project,
+        sequence: 2,
+        event_type: "document.updated",
+        entity_type: "document",
+        entity_id: ids.document
+      })
+    );
+    if (dirty)
+      await page
+        .getByRole("button", { name: "Use remote", exact: true })
+        .click();
+    await expect(page.getByRole("status")).toContainText(/revision 2/i);
+    await expect(
+      page.locator(".orchestrat-markdown-editor iframe")
+    ).toHaveCount(0);
+    await page.getByRole("radio", { name: "Source mode" }).click();
+    await expect(page.locator(".cm-content")).toContainText("# Remote");
+    await expect
+      .poll(() => page.locator(".cm-content .cm-line").allTextContents())
+      .toEqual(payload.split("\n"));
+    expect(await page.locator("html").getAttribute("data-executed")).toBeNull();
+    expect(state.getSavedBody()).toBeNull();
+  });
+}

@@ -47,25 +47,39 @@ export const codeMirrorExtensions = [
       borderColor: "var(--border)"
     },
     ".cm-activeLine, .cm-activeLineGutter": { backgroundColor: "var(--muted)" },
-    "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": {
-      backgroundColor: "var(--accent)"
-    },
+    "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection":
+      {
+        backgroundColor: "var(--accent)"
+      },
     ".cm-panels, .cm-tooltip": {
-      backgroundColor: "var(--popover)", color: "var(--foreground)", borderColor: "var(--border)"
+      backgroundColor: "var(--popover)",
+      color: "var(--foreground)",
+      borderColor: "var(--border)"
     },
-    ".cm-searchMatch, .cm-selectionMatch, .cm-matchingBracket": { backgroundColor: "var(--accent)" }
+    ".cm-searchMatch, .cm-selectionMatch, .cm-matchingBracket": {
+      backgroundColor: "var(--accent)"
+    }
   }),
-  syntaxHighlighting(HighlightStyle.define([
-    { tag: [tags.name, tags.punctuation, tags.content], color: "var(--foreground)" },
-    { tag: [tags.keyword, tags.operator], color: "var(--primary-text)" },
-    { tag: [tags.literal, tags.typeName], color: "var(--info)" },
-    { tag: [tags.comment, tags.meta], color: "var(--muted-foreground)" },
-    { tag: tags.link, color: "var(--primary-text)", textDecoration: "underline" },
-    { tag: tags.heading, color: "var(--foreground)", fontWeight: "600" },
-    { tag: tags.strong, color: "var(--foreground)", fontWeight: "700" },
-    { tag: tags.emphasis, color: "var(--foreground)", fontStyle: "italic" },
-    { tag: tags.invalid, color: "var(--destructive)" }
-  ]))
+  syntaxHighlighting(
+    HighlightStyle.define([
+      {
+        tag: [tags.name, tags.punctuation, tags.content],
+        color: "var(--foreground)"
+      },
+      { tag: [tags.keyword, tags.operator], color: "var(--primary-text)" },
+      { tag: [tags.literal, tags.typeName], color: "var(--info)" },
+      { tag: [tags.comment, tags.meta], color: "var(--muted-foreground)" },
+      {
+        tag: tags.link,
+        color: "var(--primary-text)",
+        textDecoration: "underline"
+      },
+      { tag: tags.heading, color: "var(--foreground)", fontWeight: "600" },
+      { tag: tags.strong, color: "var(--foreground)", fontWeight: "700" },
+      { tag: tags.emphasis, color: "var(--foreground)", fontStyle: "italic" },
+      { tag: tags.invalid, color: "var(--destructive)" }
+    ])
+  )
 ];
 
 type MarkdownEditorProps = {
@@ -75,62 +89,66 @@ type MarkdownEditorProps = {
   onError: (error: { error: string; source: string }) => void;
 };
 
-export const MarkdownEditor = forwardRef<
-  MDXEditorMethods,
-  MarkdownEditorProps
->(function MarkdownEditor({ markdown, readOnly, onChange, onError }, ref) {
-  const { resolvedTheme } = useTheme();
-  return (
-    <MDXEditor
-      ref={ref}
-      markdown={markdown}
-      readOnly={readOnly}
-      onChange={onChange}
-      onError={onError}
-      contentEditableClassName="document-markdown min-h-[24rem]"
-      className={`orchestrat-markdown-editor mdxeditor-full-height h-full ${resolvedTheme === "dark" ? "dark-theme" : ""}`}
-      plugins={[
-        headingsPlugin(),
-        listsPlugin(),
-        quotePlugin(),
-        linkPlugin(),
-        linkDialogPlugin(),
-        tablePlugin(),
-        thematicBreakPlugin(),
-        frontmatterPlugin(),
-        codeBlockPlugin({ defaultCodeBlockLanguage: "text" }),
-        codeMirrorPlugin({
-          codeMirrorExtensions,
-          codeBlockLanguages: {
-            bash: "Bash",
-            css: "CSS",
-            html: "HTML",
-            javascript: "JavaScript",
-            json: "JSON",
-            markdown: "Markdown",
-            text: "Plain text",
-            tsx: "TSX",
-            typescript: "TypeScript"
-          }
-        }),
-        diffSourcePlugin({ viewMode: "rich-text", readOnlyDiff: true, codeMirrorExtensions }),
-        markdownShortcutPlugin(),
-        toolbarPlugin({
-          toolbarContents: () => (
-            <DiffSourceToggleWrapper options={["rich-text", "source"]}>
-              <UndoRedo />
-              <Separator />
-              <BoldItalicUnderlineToggles />
-              <BlockTypeSelect />
-              <ListsToggle />
-              <Separator />
-              <CreateLink />
-              <InsertTable />
-              <InsertThematicBreak />
-            </DiffSourceToggleWrapper>
-          )
-        })
-      ]}
-    />
-  );
-});
+export const MarkdownEditor = forwardRef<MDXEditorMethods, MarkdownEditorProps>(
+  function MarkdownEditor({ markdown, readOnly, onChange, onError }, ref) {
+    const { resolvedTheme } = useTheme();
+    return (
+      <MDXEditor
+        ref={ref}
+        markdown={markdown}
+        suppressHtmlProcessing
+        readOnly={readOnly}
+        onChange={onChange}
+        onError={onError}
+        contentEditableClassName="document-markdown min-h-[24rem]"
+        className={`orchestrat-markdown-editor mdxeditor-full-height h-full ${resolvedTheme === "dark" ? "dark-theme" : ""}`}
+        plugins={[
+          headingsPlugin(),
+          listsPlugin(),
+          quotePlugin(),
+          linkPlugin(),
+          linkDialogPlugin(),
+          tablePlugin(),
+          thematicBreakPlugin(),
+          frontmatterPlugin(),
+          codeBlockPlugin({ defaultCodeBlockLanguage: "text" }),
+          codeMirrorPlugin({
+            codeMirrorExtensions,
+            codeBlockLanguages: {
+              bash: "Bash",
+              css: "CSS",
+              html: "HTML",
+              javascript: "JavaScript",
+              json: "JSON",
+              markdown: "Markdown",
+              text: "Plain text",
+              tsx: "TSX",
+              typescript: "TypeScript"
+            }
+          }),
+          diffSourcePlugin({
+            viewMode: "rich-text",
+            readOnlyDiff: true,
+            codeMirrorExtensions
+          }),
+          markdownShortcutPlugin(),
+          toolbarPlugin({
+            toolbarContents: () => (
+              <DiffSourceToggleWrapper options={["rich-text", "source"]}>
+                <UndoRedo />
+                <Separator />
+                <BoldItalicUnderlineToggles />
+                <BlockTypeSelect />
+                <ListsToggle />
+                <Separator />
+                <CreateLink />
+                <InsertTable />
+                <InsertThematicBreak />
+              </DiffSourceToggleWrapper>
+            )
+          })
+        ]}
+      />
+    );
+  }
+);
