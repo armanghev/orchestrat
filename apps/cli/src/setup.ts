@@ -42,11 +42,7 @@ const applicationAvailable = async (name: string) => {
 };
 const noApplication = async () => false;
 import { atomicWrite, readOptional, removeHarnessMcp } from "./safe-files.js";
-import {
-  agentAccount,
-  legacyAgentAccount,
-  type CredentialStore
-} from "./keychain.js";
+import { agentAccount, cliAccount, type CredentialStore } from "./keychain.js";
 import {
   readConfig,
   configPath,
@@ -54,7 +50,7 @@ import {
   type Integration,
   type McpScope,
   type OrchestratConfig,
-  validateApiUrl
+  apiOrigin
 } from "./config.js";
 import {
   HARNESSES,
@@ -226,9 +222,9 @@ async function pruneRuntimes(runtimeRoot: string, current: string) {
 }
 export async function authorizeCli(
   transport: SetupTransport,
-  store: CredentialStore,
-  account = "cli"
+  store: CredentialStore
 ) {
+  transport = { ...transport, api: apiOrigin(transport.api) };
   const created = await transport.fetch(
     `${transport.api}/api/v1/cli/authorization/attempts`,
     { method: "POST" }
@@ -278,12 +274,13 @@ export async function authorizeCli(
     }
     if (result.status !== "approved" || !result.credential)
       throw new Error(`Browser authorization ${result.status}`);
-    await store.write(account, result.credential);
+    await store.write(cliAccount(transport.api), result.credential);
     return resolveSetupAuthorization(transport, store);
   }
 }
 
 export type SetupAuthorization = {
+  api: string;
   credential: string;
   projects: ProjectChoice[];
 };
@@ -293,9 +290,9 @@ export async function resolveSetupAuthorization(
   store: CredentialStore,
   forceAuthorization = false
 ): Promise<SetupAuthorization> {
-  const credential = await store.read("cli");
-  if (!credential || forceAuthorization)
-    return authorizeCli(transport, store);
+  transport = { ...transport, api: apiOrigin(transport.api) };
+  const credential = await store.read(cliAccount(transport.api));
+  if (!credential || forceAuthorization) return authorizeCli(transport, store);
   const response = await transport.fetch(
     `${transport.api}/api/v1/cli/setup/projects`,
     { headers: { authorization: `Bearer ${credential}` } }
@@ -304,8 +301,9 @@ export async function resolveSetupAuthorization(
     return authorizeCli(transport, store);
   if (!response.ok) throw new Error("Unable to resolve CLI projects");
   const result = (await response.json()) as { projects?: ProjectChoice[] };
-  if (!Array.isArray(result.projects)) throw new Error("CLI projects were not returned");
-  return { credential, projects: result.projects };
+  if (!Array.isArray(result.projects))
+    throw new Error("CLI projects were not returned");
+  return { api: transport.api, credential, projects: result.projects };
 }
 
 export type SetupPreview = {
@@ -419,6 +417,14 @@ export type SetupRunOptions = SetupTransport & {
   reportPreview?: (previews: SetupPreview[]) => Promise<void> | void;
 };
 export async function runSetup(options: SetupRunOptions) {
+  options = { ...options, api: apiOrigin(options.api) };
+  if (
+    options.authorization &&
+    apiOrigin(options.authorization.api) !== options.api
+  )
+    throw new Error(
+      "CLI authorization belongs to a different API; run setup again"
+    );
   const sourceCommand = await realpath(options.sourceCommand);
   if (!sourceCommand.startsWith("/"))
     throw new Error("Persistent CLI command must be absolute");
@@ -427,11 +433,12 @@ export async function runSetup(options: SetupRunOptions) {
   let config = await readConfig(options.home);
   const key = canonicalizeCwd(options.cwd);
   const existing = config.projects[key];
-  const apiUrl = validateApiUrl(options.api);
+  const apiUrl = options.api;
   const apiChanged = existing !== undefined && existing.apiUrl !== apiUrl;
   const mcpScopes = { ...(existing?.mcpScopes ?? {}) };
   for (const integration of options.integrations)
-    mcpScopes[integration] = options.mcpScope ?? mcpScopes[integration] ?? "project";
+    mcpScopes[integration] =
+      options.mcpScope ?? mcpScopes[integration] ?? "project";
   const configPreviews = await previewSetup(
     options.home,
     options.integrations,
@@ -460,24 +467,24 @@ export async function runSetup(options: SetupRunOptions) {
       : projects.length === 1
         ? projects[0]!.id
         : undefined);
-  if (!projectId) throw new Error("Select a project by running setup in an interactive terminal");
+  if (!projectId)
+    throw new Error(
+      "Select a project by running setup in an interactive terminal"
+    );
   const projectChanged = existing?.projectId !== projectId;
   const integrations: Record<string, { agentId: string }> =
     apiChanged || projectChanged ? {} : { ...(existing?.integrations ?? {}) };
   const globalIntegrations = options.integrations.filter(
     (integration) => mcpScopes[integration] === "global"
   );
-  const selectedGlobalProjects =
-    globalIntegrations.length
-      ? options.globalProjects ?? projects
-      : [];
-  if (
-    globalIntegrations.length &&
-    !selectedGlobalProjects.length
-  )
+  const selectedGlobalProjects = globalIntegrations.length
+    ? (options.globalProjects ?? projects)
+    : [];
+  if (globalIntegrations.length && !selectedGlobalProjects.length)
     throw new Error("Select at least one project for global MCP");
   const globalMappings = { ...(config.globalProjects ?? {}) };
-  for (const integration of globalIntegrations) globalMappings[integration] = {};
+  for (const integration of globalIntegrations)
+    globalMappings[integration] = {};
   const persistMapping = async () => {
     config = {
       version: 1,
@@ -500,17 +507,9 @@ export async function runSetup(options: SetupRunOptions) {
     );
   };
   for (const integration of options.integrations) {
-    const account = agentAccount(projectId, integration);
-    const legacy = legacyAgentAccount(integration);
-    const existingCredential =
-      (await options.store.read(account)) ??
-      (projectChanged ? undefined : await options.store.read(legacy));
-    if (
-      integrations[integration]?.agentId &&
-      existingCredential
-    ) {
-      if (!(await options.store.read(account)))
-        await options.store.write(account, existingCredential);
+    const account = agentAccount(projectId, integration, options.api);
+    const existingCredential = await options.store.read(account);
+    if (integrations[integration]?.agentId && existingCredential) {
       continue;
     }
     const response = await options.fetch(`${options.api}/api/v1/cli/setup`, {
@@ -535,23 +534,28 @@ export async function runSetup(options: SetupRunOptions) {
   }
   for (const integration of globalIntegrations)
     for (const project of selectedGlobalProjects) {
-      const account = agentAccount(project.id, integration);
+      const account = agentAccount(project.id, integration, options.api);
       const mapped =
         project.id === projectId
           ? integrations[integration]
           : globalMappings[integration]?.[project.id];
       let agentId = mapped?.agentId;
       if (!agentId || !(await options.store.read(account))) {
-        const response = await options.fetch(`${options.api}/api/v1/cli/setup`, {
-          method: "POST",
-          headers: {
-            authorization: `Bearer ${cliToken}`,
-            "content-type": "application/json"
-          },
-          body: JSON.stringify({ project_id: project.id, integration })
-        });
+        const response = await options.fetch(
+          `${options.api}/api/v1/cli/setup`,
+          {
+            method: "POST",
+            headers: {
+              authorization: `Bearer ${cliToken}`,
+              "content-type": "application/json"
+            },
+            body: JSON.stringify({ project_id: project.id, integration })
+          }
+        );
         if (!response.ok)
-          throw new Error(`Unable to configure ${integration} for ${project.organization_name} / ${project.name} (API ${response.status})`);
+          throw new Error(
+            `Unable to configure ${integration} for ${project.organization_name} / ${project.name} (API ${response.status})`
+          );
         const result = (await response.json()) as {
           agent: { id: string };
           credential: { token: string };

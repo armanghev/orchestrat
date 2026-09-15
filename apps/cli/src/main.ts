@@ -314,13 +314,15 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     "https://api.orchestrat.dev";
   if (command === "document") {
     const resolved = await resolveInvocation({
+      api,
+      home,
       cwd: invocationCwd,
       integration: integration as ConfigurableIntegration,
       read: readConfig,
       credentials: new KeychainCredentialReader()
     });
     const client = new AgentApiClient({
-      baseUrl: api,
+      baseUrl: resolved.api!,
       token: resolved.credential!
     });
     const result = await runDocumentCommand({
@@ -476,6 +478,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
           home,
           integrations,
           authorization: authorization && {
+            api: authorization.api,
             credential: authorization.credential,
             projects: authorization.projects
           },
@@ -528,6 +531,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     if (!integration || integration === "all") usage();
     if (global) {
       const projects = await resolveGlobalInvocation({
+        api,
         integration,
         read: readConfig,
         credentials: new KeychainCredentialReader(),
@@ -539,7 +543,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
           id: project.projectId,
           name: `${project.organizationName} / ${project.name}`,
           client: new AgentApiClient({
-            baseUrl: project.apiUrl ?? api,
+            baseUrl: project.apiUrl,
             token: project.credential
           })
         }))
@@ -559,6 +563,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       return;
     }
     const resolved = await resolveInvocation({
+      api,
+      home,
       cwd: invocationCwd,
       integration,
       read: readConfig,
@@ -569,7 +575,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       projectId: string;
     };
     const client = new AgentApiClient({
-      baseUrl: api,
+      baseUrl: resolved.api!,
       token: resolved.credential!
     });
     const { bridge } = await startStdioBridge({

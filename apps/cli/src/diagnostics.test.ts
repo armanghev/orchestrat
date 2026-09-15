@@ -77,6 +77,7 @@ async function setupHome() {
       projects: {
         [project]: {
           projectId: id(1),
+          apiUrl: "https://api.test",
           integrations: {
             codex: { agentId: id(2) },
             "claude-code": { agentId: id(3) }
@@ -86,9 +87,15 @@ async function setupHome() {
     })
   );
   const store = new Store();
-  store.values.set("cli", `orch_cli_${"x".repeat(32)}`);
-  store.values.set("agent:codex", `orch_agent_${"c".repeat(32)}`);
-  store.values.set("agent:claude-code", `orch_agent_${"a".repeat(32)}`);
+  store.values.set("cli:https://api.test", `orch_cli_${"x".repeat(32)}`);
+  store.values.set(
+    `agent:${id(1)}:codex:https://api.test`,
+    `orch_agent_${"c".repeat(32)}`
+  );
+  store.values.set(
+    `agent:${id(1)}:claude-code:https://api.test`,
+    `orch_agent_${"a".repeat(32)}`
+  );
   return { home, project, command, source, store, backupPath };
 }
 
@@ -134,8 +141,14 @@ test("disconnect partial removes only selected exact entries and preserves backu
       ].integrations["claude-code"].agentId,
       id(3)
     );
-    assert.equal(fixture.store.values.has("agent:codex"), false);
-    assert.equal(fixture.store.values.has("agent:claude-code"), true);
+    assert.equal(
+      fixture.store.values.has(`agent:${id(1)}:codex:https://api.test`),
+      false
+    );
+    assert.equal(
+      fixture.store.values.has(`agent:${id(1)}:claude-code:https://api.test`),
+      true
+    );
     assert.equal(
       (
         await lstat(join(fixture.home, ".local", "bin", "orchestrat"))
@@ -184,9 +197,15 @@ test("local disconnect skips remote revoke and still cleans up", async () => {
     }
   });
   assert.deepEqual(result.disconnected, ["codex", "claude-code"]);
-  assert.equal(fixture.store.values.has("cli"), false);
-  assert.equal(fixture.store.values.has("agent:codex"), false);
-  assert.equal(fixture.store.values.has("agent:claude-code"), false);
+  assert.equal(fixture.store.values.has("cli:https://api.test"), false);
+  assert.equal(
+    fixture.store.values.has(`agent:${id(1)}:codex:https://api.test`),
+    false
+  );
+  assert.equal(
+    fixture.store.values.has(`agent:${id(1)}:claude-code:https://api.test`),
+    false
+  );
 });
 
 test("disconnect preview failure prevents backend and local mutation", async () => {
@@ -261,7 +280,7 @@ test("disconnect backend failure and missing CLI token mutate nothing", async ()
     assert.deepEqual(fixture.store.values, storeBefore);
     await rm(fixture.home, { recursive: true, force: true });
     const missing = await setupHome();
-    missing.store.values.delete("cli");
+    missing.store.values.delete("cli:https://api.test");
     const missingPaths = [
       configPath(missing.home),
       join(missing.home, ".codex", "config.toml"),
@@ -297,8 +316,14 @@ test("disconnect backend failure and missing CLI token mutate nothing", async ()
     assert.deepEqual(
       missing.store.values,
       new Map([
-        ["agent:codex", `orch_agent_${"c".repeat(32)}`],
-        ["agent:claude-code", `orch_agent_${"a".repeat(32)}`]
+        [
+          `agent:${id(1)}:codex:https://api.test`,
+          `orch_agent_${"c".repeat(32)}`
+        ],
+        [
+          `agent:${id(1)}:claude-code:https://api.test`,
+          `orch_agent_${"a".repeat(32)}`
+        ]
       ])
     );
     await rm(missing.home, { recursive: true, force: true });
@@ -307,7 +332,7 @@ test("disconnect backend failure and missing CLI token mutate nothing", async ()
   }
 });
 
-test("shared integration keeps provider files and keychain credential", async () => {
+test("shared integration keeps provider files and the other project credential", async () => {
   const fixture = await setupHome();
   try {
     const config = JSON.parse(await readFile(configPath(fixture.home), "utf8"));
@@ -316,6 +341,10 @@ test("shared integration keeps provider files and keychain credential", async ()
       integrations: { codex: { agentId: id(6) } }
     };
     await writeFile(configPath(fixture.home), JSON.stringify(config));
+    fixture.store.values.set(
+      `agent:${id(5)}:codex:https://api.test`,
+      "other-project-secret"
+    );
     const before = await readFile(
       join(fixture.home, ".codex", "config.toml"),
       "utf8"
@@ -333,7 +362,14 @@ test("shared integration keeps provider files and keychain credential", async ()
       await readFile(join(fixture.home, ".codex", "config.toml"), "utf8"),
       before
     );
-    assert.equal(fixture.store.values.has("agent:codex"), true);
+    assert.equal(
+      fixture.store.values.has(`agent:${id(1)}:codex:https://api.test`),
+      false
+    );
+    assert.equal(
+      fixture.store.values.get(`agent:${id(5)}:codex:https://api.test`),
+      "other-project-secret"
+    );
   } finally {
     await rm(fixture.home, { recursive: true, force: true });
   }
@@ -571,22 +607,34 @@ test("global diagnostics check each configured origin and scoped credential with
         JSON.parse(mergeJson(undefined, "claude-code", fixture.command, true))
       )
     );
-    fixture.store.values.set(`agent:${id(1)}:codex`, "scoped-codex-secret");
     fixture.store.values.set(
-      `agent:${id(1)}:claude-code`,
+      `agent:${id(1)}:codex:http://localhost:8801`,
+      "scoped-codex-secret"
+    );
+    fixture.store.values.set(
+      `agent:${id(1)}:claude-code:http://localhost:8801`,
       "scoped-claude-secret"
     );
+    fixture.store.values.set("cli:http://localhost:8801", "local-cli");
+    fixture.store.values.set("cli:https://other.api.test", "other-cli");
     const calls: string[] = [];
     const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       calls.push(url);
       const authorization = new Headers(init?.headers).get("authorization");
-      if (url.endsWith("/cli/setup/projects"))
+      if (url.endsWith("/cli/setup/projects")) {
+        assert.equal(
+          authorization,
+          url.startsWith("https://other")
+            ? "Bearer other-cli"
+            : "Bearer local-cli"
+        );
         return new Response(
           JSON.stringify({
             projects: [{ id: url.startsWith("https://other") ? id(5) : id(1) }]
           })
         );
+      }
       assert.equal(url, "http://localhost:8801/api/v1/agent/presence");
       assert.ok(
         ["Bearer scoped-codex-secret", "Bearer scoped-claude-secret"].includes(
@@ -710,6 +758,142 @@ test("doctor distinguishes malformed, outdated, and missing local prerequisites"
     });
     assert.equal(missing.checks.launcher?.ok, false);
     await rm(second.home, { recursive: true, force: true });
+  } finally {
+    await rm(fixture.home, { recursive: true, force: true });
+  }
+});
+
+test("diagnostics reject origin overrides and disconnect preserves other origins and global users", async () => {
+  const fixture = await setupHome();
+  try {
+    const input = {
+      home: fixture.home,
+      cwd: fixture.project,
+      api: "https://other.test",
+      credentials: fixture.store,
+      fetch: async () => {
+        assert.fail("must not send another origin's credential");
+      }
+    };
+    fixture.store.values.set("cli", "unbound-cli");
+    fixture.store.values.set("agent:codex", "unbound-agent");
+    const doctor = await runDoctor(input);
+    const status = await runStatus(input);
+    assert.equal(doctor.checks.cli_credential?.ok, false);
+    assert.equal((status.backend.codex as { ok: boolean }).ok, false);
+    await assert.rejects(
+      disconnectLocal({
+        ...input,
+        store: fixture.store,
+        integration: "all",
+        sourceCommand: fixture.source
+      }),
+      /differs from the project/
+    );
+    const config = JSON.parse(await readFile(configPath(fixture.home), "utf8"));
+    config.globalProjects = {
+      codex: {
+        [id(1)]: {
+          name: "Same ID, other server",
+          organizationName: "Other",
+          apiUrl: "https://other.test",
+          agentId: id(6)
+        }
+      }
+    };
+    await writeFile(configPath(fixture.home), JSON.stringify(config));
+    fixture.store.values.set("cli:https://other.test", "other-cli");
+    fixture.store.values.set(
+      `agent:${id(1)}:codex:https://other.test`,
+      "other-agent"
+    );
+    await disconnectLocal({
+      ...input,
+      api: "https://api.test",
+      store: fixture.store,
+      integration: "all",
+      sourceCommand: fixture.source,
+      localOnly: true
+    });
+    assert.equal(
+      fixture.store.values.get("cli:https://other.test"),
+      "other-cli"
+    );
+    assert.equal(
+      fixture.store.values.get(`agent:${id(1)}:codex:https://other.test`),
+      "other-agent"
+    );
+    assert.equal(fixture.store.values.has("cli:https://api.test"), false);
+    assert.ok(await lstat(fixture.command));
+  } finally {
+    await rm(fixture.home, { recursive: true, force: true });
+  }
+});
+
+test("disconnect keeps a credential shared by local and global mappings on the same origin", async () => {
+  const fixture = await setupHome();
+  try {
+    const config = JSON.parse(await readFile(configPath(fixture.home), "utf8"));
+    config.globalProjects = {
+      codex: {
+        [id(1)]: {
+          name: "Global",
+          organizationName: "Org",
+          apiUrl: "https://API.TEST:443",
+          agentId: id(2)
+        }
+      }
+    };
+    await writeFile(configPath(fixture.home), JSON.stringify(config));
+    await disconnectLocal({
+      home: fixture.home,
+      cwd: fixture.project,
+      api: "https://api.test",
+      store: fixture.store,
+      integration: "codex",
+      sourceCommand: fixture.source,
+      fetch: async () => {
+        assert.fail("shared agent must not be revoked");
+      }
+    });
+    assert.equal(
+      fixture.store.values.has(`agent:${id(1)}:codex:https://api.test`),
+      true
+    );
+    assert.equal(fixture.store.values.has("cli:https://api.test"), true);
+  } finally {
+    await rm(fixture.home, { recursive: true, force: true });
+  }
+});
+
+test("final local disconnect clears unused legacy aliases without ever sending them", async () => {
+  const fixture = await setupHome();
+  try {
+    const aliases = ["cli", `agent:${id(1)}:codex`, "agent:codex", "codex"];
+    for (const alias of aliases)
+      fixture.store.values.set(alias, "legacy-secret");
+    const config = JSON.parse(await readFile(configPath(fixture.home), "utf8"));
+    config.projects[join(fixture.home, "second")] = structuredClone(
+      config.projects[fixture.project]
+    );
+    await writeFile(configPath(fixture.home), JSON.stringify(config));
+    const input = {
+      home: fixture.home,
+      cwd: fixture.project,
+      store: fixture.store,
+      integration: "all" as const,
+      api: "https://api.test",
+      sourceCommand: fixture.source,
+      localOnly: true,
+      fetch: async () => {
+        assert.fail("local cleanup must not send credentials");
+      }
+    };
+    await disconnectLocal(input);
+    for (const alias of aliases)
+      assert.equal(fixture.store.values.get(alias), "legacy-secret");
+    await disconnectLocal({ ...input, cwd: join(fixture.home, "second") });
+    assert.equal(fixture.store.values.size, 0);
   } finally {
     await rm(fixture.home, { recursive: true, force: true });
   }

@@ -168,8 +168,32 @@ pub(crate) fn inspect_local(
     let (mapped_claude, global_claude) = mapping("claude-code");
     let mapped = mapped_codex || mapped_claude;
     let has_credential = |integration: &str, global: bool| {
-        credential(&format!("agent:{project_id}:{integration}"))
-            || (!global && (credential(&format!("agent:{integration}")) || credential(integration)))
+        let mapping = if global {
+            config
+                .as_ref()
+                .and_then(|value| {
+                    value
+                        .get("globalProjects")?
+                        .get(integration)?
+                        .get(project_id)
+                })
+                .or(project)
+        } else {
+            project
+        };
+        let api = mapping
+            .and_then(|value| value.get("apiUrl"))
+            .and_then(Value::as_str)
+            .unwrap_or("https://api.orchestrat.dev");
+        url::Url::parse(api)
+            .ok()
+            .filter(|url| matches!(url.scheme(), "http" | "https"))
+            .is_some_and(|url| {
+                credential(&format!(
+                    "agent:{project_id}:{integration}:{}",
+                    url.origin().ascii_serialization()
+                ))
+            })
     };
     let cli_exists = home.join(".local/bin/orchestrat").exists();
     let command = home
@@ -251,7 +275,7 @@ mod tests {
         write(home.join(".codex/hooks.json"), format!(r#"{{"hooks":{{"SessionStart":[{{"hooks":[{{"type":"command","command":"'{0}' hook codex"}}]}}],"SessionEnd":[{{"hooks":[{{"type":"command","command":"'{0}' hook codex"}}]}}]}}}}"#, command.display())).unwrap();
         let fake_secret = "orch_agent_unique_fake_secret";
         let status = inspect_local(&home, "p1", |account| {
-            account == "agent:codex" || account == fake_secret
+            account == "agent:p1:codex:https://api.orchestrat.dev" || account == fake_secret
         });
         assert!(status.project_mapping);
         let codex = status.integrations.get("codex").unwrap();
@@ -279,14 +303,20 @@ mod tests {
         write(home.join(".codex/hooks.json"), r#"{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"/bin/foo hook codex"}]}],"SessionEnd":[{"hooks":[{"type":"command","command":"/bin/foo hook codex"}]}]}}"#).unwrap();
         assert!(!inspect_local(&home, "p1", |_| true).integrations["codex"].hooks);
         assert!(
-            inspect_local(&home, "p1", |account| account == "agent:p1:codex").integrations["codex"]
+            inspect_local(&home, "p1", |account| account
+                == "agent:p1:codex:https://api.orchestrat.dev")
+            .integrations["codex"]
                 .credential
         );
         write(home.join(".orchestrat/config.json"), r#"{"version":1,"projects":{},"globalProjects":{"codex":{"p1":{"agentId":"a1"}},"claude-code":{"p1":{"agentId":"a2"}}}}"#).unwrap();
         write(home.join(".codex/config.toml"), format!("[mcp_servers.orchestrat]\ncommand=\"{}\" # installed launcher\nargs = [\n  \"mcp\", \"--integration\", \"codex\", \"--global\",\n]\n", command.display())).unwrap();
         write(home.join(".claude.json"), serde_json::json!({"mcpServers":{"orchestrat":{"command":command.to_string_lossy(),"args":["mcp","--integration","claude-code","--global"]}}}).to_string()).unwrap();
         let global = inspect_local(&home, "p1", |account| {
-            matches!(account, "agent:p1:codex" | "agent:p1:claude-code")
+            matches!(
+                account,
+                "agent:p1:codex:https://api.orchestrat.dev"
+                    | "agent:p1:claude-code:https://api.orchestrat.dev"
+            )
         });
         assert!(global.project_mapping);
         assert!(global
@@ -298,6 +328,31 @@ mod tests {
             !inspect_local(&home, "p1", |account| account == "agent:codex").integrations["codex"]
                 .credential
         );
+        for global in [false, true] {
+            let mapping = if global {
+                serde_json::json!({"version": 1, "projects": {}, "globalProjects": {"codex": {"p1": {"agentId": "a1", "apiUrl": "https://API.TEST:443/path"}}}})
+            } else {
+                serde_json::json!({"version": 1, "projects": {"/tmp": {"projectId": "p1", "apiUrl": "https://API.TEST:443/path", "integrations": {"codex": {"agentId": "a1"}}}}})
+            };
+            write(home.join(".orchestrat/config.json"), mapping.to_string()).unwrap();
+            assert!(
+                inspect_local(&home, "p1", |account| account
+                    == "agent:p1:codex:https://api.test")
+                .integrations["codex"]
+                    .credential
+            );
+            assert!(
+                !inspect_local(&home, "p1", |account| matches!(
+                    account,
+                    "agent:p1:codex"
+                        | "agent:codex"
+                        | "codex"
+                        | "agent:p1:codex:https://other.test"
+                ))
+                .integrations["codex"]
+                    .credential
+            );
+        }
         write(home.join(".orchestrat/config.json"), "not json").unwrap();
         let malformed = inspect_local(&home, "p1", |_| true);
         assert!(!malformed.project_mapping);

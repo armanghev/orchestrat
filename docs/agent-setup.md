@@ -35,6 +35,13 @@ per selected integration, and stores those credentials in separate macOS
 Keychain entries. The persistent launcher is `~/.local/bin/orchestrat`; the
 local project and agent mapping is non-secret metadata.
 
+CLI and agent credentials are bound to the API origin that issued them. After
+updating from a version with unbound credentials, run `orchestrat setup` again
+for each intended API and reconnect the selected agents. Legacy entries are
+ignored rather than assigned an issuer from editable configuration. Changing
+`ORCHESTRAT_API_URL` never reuses another server's credentials. `disconnect
+--local` remains available for offline cleanup.
+
 Claude Code, Codex, Cursor, and Antigravity receive MCP and lifecycle-hook
 configuration. OpenCode receives MCP configuration only because it has no
 stable native lifecycle-hook contract. Pi is detected and reported, but is not

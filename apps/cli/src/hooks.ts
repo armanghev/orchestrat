@@ -73,6 +73,7 @@ export async function runHook(input: {
             );
   const payloadCwd = hookCwd(input.integration, input.payload, input.cwd);
   const resolved = await resolveInvocation({
+    api: input.api,
     cwd: payloadCwd,
     home: input.home,
     integration: input.integration,
@@ -80,7 +81,7 @@ export async function runHook(input: {
     credentials: input.credentials
   });
   const client = new AgentApiClient({
-    baseUrl: input.api,
+    baseUrl: resolved.api!,
     token: resolved.credential!,
     fetch: input.fetch
   });

@@ -1,18 +1,17 @@
 import {
+  apiOrigin,
+  DEFAULT_API_URL,
   findMapping,
   findProject,
   type Integration,
   type OrchestratConfig,
   type ResolvedMapping
 } from "./config.js";
-import {
-  agentAccount,
-  legacyAgentAccount,
-  type CredentialReader
-} from "./keychain.js";
+import { agentAccount, type CredentialReader } from "./keychain.js";
 
 export type Invocation = {
   cwd: string;
+  api?: string;
   integration?: Integration;
   read: (home?: string) => Promise<OrchestratConfig>;
   credentials?: CredentialReader;
@@ -39,18 +38,19 @@ export async function resolveInvocation(input: Invocation) {
       `No ${input.integration} project mapping found for ${input.cwd}`
     );
   if (!input.credentials) throw new Error("Credential reader is unavailable");
-  const credential =
-    (await input.credentials.read(
-      agentAccount(mapping.projectId, input.integration)
-    )) ??
-    (await input.credentials.read(legacyAgentAccount(input.integration))) ??
-    (await input.credentials.read(input.integration));
+  const api = apiOrigin(input.api ?? mapping.apiUrl ?? DEFAULT_API_URL);
+  const credential = await input.credentials.read(
+    agentAccount(mapping.projectId, input.integration, api)
+  );
   if (!credential)
-    throw new Error(`No ${input.integration} credential found in Keychain`);
-  return { mapping, credential, public: publicMapping(mapping) };
+    throw new Error(
+      `No ${input.integration} credential found for this API; run orchestrat setup`
+    );
+  return { mapping, credential, api, public: publicMapping(mapping) };
 }
 
 export async function resolveGlobalInvocation(input: {
+  api?: string;
   integration: Integration;
   read: (home?: string) => Promise<OrchestratConfig>;
   credentials: CredentialReader;
@@ -60,14 +60,17 @@ export async function resolveGlobalInvocation(input: {
   const projects = await Promise.all(
     Object.entries(config.globalProjects?.[input.integration] ?? {}).map(
       async ([projectId, project]) => {
+        const apiUrl = apiOrigin(
+          project.apiUrl ?? input.api ?? DEFAULT_API_URL
+        );
         const credential = await input.credentials.read(
-          agentAccount(projectId, input.integration)
+          agentAccount(projectId, input.integration, apiUrl)
         );
         if (!credential)
           throw new Error(
-            `No ${input.integration} credential found in Keychain for ${project.organizationName} / ${project.name}`
+            `No ${input.integration} credential found for ${project.organizationName} / ${project.name} on this API; run orchestrat setup`
           );
-        return { projectId, ...project, credential };
+        return { projectId, ...project, apiUrl, credential };
       }
     )
   );

@@ -1,6 +1,8 @@
 import { AgentApiClient } from "@orchestrat/sdk";
 import { atomicWrite, readOptional } from "./safe-files.js";
 import {
+  apiOrigin,
+  DEFAULT_API_URL,
   configPath,
   findProject,
   INTEGRATIONS,
@@ -9,11 +11,7 @@ import {
   type OrchestratConfig
 } from "./config.js";
 import { harnessConfigPlan } from "./harness-config.js";
-import {
-  agentAccount,
-  legacyAgentAccount,
-  type CredentialStore
-} from "./keychain.js";
+import { agentAccount, cliAccount, type CredentialStore } from "./keychain.js";
 import { inspectLauncher } from "./setup.js";
 import { access, lstat, rm } from "node:fs/promises";
 import { constants } from "node:fs";
@@ -38,7 +36,7 @@ function diagnosticConnections(
         integration,
         projectId: project.projectId,
         agentId: project.integrations[integration]!.agentId,
-        api,
+        api: apiOrigin(api),
         scope: project.mcpScopes?.[integration] ?? "project"
       }))
     : INTEGRATIONS.flatMap((integration) =>
@@ -48,7 +46,7 @@ function diagnosticConnections(
             integration,
             projectId,
             agentId: mapping.agentId,
-            api: mapping.apiUrl ?? api,
+            api: apiOrigin(mapping.apiUrl ?? api),
             scope: "global" as const
           })
         )
@@ -60,13 +58,8 @@ async function connectionCredential(
   credentials: { read(account: string): Promise<string | undefined> },
   connection: ReturnType<typeof diagnosticConnections>["connections"][number]
 ) {
-  const token = await credentials.read(
-    agentAccount(connection.projectId, connection.integration)
-  );
-  if (token || connection.scope === "global") return token;
-  return (
-    (await credentials.read(legacyAgentAccount(connection.integration))) ??
-    credentials.read(connection.integration)
+  return credentials.read(
+    agentAccount(connection.projectId, connection.integration, connection.api)
   );
 }
 
@@ -154,15 +147,20 @@ export async function runDoctor(input: {
         ? "global projects configured; select a project in MCP"
         : "missing"
   );
-  const cliToken = await input.credentials.read("cli");
-  checks.cli_credential = redacted(
-    Boolean(cliToken),
-    cliToken ? "present" : "missing"
-  );
   const origins = [...new Set(connections.map((connection) => connection.api))];
-  if (!origins.length) origins.push(input.api);
-  for (const origin of cliToken ? origins : []) {
+  if (!origins.length) origins.push(apiOrigin(input.api));
+  checks.cli_credential = redacted(true, "present");
+  for (const origin of origins) {
+    const cliToken = await input.credentials.read(cliAccount(origin));
     const key = origins.length === 1 ? "cli_project" : `cli_project:${origin}`;
+    if (!cliToken) {
+      checks.cli_credential = redacted(
+        false,
+        "missing for an API; run orchestrat setup"
+      );
+      checks[key] = redacted(false, "missing credential for this API");
+      continue;
+    }
     try {
       const response = await (input.fetch ?? globalThis.fetch)(
         `${origin}/api/v1/cli/setup/projects`,
@@ -305,6 +303,11 @@ export async function disconnectLocal(input: {
     (integration) => project?.integrations[integration]
   );
   if (!project || !mapped.length) return { previews: [], disconnected: [] };
+  const api = apiOrigin(project.apiUrl ?? input.api);
+  if (!input.localOnly && apiOrigin(input.api) !== api)
+    throw new Error(
+      "Disconnect API differs from the project mapping; use its API or --local"
+    );
   const command = join(input.home, ".local", "bin", "orchestrat");
   const writes: { path: string; entries: string[]; content: string }[] = [];
   for (const name of mapped) {
@@ -312,16 +315,14 @@ export async function disconnectLocal(input: {
       ([cwd, value]) => cwd !== project.cwd && Boolean(value.integrations[name])
     );
     const mcpScope = project.mcpScopes?.[name] ?? "project";
-    const globalProjectsRemain =
-      mcpScope === "global" &&
-      Object.keys(config.globalProjects?.[name] ?? {}).some(
-        (projectId) => projectId !== project.projectId
-      );
-    if (
-      (otherProjectUses && (name !== "cursor" || mcpScope === "global")) ||
-      globalProjectsRemain
-    )
-      continue;
+    const globalProjectsRemain = Object.entries(
+      config.globalProjects?.[name] ?? {}
+    ).some(
+      ([projectId, mapping]) =>
+        mcpScope !== "global" ||
+        projectId !== project.projectId ||
+        apiOrigin(mapping.apiUrl ?? DEFAULT_API_URL) !== api
+    );
     const plan = harnessConfigPlan(
       input.home,
       name,
@@ -331,6 +332,11 @@ export async function disconnectLocal(input: {
     );
     for (const item of [plan.mcp, plan.hooks]) {
       if (!item) continue;
+      if (
+        (otherProjectUses || globalProjectsRemain) &&
+        (item !== plan.mcp || name !== "cursor" || mcpScope === "global")
+      )
+        continue;
       const source = await readOptional(item.path);
       const next = item.remove(source);
       if (next !== source)
@@ -345,7 +351,13 @@ export async function disconnectLocal(input: {
   const nextProject = nextConfig.projects[project.cwd]!;
   for (const name of mapped) delete nextProject.integrations[name];
   for (const name of mapped)
-    if (project.mcpScopes?.[name] === "global") {
+    if (
+      project.mcpScopes?.[name] === "global" &&
+      apiOrigin(
+        nextConfig.globalProjects?.[name]?.[project.projectId]?.apiUrl ??
+          DEFAULT_API_URL
+      ) === api
+    ) {
       delete nextConfig.globalProjects?.[name]?.[project.projectId];
       if (!Object.keys(nextConfig.globalProjects?.[name] ?? {}).length)
         delete nextConfig.globalProjects?.[name];
@@ -359,9 +371,33 @@ export async function disconnectLocal(input: {
     entries: mapped.map((name) => `mapping:${name}`),
     content: `${JSON.stringify(nextConfig, null, 2)}\n`
   });
-  const integrationsRemain = Object.values(nextConfig.projects).some(
-    (value) => Object.keys(value.integrations).length > 0
+  const remainingMappings = [
+    ...Object.values(nextConfig.projects).filter(
+      (value) => Object.keys(value.integrations).length
+    ),
+    ...Object.values(nextConfig.globalProjects ?? {}).flatMap((values) =>
+      Object.values(values)
+    )
+  ];
+  const integrationsRemain = remainingMappings.length > 0;
+  const originRemains = remainingMappings.some(
+    (value) => apiOrigin(value.apiUrl ?? DEFAULT_API_URL) === api
   );
+  const credentialRemains = (name: Integration) =>
+    Object.values(nextConfig.projects).some(
+      (value) =>
+        value.projectId === project.projectId &&
+        value.integrations[name] &&
+        apiOrigin(value.apiUrl ?? DEFAULT_API_URL) === api
+    ) ||
+    Boolean(
+      nextConfig.globalProjects?.[name]?.[project.projectId] &&
+      apiOrigin(
+        nextConfig.globalProjects[name]![project.projectId]!.apiUrl ??
+          DEFAULT_API_URL
+      ) === api
+    );
+  const revoked = mapped.filter((name) => !credentialRemains(name));
   let launcherPath: string | undefined;
   if (!integrationsRemain) {
     const launcher = await inspectLauncher(input.home, input.sourceCommand);
@@ -372,14 +408,14 @@ export async function disconnectLocal(input: {
     ...(launcherPath ? [{ path: launcherPath, entries: ["launcher"] }] : [])
   ];
   await input.reportPreview?.(previews);
-  if (!input.localOnly) {
-    const cliToken = await input.store.read("cli");
+  if (!input.localOnly && revoked.length) {
+    const cliToken = await input.store.read(cliAccount(api));
     if (!cliToken)
       throw new Error(
         "CLI credential is required before disconnecting a mapped agent"
       );
     const response = await (input.fetch ?? globalThis.fetch)(
-      `${input.api}/api/v1/cli/setup/disconnect`,
+      `${api}/api/v1/cli/setup/disconnect`,
       {
         method: "POST",
         headers: {
@@ -388,8 +424,8 @@ export async function disconnectLocal(input: {
         },
         body: JSON.stringify({
           project_id: project.projectId,
-          agent_ids: mapped.map((name) => project.integrations[name]!.agentId),
-          revoke_cli: !integrationsRemain
+          agent_ids: revoked.map((name) => project.integrations[name]!.agentId),
+          revoke_cli: !originRemains
         })
       }
     );
@@ -404,13 +440,23 @@ export async function disconnectLocal(input: {
       force: true
     });
   }
+  for (const name of revoked)
+    await input.store.remove(agentAccount(project.projectId, name, api));
+  if (!originRemains) await input.store.remove(cliAccount(api));
   for (const name of mapped) {
-    const otherProjectUses = Object.entries(config.projects).some(
-      ([cwd, value]) => cwd !== project.cwd && Boolean(value.integrations[name])
+    const local = Object.values(nextConfig.projects).filter(
+      (value) => value.integrations[name]
     );
-    await input.store.remove(agentAccount(project.projectId, name));
-    if (!otherProjectUses) await input.store.remove(legacyAgentAccount(name));
-    await input.store.remove(name);
+    const global = nextConfig.globalProjects?.[name] ?? {};
+    if (
+      !local.some((value) => value.projectId === project.projectId) &&
+      !global[project.projectId]
+    )
+      await input.store.remove(`agent:${project.projectId}:${name}`);
+    if (!local.length && !Object.keys(global).length) {
+      await input.store.remove(`agent:${name}`);
+      await input.store.remove(name);
+    }
   }
   if (!integrationsRemain) await input.store.remove("cli");
   return { previews, disconnected: mapped };

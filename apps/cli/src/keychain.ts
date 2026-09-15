@@ -1,12 +1,15 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { apiOrigin } from "./config.js";
 
 const execFileAsync = promisify(execFile);
 export const KEYCHAIN_SERVICE = "dev.orchestrat.cli.agent";
-export const agentAccount = (projectId: string, integration: string) =>
-  `agent:${projectId}:${integration}`;
-export const legacyAgentAccount = (integration: string) =>
-  `agent:${integration}`;
+export const cliAccount = (api: string) => `cli:${apiOrigin(api)}`;
+export const agentAccount = (
+  projectId: string,
+  integration: string,
+  api: string
+) => `agent:${projectId}:${integration}:${apiOrigin(api)}`;
 
 export interface CredentialReader {
   read(account: string): Promise<string | undefined>;

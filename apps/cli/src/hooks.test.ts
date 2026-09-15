@@ -100,7 +100,10 @@ test("runHook posts normalized payload using the payload cwd mapping", async () 
         ),
       credentials: {
         read: async (account) =>
-          account === "agent:codex" ? `orch_agent_${"x".repeat(32)}` : undefined
+          account ===
+          "agent:00000000-0000-4000-8000-000000000001:codex:https://api.test"
+            ? `orch_agent_${"x".repeat(32)}`
+            : undefined
       },
       payload: {
         hook_event_name: "SessionStart",
@@ -157,7 +160,10 @@ test("runHook posts normalized payload using the payload cwd mapping", async () 
         ),
       credentials: {
         read: async (account) =>
-          account === "agent:codex" ? `orch_agent_${"x".repeat(32)}` : undefined
+          account ===
+          "agent:00000000-0000-4000-8000-000000000001:codex:https://api.test"
+            ? `orch_agent_${"x".repeat(32)}`
+            : undefined
       },
       payload: {
         hook_event_name: "SessionStart",

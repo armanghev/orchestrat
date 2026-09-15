@@ -9,6 +9,7 @@ import {
 } from "./harnesses.js";
 
 export const INTEGRATIONS = CONFIGURABLE_INTEGRATIONS;
+export const DEFAULT_API_URL = "https://api.orchestrat.dev";
 export type Integration = ConfigurableIntegration;
 
 export type IntegrationMapping = { agentId: string };
@@ -55,6 +56,12 @@ export function validateApiUrl(value: unknown): string | undefined {
   if (url.protocol !== "http:" && url.protocol !== "https:")
     throw new Error("Invalid API URL");
   return url.origin;
+}
+
+export function apiOrigin(value: string): string {
+  const origin = validateApiUrl(value);
+  if (!origin) throw new Error("API URL is required");
+  return origin;
 }
 
 export function parseConfig(value: unknown): OrchestratConfig {
@@ -142,10 +149,7 @@ export function parseConfig(value: unknown): OrchestratConfig {
     projectsInput: unknown,
     integration: Integration
   ) => {
-    if (
-      !projectsInput ||
-      typeof projectsInput !== "object"
-    )
+    if (!projectsInput || typeof projectsInput !== "object")
       throw new Error("Invalid global MCP mapping");
     const mapped: Record<string, GlobalProject> = {};
     for (const [projectId, rawProject] of Object.entries(
