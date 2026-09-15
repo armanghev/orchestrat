@@ -8,7 +8,7 @@ import { StatusRail } from "@/components/sections/status-rail";
 
 export default function Home() {
   return (
-    <div className="flex min-h-screen flex-col bg-zinc-950 text-zinc-100 selection:bg-zinc-800 selection:text-zinc-200">
+    <div className="flex min-h-screen flex-col bg-background text-foreground">
       <HeroSection />
       <StatusRail />
       <ProblemSection />
