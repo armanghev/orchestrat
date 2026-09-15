@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="800" viewBox="0 0 1280 800" role="img" aria-label="Orchestrat dashboard overview — Acme Alpha with demo agents and tasks">
+  <defs>
+    <style>
+      .bg{fill:#241f1c}.rail{fill:#1f1b18}.side{fill:#2a2521}.card{fill:#312b27}
+      .line{stroke:#4a423c;stroke-width:1}
+      .t{font-family:Inter,-apple-system,BlinkMacSystemFont,sans-serif;fill:#ebe6e0}
+      .tm{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+      .muted{fill:#9a9188}.amber{fill:#e8a45a}.green{fill:#6dba7a}.red{fill:#d96b5c}.soft{fill:#3a342f}
+    </style>
+  </defs>
+  <rect class="bg" width="1280" height="800"/>
+  <rect class="rail" width="64" height="800"/>
+  <line class="line" x1="64" y1="0" x2="64" y2="800"/>
+  <rect x="16" y="16" width="32" height="32" rx="8" fill="#d9893b"/>
+  <text x="32" y="37" text-anchor="middle" font-size="14" font-weight="700" fill="#241f1c" font-family="Inter,sans-serif">O</text>
+  <rect class="soft" x="18" y="64" width="28" height="28" rx="8"/>
+  <rect class="soft" x="18" y="100" width="28" height="28" rx="8"/>
+  <rect class="soft" x="18" y="136" width="28" height="28" rx="8"/>
+  <rect class="side" x="64" y="0" width="220" height="800"/>
+  <line class="line" x1="284" y1="0" x2="284" y2="800"/>
+  <text class="tm muted" x="78" y="36" font-size="11" letter-spacing="1.2">ACME</text>
+  <text class="t" x="78" y="58" font-size="14" font-weight="600">Alpha</text>
+  <line class="line" x1="64" y1="72" x2="284" y2="72"/>
+  <rect class="soft" x="72" y="88" width="204" height="32" rx="8"/>
+  <text class="t" x="86" y="109" font-size="13">Overview</text>
+  <text class="muted" x="86" y="145" font-size="13">Tasks</text>
+  <text class="muted" x="86" y="177" font-size="13">Agents</text>
+  <text class="muted" x="86" y="209" font-size="13">Documents</text>
+  <text class="muted" x="86" y="241" font-size="13">Activity</text>
+  <text class="muted" x="86" y="273" font-size="13">Messages</text>
+  <text class="muted" x="86" y="305" font-size="13">Integrations</text>
+  <text class="muted" x="86" y="337" font-size="13">Settings</text>
+  <line class="line" x1="284" y1="52" x2="1280" y2="52"/>
+  <text class="muted" x="304" y="32" font-size="13">Acme / </text>
+  <text class="t" x="348" y="32" font-size="13" font-weight="600">Alpha</text>
+  <text class="muted" x="388" y="32" font-size="13"> / Overview</text>
+  <circle cx="1048" cy="26" r="4" class="green"/>
+  <text class="tm muted" x="1058" y="30" font-size="11">4 agents online</text>
+  <rect class="card" x="1160" y="12" width="100" height="28" rx="8" stroke="#4a423c" fill="#312b27"/>
+  <text class="tm muted" x="1172" y="30" font-size="11">Command ⌘ K</text>
+  <text class="t" x="304" y="96" font-size="24" font-weight="600">Overview</text>
+  <text class="muted" x="304" y="122" font-size="13">Mission control for coordinating humans and agents on Alpha — exclusive claims, visible review, shared project state.</text>
+  <text class="tm muted" x="304" y="144" font-size="12">alpha</text>
+  <text class="muted" x="1200" y="96" font-size="13">active</text>
+  <g transform="translate(304,168)">
+    <rect class="card" width="220" height="78" rx="8" stroke="#4a423c"/>
+    <rect class="card" x="232" width="220" height="78" rx="8" stroke="#4a423c"/>
+    <rect class="card" x="464" width="220" height="78" rx="8" stroke="#4a423c"/>
+    <rect class="card" x="696" width="220" height="78" rx="8" stroke="#4a423c"/>
+    <text class="muted" x="16" y="24" font-size="11" letter-spacing="0.8">ONLINE AGENTS</text>
+    <text class="t" x="16" y="56" font-size="26" font-weight="600">4</text>
+    <text class="muted" x="248" y="24" font-size="11" letter-spacing="0.8">BUSY AGENTS</text>
+    <text class="t" x="248" y="56" font-size="26" font-weight="600">2</text>
+    <text class="muted" x="480" y="24" font-size="11" letter-spacing="0.8">IDLE AGENTS</text>
+    <text class="t" x="480" y="56" font-size="26" font-weight="600">1</text>
+    <text class="muted" x="712" y="24" font-size="11" letter-spacing="0.8">BLOCKED AGENTS</text>
+    <text class="t" x="712" y="56" font-size="26" font-weight="600">1</text>
+  </g>
+  <g transform="translate(304,266)">
+    <rect class="card" width="448" height="200" rx="8" stroke="#4a423c"/>
+    <rect class="card" x="464" width="452" height="200" rx="8" stroke="#4a423c"/>
+    <text class="t" x="18" y="28" font-size="15" font-weight="600">Work at a glance</text>
+    <text class="muted" x="18" y="58" font-size="11">Active</text>
+    <text class="t" x="18" y="84" font-size="20" font-weight="600">3</text>
+    <text class="muted" x="120" y="58" font-size="11">Blocked</text>
+    <text class="t" x="120" y="84" font-size="20" font-weight="600">1</text>
+    <text class="muted" x="230" y="58" font-size="11">Review</text>
+    <text class="t" x="230" y="84" font-size="20" font-weight="600">2</text>
+    <text class="muted" x="18" y="120" font-size="12">Acme · 4 configured agents</text>
+    <text class="t" x="482" y="28" font-size="15" font-weight="600">Current agent work</text>
+    <rect class="soft" x="482" y="44" width="416" height="40" rx="8"/>
+    <text class="t" x="494" y="68" font-size="13">backend-agent · ALPHA-142 · Implement OAuth callback</text>
+    <text class="amber" x="790" y="68" font-size="11">in progress</text>
+    <rect class="soft" x="482" y="92" width="416" height="40" rx="8"/>
+    <text class="t" x="494" y="116" font-size="13">frontend-agent · ALPHA-138 · Authentication flow</text>
+    <text class="amber" x="790" y="116" font-size="11">in progress</text>
+    <rect class="soft" x="482" y="140" width="416" height="40" rx="8"/>
+    <text class="t" x="494" y="164" font-size="13">docs-agent · ALPHA-129 · API contracts blocked</text>
+    <text class="red" x="820" y="164" font-size="11">blocked</text>
+  </g>
+  <g transform="translate(304,486)">
+    <rect class="card" width="448" height="280" rx="8" stroke="#4a423c"/>
+    <rect class="card" x="464" width="452" height="280" rx="8" stroke="#4a423c"/>
+    <text class="t" x="18" y="28" font-size="15" font-weight="600">Tasks needing attention</text>
+    <rect class="soft" x="18" y="44" width="412" height="40" rx="8"/>
+    <text class="tm t" x="30" y="68" font-size="12">ALPHA-129</text>
+    <text class="t" x="120" y="68" font-size="13">· API contracts blocked on schema</text>
+    <text class="red" x="380" y="68" font-size="11">blocked</text>
+    <rect class="soft" x="18" y="92" width="412" height="40" rx="8"/>
+    <text class="tm t" x="30" y="116" font-size="12">ALPHA-138</text>
+    <text class="t" x="120" y="116" font-size="13">· Authentication flow</text>
+    <text class="amber" x="390" y="116" font-size="11">review</text>
+    <rect class="soft" x="18" y="140" width="412" height="40" rx="8"/>
+    <text class="tm t" x="30" y="164" font-size="12">ALPHA-141</text>
+    <text class="t" x="120" y="164" font-size="13">· Claim lease renewal UX</text>
+    <text class="amber" x="390" y="164" font-size="11">review</text>
+    <text class="t" x="482" y="28" font-size="15" font-weight="600">Recent activity</text>
+    <rect class="soft" x="482" y="44" width="416" height="36" rx="8"/>
+    <text class="t" x="494" y="66" font-size="12">task claimed · backend-agent took ALPHA-142</text>
+    <text class="tm muted" x="820" y="66" font-size="11">12s ago</text>
+    <rect class="soft" x="482" y="88" width="416" height="36" rx="8"/>
+    <text class="t" x="494" y="110" font-size="12">task status · ALPHA-138 moved to review</text>
+    <text class="tm muted" x="820" y="110" font-size="11">48s ago</text>
+    <rect class="soft" x="482" y="132" width="416" height="36" rx="8"/>
+    <text class="t" x="494" y="154" font-size="12">comment · Codex left context on ALPHA-129</text>
+    <text class="tm muted" x="830" y="154" font-size="11">2m ago</text>
+    <rect class="soft" x="482" y="176" width="416" height="36" rx="8"/>
+    <text class="t" x="494" y="198" font-size="12">agent presence · review-agent idle</text>
+    <text class="tm muted" x="830" y="198" font-size="11">3m ago</text>
+    <rect class="soft" x="482" y="220" width="416" height="36" rx="8"/>
+    <text class="t" x="494" y="242" font-size="12">task completed · ALPHA-131 documented</text>
+    <text class="tm muted" x="830" y="242" font-size="11">6m ago</text>
+  </g>
+</svg>
