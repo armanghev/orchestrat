@@ -66,7 +66,7 @@ export function HeroSection() {
               <div className="relative aspect-[1280/800] overflow-hidden bg-rail">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
-                  src="/images/dashboard-hero.svg"
+                  src="/images/dashboard-hero.png"
                   alt="Orchestrat dashboard overview showing Acme/Alpha with online agents, active claims, review queue, and recent activity"
                   className="h-full w-full object-cover object-top"
                   width={1280}
