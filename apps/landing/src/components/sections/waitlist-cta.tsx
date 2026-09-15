@@ -1,16 +1,46 @@
 "use client";
 
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 import { ArrowRight, Check } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { Reveal } from "@/components/motion/reveal";
 
+type WaitlistStatus =
+  | "joined"
+  | "invalid"
+  | "unavailable"
+  | "error"
+  | null;
+
 export function WaitlistCtaSection() {
   const [email, setEmail] = useState("");
-  const [focus, setFocus] = useState<string[]>(["tasks", "agents"]);
+  const [focus, setFocus] = useState(["tasks", "agents"]);
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState<WaitlistStatus>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const waitlist = params.get("waitlist") as WaitlistStatus;
+    if (waitlist === "joined") {
+      setSubmitted(true);
+      setStatus("joined");
+    } else if (
+      waitlist === "unavailable" ||
+      waitlist === "invalid" ||
+      waitlist === "error"
+    ) {
+      setStatus(waitlist);
+      setError(
+        waitlist === "unavailable"
+          ? "Waitlist storage is not configured in this environment. Your email was not saved."
+          : waitlist === "invalid"
+            ? "That email does not look valid. Please try again."
+            : "We couldn't save your place. Please try again."
+      );
+    }
+  }, []);
 
   const options = [
     { id: "tasks", label: "Task coordination" },
@@ -34,6 +64,7 @@ export function WaitlistCtaSection() {
     if (loading) return;
     setLoading(true);
     setError(null);
+    setStatus(null);
 
     try {
       const formData = new FormData();
@@ -43,11 +74,32 @@ export function WaitlistCtaSection() {
         body: formData,
         headers: { Accept: "application/json" }
       });
-      const result = await response.json();
-      if (!response.ok || result.status !== "joined")
-        throw new Error("Waitlist request was not accepted.");
-      setSubmitted(true);
+      const result = (await response.json()) as { status?: string };
+
+      if (result.status === "joined") {
+        setSubmitted(true);
+        setStatus("joined");
+        return;
+      }
+
+      if (result.status === "unavailable") {
+        setStatus("unavailable");
+        setError(
+          "Waitlist storage is not configured in this environment. Your email was not saved."
+        );
+        return;
+      }
+
+      if (result.status === "invalid") {
+        setStatus("invalid");
+        setError("That email does not look valid. Please try again.");
+        return;
+      }
+
+      setStatus("error");
+      setError("We couldn't save your place. Please try again.");
     } catch {
+      setStatus("error");
       setError("We couldn't save your place. Please try again.");
     } finally {
       setLoading(false);
@@ -55,15 +107,18 @@ export function WaitlistCtaSection() {
   }
 
   return (
-    <section id="waitlist" className="py-24 md:py-32">
+    <section id="waitlist" className="py-20 md:py-28">
       <div className="max-w-container-lg mx-auto px-6">
         <Reveal yOffset={16}>
-          <div className="max-w-2xl space-y-10">
-            <div className="space-y-4">
-              <h2 className="text-2xl leading-tight font-semibold tracking-tight text-zinc-100 sm:text-3xl">
+          <div className="max-w-2xl space-y-8">
+            <div className="space-y-3">
+              <p className="font-mono text-[11px] tracking-[0.14em] text-primary-text uppercase">
+                Private early access
+              </p>
+              <h2 className="text-2xl leading-tight font-semibold tracking-tight text-foreground sm:text-3xl">
                 Give your agents one place to coordinate.
               </h2>
-              <p className="max-w-lg text-sm leading-relaxed font-light text-zinc-500">
+              <p className="max-w-lg text-sm leading-relaxed font-light text-muted-foreground">
                 Join the private orchestrat waitlist. We&apos;ll send an invite
                 when early access is ready for your workspace.
               </p>
@@ -81,8 +136,8 @@ export function WaitlistCtaSection() {
                   className="space-y-6"
                 >
                   <div className="space-y-2.5">
-                    <p className="font-mono text-[11px] tracking-wider text-zinc-700 uppercase">
-                      What do you want to coordinate with orchestrat?
+                    <p className="font-mono text-[11px] tracking-wider text-muted-foreground uppercase">
+                      What do you want to coordinate?
                     </p>
                     <div className="flex flex-wrap gap-2">
                       {options.map((option) => {
@@ -93,10 +148,10 @@ export function WaitlistCtaSection() {
                             aria-pressed={selected}
                             key={option.id}
                             onClick={() => toggle(option.id)}
-                            className={`flex cursor-pointer items-center gap-1.5 rounded-lg border px-3 py-1.5 font-mono text-[12px] transition-colors duration-200 ${
+                            className={`flex cursor-pointer items-center gap-1.5 rounded-md border px-3 py-1.5 font-mono text-[12px] transition-colors ${
                               selected
-                                ? "border-white/10 bg-zinc-800 text-zinc-200"
-                                : "border-white/5 text-zinc-600 hover:text-zinc-400"
+                                ? "border-border bg-accent text-accent-foreground"
+                                : "border-border/60 text-muted-foreground hover:text-foreground"
                             }`}
                           >
                             {selected && (
@@ -109,6 +164,15 @@ export function WaitlistCtaSection() {
                     </div>
                   </div>
 
+                  <input
+                    type="text"
+                    name="company"
+                    tabIndex={-1}
+                    autoComplete="off"
+                    className="hidden"
+                    aria-hidden
+                  />
+
                   <div className="flex max-w-lg flex-col gap-3 sm:flex-row">
                     <input
                       type="email"
@@ -119,12 +183,12 @@ export function WaitlistCtaSection() {
                       onChange={(event) => setEmail(event.target.value)}
                       placeholder="you@company.com"
                       required
-                      className="flex-1 rounded-lg border border-white/7 bg-zinc-900/60 px-4 py-2.5 text-sm font-light text-zinc-200 transition-colors duration-200 placeholder:text-zinc-700 focus:border-white/15 focus:outline-none"
+                      className="flex-1 rounded-md border border-input bg-muted/50 px-4 py-2.5 text-sm font-light text-foreground transition-colors placeholder:text-muted-foreground focus:border-ring focus:outline-none"
                     />
                     <button
                       type="submit"
                       disabled={loading}
-                      className="inline-flex items-center justify-center gap-2 rounded-lg bg-zinc-50 px-5 py-2.5 text-sm font-medium whitespace-nowrap text-zinc-950 transition-colors duration-200 hover:bg-white disabled:opacity-50"
+                      className="inline-flex items-center justify-center gap-2 rounded-md bg-primary px-5 py-2.5 text-sm font-medium whitespace-nowrap text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
                     >
                       {loading ? (
                         "Joining..."
@@ -136,13 +200,25 @@ export function WaitlistCtaSection() {
                       )}
                     </button>
                   </div>
+
                   {error && (
                     <p
                       id="waitlist-error"
                       role="alert"
-                      className="text-sm text-red-300"
+                      className={`text-sm ${
+                        status === "unavailable"
+                          ? "text-warning"
+                          : "text-destructive"
+                      }`}
                     >
                       {error}
+                    </p>
+                  )}
+
+                  {status === "unavailable" && (
+                    <p className="font-mono text-[11px] text-muted-foreground">
+                      Local/dev tip: set SUPABASE_URL and
+                      SUPABASE_PUBLISHABLE_KEY to enable waitlist writes.
                     </p>
                   )}
                 </motion.form>
@@ -151,15 +227,15 @@ export function WaitlistCtaSection() {
                   key="success"
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
-                  className="space-y-2"
+                  className="space-y-2 rounded-lg border border-border bg-card px-5 py-4"
                 >
-                  <p className="text-sm font-medium text-zinc-200">
+                  <p className="text-sm font-medium text-foreground">
                     You&apos;re on the orchestrat waitlist.
                   </p>
-                  <p className="text-sm font-light text-zinc-600">
+                  <p className="text-sm font-light text-muted-foreground">
                     We saved your place for{" "}
-                    <span className="text-zinc-400">{email}</span>. We&apos;ll
-                    send an invite when early access is ready.
+                    <span className="text-secondary-foreground">{email}</span>.
+                    We&apos;ll send an invite when early access is ready.
                   </p>
                 </motion.div>
               )}
