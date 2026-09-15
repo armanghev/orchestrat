@@ -2,133 +2,6 @@
 
 import { ArrowRight } from "lucide-react";
 
-const boardTasks = [
-  {
-    key: "ORC-142",
-    title: "Implement OAuth callback",
-    status: "CLAIMED",
-    statusTone: "text-primary-text",
-    meta: "backend-agent · lease 04:12"
-  },
-  {
-    key: "ORC-138",
-    title: "Authentication flow",
-    status: "REVIEW",
-    statusTone: "text-warning",
-    meta: "review-agent · updated 12s ago"
-  },
-  {
-    key: "ORC-131",
-    title: "API contracts documented",
-    status: "DONE",
-    statusTone: "text-muted-foreground",
-    meta: "frontend-agent · completed 2m ago"
-  }
-];
-
-const agents = [
-  { name: "backend-agent", state: "Busy", tone: "text-foreground" },
-  { name: "frontend-agent", state: "Busy", tone: "text-foreground" },
-  { name: "review-agent", state: "Idle", tone: "text-muted-foreground" },
-  { name: "docs-agent", state: "Waiting", tone: "text-muted-foreground" }
-];
-
-function MissionBoard() {
-  return (
-    <div className="mc-panel overflow-hidden">
-      <div className="mc-panel-chrome">
-        <div className="flex items-center gap-3 min-w-0">
-          <span className="mc-panel-title truncate">northstar · board</span>
-          <span className="hidden sm:inline font-mono text-[10px] text-muted-foreground">
-            tasks · claims · review · agents
-          </span>
-        </div>
-        <span className="font-mono text-[10px] text-primary-text shrink-0">
-          4 agents online
-        </span>
-      </div>
-
-      <div className="grid grid-cols-[1fr_120px] border-b border-border sm:grid-cols-[1fr_140px]">
-        <div className="grid grid-cols-3 divide-x divide-border">
-          {[
-            { label: "Claimed", value: "3" },
-            { label: "Ready", value: "4" },
-            { label: "Review", value: "2" }
-          ].map((s) => (
-            <div key={s.label} className="px-3 py-3 sm:px-4">
-              <div className="text-lg font-semibold tracking-tight text-foreground sm:text-xl">
-                {s.value}
-              </div>
-              <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">
-                {s.label}
-              </div>
-            </div>
-          ))}
-        </div>
-        <div className="border-l border-border bg-muted/40 px-3 py-3">
-          <div className="font-mono text-[10px] tracking-wider text-muted-foreground uppercase">
-            Queue
-          </div>
-          <div className="mt-1 font-mono text-[11px] text-warning">
-            2 awaiting
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-[1fr_148px]">
-        <div className="divide-y divide-border">
-          {boardTasks.map((task) => (
-            <div
-              key={task.key}
-              className="flex items-start justify-between gap-3 px-4 py-3"
-            >
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-[11px] text-foreground">
-                    {task.key}
-                  </span>
-                  <span
-                    className={`font-mono text-[10px] tracking-wide ${task.statusTone}`}
-                  >
-                    {task.status}
-                  </span>
-                </div>
-                <p className="mt-0.5 truncate text-xs font-light text-secondary-foreground">
-                  {task.title}
-                </p>
-                <p className="mt-1 font-mono text-[10px] text-muted-foreground">
-                  {task.meta}
-                </p>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <div className="border-t border-border bg-rail sm:border-t-0 sm:border-l">
-          <div className="border-b border-border px-3 py-2 font-mono text-[10px] tracking-wider text-muted-foreground uppercase">
-            Agents
-          </div>
-          <ul className="divide-y divide-border">
-            {agents.map((agent) => (
-              <li
-                key={agent.name}
-                className="flex items-center justify-between gap-2 px-3 py-2.5"
-              >
-                <span className="truncate font-mono text-[10px] text-secondary-foreground">
-                  {agent.name}
-                </span>
-                <span className={`font-mono text-[10px] ${agent.tone}`}>
-                  {agent.state}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export function HeroSection() {
   return (
     <section className="line-b relative overflow-hidden bg-dot-grid">
@@ -176,7 +49,31 @@ export function HeroSection() {
             id="report-preview"
             className="animate-appear opacity-0 delay-400"
           >
-            <MissionBoard />
+            <div className="mc-panel overflow-hidden">
+              <div className="mc-panel-chrome">
+                <div className="flex min-w-0 items-center gap-3">
+                  <span className="mc-panel-title truncate">
+                    acme · alpha · overview
+                  </span>
+                  <span className="hidden font-mono text-[10px] text-muted-foreground sm:inline">
+                    tasks · claims · review · agents
+                  </span>
+                </div>
+                <span className="shrink-0 font-mono text-[10px] text-primary-text">
+                  live mission control
+                </span>
+              </div>
+              <div className="relative aspect-[1280/800] overflow-hidden bg-rail">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src="/images/dashboard-hero.svg"
+                  alt="Orchestrat dashboard overview showing Acme/Alpha with online agents, active claims, review queue, and recent activity"
+                  className="h-full w-full object-cover object-top"
+                  width={1280}
+                  height={800}
+                />
+              </div>
+            </div>
           </div>
         </div>
       </div>
