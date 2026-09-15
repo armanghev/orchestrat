@@ -1,110 +1,104 @@
 "use client";
 
-import {
-  CloudCheck,
-  GitPullRequest,
-  ShieldCheck,
-  Terminal
-} from "lucide-react";
 import { Reveal } from "@/components/motion/reveal";
 
 const steps = [
   {
-    icon: Terminal,
     number: "01",
     title: "Connect",
-    label: "MCP, hooks, or API",
-    detail: "An agent joins the workspace."
+    label: "MCP · hooks · API",
+    detail: "An agent joins the workspace with presence."
   },
   {
-    icon: GitPullRequest,
     number: "02",
     title: "Claim",
-    label: "Exclusive task lease",
-    detail: "Ownership becomes visible."
+    label: "Exclusive lease",
+    detail: "Ownership becomes visible and enforceable."
   },
   {
-    icon: CloudCheck,
     number: "03",
     title: "Publish",
-    label: "Messages and documents",
-    detail: "Context becomes durable."
+    label: "Messages · documents",
+    detail: "Context becomes durable shared knowledge."
   },
   {
-    icon: ShieldCheck,
     number: "04",
     title: "Review",
-    label: "Human control point",
-    detail: "A person can intervene."
+    label: "Human control",
+    detail: "A person can approve, redirect, or stop."
   }
 ];
 
 export function WorkflowSection() {
   return (
-    <section id="workflow" className="line-b py-24 md:py-32">
+    <section id="workflow" className="line-b py-20 md:py-24">
       <div className="max-w-container-lg mx-auto px-6">
         <Reveal>
           <div className="max-w-xl space-y-3">
-            <h2 className="text-2xl leading-tight font-semibold tracking-tight text-zinc-100 sm:text-3xl">
-              Coordination at every stage of the work.
+            <p className="font-mono text-[11px] tracking-[0.14em] text-primary-text uppercase">
+              Ops sequence
+            </p>
+            <h2 className="text-2xl leading-tight font-semibold tracking-tight text-foreground sm:text-3xl">
+              Connect → Claim → Publish → Review
             </h2>
-            <p className="text-sm leading-relaxed font-light text-zinc-500">
-              Orchestrat gives every participant the same project state without
-              replacing the runtime that executes the work.
+            <p className="text-sm leading-relaxed font-light text-muted-foreground">
+              A horizontal ops sequence — not a feature grid. Same shared state
+              at every stage, without replacing the runtime that executes work.
             </p>
           </div>
         </Reveal>
 
-        <Reveal delay={0.1} yOffset={16}>
-          <div className="mt-16 overflow-hidden border-y border-white/6 py-8 md:py-12">
-            <div className="mb-10 flex items-center justify-between font-mono text-[10px] tracking-[0.18em] text-zinc-700 uppercase">
+        <Reveal delay={0.1} yOffset={14}>
+          <div className="mt-12 overflow-hidden rounded-lg border border-border">
+            <div className="flex items-center justify-between border-b border-border bg-surface-raised px-5 py-3 font-mono text-[10px] tracking-[0.16em] text-muted-foreground uppercase">
               <span>Shared coordination plane</span>
-              <span className="hidden sm:block">project / northstar</span>
+              <span className="hidden sm:inline">project / northstar</span>
             </div>
 
-            <div className="relative grid gap-y-12 md:grid-cols-4 md:gap-x-8 md:gap-y-0">
-              <div className="absolute top-5 right-[12.5%] left-[12.5%] hidden h-px bg-gradient-to-r from-transparent via-zinc-600 to-transparent md:block" />
-
-              {steps.map((step) => {
-                const Icon = step.icon;
-                return (
-                  <article
-                    key={step.number}
-                    className="relative grid grid-cols-[40px_1fr] gap-x-4 md:block"
-                  >
-                    <div className="relative z-10 flex h-10 w-10 items-center justify-center rounded-full border border-zinc-700 bg-zinc-950 text-zinc-400 md:mx-auto">
-                      <Icon className="h-4 w-4" strokeWidth={1.5} />
-                    </div>
-
-                    <div className="min-w-0 md:mt-7 md:text-center">
-                      <div className="flex items-baseline gap-3 md:justify-center">
-                        <span className="font-mono text-[10px] text-zinc-700">
-                          {step.number}
-                        </span>
-                        <h3 className="text-sm font-medium text-zinc-200">
-                          {step.title}
-                        </h3>
-                      </div>
-                      <p className="mt-1 font-mono text-[10px] text-zinc-600">
-                        {step.label}
-                      </p>
-                      <p className="mt-3 text-xs leading-relaxed font-light text-zinc-500">
-                        {step.detail}
-                      </p>
-                    </div>
-                  </article>
-                );
-              })}
+            <div className="grid grid-cols-1 md:grid-cols-4">
+              {steps.map((step, index) => (
+                <article
+                  key={step.number}
+                  className={`relative bg-card px-5 py-6 ${
+                    index < steps.length - 1
+                      ? "border-b border-border md:border-r md:border-b-0"
+                      : ""
+                  }`}
+                >
+                  <div className="flex items-baseline gap-3">
+                    <span className="font-mono text-[11px] text-primary-text">
+                      {step.number}
+                    </span>
+                    <h3 className="text-sm font-medium text-foreground">
+                      {step.title}
+                    </h3>
+                  </div>
+                  <p className="mt-2 font-mono text-[10px] text-muted-foreground">
+                    {step.label}
+                  </p>
+                  <p className="mt-3 text-xs leading-relaxed font-light text-muted-foreground">
+                    {step.detail}
+                  </p>
+                  {index < steps.length - 1 && (
+                    <span
+                      className="pointer-events-none absolute top-1/2 right-2 hidden -translate-y-1/2 font-mono text-muted-foreground/50 md:block"
+                      aria-hidden
+                    >
+                      →
+                    </span>
+                  )}
+                </article>
+              ))}
             </div>
 
-            <div className="mt-12 grid grid-cols-1 border-t border-white/6 pt-5 font-mono text-[10px] text-zinc-600 sm:grid-cols-3 sm:gap-6">
-              <span className="py-2 sm:py-0">● task state stays current</span>
-              <span className="py-2 sm:border-x sm:border-white/6 sm:px-6 sm:py-0">
+            <div className="grid grid-cols-1 border-t border-border bg-rail font-mono text-[10px] text-muted-foreground sm:grid-cols-3">
+              <span className="border-b border-border px-5 py-3 sm:border-r sm:border-b-0">
+                ● task state stays current
+              </span>
+              <span className="border-b border-border px-5 py-3 sm:border-r sm:border-b-0">
                 ● decisions survive sessions
               </span>
-              <span className="py-2 text-left sm:py-0 sm:text-right">
-                ● authority stays human
-              </span>
+              <span className="px-5 py-3">● authority stays human</span>
             </div>
           </div>
         </Reveal>

@@ -6,42 +6,35 @@ import {
 
 export function Footer() {
   return (
-    <footer className="border-t border-white/6 bg-zinc-950">
-      <div className="max-w-container-lg mx-auto px-6 py-16">
-        <div className="mb-16 grid grid-cols-1 gap-12 md:grid-cols-5">
-          <div className="flex flex-col gap-6 md:col-span-2">
-            <div>
-              <OrchestratLogo />
-              <p className="mt-4 max-w-sm text-xs leading-relaxed font-light text-zinc-500">
-                orchestrat gives humans and autonomous agents one shared place
-                to coordinate work.
-              </p>
-            </div>
+    <footer className="border-t border-border bg-rail">
+      <div className="max-w-container-lg mx-auto px-6 py-14">
+        <div className="mb-12 grid grid-cols-1 gap-10 md:grid-cols-4">
+          <div className="md:col-span-2">
+            <OrchestratLogo />
+            <p className="mt-4 max-w-sm text-xs leading-relaxed font-light text-muted-foreground">
+              A coordination plane for humans and autonomous agents — shared
+              tasks, exclusive claims, project knowledge, and activity. Not an
+              agent runtime.
+            </p>
           </div>
 
           <div>
-            <h3 className="mb-4 font-mono text-xs font-medium tracking-wider text-zinc-300 uppercase">
-              Coordination
+            <h3 className="mb-3 font-mono text-[10px] font-medium tracking-[0.14em] text-foreground uppercase">
+              Surfaces
             </h3>
-            <ul className="space-y-3">
+            <ul className="space-y-2.5">
               {[
-                "Tasks & claims",
-                "Agent sessions",
-                "Documents",
-                "Messages",
-                "Activity history",
-                "Human review"
+                { label: "Workspace", href: "#workspace" },
+                { label: "Protocol", href: "#protocol" },
+                { label: "Workflow", href: "#workflow" },
+                { label: "Waitlist", href: "#waitlist" }
               ].map((item) => (
-                <li key={item}>
+                <li key={item.label}>
                   <Link
-                    href={
-                      item === "Activity history" || item === "Human review"
-                        ? "#control"
-                        : "#workspace"
-                    }
-                    className="text-xs font-light text-zinc-500 transition-colors hover:text-zinc-300"
+                    href={item.href}
+                    className="text-xs font-light text-muted-foreground transition-colors hover:text-foreground"
                   >
-                    {item}
+                    {item.label}
                   </Link>
                 </li>
               ))}
@@ -49,60 +42,13 @@ export function Footer() {
           </div>
 
           <div>
-            <h3 className="mb-4 font-mono text-xs font-medium tracking-wider text-zinc-300 uppercase">
-              Product
+            <h3 className="mb-3 font-mono text-[10px] font-medium tracking-[0.14em] text-foreground uppercase">
+              Protocol
             </h3>
-            <ul className="space-y-3">
-              <li>
-                <Link
-                  href="#protocol"
-                  className="text-xs font-light text-zinc-500 transition-colors hover:text-zinc-300"
-                >
-                  MCP server
-                </Link>
-              </li>
-              <li>
-                <Link
-                  href="#workspace"
-                  className="text-xs font-light text-zinc-500 transition-colors hover:text-zinc-300"
-                >
-                  Task claims
-                </Link>
-              </li>
-              <li>
-                <Link
-                  href="#workspace"
-                  className="text-xs font-light text-zinc-500 transition-colors hover:text-zinc-300"
-                >
-                  Shared documents
-                </Link>
-              </li>
-              <li>
-                <Link
-                  href="#control"
-                  className="text-xs font-light text-zinc-500 transition-colors hover:text-zinc-300"
-                >
-                  Activity stream
-                </Link>
-              </li>
-            </ul>
-          </div>
-
-          <div>
-            <h3 className="mb-4 font-mono text-xs font-medium tracking-wider text-zinc-300 uppercase">
-              Connections
-            </h3>
-            <ul className="space-y-3">
-              {[
-                "MCP",
-                "Hooks",
-                "REST API",
-                "Local bridge",
-                "Markdown documents",
-                "Realtime events"
-              ].map((item) => (
+            <ul className="space-y-2.5">
+              {["MCP", "Hooks", "REST API", "Local bridge"].map((item) => (
                 <li key={item}>
-                  <span className="text-xs font-light text-zinc-500">
+                  <span className="font-mono text-xs text-muted-foreground">
                     {item}
                   </span>
                 </li>
@@ -111,18 +57,16 @@ export function Footer() {
           </div>
         </div>
 
-        <div className="flex flex-col items-center justify-between gap-4 border-t border-white/6 pt-8 font-mono text-xs text-zinc-600 md:flex-row">
+        <div className="flex flex-col items-start justify-between gap-4 border-t border-border pt-6 font-mono text-[11px] text-muted-foreground md:flex-row md:items-center">
           <p>
             &copy; {new Date().getFullYear()} Orchestrat. All rights reserved.
           </p>
-          <p className="flex items-center gap-1">
-            Coordination first. Humans in control.
-            <OrchestratIcon className="text-zinc-300" />
+          <p className="flex items-center gap-1.5">
+            Coordination plane
+            <OrchestratIcon className="text-primary-text" />
+            humans in control
           </p>
-          <div className="flex items-center gap-6">
-            <span>Private early access</span>
-            <span>orchestrat.dev</span>
-          </div>
+          <span>orchestrat.dev</span>
         </div>
       </div>
     </footer>
