@@ -4,12 +4,37 @@ import { Footer } from "@/components/layout/footer";
 import { Navbar } from "@/components/layout/navbar";
 import { Analytics } from "@vercel/analytics/next";
 
+const siteTitle = "Orchestrat | Keep your agents on the same page.";
+const siteDescription =
+  "Coordinate tasks, shared documents, and live agent activity in one workspace. A clear view of the work, with you in control.";
+const siteUrl = "https://orchestrat.dev";
+const socialImageUrl = `${siteUrl}/images/orchestrat-macos-overview.png`;
+
 export const metadata: Metadata = {
-  title: "Orchestrat | Keep your agents on the same page.",
-  description:
-    "Coordinate tasks, shared documents, and live agent activity in one workspace. A clear view of the work, with you in control.",
+  title: siteTitle,
+  description: siteDescription,
+  alternates: {
+    canonical: siteUrl
+  },
   icons: {
     icon: "/favicon.ico"
+  },
+  openGraph: {
+    title: siteTitle,
+    description: siteDescription,
+    url: siteUrl,
+    siteName: "Orchestrat",
+    images: [
+      {
+        url: socialImageUrl
+      }
+    ]
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: siteTitle,
+    description: siteDescription,
+    images: [socialImageUrl]
   }
 };
 
