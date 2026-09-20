@@ -14,3 +14,4 @@ local/
 PRODUCT.md
 DESIGN.md
 deploy/private-alpha.env
+.vercel/
