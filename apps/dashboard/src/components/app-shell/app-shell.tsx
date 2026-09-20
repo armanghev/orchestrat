@@ -157,11 +157,8 @@ export function AppShell({
       ) : null}
       <aside aria-label="Project navigation" className="contents">
         <ContextSidebar
-          catalog={catalog}
-          activeProjectId={activeProjectId}
           activeRoute={activeRoute}
           onNavigate={navigateToRoute}
-          onSelectProject={selectProject}
           onOpenCommands={openCommands}
           onOpenPreferences={openPreferences}
           onSignOut={signOut}
@@ -170,7 +167,9 @@ export function AppShell({
       </aside>
       <div className="flex w-full min-w-0 flex-1 flex-col">
         <TopToolbar
+          catalog={catalog}
           context={current}
+          onSelectProject={selectProject}
           activeRoute={activeRoute}
           onOpenCommands={openCommands}
           collapsed={preferences.contextSidebarCollapsed}

@@ -8,6 +8,10 @@ const beta = project({ name: "Beta" });
 alpha.id = "alpha";
 beta.id = "beta";
 const catalog: ProjectCatalog = {
+  organizations: [
+    organization({ name: "Acme" }),
+    organization({ name: "Beta Org" })
+  ],
   failures: [],
   projects: [
     {

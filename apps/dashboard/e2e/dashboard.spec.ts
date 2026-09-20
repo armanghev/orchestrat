@@ -216,7 +216,7 @@ test("sign-out survives reload", async ({ page }) => {
   await seed(page);
   await mockHierarchy(page, populatedState());
   await page.goto(`/projects/${ids.alpha}/overview`);
-  await page.getByRole("button", { name: "Command ⌘ K", exact: true }).click();
+  await page.getByRole("button", { name: "Search ⌘ K", exact: true }).click();
   await page.getByPlaceholder("Search commands…").fill("Sign out");
   await page.getByText("Sign out", { exact: true }).click();
   await expect(
@@ -299,7 +299,7 @@ test("project shell switches projects and persists recency", async ({
     page.getByRole("complementary", { name: "Project navigation" })
   ).toBeVisible();
   await expect(page.getByRole("banner")).toContainText("Alpha");
-  await page.getByRole("button", { name: "Command ⌘ K", exact: true }).click();
+  await page.getByRole("button", { name: "Search ⌘ K", exact: true }).click();
   await page.getByPlaceholder("Search commands…").fill("Beta");
   await page.getByText("Open Beta", { exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/projects/${ids.beta}/overview$`));
@@ -553,7 +553,7 @@ test("command palette search selects a project and restores focus", async ({
   await page.getByText("Open Beta", { exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/projects/${ids.beta}/overview$`));
   const trigger = page.getByRole("button", {
-    name: "Command ⌘ K",
+    name: "Search ⌘ K",
     exact: true
   });
   await trigger.focus();

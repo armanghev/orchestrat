@@ -1,11 +1,22 @@
 import type { Organization, Project } from "@orchestrat/protocol";
 import type { QueryClient } from "@tanstack/react-query";
 import type { ApiClient } from "@/lib/api/client";
-import { organizationsQueryOptions, projectsQueryOptions } from "./query-options";
+import {
+  organizationsQueryOptions,
+  projectsQueryOptions
+} from "./query-options";
 
 export type ProjectContext = { organization: Organization; project: Project };
-export type CatalogFailure = { scope: "projects"; parentId: string; message: string };
-export type ProjectCatalog = { projects: ProjectContext[]; failures: CatalogFailure[] };
+export type CatalogFailure = {
+  scope: "projects";
+  parentId: string;
+  message: string;
+};
+export type ProjectCatalog = {
+  organizations: Organization[];
+  projects: ProjectContext[];
+  failures: CatalogFailure[];
+};
 
 export async function loadProjectCatalog(
   queryClient: QueryClient,
@@ -20,19 +31,25 @@ export async function loadProjectCatalog(
         const { projects } = await queryClient.fetchQuery(
           projectsQueryOptions(api, organization.id)
         );
-        return { projects: projects.map((project) => ({ organization, project })) };
+        return {
+          projects: projects.map((project) => ({ organization, project }))
+        };
       } catch (error) {
         return {
           failure: {
             scope: "projects" as const,
             parentId: organization.id,
-            message: error instanceof Error ? error.message : "Unable to load projects."
+            message:
+              error instanceof Error
+                ? error.message
+                : "Unable to load projects."
           }
         };
       }
     })
   );
   return {
+    organizations,
     projects: results
       .flatMap((result) => result.projects ?? [])
       .sort(

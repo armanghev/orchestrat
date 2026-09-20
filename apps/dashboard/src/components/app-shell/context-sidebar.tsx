@@ -1,20 +1,16 @@
 import type { LucideIcon } from "lucide-react";
-import { useNavigate } from "@tanstack/react-router";
 import {
   Activity,
   Bot,
-  BriefcaseBusiness,
   ChevronsUpDown,
   FileText,
   FolderKanban,
   Gauge,
   LogOut,
-  Plus,
   Search,
   Settings
 } from "lucide-react";
 import type { NavigationDestination } from "@/features/command/commands";
-import type { ProjectCatalog } from "@/features/hierarchy/catalog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -85,40 +81,22 @@ function ProfileImage({
 }
 
 export function ContextSidebar({
-  catalog,
-  activeProjectId,
   activeRoute = "overview",
   onNavigate,
-  onSelectProject,
   onOpenCommands,
   onOpenPreferences,
   onSignOut,
   profile
 }: {
-  catalog: ProjectCatalog;
-  activeProjectId?: string;
   activeRoute?: NavigationDestination;
   onNavigate: (route: NavigationDestination) => void;
-  onSelectProject: (projectId: string) => void;
   onOpenCommands: () => void;
   onOpenPreferences: () => void;
   onSignOut: () => void;
   profile?: Profile;
 }) {
-  const navigate = useNavigate();
   const desktop = usePlatform().kind === "desktop";
   const { setOpenMobile } = useSidebar();
-  const current = catalog.projects.find(
-    ({ project }) => project.id === activeProjectId
-  );
-  const organizations = Array.from(
-    new Map(
-      catalog.projects.map((context) => [
-        context.organization.id,
-        context.organization
-      ])
-    ).values()
-  );
   const profileName =
     profile?.full_name ?? profile?.username ?? profile?.email ?? "Account";
 
@@ -132,122 +110,9 @@ export function ContextSidebar({
           <WindowDragRegion />
         </div>
       ) : null}
-      <SidebarHeader className="gap-3 p-3">
-        <div className="flex h-8 items-center gap-2.5 px-2">
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="24"
-            height="24"
-            viewBox="0 0 24 24"
-            className="size-6 shrink-0 text-brand"
-            aria-hidden="true"
-          >
-            <circle
-              cx="12"
-              cy="12"
-              r="8.5"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeDasharray="0.01 4.4406"
-            />
-            <circle cx="12" cy="12" r="2.75" fill="currentColor" />
-          </svg>
-          <span className="text-base font-semibold tracking-tight">
-            Orchestrat
-          </span>
-          <SidebarTrigger
-            aria-label="Close navigation"
-            className="ml-auto md:hidden"
-          />
-        </div>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <SidebarMenuButton
-              size="lg"
-              className="data-[state=open]:bg-sidebar-accent"
-            >
-              <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-primary text-sm font-semibold text-primary-foreground">
-                {current?.organization.name.slice(0, 1).toUpperCase() ?? "O"}
-              </span>
-              <span className="grid min-w-0 flex-1 text-left text-sm leading-tight">
-                <span className="truncate font-semibold">
-                  {current?.organization.name ?? "Organization"}
-                </span>
-                <span className="truncate text-xs text-muted-foreground">
-                  {current ? current.project.name : "Select a project"}
-                </span>
-              </span>
-              <ChevronsUpDown className="ml-auto size-4" />
-            </SidebarMenuButton>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            className="w-64 select-none"
-            align="start"
-            side="right"
-          >
-            <DropdownMenuGroup>
-              <DropdownMenuItem
-                onSelect={() =>
-                  window.location.assign("/setup?create=organization")
-                }
-              >
-                <Plus />
-                New organization
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onSelect={() => window.location.assign("/setup?create=project")}
-              >
-                <Plus />
-                New project
-              </DropdownMenuItem>
-              {current ? (
-                <DropdownMenuItem
-                  onSelect={() =>
-                    navigate({
-                      to: "/organizations/$organizationId/settings",
-                      params: { organizationId: current.organization.id }
-                    })
-                  }
-                >
-                  <Settings />
-                  Organization settings
-                </DropdownMenuItem>
-              ) : null}
-            </DropdownMenuGroup>
-            <DropdownMenuSeparator />
-            <DropdownMenuLabel>Organizations</DropdownMenuLabel>
-            {organizations.map((organization) => (
-              <DropdownMenuGroup key={organization.id}>
-                <DropdownMenuLabel className="font-normal text-muted-foreground">
-                  {organization.name}
-                </DropdownMenuLabel>
-                {catalog.projects
-                  .filter(
-                    ({ organization: item }) => item.id === organization.id
-                  )
-                  .map(({ project }) => (
-                    <DropdownMenuItem
-                      key={project.id}
-                      onSelect={() => {
-                        onSelectProject(project.id);
-                        setOpenMobile(false);
-                      }}
-                    >
-                      <BriefcaseBusiness />
-                      <span className="truncate">{project.name}</span>
-                    </DropdownMenuItem>
-                  ))}
-              </DropdownMenuGroup>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </SidebarHeader>
-      <Separator />
       <SidebarContent className="gap-2 px-3 py-2">
         {routeGroups.map((group) => (
-          <SidebarGroup className="px-0" key={group.label}>
+          <SidebarGroup className="px-0 py-0" key={group.label}>
             <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
@@ -284,19 +149,21 @@ export function ContextSidebar({
         ))}
       </SidebarContent>
 
+      <SidebarMenu className="shrink-0 p-3">
+        <SidebarMenuItem>
+          <SidebarMenuButton
+            onClick={onOpenCommands}
+            tooltip="Search"
+            className="h-9"
+          >
+            <Search />
+            <span>Search</span>
+            <span className="ml-auto text-xs text-muted-foreground">⌘K</span>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+      </SidebarMenu>
       <SidebarFooter className="border-t p-3">
         <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              onClick={onOpenCommands}
-              tooltip="Command palette"
-              className="h-9"
-            >
-              <Search />
-              <span>Command palette</span>
-              <span className="ml-auto text-xs text-muted-foreground">⌘K</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
           <SidebarMenuItem>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>

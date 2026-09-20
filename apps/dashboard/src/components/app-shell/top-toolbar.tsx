@@ -1,17 +1,27 @@
 import { useRef, type MouseEvent, type RefObject, type ReactNode } from "react";
-import { Search, Sun, Moon, Monitor } from "lucide-react";
+import {
+  Search,
+  Sun,
+  Moon,
+  Monitor,
+  ChevronDown,
+  Settings,
+  Plus
+} from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import type { ProjectContext } from "@/features/hierarchy/catalog";
+import type {
+  ProjectCatalog,
+  ProjectContext
+} from "@/features/hierarchy/catalog";
 import { Button } from "@/components/ui/button";
-import { Link } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
 import {
   Breadcrumb,
   BreadcrumbList,
   BreadcrumbItem,
-  BreadcrumbLink,
   BreadcrumbPage,
   BreadcrumbSeparator
 } from "@/components/ui/breadcrumb";
@@ -19,6 +29,8 @@ import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuLabel
@@ -81,20 +93,25 @@ export function WindowDragRegion({ className }: { className?: string }) {
 }
 
 export function TopToolbar({
+  catalog,
   context,
+  onSelectProject,
   activeRoute = "overview",
   collapsed,
   onOpenCommands,
   routeActions,
   commandTriggerRef
 }: {
+  catalog: ProjectCatalog;
   context?: ProjectContext;
+  onSelectProject: (projectId: string) => void;
   activeRoute?: NavigationDestination;
   collapsed: boolean;
   onOpenCommands: () => void;
   routeActions?: ReactNode;
   commandTriggerRef?: RefObject<HTMLButtonElement | null>;
 }) {
+  const navigate = useNavigate();
   const dragHandlers = useWindowDragHandlers();
   const desktop = usePlatform().kind === "desktop";
   const { isMobile, openMobile } = useSidebar();
@@ -173,15 +190,139 @@ export function TopToolbar({
               {context ? (
                 <>
                   <BreadcrumbItem className="hidden min-w-0 sm:inline-flex">
-                    <BreadcrumbLink asChild>
-                      <Link
-                        to="/projects/$projectId/overview"
-                        params={{ projectId: context.project.id }}
-                        className="truncate"
-                      >
-                        {context.project.name}
-                      </Link>
-                    </BreadcrumbLink>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          aria-label={
+                            "Organization: " + context.organization.name
+                          }
+                          className="w-max max-w-full min-w-0 px-1.5 font-normal text-muted-foreground hover:text-primary-text data-[state=open]:text-primary-text"
+                        >
+                          <span className="truncate">
+                            {context.organization.name}
+                          </span>
+                          <ChevronDown className="size-3" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent className="w-64" align="start">
+                        <DropdownMenuLabel>Organizations</DropdownMenuLabel>
+                        <DropdownMenuRadioGroup
+                          value={context.organization.id}
+                          onValueChange={(organizationId) => {
+                            const first = catalog.projects.find(
+                              ({ organization }) =>
+                                organization.id === organizationId
+                            );
+                            if (first) onSelectProject(first.project.id);
+                            else
+                              void navigate({
+                                to: "/organizations/$organizationId/settings",
+                                params: { organizationId }
+                              });
+                          }}
+                        >
+                          {catalog.organizations.map((organization) => (
+                            <DropdownMenuRadioItem
+                              key={organization.id}
+                              value={organization.id}
+                            >
+                              <span className="truncate">
+                                {organization.name}
+                              </span>
+                            </DropdownMenuRadioItem>
+                          ))}
+                        </DropdownMenuRadioGroup>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          onSelect={() =>
+                            void navigate({
+                              to: "/setup",
+                              search: { create: "organization" }
+                            })
+                          }
+                        >
+                          <Plus />
+                          New organization
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onSelect={() =>
+                            void navigate({
+                              to: "/organizations/$organizationId/settings",
+                              params: {
+                                organizationId: context.organization.id
+                              }
+                            })
+                          }
+                        >
+                          <Settings />
+                          Organization settings
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </BreadcrumbItem>
+                  <BreadcrumbSeparator className="hidden sm:block" />
+                  <BreadcrumbItem className="hidden min-w-0 sm:inline-flex">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          aria-label={"Project: " + context.project.name}
+                          className="w-max max-w-full min-w-0 px-1.5 font-normal text-muted-foreground hover:text-primary-text data-[state=open]:text-primary-text"
+                        >
+                          <span className="truncate">
+                            {context.project.name}
+                          </span>
+                          <ChevronDown className="size-3" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent className="w-64" align="start">
+                        <DropdownMenuLabel>Projects</DropdownMenuLabel>
+                        <DropdownMenuRadioGroup
+                          value={context.project.id}
+                          onValueChange={onSelectProject}
+                        >
+                          {catalog.projects
+                            .filter(
+                              ({ organization }) =>
+                                organization.id === context.organization.id
+                            )
+                            .map(({ project }) => (
+                              <DropdownMenuRadioItem
+                                key={project.id}
+                                value={project.id}
+                              >
+                                <span className="truncate">{project.name}</span>
+                              </DropdownMenuRadioItem>
+                            ))}
+                        </DropdownMenuRadioGroup>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          onSelect={() =>
+                            void navigate({
+                              to: "/setup",
+                              search: { create: "project" }
+                            })
+                          }
+                        >
+                          <Plus />
+                          New project
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onSelect={() =>
+                            void navigate({
+                              to: "/projects/$projectId/settings",
+                              params: { projectId: context.project.id }
+                            })
+                          }
+                        >
+                          <Settings />
+                          Project settings
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </BreadcrumbItem>
                   <BreadcrumbSeparator className="hidden sm:block" />
                 </>
@@ -201,7 +342,7 @@ export function TopToolbar({
           onClick={onOpenCommands}
         >
           <Search data-icon="inline-start" />
-          Command{" "}
+          Search{" "}
           <kbd className="hidden text-xs text-muted-foreground sm:inline">
             {shortcut}
           </kbd>
