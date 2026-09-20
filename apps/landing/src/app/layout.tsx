@@ -7,7 +7,10 @@ import { Analytics } from "@vercel/analytics/next";
 export const metadata: Metadata = {
   title: "Orchestrat | Keep your agents on the same page.",
   description:
-    "Coordinate tasks, shared documents, and live agent activity in one workspace. A clear view of the work, with you in control."
+    "Coordinate tasks, shared documents, and live agent activity in one workspace. A clear view of the work, with you in control.",
+  icons: {
+    icon: "/favicon.ico"
+  }
 };
 
 export default function RootLayout({
