@@ -1,3 +1,15 @@
+import { PageState } from "@/components/dashboard/page";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  Empty,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+  EmptyDescription
+} from "@/components/ui/empty";
+import { Progress } from "@/components/ui/progress";
+import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/cn";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
@@ -93,7 +105,7 @@ function DocumentsRoute() {
   const projectArchived = project?.project.status === "archived";
   return (
     <div
-      className="document-workspace mx-auto flex min-h-full w-full max-w-7xl flex-col p-4 md:p-6"
+      className="document-workspace dashboard-page min-h-full"
       aria-labelledby="documents-heading"
     >
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -160,61 +172,64 @@ function DocumentsRoute() {
           This project is archived and read-only.
         </p>
       ) : null}
-      <div className="mt-6 flex min-h-0 flex-1 overflow-hidden rounded-xl border bg-card">
+      <div className="flex min-h-0 flex-1 overflow-hidden rounded-xl border bg-card">
         <div className="grid min-h-0 w-full md:grid-cols-[180px_minmax(0,1fr)] xl:grid-cols-[216px_minmax(0,1fr)]">
           <nav
             aria-label="Project documents"
             className="min-w-0 border-b bg-muted/20 md:border-r md:border-b-0"
           >
-            <div
-              className="flex flex-wrap gap-1 border-b p-3"
-              role="group"
-              aria-label="Document state"
+            <Tabs
+              value={showArchived ? "archived" : "active"}
+              onValueChange={(value) => setShowArchived(value === "archived")}
+              className="gap-0"
             >
-              <Button
-                variant={!showArchived ? "secondary" : "ghost"}
-                size="xs"
-                aria-pressed={!showArchived}
-                onClick={() => setShowArchived(false)}
-              >
-                Active ({active.length})
-              </Button>
-              <Button
-                variant={showArchived ? "secondary" : "ghost"}
-                size="xs"
-                aria-pressed={showArchived}
-                onClick={() => setShowArchived(true)}
-              >
-                Archived ({archived.length})
-              </Button>
-            </div>
-            <div className="max-h-40 space-y-1 overflow-y-auto p-2 md:max-h-[70dvh]">
-              {visible.map((item) => (
-                <button
-                  type="button"
-                  key={item.id}
-                  onClick={() => setSelectedId(item.id)}
-                  className={`flex w-full items-start gap-2 rounded-lg px-2.5 py-3 text-left text-sm transition-colors hover:bg-muted ${selected?.id === item.id ? "bg-accent text-accent-foreground" : "text-muted-foreground"}`}
-                  aria-current={selected?.id === item.id ? "page" : undefined}
-                >
-                  <FileText
-                    className="mt-0.5 size-4 shrink-0"
-                    aria-hidden="true"
-                  />
-                  <span className="min-w-0">
-                    <span
-                      className="block truncate font-medium"
-                      title={item.path}
+              <div className="border-b p-3">
+                <TabsList aria-label="Document state">
+                  <TabsTrigger value="active">
+                    Active ({active.length})
+                  </TabsTrigger>
+                  <TabsTrigger value="archived">
+                    Archived ({archived.length})
+                  </TabsTrigger>
+                </TabsList>
+              </div>
+              <TabsContent value={showArchived ? "archived" : "active"}>
+                <div className="max-h-40 flex flex-col gap-1 overflow-y-auto p-2 md:max-h-[70dvh]">
+                  {visible.map((item) => (
+                    <button
+                      type="button"
+                      key={item.id}
+                      onClick={() => setSelectedId(item.id)}
+                      className={cn(
+                        "flex w-full items-start gap-2 rounded-lg px-2.5 py-3 text-left text-sm transition-colors hover:bg-muted",
+                        selected?.id === item.id
+                          ? "bg-accent text-accent-foreground"
+                          : "text-muted-foreground"
+                      )}
+                      aria-current={
+                        selected?.id === item.id ? "page" : undefined
+                      }
                     >
-                      {item.path}
-                    </span>
-                    <span className="mt-1 block text-xs text-muted-foreground">
-                      Revision {item.current_revision}
-                    </span>
-                  </span>
-                </button>
-              ))}
-            </div>
+                      <FileText
+                        className="mt-0.5 size-4 shrink-0"
+                        aria-hidden="true"
+                      />
+                      <span className="min-w-0">
+                        <span
+                          className="block truncate font-medium"
+                          title={item.path}
+                        >
+                          {item.path}
+                        </span>
+                        <span className="mt-1 block text-xs text-muted-foreground">
+                          Revision {item.current_revision}
+                        </span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </TabsContent>
+            </Tabs>
           </nav>
           {selected ? (
             <DocumentEditor
@@ -226,17 +241,23 @@ function DocumentsRoute() {
               queryClient={queryClient}
             />
           ) : (
-            <div className="flex min-h-72 flex-col items-center justify-center gap-3 p-8 text-center">
-              <FileText
-                className="size-7 text-muted-foreground"
-                aria-hidden="true"
-              />
-              <p className="text-sm text-muted-foreground">
-                {showArchived
-                  ? "No archived documents."
-                  : "Create a document to start sharing project context."}
-              </p>
-            </div>
+            <Empty className="min-h-80">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <FileText />
+                </EmptyMedia>
+                <EmptyTitle>
+                  {showArchived
+                    ? "Archive is empty"
+                    : "Make room for shared context"}
+                </EmptyTitle>
+                <EmptyDescription>
+                  {showArchived
+                    ? "No archived documents."
+                    : "Create a document to start sharing project context."}
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           )}
         </div>
       </div>
@@ -702,7 +723,10 @@ function DocumentEditor({
           </div>
         </div>
       ) : null}
-      <section className="document-editor-surface flex min-h-0 flex-1 flex-col" aria-label="Markdown editor">
+      <section
+        className="document-editor-surface flex min-h-0 flex-1 flex-col"
+        aria-label="Markdown editor"
+      >
         <label htmlFor="document-content" className="sr-only">
           Markdown content
         </label>
@@ -963,13 +987,23 @@ function AttachmentSection({
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h3 id="attachments-heading" className="flex items-center gap-2 text-sm font-medium">
-            <Paperclip className="size-4 text-muted-foreground" aria-hidden="true" />
+          <h3
+            id="attachments-heading"
+            className="flex items-center gap-2 text-sm font-medium"
+          >
+            <Paperclip
+              className="size-4 text-muted-foreground"
+              aria-hidden="true"
+            />
             Attachments
-            {attachments.length > 0 ? <span className="text-xs text-muted-foreground">{attachments.length}</span> : null}
+            {attachments.length > 0 ? (
+              <Badge variant="secondary">{attachments.length}</Badge>
+            ) : null}
           </h3>
           <p className="mt-1 text-xs text-muted-foreground">
-            {attachments.length > 0 ? "Private files shared with this document." : "Add supporting files for your project."}
+            {attachments.length > 0
+              ? "Private files shared with this document."
+              : "Add supporting files for your project."}
           </p>
         </div>
         <input
@@ -1002,12 +1036,11 @@ function AttachmentSection({
             <span className="truncate">{uploading.file.name}</span>
             <span>{Math.round(uploading.progress * 100)}%</span>
           </div>
-          <div className="mt-2 h-1.5 overflow-hidden rounded bg-muted">
-            <div
-              className="h-full bg-primary"
-              style={{ width: `${uploading.progress * 100}%` }}
-            />
-          </div>
+          <Progress
+            className="mt-2"
+            value={uploading.progress * 100}
+            aria-label="File upload"
+          />
           <p className="mt-2 text-xs text-muted-foreground">
             {uploading.message}
           </p>
@@ -1284,13 +1317,10 @@ function DocumentMessage({
   message: string;
 }) {
   return (
-    <div className="mx-auto w-full max-w-3xl p-6 md:p-8">
-      <h1 tabIndex={-1} className="text-2xl font-semibold">
-        {title}
-      </h1>
-      <p role="status" className="mt-3 text-sm text-muted-foreground">
-        {message}
-      </p>
-    </div>
+    <PageState
+      title={title}
+      message={message}
+      error={title.includes("unavailable")}
+    />
   );
 }

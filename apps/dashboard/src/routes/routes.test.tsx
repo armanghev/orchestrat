@@ -20,12 +20,16 @@ vi.mock("@/features/documents/markdown-editor", () => ({
     }
   >(function TestMarkdownEditor({ markdown, readOnly, onChange }, ref) {
     const [value, setValue] = useState(markdown);
-    useImperativeHandle(ref, () => ({
-      setMarkdown(next) {
-        setValue(next);
-        onChange(next);
-      }
-    }), [onChange]);
+    useImperativeHandle(
+      ref,
+      () => ({
+        setMarkdown(next) {
+          setValue(next);
+          onChange(next);
+        }
+      }),
+      [onChange]
+    );
     return (
       <textarea
         aria-label="Markdown content"
@@ -41,7 +45,13 @@ vi.mock("@/features/documents/markdown-editor", () => ({
 }));
 
 vi.mock("@/features/documents/document-diff", () => ({
-  DocumentDiff: ({ original, current }: { original: string; current: string }) => (
+  DocumentDiff: ({
+    original,
+    current
+  }: {
+    original: string;
+    current: string;
+  }) => (
     <div aria-label="Revision comparison">
       <textarea aria-label="Original revision" value={original} readOnly />
       <textarea aria-label="Current saved revision" value={current} readOnly />
@@ -182,7 +192,7 @@ describe("dashboard routes", () => {
                 project_id: expected.id,
                 session_id: "00000000-0000-4000-8000-000000000010",
                 status: "online",
-                last_heartbeat_at: "2024-01-01T00:00:00.000Z",
+                last_heartbeat_at: new Date().toISOString(),
                 current_task_id: currentTask.id
               }
             ]
@@ -205,7 +215,8 @@ describe("dashboard routes", () => {
     });
     expect(await screen.findByText("Online agents")).toBeVisible();
     expect(screen.getByText("Codex")).toBeVisible();
-    expect(screen.getByText("DASH-1 · Compile release")).toBeVisible();
+    expect(screen.getByText("DASH-1")).toBeVisible();
+    expect(screen.getByText("Compile release")).toBeVisible();
     expect(screen.getByText("1", { selector: "dd" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Overview" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Tasks" })).toBeVisible();
@@ -253,6 +264,7 @@ describe("dashboard routes", () => {
       handlers: taskHandlers
     });
     const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "New task" }));
     await user.type(await screen.findByLabelText("Title"), "Created task");
     await user.click(screen.getByRole("button", { name: "Create task" }));
     expect(await screen.findByText("DASH-1")).toBeVisible();
@@ -284,6 +296,25 @@ describe("dashboard routes", () => {
     });
     expect(await screen.findByText("Agent-owned task")).toBeVisible();
     expect(screen.getByRole("heading", { name: "claimed" })).toBeVisible();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("tab", { name: "List" }));
+    expect(screen.getByRole("table")).toHaveTextContent("Agent-owned task");
+    await user.type(
+      screen.getByRole("textbox", { name: "Search tasks" }),
+      "missing"
+    );
+    expect(screen.getByText("No matching tasks")).toBeVisible();
+    await user.clear(screen.getByRole("textbox", { name: "Search tasks" }));
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Filter task status" }),
+      "done"
+    );
+    expect(screen.getByText("No matching tasks")).toBeVisible();
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Filter task status" }),
+      "claimed"
+    );
+    expect(screen.getByRole("table")).toHaveTextContent("Agent-owned task");
   });
 
   it("refetches and replaces stale task data after a version conflict", async () => {
@@ -506,10 +537,16 @@ describe("dashboard routes", () => {
     await user.click(screen.getByRole("button", { name: "Save mine" }));
     await waitFor(() => expect(patchRequests).toBe(2));
     expect(screen.getByDisplayValue("Unsaved draft")).toBeVisible();
-    expect(screen.queryByRole("button", { name: /^Revision 1\b/ })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^Revision 1\b/ })
+    ).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "History" }));
-    expect(await screen.findByRole("dialog", { name: "Document history" })).toBeVisible();
-    await user.click(await screen.findByRole("button", { name: /^Revision 1\b/ }));
+    expect(
+      await screen.findByRole("dialog", { name: "Document history" })
+    ).toBeVisible();
+    await user.click(
+      await screen.findByRole("button", { name: /^Revision 1\b/ })
+    );
     expect(await screen.findByLabelText("Original revision")).toHaveValue(
       "Initial content"
     );
@@ -540,7 +577,8 @@ describe("dashboard routes", () => {
     const documentHandlers = [
       http.get(
         `http://localhost:8801/api/v1/projects/${expectedProject.id}/documents`,
-        () => HttpResponse.json({ documents: [seed.document], next_cursor: null })
+        () =>
+          HttpResponse.json({ documents: [seed.document], next_cursor: null })
       ),
       http.get(
         `http://localhost:8801/api/v1/documents/${seed.document.id}`,
@@ -555,16 +593,21 @@ describe("dashboard routes", () => {
               { error: { code: "TEMPORARY" } },
               { status: 500 }
             );
-          const older = new URL(request.url).searchParams.get("cursor") === "older";
+          const older =
+            new URL(request.url).searchParams.get("cursor") === "older";
           if (older && ++olderRequests === 1)
-            return HttpResponse.json({ error: { code: "TEMPORARY" } }, { status: 500 });
+            return HttpResponse.json(
+              { error: { code: "TEMPORARY" } },
+              { status: 500 }
+            );
           return HttpResponse.json({
-            revisions: (older ? revisions.slice(3) : [
-              { ...seed.revision, revision_number: 7 },
-              ...revisions.slice(0, 3)
-            ]).map(
-              revisionSummary
-            ),
+            revisions: (older
+              ? revisions.slice(3)
+              : [
+                  { ...seed.revision, revision_number: 7 },
+                  ...revisions.slice(0, 3)
+                ]
+            ).map(revisionSummary),
             next_cursor: older ? null : "older"
           });
         }
@@ -588,47 +631,76 @@ describe("dashboard routes", () => {
     ];
     await renderDashboardRoute({
       path: `/projects/${expectedProject.id}/documents`,
-      auth: new FakeAuthClient({ status: "signedIn", identityKey: "test-user" }),
+      auth: new FakeAuthClient({
+        status: "signedIn",
+        identityKey: "test-user"
+      }),
       platform: platform(),
       handlers: documentHandlers
     });
     const user = userEvent.setup();
     const editor = await screen.findByLabelText("Markdown content");
-    expect(screen.queryByRole("button", { name: /^Revision 5\b/ })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^Revision 5\b/ })
+    ).not.toBeInTheDocument();
     await user.clear(editor);
     await user.type(editor, "Unsaved draft");
     await user.click(screen.getByRole("button", { name: "History" }));
 
-    const dialog = await screen.findByRole("dialog", { name: "Document history" });
+    const dialog = await screen.findByRole("dialog", {
+      name: "Document history"
+    });
     expect(dialog).toHaveTextContent(
       "Unsaved draft changes are excluded. Comparisons use the current saved version."
     );
     expect(await screen.findByText("Could not load history.")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Retry" }));
-    const newestPrior = await screen.findByRole("button", { name: /^Revision 5\b/ });
+    const newestPrior = await screen.findByRole("button", {
+      name: /^Revision 5\b/
+    });
     expect(newestPrior).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: /^Revision 6\b/ })).toBeDisabled();
-    expect(screen.queryByRole("button", { name: /^Revision 7\b/ })).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /^Revision 6\b/ })
+    ).toBeDisabled();
+    expect(
+      screen.queryByRole("button", { name: /^Revision 7\b/ })
+    ).not.toBeInTheDocument();
     expect(await screen.findByLabelText("Original revision")).toHaveValue(
       "Saved content 5"
     );
     expect(screen.getByLabelText("Current saved revision")).toHaveValue(
       "Current saved content"
     );
-    expect(screen.getByLabelText("Original revision")).toHaveAttribute("readonly");
+    expect(screen.getByLabelText("Original revision")).toHaveAttribute(
+      "readonly"
+    );
 
-    await user.click(screen.getByRole("button", { name: "Load older revisions" }));
-    expect(await screen.findByRole("button", { name: "Retry older revisions" })).toBeVisible();
+    await user.click(
+      screen.getByRole("button", { name: "Load older revisions" })
+    );
+    expect(
+      await screen.findByRole("button", { name: "Retry older revisions" })
+    ).toBeVisible();
     expect(newestPrior).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByLabelText("Original revision")).toHaveValue("Saved content 5");
-    await user.click(screen.getByRole("button", { name: "Retry older revisions" }));
-    await user.click(await screen.findByRole("button", { name: /^Revision 2\b/ }));
+    expect(screen.getByLabelText("Original revision")).toHaveValue(
+      "Saved content 5"
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Retry older revisions" })
+    );
+    await user.click(
+      await screen.findByRole("button", { name: /^Revision 2\b/ })
+    );
     expect(await screen.findByLabelText("Original revision")).toHaveValue(
       "Saved content 2"
     );
     await user.click(screen.getByRole("button", { name: "Close" }));
-    expect(screen.queryByRole("dialog", { name: "Document history" })).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Markdown content")).toHaveValue("Unsaved draft");
+    expect(
+      screen.queryByRole("dialog", { name: "Document history" })
+    ).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Markdown content")).toHaveValue(
+      "Unsaved draft"
+    );
   });
 
   it("debounces autosaves and serializes a queued edit", async () => {
@@ -1244,9 +1316,7 @@ describe("dashboard routes", () => {
       handlers: documentHandlers
     });
     const user = userEvent.setup();
-    await user.click(
-      await screen.findByRole("button", { name: "Archived (1)" })
-    );
+    await user.click(await screen.findByRole("tab", { name: "Archived (1)" }));
     expect(await screen.findByLabelText("Markdown content")).toBeDisabled();
     expect(
       screen.getByRole("button", { name: "Add attachment" })

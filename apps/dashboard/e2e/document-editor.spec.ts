@@ -620,7 +620,7 @@ for (const archived of [false, true]) {
     await page.goto(`/projects/${ids.project}/documents`);
     if (archived)
       await page
-        .getByRole("button", { name: "Archived (1)", exact: true })
+        .getByRole("tab", { name: "Archived (1)", exact: true })
         .click();
     await expect(
       page.locator(".mdxeditor.orchestrat-markdown-editor")

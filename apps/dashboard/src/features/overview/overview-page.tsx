@@ -1,5 +1,15 @@
 import { useQuery } from "@tanstack/react-query";
-import { Archive } from "lucide-react";
+import { Link, useRouter } from "@tanstack/react-router";
+import {
+  ArrowUpRight,
+  Bot,
+  CheckCheck,
+  CircleAlert,
+  ListTodo,
+  Activity,
+  CircleCheck,
+  Timer
+} from "lucide-react";
 import type { ProjectContext } from "@/features/hierarchy/catalog";
 import {
   agentPresenceQueryOptions,
@@ -7,11 +17,43 @@ import {
   projectEventsQueryOptions,
   tasksQueryOptions
 } from "@/features/coordination/query-options";
-import { useRouter } from "@tanstack/react-router";
+import { derivePresence } from "@/features/agents/presence";
 import { DashboardApiError } from "@/lib/api/client";
+import {
+  PageHeader,
+  PageState,
+  StatusBadge
+} from "@/components/dashboard/page";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardAction,
+  CardContent,
+  CardFooter
+} from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import {
+  Empty,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+  EmptyDescription
+} from "@/components/ui/empty";
+import { Progress } from "@/components/ui/progress";
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell
+} from "@/components/ui/table";
 
 export function OverviewPage({ context }: { context: ProjectContext }) {
-  const { project, organization } = context;
+  const { project } = context;
   const { api } = useRouter().options.context;
   const tasks = useQuery(tasksQueryOptions(api, project.id));
   const agents = useQuery(agentsQueryOptions(api, project.id));
@@ -24,55 +66,48 @@ export function OverviewPage({ context }: { context: ProjectContext }) {
     events.isPending;
   const error = tasks.error ?? agents.error ?? presence.error ?? events.error;
   if (loading)
-    return (
-      <main className="mx-auto w-full max-w-6xl p-6 md:p-8">
-        <h1 tabIndex={-1} className="text-2xl font-semibold">
-          Overview
-        </h1>
-        <p role="status" className="mt-6 text-sm text-muted-foreground">
-          Loading mission control…
-        </p>
-      </main>
-    );
+    return <PageState title="Overview" message="Loading project overview…" />;
   if (error)
     return (
-      <main className="mx-auto w-full max-w-3xl p-6 md:p-8">
-        <h1 tabIndex={-1} className="text-2xl font-semibold">
-          Overview unavailable
-        </h1>
-        <p role="alert" className="mt-3 text-sm text-muted-foreground">
-          {error instanceof DashboardApiError &&
+      <PageState
+        title="Overview unavailable"
+        error
+        message={
+          error instanceof DashboardApiError &&
           error.kind === "PERMISSION_DENIED"
             ? "You don’t have permission to view this project."
-            : "We couldn’t load mission control data. Check your connection and try again."}
-        </p>
-      </main>
+            : "We couldn’t load your project. Check your connection and try again."
+        }
+        onRetry={() =>
+          Promise.all([
+            tasks.refetch(),
+            agents.refetch(),
+            presence.refetch(),
+            events.refetch()
+          ])
+        }
+      />
     );
+
   const taskCards = tasks.data!.tasks;
   const taskById = new Map(taskCards.map((task) => [task.id, task]));
   const agentById = new Map(
     agents.data!.agents.map((agent) => [agent.id, agent])
   );
-  const blockedIds = new Set(
-    taskCards.filter((task) => task.status === "blocked").map((task) => task.id)
-  );
   const online = presence.data!.agents.filter(
-    (item) => item.status === "online"
+    (item) => derivePresence(item.status, item.last_heartbeat_at) === "online"
   );
-  const busy = online.filter(
-    (item) =>
-      item.current_task_id !== null && !blockedIds.has(item.current_task_id)
-  ).length;
-  const blocked = online.filter(
-    (item) =>
-      item.current_task_id !== null && blockedIds.has(item.current_task_id)
-  ).length;
+  const working = online.filter((item) => item.current_task_id !== null);
   const active = taskCards.filter(
     (task) => task.status === "claimed" || task.status === "in_progress"
   ).length;
+  const completed = taskCards.filter((task) => task.status === "done").length;
   const needingAttention = taskCards.filter(
     (task) => task.status === "blocked" || task.status === "review"
   );
+  const completion = taskCards.length
+    ? Math.round((completed / taskCards.length) * 100)
+    : 0;
   const meaningfulEvents = events
     .data!.events.filter(
       (event) =>
@@ -80,172 +115,332 @@ export function OverviewPage({ context }: { context: ProjectContext }) {
     )
     .slice(-5)
     .reverse();
+
   return (
-    <section
-      className="mx-auto w-full max-w-6xl p-6 md:p-8"
-      aria-labelledby="overview-heading"
-    >
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1
-            id="overview-heading"
-            tabIndex={-1}
-            className="text-2xl font-semibold tracking-tight"
-          >
-            Overview
-          </h1>
-          <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-            {project.description || "Mission control for this project."}
-          </p>
-          <p className="mt-2 font-mono text-xs text-muted-foreground">
-            {project.slug}
-          </p>
-        </div>
-        <p className="flex items-center gap-2 text-sm capitalize">
-          {project.status === "archived" ? (
-            <Archive aria-hidden="true" className="size-4" />
-          ) : null}
-          {project.status}
-        </p>
-      </div>
-      <div className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+    <section className="dashboard-page" aria-label="Project overview">
+      <PageHeader
+        title="Overview"
+        description={
+          project.description ||
+          "A clear view of your agents, work, and what needs you next."
+        }
+        actions={
+          <>
+            <StatusBadge status={project.status} />
+            <Button asChild variant="outline">
+              <Link
+                to="/projects/$projectId/tasks"
+                params={{ projectId: project.id }}
+              >
+                View tasks
+                <ArrowUpRight data-icon="inline-end" />
+              </Link>
+            </Button>
+          </>
+        }
+      />
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {[
-          ["Online agents", online.length],
-          ["Busy agents", busy],
-          ["Idle agents", Math.max(0, online.length - busy - blocked)],
-          ["Blocked agents", blocked]
-        ].map(([label, value]) => (
-          <div key={label} className="rounded border p-4">
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">
-              {label}
-            </p>
-            <p className="mt-2 text-2xl font-semibold">{value}</p>
-          </div>
+          {
+            label: "Online agents",
+            value: online.length,
+            detail: `${working.length} working · ${online.length - working.length} idle`,
+            icon: Bot
+          },
+          {
+            label: "Active tasks",
+            value: active,
+            detail: "Claimed or in progress",
+            icon: ListTodo
+          },
+          {
+            label: "Needs attention",
+            value: needingAttention.length,
+            detail: "Blocked or waiting for review",
+            icon: CircleAlert
+          },
+          {
+            label: "Completed tasks",
+            value: completed,
+            detail: `${taskCards.length} tasks in this project`,
+            icon: CheckCheck
+          }
+        ].map(({ label, value, detail, icon: Icon }) => (
+          <Card key={label} className="metric-card">
+            <CardHeader>
+              <CardDescription>{label}</CardDescription>
+              <CardAction>
+                <span className="flex size-8 items-center justify-center rounded-lg border bg-background">
+                  <Icon
+                    className="size-4 text-muted-foreground"
+                    aria-hidden="true"
+                  />
+                </span>
+              </CardAction>
+            </CardHeader>
+            <CardContent>
+              <p className="text-3xl font-semibold tracking-tight">{value}</p>
+              <p className="mt-2 text-xs text-muted-foreground">{detail}</p>
+            </CardContent>
+          </Card>
         ))}
       </div>
-      <div className="mt-8 grid gap-6 lg:grid-cols-2">
-        <section
-          className="rounded border p-5"
-          aria-labelledby="overview-tasks-heading"
-        >
-          <h2 id="overview-tasks-heading" className="font-semibold">
-            Work at a glance
-          </h2>
-          <dl className="mt-4 grid grid-cols-3 gap-3 text-sm">
-            <div>
-              <dt className="text-xs text-muted-foreground">Active</dt>
-              <dd className="mt-1 text-xl font-semibold">{active}</dd>
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              <h2>Work at a glance</h2>
+            </CardTitle>
+            <CardDescription>
+              Where your project stands right now.
+            </CardDescription>
+            <CardAction>
+              <Badge variant="outline">{taskCards.length} tasks</Badge>
+            </CardAction>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-5">
+            <div className="flex items-end justify-between">
+              <div>
+                <p className="text-3xl font-semibold tracking-tight">
+                  {completion}%
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  of tasks completed
+                </p>
+              </div>
+              <span className="text-xs text-muted-foreground">
+                {completed} of {taskCards.length}
+              </span>
             </div>
-            <div>
-              <dt className="text-xs text-muted-foreground">Blocked</dt>
-              <dd className="mt-1 text-xl font-semibold">
-                {taskCards.filter((task) => task.status === "blocked").length}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-xs text-muted-foreground">Review</dt>
-              <dd className="mt-1 text-xl font-semibold">
-                {taskCards.filter((task) => task.status === "review").length}
-              </dd>
-            </div>
-          </dl>
-          <p className="mt-4 text-xs text-muted-foreground">
-            {organization.name} · {agents.data!.agents.length} configured agent
-            {agents.data!.agents.length === 1 ? "" : "s"}
-          </p>
-        </section>
-        <section
-          className="rounded border p-5"
-          aria-labelledby="overview-current-heading"
-        >
-          <h2 id="overview-current-heading" className="font-semibold">
-            Current agent work
-          </h2>
-          {busy || blocked ? (
-            <ul className="mt-4 space-y-2 text-sm">
-              {presence
-                .data!.agents.filter((item) => item.current_task_id)
-                .map((item) => (
-                  <li key={item.agent_id} className="rounded bg-muted/40 p-2">
-                    <span className="font-medium">
-                      {agentById.get(item.agent_id)?.name ?? "Unknown agent"}
-                    </span>
-                    <span className="ml-2">
-                      {taskById.get(item.current_task_id!)?.key ??
-                        "Unknown task"}
-                      {taskById.get(item.current_task_id!)?.title
-                        ? ` · ${taskById.get(item.current_task_id!)!.title}`
-                        : ""}
-                    </span>
-                    <span className="ml-2 text-muted-foreground">
-                      {blockedIds.has(item.current_task_id!)
-                        ? "blocked"
-                        : "in progress"}
-                    </span>
+            <Progress
+              value={completion}
+              aria-label="Task completion"
+              className="h-2"
+            />
+            <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+              {[
+                {
+                  label: "Queued",
+                  value: taskCards.filter(
+                    (task) =>
+                      task.status === "backlog" || task.status === "ready"
+                  ).length
+                },
+                { label: "Active", value: active },
+                {
+                  label: "Blocked",
+                  value: taskCards.filter((task) => task.status === "blocked")
+                    .length
+                },
+                {
+                  label: "Review",
+                  value: taskCards.filter((task) => task.status === "review")
+                    .length
+                }
+              ].map(({ label, value }) => (
+                <div key={label} className="border-l-2 pl-3">
+                  <dt className="text-xs text-muted-foreground">{label}</dt>
+                  <dd className="mt-1 text-lg font-medium">{value}</dd>
+                </div>
+              ))}
+            </dl>
+          </CardContent>
+          <CardFooter>
+            <span className="text-xs text-muted-foreground">
+              {context.organization.name} ·{" "}
+              <span className="font-mono">{project.slug}</span> ·{" "}
+              {agents.data!.agents.length} configured agents
+            </span>
+          </CardFooter>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              <h2>Tasks needing attention</h2>
+            </CardTitle>
+            <CardDescription>
+              Your next decisions, in one place.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {needingAttention.length ? (
+              <ul className="flex max-h-52 flex-col divide-y overflow-auto">
+                {needingAttention.map((task) => (
+                  <li
+                    key={task.id}
+                    className="flex items-center justify-between gap-3 py-3 first:pt-0"
+                  >
+                    <div className="min-w-0">
+                      <p className="font-mono text-xs text-muted-foreground">
+                        {task.key}
+                      </p>
+                      <p
+                        className="mt-1 truncate font-medium"
+                        title={task.title}
+                      >
+                        {task.title}
+                      </p>
+                    </div>
+                    <StatusBadge status={task.status} />
                   </li>
                 ))}
-            </ul>
-          ) : (
-            <p className="mt-4 text-sm text-muted-foreground">
-              No agents are currently working on a task.
-            </p>
-          )}
-        </section>
+              </ul>
+            ) : (
+              <Empty className="min-h-40">
+                <EmptyHeader>
+                  <EmptyMedia variant="icon">
+                    <CircleCheck />
+                  </EmptyMedia>
+                  <EmptyTitle>You’re all caught up</EmptyTitle>
+                  <EmptyDescription>
+                    Nothing needs attention right now.
+                  </EmptyDescription>
+                </EmptyHeader>
+              </Empty>
+            )}
+          </CardContent>
+        </Card>
       </div>
-      <div className="mt-6 grid gap-6 lg:grid-cols-2">
-        <section
-          className="rounded border p-5"
-          aria-labelledby="overview-attention-heading"
-        >
-          <h2 id="overview-attention-heading" className="font-semibold">
-            Tasks needing attention
-          </h2>
-          {needingAttention.length ? (
-            <ul className="mt-4 space-y-2 text-sm">
-              {needingAttention.map((task) => (
-                <li
-                  key={task.id}
-                  className="flex justify-between gap-3 rounded bg-muted/40 p-2"
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              <h2>Current agent work</h2>
+            </CardTitle>
+            <CardDescription>
+              Live assignments across your connected agents.
+            </CardDescription>
+            <CardAction>
+              <Button
+                asChild
+                variant="ghost"
+                size="icon"
+                aria-label="View all agents"
+              >
+                <Link
+                  to="/projects/$projectId/agents"
+                  params={{ projectId: project.id }}
                 >
-                  <span>
-                    {task.key} · {task.title}
-                  </span>
-                  <span className="capitalize text-muted-foreground">
-                    {task.status}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="mt-4 text-sm text-muted-foreground">
-              Nothing needs attention right now.
-            </p>
-          )}
-        </section>
-        <section
-          className="rounded border p-5"
-          aria-labelledby="overview-events-heading"
-        >
-          <h2 id="overview-events-heading" className="font-semibold">
-            Recent activity
-          </h2>
-          {meaningfulEvents.length ? (
-            <ol className="mt-4 space-y-2 text-sm">
-              {meaningfulEvents.map((event) => (
-                <li key={event.id} className="rounded bg-muted/40 p-2">
-                  <span>{event.type.replace(/[._]/g, " ")}</span>
-                  <time className="ml-2 text-xs text-muted-foreground">
-                    {new Date(event.occurred_at).toLocaleString()}
-                  </time>
-                </li>
-              ))}
-            </ol>
-          ) : (
-            <p className="mt-4 text-sm text-muted-foreground">
-              No recent activity.
-            </p>
-          )}
-        </section>
+                  <ArrowUpRight />
+                </Link>
+              </Button>
+            </CardAction>
+          </CardHeader>
+          <CardContent>
+            {working.length ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Agent</TableHead>
+                    <TableHead>Task</TableHead>
+                    <TableHead>Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {working.map((item) => {
+                    const task = taskById.get(item.current_task_id!);
+                    return (
+                      <TableRow key={item.agent_id}>
+                        <TableCell>
+                          <span className="flex items-center gap-2 font-medium">
+                            <Bot className="size-4 text-muted-foreground" />
+                            {agentById.get(item.agent_id)?.name ??
+                              "Unknown agent"}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <span className="font-mono text-xs text-muted-foreground">
+                            {task?.key ?? "Unknown task"}
+                          </span>
+                          <p
+                            className="mt-1 max-w-56 truncate"
+                            title={task?.title}
+                          >
+                            {task?.title}
+                          </p>
+                        </TableCell>
+                        <TableCell>
+                          <StatusBadge status={task?.status ?? "in_progress"} />
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            ) : (
+              <Empty className="min-h-48">
+                <EmptyHeader>
+                  <EmptyMedia variant="icon">
+                    <Bot />
+                  </EmptyMedia>
+                  <EmptyTitle>Ready for the next task</EmptyTitle>
+                  <EmptyDescription>
+                    No agents are currently working on a task.
+                  </EmptyDescription>
+                </EmptyHeader>
+              </Empty>
+            )}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              <h2>Recent activity</h2>
+            </CardTitle>
+            <CardDescription>
+              The latest updates from your project.
+            </CardDescription>
+            <CardAction>
+              <Button
+                asChild
+                variant="ghost"
+                size="icon"
+                aria-label="View all activity"
+              >
+                <Link
+                  to="/projects/$projectId/activity"
+                  params={{ projectId: project.id }}
+                >
+                  <ArrowUpRight />
+                </Link>
+              </Button>
+            </CardAction>
+          </CardHeader>
+          <CardContent>
+            {meaningfulEvents.length ? (
+              <ol className="flex flex-col gap-5">
+                {meaningfulEvents.map((event) => (
+                  <li key={event.id} className="flex items-start gap-3">
+                    <span className="flex size-7 shrink-0 items-center justify-center rounded-full border">
+                      <Activity className="size-3.5 text-muted-foreground" />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-sm first-letter:uppercase">
+                        {event.type.replace(/[._]/g, " ")}
+                      </p>
+                      <time
+                        dateTime={event.occurred_at}
+                        className="mt-1 block text-xs text-muted-foreground"
+                      >
+                        {new Date(event.occurred_at).toLocaleString()}
+                      </time>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <Empty className="min-h-48">
+                <EmptyHeader>
+                  <EmptyMedia variant="icon">
+                    <Timer />
+                  </EmptyMedia>
+                  <EmptyTitle>A fresh start</EmptyTitle>
+                  <EmptyDescription>No recent activity.</EmptyDescription>
+                </EmptyHeader>
+              </Empty>
+            )}
+          </CardContent>
+        </Card>
       </div>
     </section>
   );
