@@ -414,9 +414,6 @@ function DocumentTreeItem({
           <span className="min-w-0 flex-1 truncate font-medium">
             {node.name}
           </span>
-          <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
-            r{node.document.current_revision}
-          </span>
         </button>
         {onStartRename ? (
           <Button
@@ -998,20 +995,26 @@ function DocumentEditor({
       aria-labelledby="document-editor-heading"
     >
       <div className="flex shrink-0 flex-wrap items-start justify-between gap-3 border-b px-5 py-4">
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           {rename && !archived ? (
-            <div className="flex flex-wrap gap-2">
+            <div className="flex items-center gap-2">
               <Input
                 aria-label="Document path"
+                className="min-w-0 flex-1"
                 value={path}
                 onChange={(event) => setPath(event.target.value)}
               />
-              <Button size="sm" onClick={() => void renameDocument()}>
+              <Button
+                size="sm"
+                className="shrink-0"
+                onClick={() => void renameDocument()}
+              >
                 Rename
               </Button>
               <Button
                 size="sm"
                 variant="ghost"
+                className="shrink-0"
                 onClick={() => {
                   setRename(false);
                   setPath(current.document.path);
@@ -1029,14 +1032,6 @@ function DocumentEditor({
               {current.document.path}
             </h2>
           )}
-          <p
-            role="status"
-            aria-live="polite"
-            className="mt-1 text-xs text-muted-foreground"
-          >
-            {status}
-            {archived ? " · Archived" : ""}
-          </p>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           <DocumentHistory
