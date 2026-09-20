@@ -5,6 +5,60 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  Plus,
+  Search,
+  LayoutGrid,
+  List,
+  MessageSquare,
+  ListTodo
+} from "lucide-react";
+import { PageState, StatusBadge } from "@/components/dashboard/page";
+import { TopToolbarActions } from "@/components/app-shell/app-shell";
+import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription
+} from "@/components/ui/dialog";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription
+} from "@/components/ui/sheet";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  Table,
+  TableHeader,
+  TableHead,
+  TableRow,
+  TableBody,
+  TableCell
+} from "@/components/ui/table";
+import {
+  Empty,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+  EmptyDescription
+} from "@/components/ui/empty";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  NativeSelect,
+  NativeSelectOption
+} from "@/components/ui/native-select";
+import {
+  InputGroup,
+  InputGroupInput,
+  InputGroupAddon
+} from "@/components/ui/input-group";
+import {
   coordinationKeys,
   taskCommentsQueryOptions,
   taskDependenciesQueryOptions,
@@ -38,6 +92,9 @@ function TasksRoute() {
   const { api, project } = Route.useRouteContext();
   const queryClient = useQueryClient();
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
   const [notice, setNotice] = useState<string | null>(null);
   const tasks = useQuery(tasksQueryOptions(api, projectId));
   const taskId = selectedTaskId ?? "00000000-0000-4000-8000-000000000000";
@@ -73,6 +130,7 @@ function TasksRoute() {
       status: HumanTaskStatus;
     }) => api.createTask(projectId, input, crypto.randomUUID()),
     onSuccess: async (task) => {
+      setCreating(false);
       setSelectedTaskId(task.id);
       await refresh();
     }
@@ -157,126 +215,318 @@ function TasksRoute() {
         onRetry={refresh}
       />
     );
-  const grouped = boardStatuses.map((status) => ({
-    status,
-    tasks: tasks.data.tasks.filter((task) => task.status === status)
-  }));
+  const filtered = tasks.data.tasks.filter(
+    (task) =>
+      (statusFilter === "all" || task.status === statusFilter) &&
+      `${task.key} ${task.title}`
+        .toLowerCase()
+        .includes(search.trim().toLowerCase())
+  );
+  const grouped = boardStatuses
+    .filter((status) => statusFilter === "all" || status === statusFilter)
+    .map((status) => ({
+      status,
+      tasks: filtered.filter((task) => task.status === status)
+    }));
+  const archived = project?.project.status === "archived";
+  const selectTask = (id: string) => {
+    setSelectedTaskId(id);
+    setNotice(null);
+  };
+  const emptyState = (
+    <Empty className="min-h-72 border">
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <ListTodo />
+        </EmptyMedia>
+        <EmptyTitle>
+          {tasks.data.tasks.length
+            ? "No matching tasks"
+            : "Your next project starts here"}
+        </EmptyTitle>
+        <EmptyDescription>
+          {tasks.data.tasks.length
+            ? "Try a different search or status filter."
+            : "No tasks yet. Create your first task to get started."}
+        </EmptyDescription>
+      </EmptyHeader>
+    </Empty>
+  );
   return (
-    <div
-      className="mx-auto w-full max-w-6xl p-6 md:p-8"
-      aria-labelledby="tasks-heading"
-    >
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1
-            id="tasks-heading"
-            tabIndex={-1}
-            className="text-2xl font-semibold tracking-tight"
-          >
-            Tasks
-          </h1>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Create and coordinate project work.
-          </p>
-        </div>
-        {project?.project.status === "archived" ? (
-          <p className="rounded border px-3 py-2 text-sm text-muted-foreground">
-            This project is archived and read-only.
-          </p>
-        ) : null}
-      </div>
-      {notice ? (
-        <p
-          role="alert"
-          className="mt-5 rounded border border-amber-500/50 px-3 py-2 text-sm"
+    <section className="dashboard-page" aria-label="Project tasks">
+      <TopToolbarActions>
+        <Button
+          disabled={archived}
+          onClick={() => {
+            create.reset();
+            setCreating(true);
+          }}
         >
-          {notice}
-        </p>
+          <Plus data-icon="inline-start" />
+          New task
+        </Button>
+      </TopToolbarActions>
+      {archived ? (
+        <Alert role="status">
+          <AlertDescription>
+            This project is archived and read-only.
+          </AlertDescription>
+        </Alert>
       ) : null}
-      <CreateTaskForm
-        disabled={project?.project.status === "archived" || create.isPending}
-        error={create.error ? message(create.error) : null}
-        onCreate={(input) => create.mutate(input)}
-      />
-      {tasks.data.tasks.length === 0 ? (
-        <p className="mt-8 rounded border border-dashed p-8 text-center text-sm text-muted-foreground">
-          No tasks yet. Create the first task above.
-        </p>
-      ) : (
-        <div className="mt-8 grid gap-4 xl:grid-cols-4">
-          {grouped.map(({ status, tasks: column }) => (
-            <section
-              key={status}
-              aria-labelledby={`status-${status}`}
-              className="min-h-32 rounded border bg-card/30 p-3"
-            >
-              <h2
-                id={`status-${status}`}
-                className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
-              >
-                {status.replace("_", " ")}
-              </h2>
-              <div className="mt-3 space-y-2">
-                {column.map((task) => (
-                  <button
-                    type="button"
-                    key={task.id}
-                    onClick={() => {
-                      setSelectedTaskId(task.id);
-                      setNotice(null);
-                    }}
-                    className="w-full rounded border p-3 text-left hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+      {notice && !selectedTaskId ? (
+        <Alert>
+          <AlertDescription>{notice}</AlertDescription>
+        </Alert>
+      ) : null}
+      <Tabs defaultValue="board" className="gap-5">
+        <div className="flex flex-wrap items-center gap-3">
+          <TabsList aria-label="Task view">
+            <TabsTrigger value="board">
+              <LayoutGrid />
+              Board
+            </TabsTrigger>
+            <TabsTrigger value="list">
+              <List />
+              List
+            </TabsTrigger>
+          </TabsList>
+          <InputGroup className="w-full sm:ml-auto sm:w-60">
+            <InputGroupInput
+              aria-label="Search tasks"
+              placeholder="Search tasks…"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+            <InputGroupAddon>
+              <Search />
+            </InputGroupAddon>
+          </InputGroup>
+          <NativeSelect
+            aria-label="Filter task status"
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value)}
+          >
+            <NativeSelectOption value="all">All statuses</NativeSelectOption>
+            {boardStatuses.map((status) => (
+              <NativeSelectOption key={status} value={status}>
+                {status.replaceAll("_", " ")}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+          <span className="text-xs text-muted-foreground">
+            {filtered.length} of {tasks.data.tasks.length} tasks
+          </span>
+        </div>
+
+        <TabsContent value="board">
+          {!filtered.length ? (
+            emptyState
+          ) : (
+            <>
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                {grouped.map(({ status, tasks: column }) => (
+                  <section
+                    key={status}
+                    aria-labelledby={`status-${status}`}
+                    className="min-w-0 rounded-xl bg-muted/50 p-3"
                   >
-                    <span className="font-mono text-xs text-muted-foreground">
-                      {task.key}
-                    </span>
-                    <span className="mt-1 block text-sm font-medium">
-                      {task.title}
-                    </span>
-                    <span className="mt-2 block text-xs capitalize text-muted-foreground">
-                      {task.priority} priority · v{task.version}
-                    </span>
-                  </button>
+                    <div className="mb-3 flex items-center justify-between gap-2">
+                      <h2
+                        id={`status-${status}`}
+                        className="text-sm font-medium capitalize"
+                      >
+                        {status.replaceAll("_", " ")}
+                      </h2>
+                      <Badge variant="outline">{column.length}</Badge>
+                    </div>
+                    <div className="flex min-h-24 flex-col gap-3">
+                      {column.map((task) => (
+                        <Card
+                          size="sm"
+                          key={task.id}
+                          className="relative transition-shadow hover:ring-foreground/25"
+                        >
+                          <CardHeader>
+                            <CardTitle>
+                              <button
+                                type="button"
+                                onClick={() => selectTask(task.id)}
+                                className="w-full text-left after:absolute after:inset-0"
+                                aria-label={`${task.key} ${task.title}`}
+                              >
+                                <span className="block font-mono text-xs font-normal text-muted-foreground">
+                                  {task.key}
+                                </span>
+                                <span className="mt-2 block text-sm font-medium leading-relaxed">
+                                  {task.title}
+                                </span>
+                              </button>
+                            </CardTitle>
+                          </CardHeader>
+                          <CardContent className="flex items-center justify-between gap-2">
+                            <Badge
+                              variant={
+                                task.priority === "urgent"
+                                  ? "destructive"
+                                  : "secondary"
+                              }
+                            >
+                              {task.priority} priority
+                            </Badge>
+                            {task.comment_count > 0 ? (
+                              <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                                <MessageSquare className="size-3" />
+                                {task.comment_count}
+                              </span>
+                            ) : null}
+                          </CardContent>
+                        </Card>
+                      ))}
+                      {!column.length ? (
+                        <p className="py-6 text-center text-xs text-muted-foreground">
+                          No tasks
+                        </p>
+                      ) : null}
+                    </div>
+                  </section>
                 ))}
               </div>
-            </section>
-          ))}
-        </div>
-      )}
-      {selectedTaskId && selected.isPending ? (
-        <p role="status" className="mt-8 text-sm text-muted-foreground">
-          Loading task details…
-        </p>
-      ) : null}
-      {selectedTaskId && selected.isError ? (
-        <p role="alert" className="mt-8 text-sm text-destructive">
-          Unable to load this task: {message(selected.error)}
-        </p>
-      ) : null}
-      {selectedTaskId && selected.data ? (
-        <TaskDetail
-          key={`${selected.data.id}:${selected.data.version}`}
-          task={selected.data}
-          comments={comments.data?.comments ?? []}
-          dependencies={dependencies.data}
-          archived={project?.project.status === "archived"}
-          saving={update.isPending}
-          moving={move.isPending}
-          commenting={addComment.isPending}
-          onUpdate={(input) => update.mutate({ id: selected.data!.id, input })}
-          onMove={(status) =>
-            move.mutate({
-              id: selected.data!.id,
-              status,
-              version: selected.data!.version
-            })
-          }
-          onComment={(body) =>
-            addComment.mutate({ id: selected.data!.id, body })
-          }
-        />
-      ) : null}
-    </div>
+            </>
+          )}
+        </TabsContent>
+        <TabsContent value="list">
+          {!filtered.length ? (
+            emptyState
+          ) : (
+            <div className="overflow-hidden rounded-xl border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="pl-4">Task</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Priority</TableHead>
+                    <TableHead className="text-right pr-4">Updated</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filtered.map((task) => (
+                    <TableRow key={task.id}>
+                      <TableCell className="pl-4">
+                        <button
+                          className="flex flex-col gap-1 py-2 text-left"
+                          onClick={() => selectTask(task.id)}
+                        >
+                          <span className="font-mono text-xs text-muted-foreground">
+                            {task.key}
+                          </span>
+                          <span className="max-w-96 truncate font-medium">
+                            {task.title}
+                          </span>
+                        </button>
+                      </TableCell>
+                      <TableCell>
+                        <StatusBadge status={task.status} />
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={
+                            task.priority === "urgent"
+                              ? "destructive"
+                              : "outline"
+                          }
+                        >
+                          {task.priority}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="pr-4 text-right text-xs text-muted-foreground">
+                        {new Date(task.updated_at).toLocaleDateString()}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </TabsContent>
+      </Tabs>
+      <Dialog
+        open={creating}
+        onOpenChange={(open) => {
+          if (!create.isPending) setCreating(open);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create task</DialogTitle>
+            <DialogDescription>
+              Give your team a clear next step.
+            </DialogDescription>
+          </DialogHeader>
+          <CreateTaskForm
+            disabled={archived || create.isPending}
+            error={create.error ? message(create.error) : null}
+            onCreate={(input) => create.mutate(input)}
+          />
+        </DialogContent>
+      </Dialog>
+      <Sheet
+        open={selectedTaskId !== null}
+        onOpenChange={(open) => {
+          if (!open) setSelectedTaskId(null);
+        }}
+      >
+        <SheetContent className="overflow-y-auto data-[side=right]:w-full data-[side=right]:sm:max-w-2xl">
+          <SheetHeader>
+            <SheetTitle>Task details</SheetTitle>
+            <SheetDescription>
+              Review, update, and discuss this task.
+            </SheetDescription>
+          </SheetHeader>
+          {notice ? (
+            <Alert className="mx-4 w-auto">
+              <AlertDescription>{notice}</AlertDescription>
+            </Alert>
+          ) : null}
+          {selected.isPending ? (
+            <p role="status" className="p-5 text-sm text-muted-foreground">
+              Loading task details…
+            </p>
+          ) : null}
+          {selected.isError ? (
+            <Alert variant="destructive" className="mx-4 w-auto">
+              <AlertDescription>
+                Unable to load this task: {message(selected.error)}
+              </AlertDescription>
+            </Alert>
+          ) : null}
+          {selected.data ? (
+            <TaskDetail
+              key={`${selected.data.id}:${selected.data.version}`}
+              task={selected.data}
+              comments={comments.data?.comments ?? []}
+              dependencies={dependencies.data}
+              archived={archived}
+              saving={update.isPending}
+              moving={move.isPending}
+              commenting={addComment.isPending}
+              onUpdate={(input) =>
+                update.mutate({ id: selected.data!.id, input })
+              }
+              onMove={(status) =>
+                move.mutate({
+                  id: selected.data!.id,
+                  status,
+                  version: selected.data!.version
+                })
+              }
+              onComment={(body) =>
+                addComment.mutate({ id: selected.data!.id, body })
+              }
+            />
+          ) : null}
+        </SheetContent>
+      </Sheet>
+    </section>
   );
 }
 
@@ -300,7 +550,7 @@ function CreateTaskForm({
   const [status, setStatus] = useState<HumanTaskStatus>("backlog");
   return (
     <form
-      className="mt-6 rounded border p-4"
+      className="mt-2"
       onSubmit={(event) => {
         event.preventDefault();
         if (!title.trim()) return;
@@ -310,82 +560,84 @@ function CreateTaskForm({
           priority,
           status
         });
-        setTitle("");
-        setDescription("");
       }}
-      aria-labelledby="create-task-heading"
+      aria-label="Create task"
     >
-      <h2 id="create-task-heading" className="text-sm font-semibold">
-        Create task
-      </h2>
-      <div className="mt-3 grid gap-3 md:grid-cols-4 md:items-end">
-        <div className="md:col-span-2">
-          <Label htmlFor="task-title">Title</Label>
+      <FieldGroup>
+        <Field>
+          <FieldLabel htmlFor="task-title">Title</FieldLabel>
           <Input
             id="task-title"
             value={title}
             onChange={(event) => setTitle(event.target.value)}
             disabled={disabled}
             required
-            className="mt-2"
+            maxLength={500}
+            placeholder="What needs to be done?"
           />
-        </div>
-        <div>
-          <Label htmlFor="task-priority">Priority</Label>
-          <select
-            id="task-priority"
-            value={priority}
-            onChange={(event) =>
-              setPriority(event.target.value as TaskPriority)
-            }
-            disabled={disabled}
-            className="mt-2 h-8 w-full rounded-lg border border-input bg-background px-2 text-sm"
-          >
-            {priorities.map((item) => (
-              <option key={item} value={item}>
-                {item}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <Label htmlFor="task-status">Status</Label>
-          <select
-            id="task-status"
-            value={status}
-            onChange={(event) =>
-              setStatus(event.target.value as HumanTaskStatus)
-            }
-            disabled={disabled}
-            className="mt-2 h-8 w-full rounded-lg border border-input bg-background px-2 text-sm"
-          >
-            {statuses.map((item) => (
-              <option key={item} value={item}>
-                {item.replace("_", " ")}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="md:col-span-3">
-          <Label htmlFor="task-description">Description (Markdown)</Label>
-          <textarea
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="task-description">
+            Description (Markdown)
+          </FieldLabel>
+          <Textarea
             id="task-description"
             value={description}
             onChange={(event) => setDescription(event.target.value)}
             disabled={disabled}
-            rows={3}
-            className="mt-2 w-full rounded-lg border border-input bg-transparent p-2 text-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+            rows={4}
+            placeholder="Add context, requirements, or a definition of done."
           />
+        </Field>
+        <div className="grid grid-cols-2 gap-4">
+          <Field>
+            <FieldLabel htmlFor="task-priority">Priority</FieldLabel>
+            <NativeSelect
+              id="task-priority"
+              value={priority}
+              onChange={(event) =>
+                setPriority(event.target.value as TaskPriority)
+              }
+              disabled={disabled}
+            >
+              {priorities.map((item) => (
+                <NativeSelectOption key={item} value={item}>
+                  {item}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="task-status">Status</FieldLabel>
+            <NativeSelect
+              id="task-status"
+              value={status}
+              onChange={(event) =>
+                setStatus(event.target.value as HumanTaskStatus)
+              }
+              disabled={disabled}
+            >
+              {statuses.map((item) => (
+                <NativeSelectOption key={item} value={item}>
+                  {item.replaceAll("_", " ")}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          </Field>
         </div>
-        <Button type="submit" disabled={disabled || !title.trim()}>
-          Create task
+        {error ? (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        ) : null}
+        <Button
+          type="submit"
+          disabled={disabled || !title.trim()}
+          className="self-end"
+        >
+          {disabled ? "Creating…" : "Create task"}
         </Button>
-      </div>
-      {error ? (
-        <p role="alert" className="mt-3 text-sm text-destructive">
-          {error}
-        </p>
-      ) : null}
+      </FieldGroup>
     </form>
   );
 }
@@ -429,10 +681,7 @@ function TaskDetail({
   const [comment, setComment] = useState("");
   const claimed = task.status === "claimed";
   return (
-    <section
-      className="mt-8 rounded border p-5"
-      aria-labelledby="task-detail-heading"
-    >
+    <section className="p-5 pt-0" aria-labelledby="task-detail-heading">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="font-mono text-xs text-muted-foreground">
@@ -447,19 +696,18 @@ function TaskDetail({
           </h2>
         </div>
         {!claimed ? (
-          <select
+          <NativeSelect
             aria-label="Move task status"
             value={task.status}
             disabled={archived || moving}
             onChange={(event) => onMove(event.target.value as HumanTaskStatus)}
-            className="h-8 rounded-lg border border-input bg-background px-2 text-sm"
           >
             {statuses.map((status) => (
-              <option key={status} value={status}>
+              <NativeSelectOption key={status} value={status}>
                 {status.replace("_", " ")}
-              </option>
+              </NativeSelectOption>
             ))}
-          </select>
+          </NativeSelect>
         ) : (
           <p className="rounded bg-muted px-2 py-1 text-xs">
             Claimed by an agent
@@ -493,32 +741,32 @@ function TaskDetail({
           <Label htmlFor="detail-description" className="mt-4">
             Description (Markdown)
           </Label>
-          <textarea
+          <Textarea
             id="detail-description"
             value={description}
             disabled={archived || claimed || saving}
             onChange={(event) => setDescription(event.target.value)}
             rows={5}
-            className="mt-2 w-full rounded-lg border border-input bg-transparent p-2 text-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+            className="mt-2"
           />
           <Label htmlFor="detail-priority" className="mt-4">
             Priority
           </Label>
-          <select
+          <NativeSelect
             id="detail-priority"
             value={priority}
             disabled={archived || claimed || saving}
             onChange={(event) =>
               setPriority(event.target.value as TaskPriority)
             }
-            className="mt-2 h-8 w-full rounded-lg border border-input bg-background px-2 text-sm"
+            className="mt-2 w-full"
           >
             {priorities.map((item) => (
-              <option key={item} value={item}>
+              <NativeSelectOption key={item} value={item}>
                 {item}
-              </option>
+              </NativeSelectOption>
             ))}
-          </select>
+          </NativeSelect>
           <Button
             className="mt-3"
             disabled={archived || claimed || saving || !title.trim()}
@@ -546,7 +794,7 @@ function TaskDetail({
             {dependencies?.blocks.map((item) => item.key).join(", ") || "None"}
           </p>
           <h3 className="mt-5 text-sm font-semibold">Comments</h3>
-          <div className="mt-2 space-y-2">
+          <div className="mt-2 flex flex-col gap-2">
             {comments.length ? (
               comments.map((item) => (
                 <p key={item.id} className="rounded bg-muted/50 p-2 text-sm">
@@ -601,29 +849,11 @@ function TaskMessage({
   onRetry?: () => unknown;
 }) {
   return (
-    <div
-      className="mx-auto w-full max-w-3xl p-6 md:p-8"
-      aria-labelledby="task-message-heading"
-    >
-      <h1
-        id="task-message-heading"
-        tabIndex={-1}
-        className="text-2xl font-semibold"
-      >
-        {title}
-      </h1>
-      <p role="status" className="mt-3 text-sm text-muted-foreground">
-        {message}
-      </p>
-      {onRetry ? (
-        <Button
-          className="mt-5"
-          variant="outline"
-          onClick={() => void onRetry()}
-        >
-          Retry
-        </Button>
-      ) : null}
-    </div>
+    <PageState
+      title={title}
+      message={message}
+      error={Boolean(onRetry)}
+      onRetry={onRetry}
+    />
   );
 }

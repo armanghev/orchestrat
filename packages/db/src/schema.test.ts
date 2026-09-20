@@ -54,7 +54,7 @@ test("agent lifecycle idempotency is project/agent scoped and hash-only", async 
       "utf8"
     )
   ) as { entries: { tag: string }[] };
-  assert.equal(journal.entries.at(-1)?.tag, "0011_agent_task_authors");
+  assert.equal(journal.entries.at(-1)?.tag, "0012_document_folders");
 });
 
 test("CLI credentials can be user-scoped after the authorization migration", async () => {

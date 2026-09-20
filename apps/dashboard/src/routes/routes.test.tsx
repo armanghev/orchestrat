@@ -17,31 +17,62 @@ vi.mock("@/features/documents/markdown-editor", () => ({
       markdown: string;
       readOnly: boolean;
       onChange: (markdown: string, initialMarkdownNormalize?: boolean) => void;
+      imageUploadHandler: (file: File) => Promise<string | null>;
     }
-  >(function TestMarkdownEditor({ markdown, readOnly, onChange }, ref) {
+  >(function TestMarkdownEditor(
+    { markdown, readOnly, onChange, imageUploadHandler },
+    ref
+  ) {
     const [value, setValue] = useState(markdown);
-    useImperativeHandle(ref, () => ({
-      setMarkdown(next) {
-        setValue(next);
-        onChange(next);
-      }
-    }), [onChange]);
+    useImperativeHandle(
+      ref,
+      () => ({
+        setMarkdown(next) {
+          setValue(next);
+          onChange(next);
+        }
+      }),
+      [onChange]
+    );
     return (
-      <textarea
-        aria-label="Markdown content"
-        value={value}
-        disabled={readOnly}
-        onChange={(event) => {
-          setValue(event.target.value);
-          onChange(event.target.value);
-        }}
-      />
+      <>
+        <textarea
+          aria-label="Markdown content"
+          value={value}
+          disabled={readOnly}
+          onChange={(event) => {
+            setValue(event.target.value);
+            onChange(event.target.value);
+          }}
+        />
+        <input
+          type="file"
+          aria-label="Insert image"
+          disabled={readOnly}
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (!file) return;
+            void imageUploadHandler(file).then((source) => {
+              if (!source) return;
+              const next = `![${file.name}](${source})`;
+              setValue(next);
+              onChange(next);
+            });
+          }}
+        />
+      </>
     );
   })
 }));
 
 vi.mock("@/features/documents/document-diff", () => ({
-  DocumentDiff: ({ original, current }: { original: string; current: string }) => (
+  DocumentDiff: ({
+    original,
+    current
+  }: {
+    original: string;
+    current: string;
+  }) => (
     <div aria-label="Revision comparison">
       <textarea aria-label="Original revision" value={original} readOnly />
       <textarea aria-label="Current saved revision" value={current} readOnly />
@@ -182,7 +213,7 @@ describe("dashboard routes", () => {
                 project_id: expected.id,
                 session_id: "00000000-0000-4000-8000-000000000010",
                 status: "online",
-                last_heartbeat_at: "2024-01-01T00:00:00.000Z",
+                last_heartbeat_at: new Date().toISOString(),
                 current_task_id: currentTask.id
               }
             ]
@@ -205,7 +236,8 @@ describe("dashboard routes", () => {
     });
     expect(await screen.findByText("Online agents")).toBeVisible();
     expect(screen.getByText("Codex")).toBeVisible();
-    expect(screen.getByText("DASH-1 · Compile release")).toBeVisible();
+    expect(screen.getByText("DASH-1")).toBeVisible();
+    expect(screen.getByText("Compile release")).toBeVisible();
     expect(screen.getByText("1", { selector: "dd" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Overview" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Tasks" })).toBeVisible();
@@ -253,6 +285,9 @@ describe("dashboard routes", () => {
       handlers: taskHandlers
     });
     const user = userEvent.setup();
+    const newTask = await screen.findByRole("button", { name: "New task" });
+    expect(newTask.closest("[data-slot='top-toolbar']")).toBeVisible();
+    await user.click(newTask);
     await user.type(await screen.findByLabelText("Title"), "Created task");
     await user.click(screen.getByRole("button", { name: "Create task" }));
     expect(await screen.findByText("DASH-1")).toBeVisible();
@@ -284,6 +319,25 @@ describe("dashboard routes", () => {
     });
     expect(await screen.findByText("Agent-owned task")).toBeVisible();
     expect(screen.getByRole("heading", { name: "claimed" })).toBeVisible();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("tab", { name: "List" }));
+    expect(screen.getByRole("table")).toHaveTextContent("Agent-owned task");
+    await user.type(
+      screen.getByRole("textbox", { name: "Search tasks" }),
+      "missing"
+    );
+    expect(screen.getByText("No matching tasks")).toBeVisible();
+    await user.clear(screen.getByRole("textbox", { name: "Search tasks" }));
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Filter task status" }),
+      "done"
+    );
+    expect(screen.getByText("No matching tasks")).toBeVisible();
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Filter task status" }),
+      "claimed"
+    );
+    expect(screen.getByRole("table")).toHaveTextContent("Agent-owned task");
   });
 
   it("refetches and replaces stale task data after a version conflict", async () => {
@@ -401,6 +455,160 @@ describe("dashboard routes", () => {
     expect(screen.getAllByText("Task Updated")).toHaveLength(1);
   });
 
+  it("nests documents in collapsible path folders", async () => {
+    const expectedProject = project();
+    const root = documentDetail({
+      document: { ...documentDetail().document, project_id: expectedProject.id }
+    });
+    const setup = {
+      ...root.document,
+      id: "00000000-0000-4000-8000-000000000009",
+      path: "guides/setup.md"
+    };
+    const security = {
+      ...root.document,
+      id: "00000000-0000-4000-8000-00000000000a",
+      path: "guides/advanced/security.md"
+    };
+    const listed = [root.document, setup, security];
+    let createdPath = "";
+    let renamedPath = "";
+    const documentHandlers = [
+      http.get(
+        `http://localhost:8801/api/v1/projects/${expectedProject.id}/documents`,
+        () =>
+          HttpResponse.json({
+            documents: listed,
+            folders: [
+              {
+                id: "00000000-0000-4000-8000-00000000000b",
+                project_id: expectedProject.id,
+                path: "empty",
+                created_at: root.document.created_at
+              }
+            ],
+            next_cursor: null
+          })
+      ),
+      http.post(
+        `http://localhost:8801/api/v1/projects/${expectedProject.id}/documents`,
+        async ({ request }) => {
+          createdPath = ((await request.json()) as { path: string }).path;
+          return HttpResponse.json(
+            {
+              ...root,
+              document: {
+                ...root.document,
+                id: "00000000-0000-4000-8000-00000000000c",
+                path: createdPath
+              }
+            },
+            { status: 201 }
+          );
+        }
+      ),
+      http.patch(
+        `http://localhost:8801/api/v1/documents/${setup.id}/path`,
+        async ({ request }) => {
+          const body = (await request.json()) as {
+            path: string;
+            expected_revision: number;
+          };
+          renamedPath = body.path;
+          expect(body.expected_revision).toBe(setup.current_revision);
+          return HttpResponse.json({
+            document: { ...setup, path: renamedPath }
+          });
+        }
+      ),
+      http.get(
+        "http://localhost:8801/api/v1/documents/:documentId",
+        ({ params }) => {
+          const document = listed.find((item) => item.id === params.documentId);
+          return document
+            ? HttpResponse.json({
+                document,
+                revision: {
+                  ...root.revision,
+                  document_id: document.id
+                }
+              })
+            : HttpResponse.json({}, { status: 404 });
+        }
+      ),
+      ...handlers
+    ];
+    await renderDashboardRoute({
+      path: `/projects/${expectedProject.id}/documents`,
+      auth: new FakeAuthClient({
+        status: "signedIn",
+        identityKey: "test-user"
+      }),
+      platform: platform(),
+      handlers: documentHandlers
+    });
+
+    const user = userEvent.setup();
+    await screen.findByRole("button", {
+      name: "Expand guides folder"
+    });
+    expect(
+      screen.getByRole("button", { name: "Expand empty folder" })
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Create folder" })).toBeVisible();
+    expect(screen.queryByText("setup.md")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Create document" }));
+    const unnamed = screen.getByRole("textbox", {
+      name: "New document name"
+    });
+    expect(unnamed).toHaveValue("");
+    await user.keyboard("{Escape}");
+    expect(
+      screen.queryByRole("textbox", { name: "New document name" })
+    ).not.toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", { name: "Create document in guides" })
+    );
+    const newPath = screen.getByRole("textbox", {
+      name: "New document name in guides"
+    });
+    expect(newPath).toHaveValue("");
+    await user.type(newPath, "quickstart{Enter}");
+    await waitFor(() => expect(createdPath).toBe("guides/quickstart.md"));
+
+    const openGuides = screen.getByRole("button", {
+      name: "Collapse guides folder"
+    });
+    expect(openGuides.closest("li")).toContainElement(
+      screen.getByText("setup.md")
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Rename guides/setup.md" })
+    );
+    const rename = screen.getByRole("textbox", {
+      name: "Rename guides/setup.md"
+    });
+    await user.clear(rename);
+    await user.type(rename, "install{Enter}");
+    await waitFor(() => expect(renamedPath).toBe("guides/install.md"));
+
+    const advanced = screen.getByRole("button", {
+      name: "Expand guides/advanced folder"
+    });
+    expect(screen.queryByText("security.md")).not.toBeInTheDocument();
+
+    await user.click(advanced);
+    expect(advanced.closest("li")).toContainElement(
+      screen.getByText("security.md")
+    );
+
+    await user.click(openGuides);
+    expect(openGuides).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("setup.md")).not.toBeInTheDocument();
+  });
+
   it("preserves an unsaved document draft after conflict and shows summary history", async () => {
     const expectedProject = project();
     const initial = documentDetail({
@@ -506,10 +714,16 @@ describe("dashboard routes", () => {
     await user.click(screen.getByRole("button", { name: "Save mine" }));
     await waitFor(() => expect(patchRequests).toBe(2));
     expect(screen.getByDisplayValue("Unsaved draft")).toBeVisible();
-    expect(screen.queryByRole("button", { name: /^Revision 1\b/ })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^Revision 1\b/ })
+    ).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "History" }));
-    expect(await screen.findByRole("dialog", { name: "Document history" })).toBeVisible();
-    await user.click(await screen.findByRole("button", { name: /^Revision 1\b/ }));
+    expect(
+      await screen.findByRole("dialog", { name: "Document history" })
+    ).toBeVisible();
+    await user.click(
+      await screen.findByRole("button", { name: /^Revision 1\b/ })
+    );
     expect(await screen.findByLabelText("Original revision")).toHaveValue(
       "Initial content"
     );
@@ -540,7 +754,8 @@ describe("dashboard routes", () => {
     const documentHandlers = [
       http.get(
         `http://localhost:8801/api/v1/projects/${expectedProject.id}/documents`,
-        () => HttpResponse.json({ documents: [seed.document], next_cursor: null })
+        () =>
+          HttpResponse.json({ documents: [seed.document], next_cursor: null })
       ),
       http.get(
         `http://localhost:8801/api/v1/documents/${seed.document.id}`,
@@ -555,16 +770,21 @@ describe("dashboard routes", () => {
               { error: { code: "TEMPORARY" } },
               { status: 500 }
             );
-          const older = new URL(request.url).searchParams.get("cursor") === "older";
+          const older =
+            new URL(request.url).searchParams.get("cursor") === "older";
           if (older && ++olderRequests === 1)
-            return HttpResponse.json({ error: { code: "TEMPORARY" } }, { status: 500 });
+            return HttpResponse.json(
+              { error: { code: "TEMPORARY" } },
+              { status: 500 }
+            );
           return HttpResponse.json({
-            revisions: (older ? revisions.slice(3) : [
-              { ...seed.revision, revision_number: 7 },
-              ...revisions.slice(0, 3)
-            ]).map(
-              revisionSummary
-            ),
+            revisions: (older
+              ? revisions.slice(3)
+              : [
+                  { ...seed.revision, revision_number: 7 },
+                  ...revisions.slice(0, 3)
+                ]
+            ).map(revisionSummary),
             next_cursor: older ? null : "older"
           });
         }
@@ -588,47 +808,174 @@ describe("dashboard routes", () => {
     ];
     await renderDashboardRoute({
       path: `/projects/${expectedProject.id}/documents`,
-      auth: new FakeAuthClient({ status: "signedIn", identityKey: "test-user" }),
+      auth: new FakeAuthClient({
+        status: "signedIn",
+        identityKey: "test-user"
+      }),
       platform: platform(),
       handlers: documentHandlers
     });
     const user = userEvent.setup();
     const editor = await screen.findByLabelText("Markdown content");
-    expect(screen.queryByRole("button", { name: /^Revision 5\b/ })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^Revision 5\b/ })
+    ).not.toBeInTheDocument();
     await user.clear(editor);
     await user.type(editor, "Unsaved draft");
     await user.click(screen.getByRole("button", { name: "History" }));
 
-    const dialog = await screen.findByRole("dialog", { name: "Document history" });
+    const dialog = await screen.findByRole("dialog", {
+      name: "Document history"
+    });
     expect(dialog).toHaveTextContent(
       "Unsaved draft changes are excluded. Comparisons use the current saved version."
     );
     expect(await screen.findByText("Could not load history.")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Retry" }));
-    const newestPrior = await screen.findByRole("button", { name: /^Revision 5\b/ });
+    const newestPrior = await screen.findByRole("button", {
+      name: /^Revision 5\b/
+    });
+    expect(screen.getByRole("list", { name: /revisions$/ })).toBeVisible();
     expect(newestPrior).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: /^Revision 6\b/ })).toBeDisabled();
-    expect(screen.queryByRole("button", { name: /^Revision 7\b/ })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^Revision 6\b/ })
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^Revision 7\b/ })
+    ).not.toBeInTheDocument();
     expect(await screen.findByLabelText("Original revision")).toHaveValue(
       "Saved content 5"
     );
+    expect(
+      screen.getByRole("button", { name: "Restore as new revision" })
+    ).toBeDisabled();
     expect(screen.getByLabelText("Current saved revision")).toHaveValue(
       "Current saved content"
     );
-    expect(screen.getByLabelText("Original revision")).toHaveAttribute("readonly");
+    expect(screen.getByLabelText("Original revision")).toHaveAttribute(
+      "readonly"
+    );
 
-    await user.click(screen.getByRole("button", { name: "Load older revisions" }));
-    expect(await screen.findByRole("button", { name: "Retry older revisions" })).toBeVisible();
+    await user.click(
+      screen.getByRole("button", { name: "Load older revisions" })
+    );
+    expect(
+      await screen.findByRole("button", { name: "Retry older revisions" })
+    ).toBeVisible();
     expect(newestPrior).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByLabelText("Original revision")).toHaveValue("Saved content 5");
-    await user.click(screen.getByRole("button", { name: "Retry older revisions" }));
-    await user.click(await screen.findByRole("button", { name: /^Revision 2\b/ }));
+    expect(screen.getByLabelText("Original revision")).toHaveValue(
+      "Saved content 5"
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Retry older revisions" })
+    );
+    await user.click(
+      await screen.findByRole("button", { name: /^Revision 2\b/ })
+    );
     expect(await screen.findByLabelText("Original revision")).toHaveValue(
       "Saved content 2"
     );
     await user.click(screen.getByRole("button", { name: "Close" }));
-    expect(screen.queryByRole("dialog", { name: "Document history" })).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Markdown content")).toHaveValue("Unsaved draft");
+    expect(
+      screen.queryByRole("dialog", { name: "Document history" })
+    ).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Markdown content")).toHaveValue(
+      "Unsaved draft"
+    );
+  });
+
+  it("restores an old document version as a new revision", async () => {
+    const expectedProject = project();
+    const old = documentDetail({
+      document: {
+        ...documentDetail().document,
+        project_id: expectedProject.id,
+        current_revision: 3
+      },
+      revision: {
+        ...documentDetail().revision,
+        revision_number: 2,
+        content: "Old content"
+      }
+    });
+    let current = {
+      ...old,
+      revision: {
+        ...old.revision,
+        revision_number: 3,
+        content: "Current content"
+      }
+    };
+    let patchRequests = 0;
+    const documentHandlers = [
+      http.get(
+        `http://localhost:8801/api/v1/projects/${expectedProject.id}/documents`,
+        () =>
+          HttpResponse.json({
+            documents: [current.document],
+            next_cursor: null
+          })
+      ),
+      http.get(
+        `http://localhost:8801/api/v1/documents/${old.document.id}`,
+        () => HttpResponse.json(current)
+      ),
+      http.get(
+        `http://localhost:8801/api/v1/documents/${old.document.id}/revisions`,
+        () =>
+          HttpResponse.json({
+            revisions: [current.revision, old.revision].map(revisionSummary),
+            next_cursor: null
+          })
+      ),
+      http.get(
+        `http://localhost:8801/api/v1/documents/${old.document.id}/revisions/2`,
+        () => HttpResponse.json({ revision: old.revision })
+      ),
+      http.patch(
+        `http://localhost:8801/api/v1/documents/${old.document.id}`,
+        async ({ request }) => {
+          patchRequests += 1;
+          expect(await request.json()).toEqual({
+            content: "Old content",
+            base_revision: 3
+          });
+          current = {
+            ...current,
+            document: { ...current.document, current_revision: 4 },
+            revision: {
+              ...current.revision,
+              revision_number: 4,
+              content: "Old content"
+            }
+          };
+          return HttpResponse.json(current);
+        }
+      ),
+      ...handlers
+    ];
+    await renderDashboardRoute({
+      path: `/projects/${expectedProject.id}/documents`,
+      auth: new FakeAuthClient({
+        status: "signedIn",
+        identityKey: "test-user"
+      }),
+      platform: platform(),
+      handlers: documentHandlers
+    });
+    const user = userEvent.setup();
+    await screen.findByLabelText("Markdown content");
+    await user.click(screen.getByRole("button", { name: "History" }));
+    await screen.findByRole("button", { name: /^Revision 2\b/ });
+    const restore = await screen.findByRole("button", {
+      name: "Restore as new revision"
+    });
+    await waitFor(() => expect(restore).toBeEnabled());
+    await user.click(restore);
+    await waitFor(() => expect(patchRequests).toBe(1));
+    expect(
+      screen.queryByRole("dialog", { name: "Document history" })
+    ).not.toBeInTheDocument();
   });
 
   it("debounces autosaves and serializes a queued edit", async () => {
@@ -913,14 +1260,13 @@ describe("dashboard routes", () => {
       await Promise.resolve();
       await Promise.resolve();
       expect(attempts).toBe(1);
-      expect(screen.getByRole("status")).toHaveTextContent("Offline, retrying");
       await act(async () => {
         await vi.advanceTimersByTimeAsync(1_500);
       });
       await Promise.resolve();
       await Promise.resolve();
       expect(attempts).toBe(2);
-      expect(screen.getByRole("status")).toHaveTextContent("Saved revision 2");
+      expect(editor).toHaveValue("Offline draft");
     } finally {
       vi.useRealTimers();
     }
@@ -1105,7 +1451,7 @@ describe("dashboard routes", () => {
     expect(screen.getAllByDisplayValue("Human draft")).toHaveLength(2);
   });
 
-  it("removes completed attachment progress after refreshing the attachment row", async () => {
+  it("uploads editor images without rendering a separate attachment section", async () => {
     const expectedProject = project();
     const initial = documentDetail({
       document: { ...documentDetail().document, project_id: expectedProject.id }
@@ -1114,17 +1460,14 @@ describe("dashboard routes", () => {
     const attachment = {
       id: "00000000-0000-4000-8000-000000000022",
       document_id: initial.document.id,
-      filename: "receipt.txt",
-      content_type: "text/plain",
+      filename: "diagram.png",
+      content_type: "image/png",
       size_bytes: 7,
       created_at: "2026-08-24T00:00:00.000Z"
     };
-    let attachments: (typeof attachment)[] = [];
     const putPresignedObject = vi
       .spyOn(ApiClient.prototype, "putPresignedObject")
-      .mockImplementation(async (_url, body, onProgress) => {
-        onProgress?.(body.size);
-      });
+      .mockResolvedValue();
     const documentHandlers = [
       http.get(
         `http://localhost:8801/api/v1/projects/${expectedProject.id}/documents`,
@@ -1146,10 +1489,6 @@ describe("dashboard routes", () => {
             next_cursor: null
           })
       ),
-      http.get(
-        `http://localhost:8801/api/v1/documents/${initial.document.id}/attachments`,
-        () => HttpResponse.json({ attachments })
-      ),
       http.post(
         `http://localhost:8801/api/v1/documents/${initial.document.id}/attachments/uploads`,
         () =>
@@ -1164,10 +1503,7 @@ describe("dashboard routes", () => {
       ),
       http.post(
         `http://localhost:8801/api/v1/documents/${initial.document.id}/attachments/uploads/${uploadId}/complete`,
-        () => {
-          attachments = [attachment];
-          return HttpResponse.json({ attachment });
-        }
+        () => HttpResponse.json({ attachment })
       ),
       ...handlers
     ];
@@ -1182,21 +1518,16 @@ describe("dashboard routes", () => {
         handlers: documentHandlers
       });
       await screen.findByLabelText("Markdown content");
-      const input =
-        document.querySelector<HTMLInputElement>("input[type=file]");
-      expect(input).not.toBeNull();
-      fireEvent.change(input!, {
+      fireEvent.change(screen.getByLabelText("Insert image"), {
         target: {
-          files: [new File(["receipt"], "receipt.txt", { type: "text/plain" })]
+          files: [new File(["diagram"], "diagram.png", { type: "image/png" })]
         }
       });
       await waitFor(() => expect(putPresignedObject).toHaveBeenCalledOnce());
-      await waitFor(() =>
-        expect(
-          screen.queryByLabelText("Attachment upload progress")
-        ).not.toBeInTheDocument()
+      expect(await screen.findByLabelText("Markdown content")).toHaveValue(
+        `![diagram.png](orchestrat-attachment:${attachment.id})`
       );
-      expect(screen.getByText("receipt.txt")).toBeVisible();
+      expect(screen.queryByText("Attachments")).not.toBeInTheDocument();
     } finally {
       putPresignedObject.mockRestore();
     }
@@ -1244,13 +1575,9 @@ describe("dashboard routes", () => {
       handlers: documentHandlers
     });
     const user = userEvent.setup();
-    await user.click(
-      await screen.findByRole("button", { name: "Archived (1)" })
-    );
+    await user.click(await screen.findByRole("tab", { name: "Archived (1)" }));
     expect(await screen.findByLabelText("Markdown content")).toBeDisabled();
-    expect(
-      screen.getByRole("button", { name: "Add attachment" })
-    ).toBeDisabled();
+    expect(screen.getByLabelText("Insert image")).toBeDisabled();
     await user.click(screen.getByRole("button", { name: "Document actions" }));
     expect(screen.getByRole("menuitem", { name: "Restore" })).toBeVisible();
     expect(

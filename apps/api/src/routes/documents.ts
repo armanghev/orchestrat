@@ -1,5 +1,6 @@
 import {
   createDocumentRequestSchema,
+  createDocumentFolderRequestSchema,
   documentIdParamsSchema,
   documentHistoryQuerySchema,
   attachmentPartsRequestSchema,
@@ -37,6 +38,17 @@ export async function documentRoutes(
           request.userId,
           projectDocumentParamsSchema.parse(request.params).projectId,
           createDocumentRequestSchema.parse(request.body)
+        )
+      )
+  );
+  app.post("/projects/:projectId/document-folders", async (request, reply) =>
+    reply
+      .code(201)
+      .send(
+        await options.documents.createFolder(
+          request.userId,
+          projectDocumentParamsSchema.parse(request.params).projectId,
+          createDocumentFolderRequestSchema.parse(request.body)
         )
       )
   );

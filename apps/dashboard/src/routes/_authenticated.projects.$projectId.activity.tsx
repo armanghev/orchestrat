@@ -1,3 +1,22 @@
+import { Activity, Bot, User, FileText } from "lucide-react";
+import { PageState } from "@/components/dashboard/page";
+import { TopToolbarActions } from "@/components/app-shell/app-shell";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardContent
+} from "@/components/ui/card";
+import {
+  Empty,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+  EmptyDescription
+} from "@/components/ui/empty";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { coordinationKeys } from "@/features/coordination/query-options";
@@ -19,10 +38,11 @@ function ActivityRoute() {
     getNextPageParam: (page) => page.next_cursor ?? undefined
   });
   if (activity.isPending)
-    return <ActivityMessage title="Activity" message="Loading activity…" />;
+    return <PageState title="Activity" message="Loading activity…" />;
   if (activity.isError)
     return (
-      <ActivityMessage
+      <PageState
+        error
         title="Activity unavailable"
         message={
           activity.error instanceof DashboardApiError &&
@@ -45,66 +65,99 @@ function ActivityRoute() {
   ].sort((left, right) => right.id - left.id);
   const groups = groupActivityEvents(events);
   return (
-    <main
-      id="main-content"
-      className="mx-auto w-full max-w-5xl p-6 md:p-8"
-      aria-labelledby="activity-heading"
-    >
-      <h1
-        id="activity-heading"
-        tabIndex={-1}
-        className="text-2xl font-semibold tracking-tight"
-      >
-        Activity
-      </h1>
-      <p className="mt-2 text-sm text-muted-foreground">
-        Durable project events from agents and humans.
-      </p>
-      {events.length === 0 ? (
-        <p className="mt-8 rounded border border-dashed p-8 text-center text-sm text-muted-foreground">
-          No meaningful activity has been recorded yet.
-        </p>
-      ) : (
-        <ol className="mt-8 divide-y rounded border">
-          {groups.map(({ event, events: groupedEvents }) => (
-            <li key={event.id} className="p-4">
-              <div className="flex flex-wrap justify-between gap-2">
-                <span className="font-medium">
-                  {formatEvent(event.type)}
-                  {groupedEvents.length > 1
-                    ? ` (${groupedEvents.length} revisions)`
-                    : ""}
-                </span>
-                <time
-                  dateTime={event.occurred_at}
-                  className="text-xs text-muted-foreground"
-                >
-                  {new Date(event.occurred_at).toLocaleString()}
-                </time>
-              </div>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {event.actor_agent_id
-                  ? `Agent ${event.actor_agent_id}`
-                  : event.actor_user_id
-                    ? `User ${event.actor_user_id}`
-                    : "System"}
-                {event.entity_id ? ` · ${event.entity_id}` : ""}
-              </p>
-            </li>
-          ))}
-        </ol>
-      )}
+    <section className="dashboard-page" aria-label="Project activity">
+      <TopToolbarActions>
+        <Badge variant="outline">{events.length} events loaded</Badge>
+      </TopToolbarActions>
+      <Card>
+        <CardHeader>
+          <CardTitle>
+            <h2>Project timeline</h2>
+          </CardTitle>
+          <CardDescription>
+            Most recent first. Consecutive document saves are grouped.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {!events.length ? (
+            <Empty className="min-h-72">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <Activity />
+                </EmptyMedia>
+                <EmptyTitle>Your project’s story starts here</EmptyTitle>
+                <EmptyDescription>
+                  No meaningful activity has been recorded yet.
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          ) : (
+            <ol className="flex flex-col">
+              {groups.map(({ event, events: groupedEvents }) => {
+                const Icon = event.type.startsWith("document")
+                  ? FileText
+                  : event.actor_agent_id
+                    ? Bot
+                    : event.actor_user_id
+                      ? User
+                      : Activity;
+                return (
+                  <li
+                    key={event.id}
+                    className="relative flex gap-4 pb-7 last:pb-0"
+                  >
+                    <div
+                      className="absolute left-4 top-9 bottom-0 w-px bg-border"
+                      aria-hidden="true"
+                    />
+                    <span className="relative flex size-8 shrink-0 items-center justify-center rounded-full border bg-card">
+                      <Icon
+                        className="size-4 text-muted-foreground"
+                        aria-hidden="true"
+                      />
+                    </span>
+                    <div className="min-w-0 flex-1 pt-1">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <h3 className="text-sm font-medium">
+                          {formatEvent(event.type)}
+                          {groupedEvents.length > 1
+                            ? ` (${groupedEvents.length} revisions)`
+                            : ""}
+                        </h3>
+                        <time
+                          dateTime={event.occurred_at}
+                          className="text-xs text-muted-foreground"
+                        >
+                          {new Date(event.occurred_at).toLocaleString()}
+                        </time>
+                      </div>
+                      <p className="mt-1.5 break-all text-xs text-muted-foreground">
+                        {event.actor_agent_id
+                          ? `Agent ${event.actor_agent_id}`
+                          : event.actor_user_id
+                            ? `User ${event.actor_user_id}`
+                            : "System"}
+                        {event.entity_id ? ` · ${event.entity_id}` : ""}
+                      </p>
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+          )}
+        </CardContent>
+      </Card>
       {activity.hasNextPage ? (
-        <button
-          type="button"
-          className="mt-5 text-sm font-medium underline focus-visible:ring-2 focus-visible:ring-ring"
+        <Button
+          variant="outline"
+          className="self-center"
           onClick={() => void activity.fetchNextPage()}
           disabled={activity.isFetchingNextPage}
         >
           {activity.isFetchingNextPage ? "Loading more…" : "Load more activity"}
-        </button>
+        </Button>
       ) : null}
-    </main>
+    </section>
   );
 }
 
@@ -112,22 +165,4 @@ function formatEvent(type: string) {
   return type
     .replace(/[._]/g, " ")
     .replace(/\b\w/g, (character) => character.toUpperCase());
-}
-function ActivityMessage({
-  title,
-  message
-}: {
-  title: string;
-  message: string;
-}) {
-  return (
-    <main className="mx-auto w-full max-w-3xl p-6 md:p-8">
-      <h1 tabIndex={-1} className="text-2xl font-semibold">
-        {title}
-      </h1>
-      <p role="status" className="mt-3 text-sm text-muted-foreground">
-        {message}
-      </p>
-    </main>
-  );
 }

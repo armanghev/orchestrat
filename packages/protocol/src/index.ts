@@ -818,6 +818,26 @@ export const documentPathSchema = z
   );
 export type DocumentPath = z.infer<typeof documentPathSchema>;
 
+const markdownDocumentPathSchema = documentPathSchema.refine(
+  (path) => path.toLowerCase().endsWith(".md"),
+  { message: "Document paths must end in .md." }
+);
+
+export const documentFolderSchema = z.object({
+  id: idSchema,
+  project_id: idSchema,
+  path: documentPathSchema,
+  created_at: dateSchema
+});
+export type DocumentFolder = z.infer<typeof documentFolderSchema>;
+
+export const createDocumentFolderRequestSchema = z.object({
+  path: documentPathSchema
+});
+export type CreateDocumentFolderRequest = z.infer<
+  typeof createDocumentFolderRequestSchema
+>;
+
 export const documentAuthorTypeSchema = z.enum(["human", "agent"]);
 export type DocumentAuthorType = z.infer<typeof documentAuthorTypeSchema>;
 export const documentContentSchema = z.string().max(1_000_000);
@@ -878,6 +898,7 @@ export type DocumentListQuery = z.infer<typeof documentListQuerySchema>;
 
 export const documentsResponseSchema = z.object({
   documents: z.array(documentSchema),
+  folders: z.array(documentFolderSchema).default([]),
   next_cursor: cursorSchema.nullable()
 });
 export type DocumentsResponse = z.infer<typeof documentsResponseSchema>;
@@ -885,7 +906,7 @@ export const documentListResponseSchema = documentsResponseSchema;
 export type DocumentListResponse = z.infer<typeof documentListResponseSchema>;
 
 export const createDocumentRequestSchema = z.object({
-  path: documentPathSchema,
+  path: markdownDocumentPathSchema,
   content: documentContentSchema
 });
 export type CreateDocumentRequest = z.infer<typeof createDocumentRequestSchema>;
@@ -937,7 +958,7 @@ export const editDocumentRequestSchema = z.object({
 export type EditDocumentRequest = z.infer<typeof editDocumentRequestSchema>;
 
 export const renameDocumentRequestSchema = z.object({
-  path: documentPathSchema,
+  path: markdownDocumentPathSchema,
   expected_revision: z.number().int().min(1)
 });
 export type RenameDocumentRequest = z.infer<typeof renameDocumentRequestSchema>;

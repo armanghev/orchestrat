@@ -76,7 +76,10 @@ export async function sendDesktopMagicLink(
   return email;
 }
 
-export function desktopAppCallback(search: string): string | null {
+export function desktopAppCallback(
+  search: string,
+  development = false
+): string | null {
   const source = new URLSearchParams(search);
   const allowed = new Set([
     "sb_flow_id",
@@ -108,7 +111,11 @@ export function desktopAppCallback(search: string): string | null {
     errorCode === null &&
     description === null;
   if (!flowPattern.test(flowId) || (!validCode && !validError)) return null;
-  const callback = new URL("dev.orchestrat.app://auth/callback");
+  const callback = new URL(
+    development
+      ? "dev.orchestrat.app.local://auth/callback"
+      : "dev.orchestrat.app://auth/callback"
+  );
   for (const key of allowed) {
     const value = source.get(key);
     if (value !== null) callback.searchParams.set(key, value);

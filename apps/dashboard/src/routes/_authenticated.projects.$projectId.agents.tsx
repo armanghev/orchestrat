@@ -1,8 +1,35 @@
+import { useState } from "react";
+import { Bot, Search, HeartPulse } from "lucide-react";
+import { PageState, StatusBadge } from "@/components/dashboard/page";
+import { TopToolbarActions } from "@/components/app-shell/app-shell";
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardContent,
+  CardFooter,
+  CardAction
+} from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import {
+  Empty,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+  EmptyDescription
+} from "@/components/ui/empty";
+import {
+  InputGroup,
+  InputGroupInput,
+  InputGroupAddon
+} from "@/components/ui/input-group";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import {
   agentPresenceQueryOptions,
   agentsQueryOptions,
+  tasksQueryOptions,
   projectEventsQueryOptions
 } from "@/features/coordination/query-options";
 import { derivePresence } from "@/features/agents/presence";
@@ -14,15 +41,18 @@ export const Route = createFileRoute(
 
 function AgentsRoute() {
   const { projectId } = Route.useParams();
+  const [search, setSearch] = useState("");
   const { api } = Route.useRouteContext();
   const agents = useQuery(agentsQueryOptions(api, projectId));
   const presence = useQuery(agentPresenceQueryOptions(api, projectId));
+  const tasks = useQuery(tasksQueryOptions(api, projectId));
   const events = useQuery(projectEventsQueryOptions(api, projectId));
   if (agents.isPending || presence.isPending)
-    return <AgentMessage title="Agents" message="Loading agents…" />;
+    return <PageState title="Agents" message="Loading agents…" />;
   if (agents.isError || presence.isError)
     return (
-      <AgentMessage
+      <PageState
+        error
         title="Agents unavailable"
         message={
           agents.error instanceof DashboardApiError &&
@@ -41,29 +71,57 @@ function AgentsRoute() {
         !event.type.startsWith("tool.") && !event.type.includes("telemetry")
     )
     .sort((left, right) => right.id - left.id);
+  const filtered = agents.data.agents.filter((agent) =>
+    agent.name.toLowerCase().includes(search.trim().toLowerCase())
+  );
+  const taskById = new Map(
+    (tasks.data?.tasks ?? []).map((task) => [task.id, task])
+  );
+  const online = presence.data.agents.filter(
+    (item) => derivePresence(item.status, item.last_heartbeat_at) === "online"
+  ).length;
   return (
-    <main
-      id="main-content"
-      className="mx-auto w-full max-w-5xl p-6 md:p-8"
-      aria-labelledby="agents-heading"
-    >
-      <h1
-        id="agents-heading"
-        tabIndex={-1}
-        className="text-2xl font-semibold tracking-tight"
-      >
-        Agents
-      </h1>
-      <p className="mt-2 text-sm text-muted-foreground">
-        Connected runtimes and their current project presence.
-      </p>
-      {agents.data.agents.length === 0 ? (
-        <p className="mt-8 rounded border border-dashed p-8 text-center text-sm text-muted-foreground">
-          No agents are connected to this project.
-        </p>
+    <section className="dashboard-page" aria-label="Project agents">
+      <TopToolbarActions>
+        <Badge variant="outline">
+          {online} online · {agents.data.agents.length} total
+        </Badge>
+      </TopToolbarActions>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-sm font-medium">Agent directory</h2>
+        <InputGroup className="w-full sm:w-64">
+          <InputGroupInput
+            aria-label="Search agents"
+            placeholder="Search agents…"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+          <InputGroupAddon>
+            <Search />
+          </InputGroupAddon>
+        </InputGroup>
+      </div>
+      {!filtered.length ? (
+        <Empty className="min-h-80 border">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <Bot />
+            </EmptyMedia>
+            <EmptyTitle>
+              {agents.data.agents.length
+                ? "No matching agents"
+                : "Bring your agents together"}
+            </EmptyTitle>
+            <EmptyDescription>
+              {agents.data.agents.length
+                ? "Try searching for another agent name."
+                : "No agents are connected to this project. Connect a runtime through the Orchestrat CLI to get started."}
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       ) : (
-        <div className="mt-8 grid gap-4 md:grid-cols-2">
-          {agents.data.agents.map((agent) => {
+        <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
+          {filtered.map((agent) => {
             const item = byAgent.get(agent.id);
             const state = item
               ? derivePresence(item.status, item.last_heartbeat_at)
@@ -71,55 +129,74 @@ function AgentsRoute() {
             const activity = recent.find(
               (event) => event.actor_agent_id === agent.id
             );
+            const task = item?.current_task_id
+              ? taskById.get(item.current_task_id)
+              : null;
             return (
-              <article key={agent.id} className="rounded border p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h2 className="font-medium">{agent.name}</h2>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Agent runtime details appear when a session is active.
-                    </p>
-                  </div>
-                  <span className="rounded bg-muted px-2 py-1 text-xs capitalize">
-                    {state}
+              <Card key={agent.id}>
+                <CardHeader>
+                  <CardTitle>
+                    <h2 className="flex items-center gap-2">
+                      <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border bg-muted/50">
+                        <Bot className="size-4 text-muted-foreground" />
+                      </span>
+                      <span className="truncate" title={agent.name}>
+                        {agent.name}
+                      </span>
+                    </h2>
+                  </CardTitle>
+                  <CardDescription>Agent runtime</CardDescription>
+                  <CardAction>
+                    <StatusBadge status={state} />
+                  </CardAction>
+                </CardHeader>
+                <CardContent>
+                  <dl className="grid gap-4 text-sm">
+                    <div>
+                      <dt className="text-xs text-muted-foreground">
+                        Current task
+                      </dt>
+                      <dd className="mt-1.5 font-medium">
+                        {task ? (
+                          `${task.key} · ${task.title}`
+                        ) : item?.current_task_id ? (
+                          <span className="break-all font-mono text-xs">
+                            {item.current_task_id}
+                          </span>
+                        ) : (
+                          "Idle"
+                        )}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-muted-foreground">
+                        Recent activity
+                      </dt>
+                      <dd className="mt-1.5 text-sm first-letter:uppercase">
+                        {activity
+                          ? activity.type.replace(/[._]/g, " ")
+                          : "None recorded"}
+                      </dd>
+                    </div>
+                  </dl>
+                </CardContent>
+                <CardFooter className="justify-between gap-3">
+                  <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <HeartPulse className="size-3.5" />
+                    Heartbeat
                   </span>
-                </div>
-                <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
-                  <div>
-                    <dt className="text-xs text-muted-foreground">
-                      Current task
-                    </dt>
-                    <dd>
-                      {item?.current_task_id ? (
-                        <span className="font-mono">
-                          {item.current_task_id}
-                        </span>
-                      ) : (
-                        "Idle"
-                      )}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-xs text-muted-foreground">Heartbeat</dt>
-                    <dd>
-                      {item?.last_heartbeat_at
-                        ? heartbeatAge(item.last_heartbeat_at)
-                        : "No heartbeat"}
-                    </dd>
-                  </div>
-                </dl>
-                <p className="mt-4 text-xs text-muted-foreground">
-                  Recent activity:{" "}
-                  {activity
-                    ? `${activity.type} · ${new Date(activity.occurred_at).toLocaleString()}`
-                    : "None recorded"}
-                </p>
-              </article>
+                  <span className="text-xs text-muted-foreground">
+                    {item?.last_heartbeat_at
+                      ? heartbeatAge(item.last_heartbeat_at)
+                      : "No heartbeat"}
+                  </span>
+                </CardFooter>
+              </Card>
             );
           })}
         </div>
       )}
-    </main>
+    </section>
   );
 }
 
@@ -129,16 +206,4 @@ function heartbeatAge(value: string) {
     Math.round((Date.now() - Date.parse(value)) / 1000)
   );
   return seconds < 60 ? `${seconds}s ago` : `${Math.round(seconds / 60)}m ago`;
-}
-function AgentMessage({ title, message }: { title: string; message: string }) {
-  return (
-    <main className="mx-auto w-full max-w-3xl p-6 md:p-8">
-      <h1 tabIndex={-1} className="text-2xl font-semibold">
-        {title}
-      </h1>
-      <p role="status" className="mt-3 text-sm text-muted-foreground">
-        {message}
-      </p>
-    </main>
-  );
 }

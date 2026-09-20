@@ -4,6 +4,9 @@ import { describe, expect, it, vi } from "vitest";
 import { OrganizationSettingsShell } from "./organization-settings-shell";
 
 const navigate = vi.fn();
+vi.mock("@/platform/provider", () => ({
+  usePlatform: () => ({ kind: "browser" })
+}));
 
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => navigate

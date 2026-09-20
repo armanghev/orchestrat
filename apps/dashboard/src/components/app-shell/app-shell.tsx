@@ -1,4 +1,6 @@
 import {
+  createContext,
+  useContext,
   useCallback,
   useEffect,
   useMemo,
@@ -18,8 +20,23 @@ import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { ContextSidebar } from "./context-sidebar";
 import { TopToolbar } from "./top-toolbar";
 import { CommandMenu } from "./command-menu";
+import { usePlatform } from "@/platform/provider";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ConnectivityBanner } from "@/features/connectivity/connectivity-banner";
 import { WindowDragRegion } from "./top-toolbar";
+
+const TopToolbarActionsContext = createContext<
+  ((actions: ReactNode | null) => void) | null
+>(null);
+
+export function TopToolbarActions({ children }: { children: ReactNode }) {
+  const setActions = useContext(TopToolbarActionsContext);
+  useEffect(() => {
+    setActions?.(children);
+    return () => setActions?.(null);
+  }, [children, setActions]);
+  return null;
+}
 
 export type AppShellProps = {
   catalog: ProjectCatalog;
@@ -55,8 +72,10 @@ export function AppShell({
   children
 }: AppShellProps) {
   const { preferences, update } = usePreferences();
+  const desktop = usePlatform().kind === "desktop";
   const { setTheme } = useTheme();
   const [open, setOpen] = useState(false);
+  const [routeActions, setRouteActions] = useState<ReactNode>(null);
   const commandInvokerRef = useRef<HTMLElement>(null);
   const defaultCommandTriggerRef = useRef<HTMLButtonElement>(null);
   const openCommands = useCallback(() => {
@@ -133,24 +152,29 @@ export function AppShell({
       open={!preferences.contextSidebarCollapsed}
       onOpenChange={(open) => void update({ contextSidebarCollapsed: !open })}
     >
-      <div className="pointer-events-none fixed inset-x-0 top-0 z-50 hidden h-10 md:block">
-      <WindowDragRegion />
-        <SidebarTrigger
-          aria-label={
-            preferences.contextSidebarCollapsed
-              ? "Restore sidebar"
-              : "Collapse sidebar"
-          }
-          className="pointer-events-auto absolute left-22 top-1.75"
-        />
-      </div>
+      <a
+        href="#main-content"
+        className="sr-only fixed left-4 top-4 z-50 rounded-lg bg-primary px-4 py-2 text-sm text-primary-foreground focus:not-sr-only"
+      >
+        Skip to content
+      </a>
+      {desktop ? (
+        <div className="pointer-events-none fixed inset-x-0 top-0 z-50 hidden h-12 items-center md:flex">
+          <WindowDragRegion />
+          <SidebarTrigger
+            aria-label={
+              preferences.contextSidebarCollapsed
+                ? "Restore sidebar"
+                : "Collapse sidebar"
+            }
+            className="pointer-events-auto relative left-22"
+          />
+        </div>
+      ) : null}
       <aside aria-label="Project navigation" className="contents">
         <ContextSidebar
-          catalog={catalog}
-          activeProjectId={activeProjectId}
           activeRoute={activeRoute}
           onNavigate={navigateToRoute}
-          onSelectProject={selectProject}
           onOpenCommands={openCommands}
           onOpenPreferences={openPreferences}
           onSignOut={signOut}
@@ -159,31 +183,40 @@ export function AppShell({
       </aside>
       <div className="flex w-full min-w-0 flex-1 flex-col">
         <TopToolbar
+          catalog={catalog}
           context={current}
+          onSelectProject={selectProject}
+          activeRoute={activeRoute}
           onOpenCommands={openCommands}
           collapsed={preferences.contextSidebarCollapsed}
+          routeActions={routeActions}
           commandTriggerRef={defaultCommandTriggerRef}
         />
-        <main id="main-content" tabIndex={0} className="min-h-0 flex-1 overflow-auto">
+        <main
+          id="main-content"
+          tabIndex={0}
+          className="min-h-0 flex-1 overflow-auto"
+        >
           <ConnectivityBanner />
           {catalog.failures.length ? (
-            <div
-              role="status"
-              className="m-3 flex items-center gap-2 rounded-md border px-3 py-2 text-sm text-muted-foreground"
-            >
-              Some projects could not be loaded.
-              {retryCatalog ? (
-                <button
-                  type="button"
-                  className="font-medium text-foreground underline focus-visible:ring-2 focus-visible:ring-ring"
-                  onClick={() => void retryCatalog()}
-                >
-                  Retry
-                </button>
-              ) : null}
-            </div>
+            <Alert role="status" className="m-4 w-auto">
+              <AlertDescription>
+                Some projects could not be loaded.
+                {retryCatalog ? (
+                  <button
+                    type="button"
+                    className="font-medium text-foreground underline focus-visible:ring-2 focus-visible:ring-ring"
+                    onClick={() => void retryCatalog()}
+                  >
+                    Retry
+                  </button>
+                ) : null}
+              </AlertDescription>
+            </Alert>
           ) : null}
-          {children}
+          <TopToolbarActionsContext.Provider value={setRouteActions}>
+            {children}
+          </TopToolbarActionsContext.Provider>
         </main>
       </div>
       <CommandMenu

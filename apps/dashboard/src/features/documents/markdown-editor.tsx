@@ -7,6 +7,7 @@ import {
   BoldItalicUnderlineToggles,
   CreateLink,
   DiffSourceToggleWrapper,
+  InsertImage,
   InsertTable,
   InsertThematicBreak,
   ListsToggle,
@@ -18,6 +19,7 @@ import {
   diffSourcePlugin,
   frontmatterPlugin,
   headingsPlugin,
+  imagePlugin,
   linkDialogPlugin,
   linkPlugin,
   listsPlugin,
@@ -26,6 +28,8 @@ import {
   tablePlugin,
   thematicBreakPlugin,
   toolbarPlugin,
+  type ImagePreviewHandler,
+  type ImageUploadHandler,
   type MDXEditorMethods
 } from "@mdxeditor/editor";
 
@@ -87,10 +91,22 @@ type MarkdownEditorProps = {
   readOnly: boolean;
   onChange: (markdown: string, initialMarkdownNormalize?: boolean) => void;
   onError: (error: { error: string; source: string }) => void;
+  imageUploadHandler: ImageUploadHandler;
+  imagePreviewHandler: ImagePreviewHandler;
 };
 
 export const MarkdownEditor = forwardRef<MDXEditorMethods, MarkdownEditorProps>(
-  function MarkdownEditor({ markdown, readOnly, onChange, onError }, ref) {
+  function MarkdownEditor(
+    {
+      markdown,
+      readOnly,
+      onChange,
+      onError,
+      imageUploadHandler,
+      imagePreviewHandler
+    },
+    ref
+  ) {
     const { resolvedTheme } = useTheme();
     return (
       <MDXEditor
@@ -108,6 +124,7 @@ export const MarkdownEditor = forwardRef<MDXEditorMethods, MarkdownEditorProps>(
           quotePlugin(),
           linkPlugin(),
           linkDialogPlugin(),
+          imagePlugin({ imageUploadHandler, imagePreviewHandler }),
           tablePlugin(),
           thematicBreakPlugin(),
           frontmatterPlugin(),
@@ -142,6 +159,7 @@ export const MarkdownEditor = forwardRef<MDXEditorMethods, MarkdownEditorProps>(
                 <ListsToggle />
                 <Separator />
                 <CreateLink />
+                <InsertImage />
                 <InsertTable />
                 <InsertThematicBreak />
               </DiffSourceToggleWrapper>

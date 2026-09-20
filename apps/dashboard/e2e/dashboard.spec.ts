@@ -52,7 +52,10 @@ function populatedState(): HierarchyState {
   return {
     organizations: [organization()],
     projects: {
-      [ids.organization]: [project(), project(ids.beta, ids.organization, "Beta")]
+      [ids.organization]: [
+        project(),
+        project(ids.beta, ids.organization, "Beta")
+      ]
     }
   };
 }
@@ -125,7 +128,9 @@ async function mockHierarchy(page: Page, state: HierarchyState) {
         }
       });
     if (/^\/api\/v1\/projects\/[^/]+\/tasks$/.test(path))
-      return route.fulfill({ json: { tasks: [], total: 0, next_cursor: null } });
+      return route.fulfill({
+        json: { tasks: [], total: 0, next_cursor: null }
+      });
     if (/^\/api\/v1\/projects\/[^/]+\/agents$/.test(path))
       return route.fulfill({ json: { agents: [] } });
     if (/^\/api\/v1\/projects\/[^/]+\/presence$/.test(path))
@@ -211,7 +216,7 @@ test("sign-out survives reload", async ({ page }) => {
   await seed(page);
   await mockHierarchy(page, populatedState());
   await page.goto(`/projects/${ids.alpha}/overview`);
-  await page.getByRole("button", { name: "Command ⌘ K", exact: true }).click();
+  await page.getByRole("button", { name: "Search", exact: true }).click();
   await page.getByPlaceholder("Search commands…").fill("Sign out");
   await page.getByText("Sign out", { exact: true }).click();
   await expect(
@@ -229,7 +234,9 @@ test("a 401 forces one token refresh and retries the request", async ({
   await seed(page);
   await mockHierarchy(page, { ...populatedState(), unauthorized: "once" });
   await page.goto(`/projects/${ids.alpha}/overview`);
-  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+  await expect(page.locator('[data-slot="top-toolbar-page"]')).toHaveText(
+    "Overview"
+  );
   await expect
     .poll(() =>
       page.evaluate(() =>
@@ -269,9 +276,7 @@ test("the e2e adapter rejects arbitrary persisted auth modes", async ({
   ).toBeVisible();
 });
 
-test("creates organization and project sequentially", async ({
-  page
-}) => {
+test("creates organization and project sequentially", async ({ page }) => {
   await seed(page);
   await mockHierarchy(page, {
     organizations: [],
@@ -282,7 +287,9 @@ test("creates organization and project sequentially", async ({
   await page.getByRole("button", { name: "Create organization" }).click();
   await page.getByLabel("Project name").fill("Alpha");
   await page.getByRole("button", { name: "Create project" }).click();
-  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+  await expect(page.locator('[data-slot="top-toolbar-page"]')).toHaveText(
+    "Overview"
+  );
   await expectNoAxe(page);
 });
 
@@ -296,7 +303,7 @@ test("project shell switches projects and persists recency", async ({
     page.getByRole("complementary", { name: "Project navigation" })
   ).toBeVisible();
   await expect(page.getByRole("banner")).toContainText("Alpha");
-  await page.getByRole("button", { name: "Command ⌘ K", exact: true }).click();
+  await page.getByRole("button", { name: "Search", exact: true }).click();
   await page.getByPlaceholder("Search commands…").fill("Beta");
   await page.getByText("Open Beta", { exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/projects/${ids.beta}/overview$`));
@@ -306,9 +313,8 @@ test("project shell switches projects and persists recency", async ({
     .poll(() =>
       page.evaluate(
         (projectId) =>
-          JSON.parse(
-            localStorage.getItem("orchestrat.preferences.v1") ?? "{}"
-          ).recentProjectIds?.[0] === projectId,
+          JSON.parse(localStorage.getItem("orchestrat.preferences.v1") ?? "{}")
+            .recentProjectIds?.[0] === projectId,
         ids.beta
       )
     )
@@ -349,7 +355,11 @@ test("creates, edits, and comments on a task with human and agent authors", asyn
     async (route) => {
       if (route.request().method() === "GET")
         return route.fulfill({
-          json: { tasks: task ? [taskCard()] : [], total: task ? 1 : 0, next_cursor: null }
+          json: {
+            tasks: task ? [taskCard()] : [],
+            total: task ? 1 : 0,
+            next_cursor: null
+          }
         });
       const body = route.request().postDataJSON() as Record<string, unknown>;
       task = {
@@ -381,7 +391,9 @@ test("creates, edits, and comments on a task with human and agent authors", asyn
       if (path.endsWith("/comments")) {
         if (method === "GET")
           return route.fulfill({ json: { comments, next_cursor: null } });
-        const body = route.request().postDataJSON() as { body_markdown: string };
+        const body = route.request().postDataJSON() as {
+          body_markdown: string;
+        };
         const created = {
           id: "00000000-0000-4000-8000-000000000011",
           task_id: ids.task,
@@ -404,24 +416,40 @@ test("creates, edits, and comments on a task with human and agent authors", asyn
         return route.fulfill({ json: { depends_on: [], blocks: [] } });
       if (method === "GET") return route.fulfill({ json: task });
       const body = route.request().postDataJSON() as Record<string, unknown>;
-      task = { ...task, ...body, version: Number(task!.version) + 1, updated_at: now };
+      task = {
+        ...task,
+        ...body,
+        version: Number(task!.version) + 1,
+        updated_at: now
+      };
       delete task.expected_version;
       return route.fulfill({ json: task });
     }
   );
   await page.goto(`/projects/${ids.alpha}/tasks`);
+  await page.getByRole("button", { name: "New task" }).click();
   await page.getByLabel("Title").fill("Ship editor");
   await page.getByLabel("Description (Markdown)").fill("Use MDXEditor");
   await page.getByRole("button", { name: "Create task" }).click();
-  await expect(page.getByRole("button", { name: /ALPHA-1 Ship editor/ })).toBeVisible();
-  await page.getByRole("button", { name: /ALPHA-1 Ship editor/ }).click();
-  await expect(page.getByText("Codex (agent): Agent context is ready.")).toBeVisible();
-  await page.getByLabel("Title", { exact: true }).nth(1).fill("Ship rich editor");
+  await expect(
+    page.getByRole("heading", { name: "Ship editor" })
+  ).toBeVisible();
+  await expect(
+    page.getByText("Codex (agent): Agent context is ready.")
+  ).toBeVisible();
+  await page
+    .getByRole("dialog", { name: "Task details" })
+    .getByLabel("Title", { exact: true })
+    .fill("Ship rich editor");
   await page.getByRole("button", { name: "Save changes" }).click();
-  await expect(page.getByRole("heading", { name: "Ship rich editor" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Ship rich editor" })
+  ).toBeVisible();
   await page.getByLabel("Add comment").fill("Human review complete.");
   await page.getByRole("button", { name: "Comment" }).click();
-  await expect(page.getByText("E2E User: Human review complete.")).toBeVisible();
+  await expect(
+    page.getByText("E2E User: Human review complete.")
+  ).toBeVisible();
   await expectNoAxe(page);
 });
 
@@ -472,10 +500,12 @@ test("preserves successful projects when one hierarchy branch fails", async ({
   await seed(page);
   await mockHierarchy(page, state);
   await page.goto(`/projects/${ids.alpha}/overview`);
-  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
-  await expect(page.getByText(
-    "Some projects could not be loaded."
-  )).toBeVisible();
+  await expect(page.locator('[data-slot="top-toolbar-page"]')).toHaveText(
+    "Overview"
+  );
+  await expect(
+    page.getByText("Some projects could not be loaded.")
+  ).toBeVisible();
 });
 
 test("does not silently switch when project access is lost", async ({
@@ -520,7 +550,9 @@ test("command palette search selects a project and restores focus", async ({
   await seed(page);
   await mockHierarchy(page, populatedState());
   await page.goto(`/projects/${ids.alpha}/overview`);
-  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+  await expect(page.locator('[data-slot="top-toolbar-page"]')).toHaveText(
+    "Overview"
+  );
   await page.waitForTimeout(50);
   await page.keyboard.down("Meta");
   await page.keyboard.press("k");
@@ -529,7 +561,7 @@ test("command palette search selects a project and restores focus", async ({
   await page.getByText("Open Beta", { exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/projects/${ids.beta}/overview$`));
   const trigger = page.getByRole("button", {
-    name: "Command ⌘ K",
+    name: "Search",
     exact: true
   });
   await trigger.focus();
@@ -556,6 +588,18 @@ test("compact shell collapses and restores sidebar without horizontal overflow",
   expect(
     await main.evaluate((element) => element.scrollWidth <= element.clientWidth)
   ).toBe(true);
+  const centers = await page
+    .locator(
+      'header [data-slot="sidebar-trigger"], header [data-slot="separator"], header [data-slot="breadcrumb"], header button[aria-haspopup="menu"]'
+    )
+    .evaluateAll((elements) =>
+      elements.map((element) => {
+        const rect = element.getBoundingClientRect();
+        return rect.y + rect.height / 2;
+      })
+    );
+  expect(centers).toHaveLength(6);
+  expect(Math.max(...centers) - Math.min(...centers)).toBeLessThanOrEqual(1);
 });
 
 test("has no axe violations on setup, overview, Tasks, profile, and themes", async ({
@@ -574,10 +618,14 @@ test("has no axe violations on setup, overview, Tasks, profile, and themes", asy
   await page.unrouteAll();
   await mockHierarchy(page, populatedState());
   await page.goto(`/projects/${ids.alpha}/overview`);
-  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+  await expect(page.locator('[data-slot="top-toolbar-page"]')).toHaveText(
+    "Overview"
+  );
   await expectNoAxe(page);
   await page.goto(`/projects/${ids.alpha}/tasks`);
-  await expect(page.getByRole("heading", { name: "Tasks" })).toBeVisible();
+  await expect(page.locator('[data-slot="top-toolbar-page"]')).toHaveText(
+    "Tasks"
+  );
   await expectNoAxe(page);
   await page.goto("/profile");
   await expect(
@@ -591,5 +639,30 @@ test("has no axe violations on setup, overview, Tasks, profile, and themes", asy
   await page.getByText("Light", { exact: true }).click();
   await expect(page.locator("html")).not.toHaveClass(/dark/);
   await page.waitForTimeout(250);
+  await expectNoAxe(page);
+});
+
+test("mobile navigation opens, changes pages, and closes without overflow", async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await seed(page);
+  await mockHierarchy(page, populatedState());
+  await page.goto(`/projects/${ids.alpha}/overview`);
+  for (const name of ["Tasks", "Agents", "Activity", "Overview"]) {
+    await page.getByRole("button", { name: "Open navigation" }).click();
+    await page.getByRole("button", { name, exact: true }).click();
+    await expect(page.locator('[data-slot="top-toolbar-page"]')).toHaveText(
+      name
+    );
+    await expect(
+      page.getByRole("dialog", { name: "Sidebar" })
+    ).not.toBeVisible();
+    expect(
+      await page
+        .locator("#main-content")
+        .evaluate((element) => element.scrollWidth <= element.clientWidth)
+    ).toBe(true);
+  }
   await expectNoAxe(page);
 });

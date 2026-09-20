@@ -1,5 +1,10 @@
 import { useMemo, useState } from "react";
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient
+} from "@tanstack/react-query";
 import { HistoryIcon } from "lucide-react";
 import type { DocumentRevision } from "@orchestrat/protocol";
 import { Button } from "@/components/ui/button";
@@ -18,10 +23,12 @@ import { DocumentDiff } from "./document-diff";
 
 export type DocumentHistoryProps = {
   api: ApiClient;
+  projectId: string;
   documentId: string;
   path: string;
   currentRevision: DocumentRevision;
   hasUnsavedChanges: boolean;
+  readOnly: boolean;
 };
 
 export function DocumentHistory(props: DocumentHistoryProps) {
@@ -35,18 +42,24 @@ export function DocumentHistory(props: DocumentHistoryProps) {
           History
         </Button>
       </DialogTrigger>
-      {open ? <HistoryDialog {...props} /> : null}
+      {open ? (
+        <HistoryDialog {...props} onRestored={() => setOpen(false)} />
+      ) : null}
     </Dialog>
   );
 }
 
 function HistoryDialog({
   api,
+  projectId,
   documentId,
   path,
   currentRevision,
-  hasUnsavedChanges
-}: DocumentHistoryProps) {
+  hasUnsavedChanges,
+  readOnly,
+  onRestored
+}: DocumentHistoryProps & { onRestored: () => void }) {
+  const queryClient = useQueryClient();
   const [selectedRevisionNumber, setSelectedRevisionNumber] = useState<
     number | null
   >(null);
@@ -89,6 +102,34 @@ function HistoryDialog({
     queryFn: () => api.getDocumentRevision(documentId, selectedRevision!),
     enabled: selectedRevision !== null
   });
+  const restore = useMutation({
+    mutationFn: () => {
+      if (!detail.data) throw new Error("This revision is not available yet.");
+      return api.updateDocument(documentId, {
+        content: detail.data.content,
+        base_revision: currentRevision.revision_number
+      });
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: coordinationKeys.documents(projectId)
+        }),
+        queryClient.invalidateQueries({
+          queryKey: coordinationKeys.document(documentId)
+        }),
+        queryClient.invalidateQueries({
+          queryKey: coordinationKeys.revisions(documentId)
+        })
+      ]);
+      onRestored();
+    }
+  });
+  const restoreBlockedReason = hasUnsavedChanges
+    ? "Save or discard your draft before restoring a revision."
+    : readOnly
+      ? "Archived documents are read-only."
+      : undefined;
 
   return (
     <DialogContent className="document-history-dialog h-[min(80dvh,760px)] w-[calc(100vw-2rem)] max-w-[1100px] grid-rows-[auto_minmax(0,1fr)] overflow-hidden p-0 sm:max-w-[1100px]">
@@ -102,16 +143,18 @@ function HistoryDialog({
           </p>
         ) : null}
       </DialogHeader>
-      <div className="grid min-h-0 grid-cols-1 grid-rows-[minmax(0,10rem)_minmax(0,1fr)] sm:grid-cols-[200px_minmax(0,1fr)] sm:grid-rows-1">
+      <div className="grid min-h-0 grid-cols-1 grid-rows-[minmax(0,10rem)_minmax(0,1fr)] sm:grid-cols-[260px_minmax(0,1fr)] sm:grid-rows-1">
         <aside
           className="min-h-0 overflow-auto border-b p-3 sm:border-r sm:border-b-0"
           aria-label="Document revisions"
         >
           <RevisionList
-            revisions={revisions}
-            currentRevision={currentRevision.revision_number}
+            revisions={historicalRevisions}
             selectedRevision={selectedRevision}
-            onSelect={setSelectedRevisionNumber}
+            onSelect={(revision) => {
+              restore.reset();
+              setSelectedRevisionNumber(revision);
+            }}
             loading={history.isPending}
             error={history.isError && !history.data}
             onRetry={() => history.refetch()}
@@ -141,24 +184,47 @@ function HistoryDialog({
           className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-3 overflow-hidden p-4"
           aria-live="polite"
         >
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-            <span className="font-medium text-foreground">
-              {selectedRevision === null
-                ? "Select a revision"
-                : `Revision ${selectedRevision}`}
-            </span>
-            <span>vs</span>
-            <span className="font-medium text-foreground">
-              Current saved · Revision {currentRevision.revision_number}
-            </span>
-            <span>
-              <span className="mr-1 inline-block size-2 rounded-sm bg-destructive/45" />
-              Removed
-            </span>
-            <span>
-              <span className="mr-1 inline-block size-2 rounded-sm bg-success/45" />
-              Added
-            </span>
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+              <span className="font-medium text-foreground">
+                {selectedRevision === null
+                  ? "Select a revision"
+                  : `Revision ${selectedRevision}`}
+              </span>
+              <span>vs</span>
+              <span className="font-medium text-foreground">
+                Current saved · Revision {currentRevision.revision_number}
+              </span>
+              <span>
+                <span className="mr-1 inline-block size-2 rounded-sm bg-destructive/45" />
+                Removed
+              </span>
+              <span>
+                <span className="mr-1 inline-block size-2 rounded-sm bg-success/45" />
+                Added
+              </span>
+              <Button
+                className="ml-auto"
+                size="sm"
+                disabled={
+                  selectedRevision === null ||
+                  !detail.data ||
+                  restore.isPending ||
+                  Boolean(restoreBlockedReason)
+                }
+                title={restoreBlockedReason}
+                onClick={() => restore.mutate()}
+              >
+                {restore.isPending ? "Restoring…" : "Restore as new revision"}
+              </Button>
+            </div>
+            {restore.isError ? (
+              <p role="alert" className="text-xs text-destructive">
+                {restore.error instanceof Error
+                  ? restore.error.message
+                  : "Unable to restore this revision."}
+              </p>
+            ) : null}
           </div>
           {detail.isPending && selectedRevision !== null ? (
             <Skeleton className="h-full min-h-64" />
@@ -191,7 +257,6 @@ function HistoryDialog({
 
 function RevisionList({
   revisions,
-  currentRevision,
   selectedRevision,
   onSelect,
   loading,
@@ -199,7 +264,6 @@ function RevisionList({
   onRetry
 }: {
   revisions: DocumentRevisionSummary[];
-  currentRevision: number;
   selectedRevision: number | null;
   onSelect: (revision: number) => void;
   loading: boolean;
@@ -223,38 +287,85 @@ function RevisionList({
       </p>
     );
 
+  const groups = Array.from(
+    revisions.reduce((grouped, revision) => {
+      const date = new Date(revision.created_at);
+      const key = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+      const group = grouped.get(key);
+      if (group) group.revisions.push(revision);
+      else grouped.set(key, { date, revisions: [revision] });
+      return grouped;
+    }, new Map<string, { date: Date; revisions: DocumentRevisionSummary[] }>())
+  ).map(([, group]) => group);
+
   return (
-    <div className="space-y-1">
-      {revisions.map((revision) => {
-        const current = revision.revision_number === currentRevision;
-        return (
-          <button
-            key={revision.revision_number}
-            type="button"
-            disabled={current}
-            aria-pressed={
-              !current && selectedRevision === revision.revision_number
-            }
-            className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-muted disabled:cursor-default aria-pressed:bg-muted"
-            onClick={() => onSelect(revision.revision_number)}
+    <div className="space-y-5">
+      {groups.map((group) => (
+        <section key={group.date.toISOString()}>
+          <h3 className="mb-2 px-1 text-xs font-medium text-muted-foreground">
+            {formatRevisionDay(group.date)}
+          </h3>
+          <ol
+            className="relative ml-2 border-l border-border pl-4"
+            aria-label={`${formatRevisionDay(group.date)} revisions`}
           >
-            <span className="flex items-center justify-between gap-2 font-medium">
-              Revision {revision.revision_number}{" "}
-              {current ? (
-                <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[0.7rem] text-primary-text">
-                  Current
-                </span>
-              ) : null}
-            </span>{" "}
-            <span className="mt-1 block text-xs text-muted-foreground">
-              {revision.author.type} ·{" "}
-              {new Date(revision.created_at).toLocaleString()}
-            </span>
-          </button>
-        );
-      })}
+            {group.revisions.map((revision) => {
+              const selected = selectedRevision === revision.revision_number;
+              const createdAt = new Date(revision.created_at);
+              const time = createdAt.toLocaleTimeString([], {
+                hour: "numeric",
+                minute: "2-digit"
+              });
+              return (
+                <li key={revision.revision_number} className="relative py-0.5">
+                  <span
+                    aria-hidden="true"
+                    className={`absolute -left-[1.3rem] top-4 size-2.5 rounded-full border-2 border-background ${selected ? "bg-primary" : "bg-muted-foreground/45"}`}
+                  />
+                  <button
+                    type="button"
+                    aria-pressed={selected}
+                    aria-label={`Revision ${revision.revision_number}, ${time}, ${revision.author.type} edit`}
+                    className="w-full rounded-lg px-3 py-2.5 text-left text-sm transition-colors hover:bg-muted aria-pressed:bg-muted"
+                    onClick={() => onSelect(revision.revision_number)}
+                  >
+                    <span className="flex items-baseline justify-between gap-2">
+                      <span className="font-medium text-foreground">
+                        Revision {revision.revision_number}
+                      </span>
+                      <time
+                        className="shrink-0 text-xs text-muted-foreground"
+                        dateTime={revision.created_at}
+                      >
+                        {time}
+                      </time>
+                    </span>
+                    <span className="mt-1 block text-xs capitalize text-muted-foreground">
+                      {revision.author.type} edit
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
+        </section>
+      ))}
     </div>
   );
+}
+
+function formatRevisionDay(date: Date) {
+  const today = new Date();
+  if (date.toDateString() === today.toDateString()) return "Today";
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  if (date.toDateString() === yesterday.toDateString()) return "Yesterday";
+  return date.toLocaleDateString([], {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: date.getFullYear() === today.getFullYear() ? undefined : "numeric"
+  });
 }
 
 function ErrorState({

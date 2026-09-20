@@ -1,1832 +1,646 @@
 ---
 version: alpha
-name: orchestrat Design System
-description: A high-contrast, technical, developer-first dark mode design system for an agent orchestration control plane.
+name: Orchestrat Dashboard Design System
+description: A calm, technical, desktop-first design system for an agent coordination workspace.
+themes:
+  default: system
+  supported:
+    - light
+    - dark
+    - system
 colors:
-  background: "#09090B"
-  foreground: "#FAFAFA"
-  card: "#111116"
-  card-foreground: "#FAFAFA"
-  popover: "#111116"
-  popover-foreground: "#FAFAFA"
-  primary: "#FAFAFA"
-  primary-foreground: "#09090B"
-  secondary: "#1C1C22"
-  secondary-foreground: "#A1A1AA"
-  muted: "#1C1C22"
-  muted-foreground: "#71717A"
-  accent: "#27272A"
-  accent-foreground: "#FAFAFA"
-  destructive: "#7F1D1D"
-  border: "rgba(255, 255, 255, 0.07)"
-  input: "#141416"
-  ring: "rgba(255, 255, 255, 0.15)"
-  blocker: "#EF4444"
-  warning: "#F59E0B"
-  passed: "#A1A1AA"
+  background: "var(--background)"
+  foreground: "var(--foreground)"
+  card: "var(--card)"
+  card-foreground: "var(--card-foreground)"
+  popover: "var(--popover)"
+  popover-foreground: "var(--popover-foreground)"
+  primary: "var(--primary)"
+  primary-foreground: "var(--primary-foreground)"
+  brand: "var(--brand)"
+  primary-text: "var(--primary-text)"
+  secondary: "var(--secondary)"
+  secondary-foreground: "var(--secondary-foreground)"
+  muted: "var(--muted)"
+  muted-foreground: "var(--muted-foreground)"
+  accent: "var(--accent)"
+  accent-foreground: "var(--accent-foreground)"
+  highlight: "var(--highlight)"
+  highlight-foreground: "var(--highlight-foreground)"
+  success: "var(--success)"
+  success-foreground: "var(--success-foreground)"
+  warning: "var(--warning)"
+  warning-foreground: "var(--warning-foreground)"
+  info: "var(--info)"
+  info-foreground: "var(--info-foreground)"
+  destructive: "var(--destructive)"
+  destructive-foreground: "var(--destructive-foreground)"
+  border: "var(--border)"
+  input: "var(--input)"
+  ring: "var(--ring)"
+  rail: "var(--rail)"
+  sidebar: "var(--sidebar)"
+  sidebar-foreground: "var(--sidebar-foreground)"
+  sidebar-accent: "var(--sidebar-accent)"
+  sidebar-accent-foreground: "var(--sidebar-accent-foreground)"
+  surface-raised: "var(--surface-raised)"
+  overlay: "var(--overlay)"
+palette:
+  light:
+    background: "oklch(1 0 0)"
+    foreground: "oklch(0.205 0 0)"
+    card: "oklch(1 0 0)"
+    popover: "oklch(1 0 0)"
+    primary: "oklch(0.205 0 0)"
+    primary-foreground: "oklch(0.985 0 0)"
+    brand: "oklch(0.7275 0.1669 53.99)"
+    primary-text: "oklch(0.49 0.145 48)"
+    secondary: "oklch(0.965 0 0)"
+    muted: "oklch(0.965 0 0)"
+    muted-foreground: "oklch(0.48 0 0)"
+    accent: "oklch(0.95 0 0)"
+    success: "oklch(0.43 0.1 155)"
+    warning: "oklch(0.78 0.16 85)"
+    info: "oklch(0.47 0.13 250)"
+    destructive: "oklch(0.54 0.21 28)"
+    border: "oklch(0.91 0 0)"
+    input: "oklch(0.89 0 0)"
+    ring: "oklch(0.6 0 0)"
+    rail: "oklch(0.97 0 0)"
+    sidebar: "oklch(0.98 0 0)"
+    sidebar-accent: "oklch(0.935 0 0)"
+  dark:
+    background: "oklch(0.24 0 0)"
+    foreground: "oklch(0.94 0 0)"
+    card: "oklch(0.275 0 0)"
+    popover: "oklch(0.29 0 0)"
+    primary: "oklch(0.94 0 0)"
+    primary-foreground: "oklch(0.205 0 0)"
+    brand: "oklch(0.7275 0.1669 53.99)"
+    primary-text: "oklch(0.78 0.14 57)"
+    secondary: "oklch(0.32 0 0)"
+    muted: "oklch(0.3 0 0)"
+    muted-foreground: "oklch(0.71 0 0)"
+    accent: "oklch(0.34 0 0)"
+    success: "oklch(0.76 0.13 155)"
+    warning: "oklch(0.8 0.15 85)"
+    info: "oklch(0.75 0.1 250)"
+    destructive: "oklch(0.71 0.16 28)"
+    border: "oklch(0.36 0 0)"
+    input: "oklch(0.39 0 0)"
+    ring: "oklch(0.65 0 0)"
+    rail: "oklch(0.22 0 0)"
+    sidebar: "oklch(0.22 0 0)"
+    sidebar-accent: "oklch(0.34 0 0)"
 typography:
-  display:
-    fontFamily: Outfit
-    fontSize: 48px
-    fontWeight: 600
-    lineHeight: 1.12
-    letterSpacing: -0.03em
-  headline:
-    fontFamily: Space Grotesk
-    fontSize: 30px
+  page-title:
+    fontFamily: system-ui
+    fontSize: 24px
     fontWeight: 600
     lineHeight: 1.25
-    letterSpacing: -0.02em
+    letterSpacing: -0.025em
+  toolbar-title:
+    fontFamily: system-ui
+    fontSize: 14px
+    fontWeight: 400
+    lineHeight: 1.25
+  card-title:
+    fontFamily: system-ui
+    fontSize: 16px
+    fontWeight: 500
+    lineHeight: 1.375
   body:
-    fontFamily: Outfit
-    fontSize: 15px
-    fontWeight: 300
-    lineHeight: 1.7
-  mono:
-    fontFamily: Geist Mono
+    fontFamily: system-ui
+    fontSize: 14px
+    fontWeight: 400
+    lineHeight: 1.5
+  metadata:
+    fontFamily: system-ui
     fontSize: 12px
     fontWeight: 400
+    lineHeight: 1.5
+  mono:
+    fontFamily: SFMono-Regular
+    fontSize: 12px
+    fontWeight: 400
+    lineHeight: 1.5
 rounded:
-  sm: 6px
-  md: 8px
-  lg: 10px
-  xl: 14px
-  "2xl": 18px
-  "3xl": 22px
-  "4xl": 26px
+  sm: 8px
+  md: 10px
+  lg: 14px
   full: 9999px
 spacing:
-  unit: 8px
-  container: 1024px
-  container-lg: 1280px
+  unit: 4px
+  rhythm: 8px
+  page-compact: 16px
+  page-default: 24px
+  page-large: 32px
+  container: 1280px
+  sidebar: 256px
+  sidebar-mobile: 288px
+  toolbar-desktop: 48px
+  toolbar-default: 56px
+motion:
+  shell-duration: 300ms
+  shell-easing: "cubic-bezier(0.22, 1, 0.36, 1)"
+  reduced-motion: remove-nonessential-transitions
 components:
   page-layout:
     backgroundColor: "{colors.background}"
     textColor: "{colors.foreground}"
-  hero-heading:
-    typography: "{typography.display}"
-    textColor: "{colors.foreground}"
+    maxWidth: "{spacing.container}"
+  toolbar-page-name:
+    typography: "{typography.toolbar-title}"
+    textColor: "{colors.primary-text}"
   body-text:
     typography: "{typography.body}"
-    textColor: "{colors.secondary-foreground}"
-  cta-button:
+    textColor: "{colors.foreground}"
+  supporting-text:
+    typography: "{typography.body}"
+    textColor: "{colors.muted-foreground}"
+  primary-button:
     backgroundColor: "{colors.primary}"
     textColor: "{colors.primary-foreground}"
     rounded: "{rounded.md}"
-  button-secondary:
+  secondary-button:
     backgroundColor: "{colors.secondary}"
     textColor: "{colors.secondary-foreground}"
     rounded: "{rounded.md}"
-  input-field:
-    backgroundColor: "{colors.input}"
+  outline-button:
+    backgroundColor: "{colors.background}"
     textColor: "{colors.foreground}"
+    borderColor: "{colors.border}"
+    rounded: "{rounded.md}"
+  input-field:
+    backgroundColor: "{colors.background}"
+    textColor: "{colors.foreground}"
+    borderColor: "{colors.input}"
     rounded: "{rounded.md}"
   divider:
     backgroundColor: "{colors.border}"
-    height: "1px"
+    height: 1px
   card-container:
     backgroundColor: "{colors.card}"
     textColor: "{colors.card-foreground}"
-    rounded: "{rounded.xl}"
+    outlineColor: "color-mix(in oklch, {colors.foreground} 10%, transparent)"
+    rounded: "{rounded.lg}"
   popover-menu:
     backgroundColor: "{colors.popover}"
     textColor: "{colors.popover-foreground}"
-    rounded: "{rounded.lg}"
-  muted-card:
-    backgroundColor: "{colors.muted}"
-    textColor: "{colors.secondary-foreground}"
     rounded: "{rounded.md}"
-  muted-badge:
-    backgroundColor: "{colors.foreground}"
+  muted-region:
+    backgroundColor: "{colors.muted}"
     textColor: "{colors.muted-foreground}"
+    rounded: "{rounded.md}"
+  active-navigation:
+    backgroundColor: "{colors.sidebar-accent}"
+    textColor: "{colors.sidebar-accent-foreground}"
+    rounded: "{rounded.sm}"
+  status-success:
+    backgroundColor: "color-mix(in oklch, {colors.success} 10%, transparent)"
+    textColor: "{colors.success}"
     rounded: "{rounded.full}"
-  accent-badge:
-    backgroundColor: "{colors.accent}"
-    textColor: "{colors.accent-foreground}"
-    rounded: "{rounded.sm}"
-  blocker-badge:
-    backgroundColor: "{colors.destructive}"
-    textColor: "{colors.foreground}"
-    rounded: "{rounded.sm}"
-  blocker-text:
-    textColor: "{colors.blocker}"
-  warning-text:
-    textColor: "{colors.warning}"
-  passed-text:
-    textColor: "{colors.passed}"
-  ring-indicator:
-    textColor: "{colors.ring}"
+  status-warning:
+    backgroundColor: "color-mix(in oklch, {colors.warning} 15%, transparent)"
+    textColor: "{colors.warning-foreground}"
+    rounded: "{rounded.full}"
+  status-info:
+    backgroundColor: "color-mix(in oklch, {colors.info} 10%, transparent)"
+    textColor: "{colors.info}"
+    rounded: "{rounded.full}"
+  status-destructive:
+    backgroundColor: "color-mix(in oklch, {colors.destructive} 10%, transparent)"
+    textColor: "{colors.destructive}"
+    rounded: "{rounded.full}"
+  focus-ring:
+    color: "{colors.ring}"
+    width: 2px
 ---
 
-# orchestrat Design System
+# Orchestrat Dashboard Design
 
-## Overview
+This document defines the visual and interaction system used by the Orchestrat dashboard. It describes the dashboard as it is implemented on the `codex/dashboard-redesign` branch and should guide future dashboard work.
 
-**orchestrat** is a developer-first coordination and control plane for autonomous agents.
+The source code remains authoritative. When this document and the implementation disagree, update this document or the implementation deliberately rather than creating a third pattern.
 
-Agents connect through MCP, hooks, APIs, and local integrations to coordinate shared work across projects. They can discover and claim tasks, leave comments, create and edit Markdown documents, communicate with other agents, report runtime activity, and maintain durable shared project state.
+## Product character
 
-Humans use orchestrat to observe these agents, understand what they are doing, intervene when necessary, manage shared work, inspect project activity, and maintain control over multi-agent workflows.
+Orchestrat is a coordination workspace for people and autonomous agents. The dashboard should feel like a calm desktop work tool: structured, compact, operational, and easy to scan for long periods.
 
-The visual identity should reflect the product's role as infrastructure for autonomous systems:
+The design is built around these qualities:
 
-- **Tone**: Technical, precise, calm, trustworthy, and operational.
-- **Vibe**: A minimal midnight-zinc control plane displaying live agents, task state, messages, documents, events, and system activity.
-- **Structure**: Dense but readable information layouts, structural hairline dividers, subtle dotted backgrounds, terminal-inspired metadata, and restrained status indicators.
-- **Product Metaphor**: A mission control interface for agents rather than a traditional project-management application.
+- **Quiet structure.** Hierarchy comes from spacing, typography, alignment, and subtle separators.
+- **Operational clarity.** Tasks, agents, documents, revisions, and system state should be understandable at a glance.
+- **Desktop fluency.** The shell behaves like a native productivity app while remaining responsive on the web.
+- **Restrained brand color.** Orange identifies selection, active context, and interactive emphasis. It does not fill page backgrounds or frame every surface.
+- **Reusable primitives.** Use shadcn components and semantic design tokens before creating page-specific UI.
+- **Information over decoration.** Avoid ornamental gradients, oversized marketing typography, glass effects, and heavy shadows.
 
-The interface should feel purpose-built for developers operating multiple autonomous systems.
+## Foundations
 
-It should not feel playful, consumer-oriented, overly futuristic, or like a generic SaaS dashboard.
+### Typography
 
----
-
-# Brand Principles
-
-## 1. Coordination Over Decoration
-
-orchestrat contains potentially large amounts of operational state:
-
-- agents
-- tasks
-- claims
-- sessions
-- messages
-- document revisions
-- events
-- integrations
-- heartbeats
-- runtime status
-
-The design should make this information easy to scan without creating unnecessary decoration.
-
-Visual hierarchy should come primarily from:
-
-- typography
-- spacing
-- contrast
-- alignment
-- borders
-- status indicators
-
-rather than excessive gradients, shadows, or color.
-
----
-
-## 2. Agents Are First-Class Actors
-
-Agents should visually appear as real participants in the workspace rather than anonymous system processes.
-
-Agent identity elements may show:
-
-```text
-Backend Agent
-
-● Busy
-
-ORC-142
-Implement OAuth callback
-
-Claude Code
-Heartbeat 8s ago
-```
-
-Humans, agents, and system-generated events should be visually distinguishable while remaining part of the same design language.
-
----
-
-## 3. System State Should Be Obvious
-
-Important operational state should be understandable at a glance.
-
-Examples:
-
-```text
-● Online
-
-● Busy
-
-○ Idle
-
-Blocked
-
-Awaiting Review
-
-Claim expired
-
-Revision conflict
-```
-
-Color should reinforce state, but the interface must never depend on color alone.
-
-Always pair important state colors with:
-
-- labels
-- icons
-- text
-- shapes
-
----
-
-## 4. Technical Metadata Is Part of the Interface
-
-Metadata should not be hidden unnecessarily.
-
-Examples:
-
-```text
-ORC-142
-
-frontend-agent
-
-session_01K...
-
-revision 18
-
-heartbeat 12s ago
-
-claude-code
-
-mcp
-
-api.orchestrat.dev
-```
-
-Use Geist Mono for this information.
-
-The system should feel transparent and inspectable.
-
----
-
-# Colors
-
-The visual identity relies on a high-contrast dark palette designed for long developer sessions and information-dense interfaces.
-
-## Background & Canvas
-
-Primary background:
-
-```text
-#09090B
-```
-
-Use this as the primary application canvas.
-
-Avoid pure black.
-
-The slight zinc tone prevents the interface from feeling excessively harsh while maintaining high contrast.
-
----
-
-## Primary Text
-
-```text
-#FAFAFA
-```
-
-Use for:
-
-- page headings
-- task names
-- document names
-- agent names
-- primary values
-- active navigation
-- important controls
-
----
-
-## Secondary Text
-
-```text
-#A1A1AA
-```
-
-Use for:
-
-- body text
-- descriptions
-- secondary labels
-- agent metadata
-- task metadata
-
----
-
-## Muted Text
-
-```text
-#71717A
-```
-
-Use for:
-
-- timestamps
-- inactive metadata
-- placeholders
-- disabled states
-- less important technical information
-
----
-
-## Card Surfaces
-
-```text
-#111116
-```
-
-Use for:
-
-- agent cards
-- task panels
-- document panes
-- activity panels
-- popovers
-- inspector surfaces
-
-Cards should be separated primarily through borders instead of shadows.
-
----
-
-## Borders
-
-Primary structural border:
-
-```text
-rgba(255, 255, 255, 0.07)
-```
-
-Use extensively for:
-
-- cards
-- sidebars
-- tables
-- panels
-- rows
-- navigation separators
-- window chrome
-
-Slightly stronger interactive borders may use:
-
-```text
-rgba(255, 255, 255, 0.15)
-```
-
----
-
-# Status Colors
-
-Status colors should remain restrained.
-
-They are operational indicators, not decorative brand colors.
-
-## Critical / Blocked / Error
-
-Background:
-
-```text
-#7F1D1D
-```
-
-Foreground:
-
-```text
-#EF4444
-```
-
-Use for:
-
-- blocked agents
-- failed operations
-- task claim failures
-- document conflicts
-- disconnected critical integrations
-- destructive operations
-
-Examples:
-
-```text
-Blocked
-
-Claim expired
-
-Connection failed
-
-Revision conflict
-```
-
----
-
-## Warning / Attention
-
-```text
-#F59E0B
-```
-
-Use for:
-
-- stale agents
-- expiring leases
-- review required
-- degraded integrations
-- human attention required
-
-Examples:
-
-```text
-Stale
-
-Lease expires in 38s
-
-Awaiting review
-```
-
----
-
-## Healthy / Complete
-
-Success should generally remain visually restrained.
-
-Use:
-
-```text
-#A1A1AA
-```
-
-for neutral completed state.
-
-Emerald:
-
-```text
-#10B981
-```
-
-may be used sparingly for highly meaningful positive runtime state such as:
-
-```text
-Connected
-
-Healthy
-
-Verified
-```
-
-Do not turn large portions of the interface green when tasks complete.
-
----
-
-# Agent Presence
-
-Recommended visual treatment:
-
-## Online
-
-Small neutral/emerald presence indicator with label:
-
-```text
-● Online
-```
-
-## Busy
-
-High-contrast neutral indicator:
-
-```text
-● Busy
-```
-
-The active task should provide stronger context than the presence color.
-
-## Idle
-
-Muted:
-
-```text
-○ Idle
-```
-
-## Waiting
-
-Muted or warning-toned:
-
-```text
-○ Waiting
-```
-
-## Blocked
-
-Red:
-
-```text
-● Blocked
-```
-
-## Stale
-
-Amber:
-
-```text
-● Stale
-```
-
-## Offline
-
-Muted zinc:
-
-```text
-○ Offline
-```
-
-Presence dots should remain small and functional.
-
-Avoid large glowing status indicators.
-
----
-
-# Task Status Treatment
-
-Task statuses should rely on compact badges.
-
-Recommended visual hierarchy:
-
-```text
-Backlog
-Ready
-Claimed
-In Progress
-Blocked
-Review
-Done
-Cancelled
-```
-
-Use mostly neutral zinc backgrounds.
-
-Reserve stronger color for:
-
-- Blocked
-- stale claims
-- warnings
-- failures
-
-Example:
-
-```text
-ORC-142    Implement OAuth callback
-
-In Progress
-backend-agent
-
-updated 32s ago
-```
-
-Task priority should remain secondary to task status.
-
----
-
-# Typography
-
-Typography establishes a developer-oriented identity by combining geometric sans-serif type with technical monospace metadata.
-
-## Display & UI Controls
-
-Use:
-
-```text
-Outfit
-```
-
-Primary hero headings:
-
-```text
-48px
-font-weight: 600
-line-height: 1.12
-letter-spacing: -0.03em
-```
-
-Outfit should also be used for most interface labels and controls.
-
----
-
-## Secondary Headings
-
-Use:
-
-```text
-Space Grotesk
-```
-
-Recommended for:
-
-- section headings
-- dashboard page titles
-- editorial landing-page sections
-- major card headings
-
-Default:
-
-```text
-30px
-font-weight: 600
-line-height: 1.25
-letter-spacing: -0.02em
-```
-
----
-
-## Body
-
-Use:
-
-```text
-Outfit
-```
-
-Default:
-
-```text
-15px
-font-weight: 300
-line-height: 1.7
-```
-
-This should make long descriptions, task content, and Markdown documents comfortable to read.
-
----
-
-## Technical & Metadata
-
-Use:
-
-```text
-Geist Mono
-```
-
-Default:
-
-```text
-12px
-font-weight: 400
-```
-
-Use for:
-
-- task keys
-- document paths
-- event types
-- timestamps
-- session IDs
-- agent IDs
-- commands
-- MCP tools
-- API paths
-- model names
-- runtime metadata
-- logs
-- heartbeat values
-- revision numbers
-
-Examples:
-
-```text
-ORC-142
-
-architecture.md
-
-revision 18
-
-task.claimed
-
-heartbeat 12s
-
-claude-code
-
-POST /api/v1/tasks
-```
-
----
-
-# Layout
-
-orchestrat uses structured application layouts with strong alignment.
-
-## Max Width Containers
-
-Marketing and documentation surfaces may use:
-
-```text
-1024px
-```
-
-or:
-
-```text
-1280px
-```
-
-Application dashboard views may expand beyond this when necessary for:
-
-- kanban boards
-- document editors
-- messaging
-- split-pane layouts
-- activity feeds
-
-Do not artificially constrain dense operational screens to marketing-page widths.
-
----
-
-## Dashboard Shell
-
-Recommended primary structure:
-
-```text
-┌──────────────┬─────────────────────────────────────┐
-│              │ Project / Breadcrumb / Actions      │
-│   Sidebar    ├─────────────────────────────────────┤
-│              │                                     │
-│              │             Content                 │
-│              │                                     │
-└──────────────┴─────────────────────────────────────┘
-```
-
-Sidebar navigation:
-
-```text
-Overview
-Tasks
-Agents
-Documents
-Messages
-Activity
-Integrations
-Settings
-```
-
-Desktop-only additions may include:
-
-```text
-Local Agents
-MCP Connections
-Hooks
-```
-
----
-
-# Dividers
-
-Use thin structural separators:
-
-```text
-1px
-rgba(255,255,255,0.06)
-```
-
-Dividers should define:
-
-- sidebar boundaries
-- table rows
-- card sections
-- metadata groups
-- split panes
-- editor boundaries
-
-They are one of the primary layout tools in the system.
-
----
-
-# Dot Grid Canvas
-
-A subtle radial dot pattern may be used on:
-
-- landing-page hero
-- onboarding
-- empty states
-- integration setup
-- connection screens
-
-Suggested pattern:
+The dashboard uses the operating system UI font stack:
 
 ```css
-radial-gradient(
-  rgba(255,255,255,0.04) 1px,
-  transparent 1px
-)
+-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif
 ```
 
-with:
+Use the monospace stack for identifiers, slugs, task keys, paths, code, and technical metadata:
+
+```css
+"SFMono-Regular", "SF Mono", ui-monospace, monospace
+```
+
+The standard hierarchy is:
+
+| Role | Treatment |
+| --- | --- |
+| Toolbar page name | `text-sm font-normal`, orange semantic text |
+| Page or modal title | `text-2xl font-semibold tracking-tight` when a standalone heading is needed |
+| Card title | `text-base font-medium leading-snug` |
+| Body | `text-sm` |
+| Supporting copy | `text-sm text-muted-foreground` |
+| Metadata | `text-xs text-muted-foreground` |
+| Technical identifier | `font-mono text-xs text-muted-foreground` |
+| Metric | `text-3xl font-semibold tracking-tight` |
+
+Keep headings sentence case. Avoid uppercase labels except established acronyms. Numeric content uses tabular figures globally.
+
+### Spacing and density
+
+Tailwind's spacing scale is the layout system. Prefer increments of 4 px, with 8 px as the common rhythm.
+
+- Page container: `max-w-7xl`, centered.
+- Page padding: 16 px compact, 24 px small desktop, 32 px large desktop.
+- Page section gap: 24 px.
+- Card and board gap: 16–24 px.
+- Compact control gap: 6–8 px.
+- Default card internal spacing: 16 px.
+- Small card internal spacing: 12 px.
+- Sidebar width: 256 px desktop, 288 px mobile sheet.
+- Top toolbar height: 48 px in desktop mode, 56 px elsewhere.
+
+Dense screens may show more information, but controls should retain comfortable hit targets and visible focus states.
+
+### Shape and elevation
+
+The root radius is 10 px. Controls generally use 8–10 px corners; cards and larger containers use 14 px corners.
+
+Use a one-pixel semantic ring or border to separate surfaces. Shadows are reserved for overlays, popovers, and the selected tab treatment. Cards should not appear to float high above the page.
+
+### Color system
+
+All product UI uses the semantic variables in `apps/dashboard/src/globals.css`. Do not hardcode light or dark colors in components.
+
+| Token | Purpose |
+| --- | --- |
+| `background` | Main canvas |
+| `foreground` | Primary text and icons |
+| `card` | Cards and raised work surfaces |
+| `popover` | Menus, dialogs, and floating controls |
+| `muted` | Recessed regions, quiet selection, skeletons |
+| `muted-foreground` | Secondary text and metadata |
+| `border` | Structural dividers and surface outlines |
+| `input` | Input outlines and dark-mode control surfaces |
+| `ring` | Keyboard focus |
+| `sidebar` | Sidebar and desktop toolbar surface |
+| `sidebar-accent` | Sidebar hover and selected background |
+| `brand` | Orchestrat orange identity color |
+| `primary-text` | Accessible orange text for active context and links |
+| `success` | Online, active, completed |
+| `warning` | Review, stale, caution |
+| `info` | Claimed and in-progress state |
+| `destructive` | Blocked, cancelled, destructive action, error |
+
+Light mode uses a white canvas and very light neutral surfaces. Dark mode uses warm-neutral charcoal layers rather than pure black. The canvas, sidebar, cards, and popovers should remain visually distinguishable in both themes.
+
+Use orange sparingly for:
+
+- the active page name in the toolbar;
+- active and hovered tab text;
+- open organization and project selectors;
+- active sidebar text;
+- links and editor syntax accents;
+- small identity marks or selected timeline nodes.
+
+Do not use orange as a large page background, generic card border, or default status color.
+
+Color never carries meaning alone. Status color must be paired with a label, icon, dot, or shape.
+
+## Application shell
+
+### Desktop frame
+
+The desktop app uses a persistent 256 px sidebar and a 48 px top toolbar. The toolbar and sidebar share the `sidebar` surface so the shell reads as one continuous frame.
+
+macOS traffic lights remain in the native titlebar area. The sidebar toggle and toolbar content align to the same horizontal divider. Drag regions must stay behind interactive controls, and double-clicking the toolbar may maximize the window.
+
+The sidebar transition uses:
 
 ```text
-24px 24px
+300 ms cubic-bezier(0.22, 1, 0.36, 1)
 ```
 
-spacing.
+Animate the sidebar width, toolbar padding, separator width, margin, and opacity together. Respect `prefers-reduced-motion` by removing nonessential transitions.
 
-Avoid using the grid behind highly information-dense dashboard screens.
+### Sidebar
 
----
+The sidebar is project navigation, not a second settings panel.
 
-# Vertical Guides
+Navigation is grouped as:
 
-Subtle vertical guide lines may be used on marketing pages to visually align sections.
+- **Workspace:** Overview, Tasks, Agents
+- **Knowledge:** Documents, Activity
+- **Administration:** Settings
 
-They should not dominate dashboard surfaces.
+Each destination uses a Lucide icon and a text label. The selected destination uses the neutral sidebar accent surface with orange text. Hover states remain subtle.
 
----
+The lower sidebar hierarchy is fixed:
 
-# Spacing
+1. Search button with the `⌘K` shortcut.
+2. Divider.
+3. Profile dropdown with avatar, name, and email.
 
-Base spacing unit:
+Profile settings and sign out belong in the profile menu. Search opens the global command menu.
+
+On mobile, the sidebar becomes a 288 px sheet and closes after navigation.
+
+### Top toolbar
+
+The left side of the toolbar shows context as:
 
 ```text
-8px
+Organization  ›  Project  ›  Page
 ```
 
-Application layouts should favor:
+Organization and project names are full-width content controls, not fixed-width truncation slots. They may truncate only when the window genuinely lacks space.
 
-```text
-8
-16
-24
-32
-40
-48
-```
+Clicking the organization name opens an organization switcher with:
 
-pixel rhythm.
+- available organizations;
+- New organization;
+- Organization settings.
 
-Marketing sections may use:
+Clicking the project name opens projects from the selected organization with:
 
-```text
-96px
-128px
-```
+- available projects;
+- New project;
+- Project settings.
 
-vertical padding.
+The current page name is plain orange text and is not a dropdown.
 
-Dashboard views should be more compact.
+The right side is ordered as:
 
----
+1. Route-specific actions such as **New task**.
+2. Search button with the platform shortcut.
+3. Appearance menu.
 
-# Elevation & Depth
+Page-specific actions belong in the toolbar rather than duplicated page headers. Do not reintroduce Overview's removed status badge or View tasks button.
 
-orchestrat should remain mostly flat.
+## Core component language
 
-Depth comes from:
+### Buttons
 
-- surface changes
-- border contrast
-- nested panes
-- restrained overlays
+- Default buttons are dark-on-light or light-on-dark primary actions.
+- Outline buttons are the common neutral action.
+- Ghost buttons are for compact toolbar, menu, and icon actions.
+- Destructive buttons are reserved for destructive mutations.
+- Button heights range from 24 px for extra-small controls to 36 px for large controls; the normal height is 32 px.
+- Icon-only buttons require an accessible label.
+- Disabled buttons reduce opacity and do not accept pointer events.
+- Pressed non-menu buttons may move down by one pixel.
 
-Do not rely heavily on box shadows.
+Prefer one primary action per local context. Put secondary or infrequent operations in a menu.
 
----
+### Cards
 
-# Translucent Borders
+Cards use `bg-card`, a 14 px radius, and a one-pixel low-contrast ring. They do not use prominent shadows.
 
-Primary card separation:
+Card anatomy is:
 
-```text
-background: #111116
-border: rgba(255,255,255,0.07)
-```
+- header with title, description, and optional top-right action;
+- content;
+- optional footer separated by a border and muted fill.
 
-This is preferred over:
+Metric cards may use the existing very subtle vertical gradient from `card` to a card/muted mix. Do not apply this gradient to every card.
 
-- bright card backgrounds
-- heavy shadows
-- large glowing outlines
+### Badges and status
 
----
+Badges are compact pills with text at 12 px. `StatusBadge` pairs every status with a dot and readable label.
 
-# Bezel Frames
+Use the existing mapping:
 
-Marketing previews may use nested frames that resemble:
+- success: online, active, done;
+- warning: review, stale;
+- info: claimed, in progress;
+- destructive: blocked, cancelled;
+- secondary: neutral or queued states.
 
-- terminal windows
-- IDE windows
-- orchestrat desktop windows
+Priority badges use destructive only for urgent priority. Other priorities stay neutral so they do not compete with workflow state.
 
-Example structure:
+### Tabs
 
-```text
-Outer frame
-  ↓
-Window chrome
-  ↓
-Application preview
-```
+Tabs use a quiet muted container. Active tabs use the page surface and orange semantic text; hover changes text to orange before selection. Keep tab labels short and pair icons with text when the view changes substantially, such as Board and List.
 
-Use subtle double borders:
+### Tables and lists
 
-```text
-outer: white/6
-inner: white/5
-```
+Tables are for comparison-heavy data. Board cards and lists are for scanning work items. Technical keys and timestamps should remain visually secondary.
 
-This treatment is especially useful when displaying:
+Use sticky headers only when a table scrolls independently. Keep row actions discoverable without filling each row with buttons.
 
-- active agents
-- task feeds
-- MCP connection setup
-- orchestration examples
+### Forms
 
----
+Forms use shadcn fields, labels, inputs, textareas, selects, and validation messages. Categorical values must use a real select or menu rather than free text.
 
-# Overlay Texture
+- Labels are explicit.
+- Placeholder text does not replace labels.
+- Save actions expose pending and failure states.
+- Conflicts preserve the user's draft and explain the next choice.
+- Archived projects and documents are visibly read-only.
 
-A very subtle noise layer may be applied globally.
+### Dialogs, sheets, and menus
 
-Suggested opacity:
+- Dialogs are for focused creation, confirmation, comparison, and revision history.
+- Right-side sheets are for task details and other work that benefits from keeping the underlying page visible.
+- Dropdown menus are for selection and low-frequency actions.
+- Destructive actions should be separated from routine actions.
+- Overlays must trap focus and return focus to the invoking control.
 
-```text
-0.025
-```
+## Page patterns
 
-It should barely be visible.
+### Overview
 
-Do not let texture reduce text clarity.
+The overview is a mission-control summary, not a report full of charts.
 
----
+Its hierarchy is:
 
-# Shapes
+1. Four compact metric cards: online agents, active tasks, needs attention, completed tasks.
+2. Work at a glance and tasks needing attention.
+3. Current agent work and recent activity.
 
-## Inputs & Buttons
+Use cards, progress, short tables, and focused empty states. Avoid adding page-title chrome above the metrics.
 
-Use:
+### Tasks
 
-```text
-8px - 10px
-```
+Tasks provide Board and List tabs.
 
-corner radius.
+The filter row contains:
 
-They should feel precise, not pill-heavy.
+- view tabs;
+- task search;
+- status select;
+- result count.
 
----
+Board columns use a recessed muted surface. Task cards use the standard card ring, a monospace task key, title, priority, and comment count. Empty columns say **No tasks** rather than displaying decorative art.
 
-## Cards
+Task creation is a dialog. Task inspection and editing use a right-side sheet. **New task** lives in the top toolbar.
 
-Use:
+### Agents
 
-```text
-14px
-```
+Agents emphasize identity, presence, current work, and last heartbeat. Online and working states must pair semantic color with labels. Empty states should tell the user how to connect a runtime.
 
-or:
+### Documents
 
-```text
-18px
-```
+Documents use a two-pane workspace:
 
-for major surfaces.
+- left: collapsible folder and document tree;
+- right: selected document editor and actions.
 
-Examples:
+Folders are closed by default. Files use Markdown-only creation, allow an untitled initial state, and support inline rename. New document and new folder actions belong beside the tree controls; folder rows can expose contextual creation.
 
-- dashboard overview cards
-- agent preview panels
-- integration cards
-- landing-page product mockups
+The editor supports rich Markdown and source mode, including headings, links, lists, task lists, tables, code blocks, separators, and images. The rendered document typography is defined by `.document-markdown`.
 
----
+Revision history is a date-grouped timeline:
 
-## Badges
-
-Use:
-
-```text
-6px
-```
-
-for compact rectangular status labels.
-
-Use full pill rounding only for:
-
-- compact filters
-- presence states
-- tiny metadata tokens
-
-Avoid turning every label into a pill.
-
----
-
-# Components
-
-## 1. Main CTA Buttons
-
-Solid white:
-
-```text
-background: #FAFAFA
-color: #09090B
-```
-
-Use for primary actions such as:
-
-```text
-Join Waitlist
-
-Create Project
-
-Connect Agent
-
-Create Task
-
-Install macOS App
-```
-
-Hover behavior should remain subtle.
-
-Do not use large glow effects.
-
----
-
-# 2. Secondary / Ghost Controls
-
-Use:
-
-```text
-rgba(255,255,255,0.03)
-```
-
-with:
-
-```text
-rgba(255,255,255,0.07)
-```
-
-borders.
-
-Suitable for:
-
-```text
-Cancel
-
-View Activity
-
-Open Document
-
-Configure
-
-Release Task
-```
-
-Hover should slightly increase contrast.
-
----
-
-# 3. Input Fields
-
-Use:
-
-```text
-background: rgba(255,255,255,0.06)
-border: rgba(255,255,255,0.07)
-```
-
-Placeholder:
-
-```text
-#71717A
-```
-
-Focused border:
-
-```text
-rgba(255,255,255,0.15)
-```
-
-Use for:
-
-- task titles
-- project names
-- agent names
-- search
-- filters
-- channel messages
-- document paths
-
----
-
-# 4. Agent Card
-
-An agent card should communicate useful operational information without requiring a detail page.
-
-Example:
-
-```text
-Backend Agent                         ● Busy
-
-Working on
-ORC-142 · Implement OAuth callback
-
-Claude Code
-typescript · backend
-
-heartbeat 12s ago
-```
-
-Recommended visual hierarchy:
-
-1. agent identity
-2. state
-3. current task
-4. capabilities
-5. runtime metadata
-
-Avoid displaying every available database field.
-
----
-
-# 5. Task Row
-
-Recommended structure:
-
-```text
-ORC-142    Implement OAuth callback
-
-In Progress      backend-agent
-High             updated 32s ago
-```
-
-Task keys use Geist Mono.
-
-Task title uses Outfit.
-
-Metadata remains muted.
-
-Rows should be separated by thin borders rather than floating individual cards when displayed in lists.
-
----
-
-# 6. Task Claim Indicator
-
-Claim ownership is important system state.
-
-Example:
-
-```text
-CLAIMED BY
-
-backend-agent
-
-session_01K...
-lease 04:12 remaining
-heartbeat 12s ago
-```
-
-Expiring leases may use amber.
-
-Expired or revoked claims may use red.
-
-Do not use countdown animation that becomes visually distracting.
-
----
-
-# 7. Document Editor
-
-Recommended split view:
-
-```text
-┌───────────────┬──────────────────────────────┐
-│ Files         │ architecture.md              │
-│               ├──────────────────────────────┤
-│ README.md     │                              │
-│ architecture │ Markdown editor / preview    │
-│ docs/         │                              │
-│               │                              │
-└───────────────┴──────────────────────────────┘
-```
-
-Header metadata may show:
-
-```text
-revision 18
-edited by backend-agent
-32s ago
-```
-
-Conflicts should appear clearly:
-
-```text
-Revision conflict
-
-Current revision: 19
-Your base revision: 18
-```
-
----
-
-# 8. Messages
-
-Messages should distinguish actor type subtly.
-
-Example:
-
-```text
-backend-agent                                     22:41
-
-ORC-142 is implemented and ready for review.
-```
-
-Agent names may use a small agent glyph.
-
-Human names may use avatar/initial treatment.
-
-System messages should use muted monospace styling.
-
-Avoid oversized chat bubbles.
-
-A Slack-like dense message stream is more appropriate than consumer messenger bubbles.
-
----
-
-# 9. Activity Feed
-
-The activity feed is a central orchestrat component.
-
-Example:
-
-```text
-22:41  backend-agent   claimed       ORC-142
-
-22:39  Arman           updated       architecture.md
-
-22:37  review-agent    commented     ORC-138
-
-22:35  frontend-agent  completed     ORC-131
-```
-
-Recommended treatment:
-
-- timestamp: Geist Mono
-- actor: high contrast
-- action: muted
-- entity: medium/high contrast
-- subtle icon per event class
-
-This should feel closer to an operational event log than a social feed.
-
----
-
-# 10. MCP Tool Display
-
-MCP actions should use compact technical styling.
-
-Example:
-
-```text
-MCP TOOL
-
-claim_task
-
-task_id
-ORC-142
-
-status
-success
-```
-
-or:
-
-```text
-claim_task(ORC-142)
-→ TASK_ALREADY_CLAIMED
-```
-
-Use Geist Mono heavily.
-
-Ideal for:
-
-- setup screens
-- integration previews
-- activity detail
-- marketing product previews
-
----
-
-# 11. Connection Card
-
-Agent integration cards should show connection state clearly.
-
-Example:
-
-```text
-Claude Code
-
-● Connected
-
-MCP
-orchestrat mcp
-
-Hooks
-Enabled
-
-Last event
-8s ago
-```
-
-Disconnected state:
-
-```text
-Claude Code
-
-○ Not connected
-
-Configure
-```
-
----
-
-# 12. Status Rail / Live Activity Banner
-
-The original looping release banner becomes an **agent activity rail** for orchestrat.
-
-Example content:
-
-```text
-frontend-agent · ORC-128 completed
-
-backend-agent · ORC-142 claimed
-
-review-agent · waiting
-
-architecture.md · revision 18
-
-3 agents online
-```
-
-Use:
-
-```text
-11px
-Geist Mono
-uppercase or compact technical labels
-```
-
-This is primarily suitable for the landing page, onboarding, or overview surfaces.
-
-Avoid continuous animation in primary work screens.
-
----
-
-# 13. Preview Chrome Windows
-
-Marketing previews should resemble real orchestrat surfaces.
-
-Possible examples:
-
-### Multi-Agent Overview
-
-```text
-3 AGENTS ONLINE
-
-frontend-agent       Busy
-backend-agent        Busy
-review-agent         Idle
-```
-
-### Task Coordination
-
-```text
-ORC-142
-
-Implement OAuth callback
-
-CLAIMED
-backend-agent
-
-lease 04:12
-```
+- newest revisions appear first;
+- a vertical branch connects revision nodes;
+- selected nodes use the theme accent;
+- each entry shows revision number, time, and actor type;
+- older pages append below the current timeline;
+- the current revision is omitted from the selectable historical list;
+- restore writes the selected content as a new revision, preserving history;
+- restore is disabled while a local draft is unsaved or the document is read-only.
 
 ### Activity
 
-```text
-22:41 task.claimed
-22:39 document.updated
-22:37 message.sent
-```
+Activity is chronological and metadata-forward. Filter out implementation noise that does not help a person understand project state. Event type, actor, affected entity, and time should be easy to scan.
 
-### MCP
+### Settings
 
-```text
-list_tasks()
-claim_task("ORC-142")
-read_document("architecture.md")
-send_message(...)
-```
+Organization and project settings are reached from their toolbar selectors. Profile settings are reached from the sidebar profile menu. Keep settings forms narrow enough to read and separate dangerous operations from routine configuration.
+
+## Loading, empty, error, and conflict states
 
-These should look like actual application interfaces rather than abstract decorative code.
+Every data surface must define all four states.
 
----
+- **Loading:** use structural skeletons shaped like the eventual content.
+- **Empty:** state what is missing and provide a relevant next action when one exists.
+- **Error:** explain the failure in plain language and provide Retry when retrying is meaningful.
+- **Conflict:** preserve local work, load the current server version, and let the user decide how to continue.
 
-# Tables
+Connectivity problems appear in the shared shell banner. Do not repeat the same global connection warning in every card.
 
-Dense data should usually use table/list layouts rather than card grids.
-
-Good candidates:
-
-- agents
-- tasks
-- sessions
-- integrations
-- credentials
-- revisions
-
-Recommended:
-
-- 40–48px row heights
-- thin bottom borders
-- muted headers
-- clear hover state
-- monospace metadata where appropriate
-
-Avoid excessive zebra striping.
-
----
-
-# Navigation
-
-Sidebar should remain visually quiet.
-
-Default:
-
-```text
-text: #71717A
-```
-
-Hover:
-
-```text
-text: #A1A1AA
-background: rgba(255,255,255,0.03)
-```
-
-Active:
-
-```text
-text: #FAFAFA
-background: rgba(255,255,255,0.05)
-```
-
-Do not give every navigation item a large filled button appearance.
-
----
-
-# Empty States
-
-Empty states should remain useful and technical.
-
-Example:
-
-```text
-No agents connected
-
-Connect an MCP-capable agent to begin coordinating work.
-
-[ Connect Agent ]
-```
-
-or:
-
-```text
-No tasks yet
-
-Create the first task manually or let a connected agent create one.
-
-[ Create Task ]
-```
-
-A subtle dot grid may be used behind large empty states.
-
-Avoid cartoon illustrations.
-
----
-
-# Loading States
-
-Prefer:
-
-- skeleton rows
-- subtle spinner
-- inline loading state
-
-Avoid full-page branded loading animations for routine navigation.
-
----
-
-# Conflict States
-
-Conflicts are expected in multi-agent systems and should be treated as first-class UI.
-
-Examples:
-
-```text
-TASK VERSION CONFLICT
-
-This task changed after you opened it.
-```
-
-```text
-DOCUMENT CONFLICT
-
-architecture.md is now revision 19.
-Your edit was based on revision 18.
-```
-
-Use red sparingly.
-
-Provide clear recovery actions.
-
----
-
-# Human Intervention UI
-
-Human-control actions should be visible but not dominant.
-
-Examples:
-
-```text
-Revoke Claim
-
-Disable Agent
-
-Reassign
-
-Mark Blocked
-
-Send Message
-```
-
-Destructive actions require explicit confirmation.
-
-Use red only for actually destructive actions.
-
----
-
-# Marketing Design
-
-The orchestrat.dev landing page should retain the same visual system but use more whitespace than the dashboard.
-
-Suggested hero:
-
-```text
-Orchestrate agents.
-Keep control.
-
-A shared workspace where autonomous agents
-claim work, communicate, edit project knowledge,
-and coordinate in real time.
-```
-
-Primary CTA:
-
-```text
-Join Waitlist
-```
-
-Secondary CTA:
-
-```text
-View How It Works
-```
-
-Possible technical preview beneath hero:
-
-```text
-frontend-agent
-● Busy
-ORC-128
-
-backend-agent
-● Busy
-ORC-142
-
-review-agent
-○ Idle
-```
-
-or an MCP interaction:
-
-```text
-list_tasks()
-
-→ ORC-142
-  Implement OAuth callback
-  priority: high
-  status: ready
-
-claim_task("ORC-142")
-
-→ claimed
-```
-
----
-
-# Landing Page Sections
-
-Suggested section structure:
-
-```text
-Hero
-
-Live Agent Activity Rail
-
-The Coordination Problem
-
-Tasks Built for Agents
-
-Shared Markdown Knowledge
-
-Agent-to-Agent Messaging
-
-MCP + Hooks
-
-Human Control Plane
-
-macOS App
-
-Waitlist CTA
-```
-
-Use actual product concepts and mock UI.
-
-Avoid generic:
-
-- AI brain graphics
-- glowing nodes
-- humanoid robots
-- colorful network diagrams
-
----
-
-# Icons
-
-Use simple line icons.
-
-Recommended categories:
-
-- agents
-- tasks
-- documents
-- messages
-- activity
-- integrations
-- settings
-- connection
-- terminal
-- branch/dependency
-- heartbeat
-
-Icons should generally inherit text color.
-
-Avoid multi-colored icon sets.
-
----
-
-# Motion
-
-Motion should feel operational.
-
-Good:
-
-- 100–200ms hover transitions
-- subtle status changes
-- panel opening
-- dropdown transitions
-- realtime row insertion
-- small presence transitions
-
-Avoid:
-
-- large parallax
-- glowing animated gradients
-- aggressive spring animations
-- constant dashboard motion
-
-Realtime activity should not make the interface visually unstable.
-
----
-
-# Do's and Don'ts
-
-## Do
-
-- **Do** keep the primary background dark zinc `#09090B`.
-- **Do** use thin translucent borders `rgba(255,255,255,0.07)` as the main structural device.
-- **Do** use Geist Mono for IDs, task keys, paths, events, timestamps, commands, sessions, and MCP information.
-- **Do** make agent state and task ownership understandable immediately.
-- **Do** show useful technical metadata instead of hiding it behind excessive abstraction.
-- **Do** keep the system dense but organized.
-- **Do** prefer lists and tables for operational data.
-- **Do** use restrained colors primarily for state.
-- **Do** give important conflicts explicit UI.
-- **Do** make human intervention controls easy to find.
-- **Do** maintain the same frontend visual language across the web dashboard and macOS application.
-- **Do** use actual orchestrat concepts in landing-page mockups.
-
-## Don't
-
-- **Don't** use heavy drop shadows.
-- **Don't** use purple or blue SaaS gradients as the primary brand treatment.
-- **Don't** use glassmorphism.
-- **Don't** use fully saturated primary accent colors across large areas.
-- **Don't** turn every object into a floating card.
-- **Don't** use excessive pills.
-- **Don't** hide important agent/runtime information for the sake of visual minimalism.
-- **Don't** make the dashboard resemble a consumer chat application.
-- **Don't** represent agents using humanoid robot illustrations.
-- **Don't** overuse red, amber, or green.
-- **Don't** use glowing agent presence indicators.
-- **Don't** make activity animations distracting.
-- **Don't** mix additional sans-serif families outside Outfit and Space Grotesk.
-- **Don't** use bright solid card backgrounds.
-- **Don't** make orchestrat look like a generic project-management clone.
-
----
-
-# Product-Specific Design Vocabulary
-
-Preferred language inside the product:
-
-```text
-Agent
-Session
-Task
-Claim
-Lease
-Document
-Revision
-Message
-Channel
-Activity
-Event
-Integration
-MCP
-Hook
-Workspace
-Project
-```
-
-Avoid unnecessarily humanizing technical concepts.
-
-For example, prefer:
-
-```text
-Agent disconnected
-```
-
-instead of:
-
-```text
-Your teammate went away
-```
-
-Prefer:
-
-```text
-Claim expired
-```
-
-instead of:
-
-```text
-Agent lost ownership
-```
-
-The UI language should remain direct and operational.
-
----
-
-# Core Visual Identity Summary
-
-orchestrat should visually communicate:
-
-```text
-control
-coordination
-visibility
-precision
-shared state
-developer tooling
-live systems
-```
-
-The primary interface should feel like a calm mission-control environment for autonomous agents.
-
-Its visual identity comes from:
-
-- deep zinc backgrounds
-- crisp white typography
-- thin structural borders
-- monochrome surfaces
-- restrained operational status colors
-- monospace technical metadata
-- dense but readable layouts
-- live activity
-- agent presence
-- task ownership
-- document revision state
-
-The product should look credible next to tools such as terminals, IDEs, infrastructure dashboards, and developer control planes while maintaining a distinct orchestrat identity.
+## Responsive behavior
+
+The dashboard is desktop-first but must remain functional on smaller windows.
+
+- Persistent sidebar becomes a sheet below the medium breakpoint.
+- Organization and project breadcrumb controls hide on compact widths; the page name remains.
+- Toolbar actions stay to the right and may reduce to icons when their meaning remains clear.
+- Metric grids progress from one column to two and then four.
+- Dense two-column page sections collapse to one column.
+- Task board columns use two columns at medium widths and four at extra-large widths.
+- Two-pane document layouts stack or provide independently scrollable regions.
+- Avoid fixed widths that force horizontal page scrolling.
+
+Test desktop layouts at the standard app window and narrow desktop widths. Test responsive behavior at 390 px and 320 px when a change touches shared layout.
+
+## Motion
+
+Motion explains spatial change. It should not decorate routine actions.
+
+Use the shell's 300 ms easing for sidebar and toolbar geometry. Use short color and shadow transitions for hover and selection. Avoid animating large page regions on initial load.
+
+All animation and transition effects must yield to `prefers-reduced-motion`.
+
+## Accessibility
+
+- Use semantic landmarks: navigation, header, main, section, aside, table, list.
+- Every page or major region needs a meaningful accessible label.
+- Keep a skip link to `#main-content`.
+- Interactive icons require accessible names.
+- Use `aria-current` for active navigation and `aria-pressed` for selectable revision nodes.
+- Preserve visible focus rings in the shell, dialogs, document editor, and revision history.
+- Do not place click handlers on noninteractive elements.
+- Announce loading, save, error, and conflict status where appropriate.
+- Maintain keyboard access for menus, tabs, sheets, dialogs, editor controls, and command search.
+- Never rely on color alone for status or selection.
+
+## Content style
+
+Use concise, direct language.
+
+- Buttons begin with verbs: **New task**, **Save now**, **Load older revisions**.
+- Empty states describe the situation before suggesting an action.
+- Errors explain what the user can do next.
+- Prefer **Search** over **Command palette** in user-facing shell copy.
+- Use **organization**, **project**, **task**, **agent**, **document**, and **revision** consistently.
+- Avoid implementation terms in the product interface unless they help a developer make a decision.
+
+## Implementation rules
+
+1. Reuse an existing component in `apps/dashboard/src/components/ui` before adding markup or a dependency.
+2. Use Tailwind utilities for layout and component styling.
+3. Use semantic color tokens; never hardcode theme-specific colors in route components.
+4. Put shared behavior in the shell or shared component rather than duplicating it across routes.
+5. Keep route-specific primary actions in `TopToolbarActions`.
+6. Preserve the dashboard page container: `dashboard-page`.
+7. Use Lucide icons at the component default size unless the context requires otherwise.
+8. Keep realtime and mutation state visible without allowing it to rearrange the whole page.
+9. Add a focused interaction test when introducing branching behavior, persistence, or conflict handling.
+10. Verify both light and dark mode when changing tokens or shared surfaces.
+
+## Avoid
+
+- Pure black dashboard backgrounds.
+- Orange page backgrounds or generic orange borders.
+- Large logo blocks that compete with navigation.
+- Repeated page headers below the toolbar.
+- Heavy shadows on ordinary cards.
+- Gratuitous gradients or glass effects.
+- Fixed-width breadcrumb labels that truncate when space is available.
+- Icon-only actions without accessible labels.
+- Custom controls where a shadcn primitive already exists.
+- Hiding operational state behind hover-only interactions.
+- Replacing a user's unsaved draft during refetch or conflict recovery.
+
+## Review checklist
+
+Before considering a dashboard UI change complete, verify:
+
+- It uses the established shell, page container, and shadcn primitives.
+- Light and dark surfaces remain distinct without harsh contrast.
+- Orange is limited to identity and active interaction cues.
+- Toolbar, divider, sidebar toggle, breadcrumbs, route actions, search, and appearance controls align.
+- Loading, empty, error, disabled, and archived states are accounted for.
+- Keyboard focus is visible and interaction order is logical.
+- The layout works with long organization, project, task, and document names.
+- The layout does not overflow at supported compact widths.
+- Dynamic state updates do not discard drafts or obscure conflicts.
+- Focused tests, lint, typecheck, and the relevant build pass.
+
+## Source map
+
+The main implementation references are:
+
+- `apps/dashboard/src/globals.css` — semantic tokens, page layout, Markdown typography, editor theming, reduced motion.
+- `apps/dashboard/src/components/app-shell/app-shell.tsx` — shared shell, sidebar state, route actions, command search.
+- `apps/dashboard/src/components/app-shell/context-sidebar.tsx` — navigation groups, search, profile menu.
+- `apps/dashboard/src/components/app-shell/top-toolbar.tsx` — hierarchy selectors, route actions, search, appearance, desktop drag behavior.
+- `apps/dashboard/src/components/ui` — shadcn-based primitives and variants.
+- `apps/dashboard/src/features/overview/overview-page.tsx` — overview composition.
+- `apps/dashboard/src/features/documents/markdown-editor.tsx` — Markdown authoring surface.
+- `apps/dashboard/src/features/documents/document-history.tsx` — revision timeline, comparison, restore.
+- `apps/dashboard/src/routes/_authenticated.projects.$projectId.tasks.tsx` — board/list and task-detail patterns.
+- `apps/dashboard/src/routes/_authenticated.projects.$projectId.documents.tsx` — document tree and editor workspace.

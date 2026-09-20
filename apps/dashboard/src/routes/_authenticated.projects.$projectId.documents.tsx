@@ -1,12 +1,26 @@
+import { PageState } from "@/components/dashboard/page";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  Empty,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+  EmptyDescription
+} from "@/components/ui/empty";
+import { cn } from "@/lib/cn";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import type { MDXEditorMethods } from "@mdxeditor/editor";
+import type { Document as ProjectDocument } from "@orchestrat/protocol";
 import {
   Archive,
+  ChevronRight,
+  FilePlus,
   FileText,
+  Folder,
+  FolderPlus,
   MoreHorizontal,
-  Paperclip,
   Pencil,
   Plus,
   RotateCcw
@@ -23,26 +37,401 @@ import { MarkdownEditor } from "@/features/documents/markdown-editor";
 import { DocumentHistory } from "@/features/documents/document-history";
 import {
   coordinationKeys,
-  documentAttachmentsQueryOptions,
   documentQueryOptions,
   documentsQueryOptions
 } from "@/features/coordination/query-options";
 import {
   DashboardApiError,
-  type DocumentAttachment,
   type DocumentAttachmentUpload
 } from "@/lib/api/client";
 
 const AUTOSAVE_DELAY_MS = 1_500;
 const PART_SIZE_BYTES = 16 * 1024 * 1024;
 const PART_SIGN_BATCH_SIZE = 100;
-const MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024 * 1024;
+const MAX_IMAGE_BYTES = 2 * 1024 * 1024 * 1024;
+const DOCUMENT_IMAGE_PREFIX = "orchestrat-attachment:";
+const SUPPORTED_IMAGE_TYPES = new Set([
+  "image/avif",
+  "image/gif",
+  "image/jpeg",
+  "image/png",
+  "image/webp"
+]);
 
 export const Route = createFileRoute(
   "/_authenticated/projects/$projectId/documents"
 )({ component: DocumentsRoute });
 
 type RemoteRevision = { revision: number; content: string; actor: string };
+type DocumentTreeFolder = {
+  type: "folder";
+  name: string;
+  path: string;
+  children: DocumentTreeNode[];
+};
+type DocumentTreeFile = {
+  type: "file";
+  name: string;
+  document: ProjectDocument;
+};
+type DocumentTreeNode = DocumentTreeFolder | DocumentTreeFile;
+
+function buildDocumentTree(
+  documents: ProjectDocument[],
+  folderPaths: string[]
+) {
+  const root: DocumentTreeNode[] = [];
+  const folderChildren = (path: string) => {
+    let children = root;
+    let folderPath = "";
+
+    for (const part of path.split("/").filter(Boolean)) {
+      folderPath = folderPath ? `${folderPath}/${part}` : part;
+      let folder = children.find(
+        (node): node is DocumentTreeFolder =>
+          node.type === "folder" && node.name === part
+      );
+      if (!folder) {
+        folder = { type: "folder", name: part, path: folderPath, children: [] };
+        children.push(folder);
+      }
+      children = folder.children;
+    }
+    return children;
+  };
+
+  for (const path of folderPaths) folderChildren(path);
+
+  for (const document of documents) {
+    const parts = document.path.split("/");
+    const name = parts.pop() ?? document.path;
+    const children = folderChildren(parts.join("/"));
+
+    children.push({ type: "file", name, document });
+  }
+
+  const sort = (nodes: DocumentTreeNode[]) => {
+    nodes.sort((left, right) => {
+      if (left.type !== right.type) return left.type === "folder" ? -1 : 1;
+      return left.name.localeCompare(right.name);
+    });
+    for (const node of nodes) if (node.type === "folder") sort(node.children);
+  };
+  sort(root);
+  return root;
+}
+
+function markdownPath(value: string) {
+  const path = value.trim();
+  const name = path.split("/").at(-1) ?? "";
+  if (!name) return null;
+  if (name.toLowerCase().endsWith(".md")) return path;
+  return name.includes(".") ? null : `${path}.md`;
+}
+
+function InlineDocumentName({
+  label,
+  initialValue = "",
+  pending,
+  error,
+  onSubmit,
+  onCancel
+}: {
+  label: string;
+  initialValue?: string;
+  pending: boolean;
+  error?: string;
+  onSubmit: (name: string) => void;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState(initialValue);
+  const [invalid, setInvalid] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const input = inputRef.current;
+    if (!input) return;
+    input.focus();
+    const extension = input.value.toLowerCase().endsWith(".md") ? 3 : 0;
+    input.setSelectionRange(0, input.value.length - extension);
+  }, [error, invalid]);
+  const commit = () => {
+    if (pending) return;
+    if (!value.trim()) return onCancel();
+    const name = markdownPath(value);
+    if (!name || name.includes("/")) return setInvalid(true);
+    onSubmit(name);
+  };
+
+  return (
+    <div className="px-1 py-0.5">
+      <div className="flex items-center gap-1.5">
+        <FileText
+          className="size-4 shrink-0 text-muted-foreground"
+          aria-hidden="true"
+        />
+        <Input
+          ref={inputRef}
+          autoFocus
+          aria-label={label}
+          value={value}
+          onChange={(event) => {
+            setValue(event.target.value);
+            setInvalid(false);
+          }}
+          onBlur={commit}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              commit();
+            }
+            if (event.key === "Escape") {
+              event.preventDefault();
+              onCancel();
+            }
+          }}
+          disabled={pending}
+          className="h-7 min-w-0 px-1.5 text-sm"
+        />
+      </div>
+      {invalid || error ? (
+        <p role="alert" className="mt-1 pl-5 text-xs text-destructive">
+          {error ?? "Use a Markdown filename ending in .md."}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function DocumentTree({
+  documents,
+  folderPaths,
+  selectedId,
+  onSelect,
+  newFileParent,
+  renamingId,
+  pending,
+  error,
+  onCreateDocument,
+  onCreateFile,
+  onStartRename,
+  onRename,
+  onCancelEdit
+}: {
+  documents: ProjectDocument[];
+  folderPaths: string[];
+  selectedId: string | undefined;
+  onSelect: (id: string) => void;
+  newFileParent: string | null;
+  renamingId: string | null;
+  pending: boolean;
+  error?: string;
+  onCreateDocument?: (folderPath: string) => void;
+  onCreateFile: (folderPath: string, name: string) => void;
+  onStartRename?: (document: ProjectDocument) => void;
+  onRename: (document: ProjectDocument, name: string) => void;
+  onCancelEdit: () => void;
+}) {
+  return (
+    <ul className="space-y-0.5">
+      {newFileParent === "" ? (
+        <li>
+          <InlineDocumentName
+            label="New document name"
+            pending={pending}
+            error={error}
+            onSubmit={(name) => onCreateFile("", name)}
+            onCancel={onCancelEdit}
+          />
+        </li>
+      ) : null}
+      {buildDocumentTree(documents, folderPaths).map((node) => (
+        <DocumentTreeItem
+          key={node.type === "folder" ? node.path : node.document.id}
+          node={node}
+          selectedId={selectedId}
+          onSelect={onSelect}
+          newFileParent={newFileParent}
+          renamingId={renamingId}
+          pending={pending}
+          error={error}
+          onCreateDocument={onCreateDocument}
+          onCreateFile={onCreateFile}
+          onStartRename={onStartRename}
+          onRename={onRename}
+          onCancelEdit={onCancelEdit}
+        />
+      ))}
+    </ul>
+  );
+}
+
+function DocumentTreeItem({
+  node,
+  selectedId,
+  onSelect,
+  newFileParent,
+  renamingId,
+  pending,
+  error,
+  onCreateDocument,
+  onCreateFile,
+  onStartRename,
+  onRename,
+  onCancelEdit
+}: {
+  node: DocumentTreeNode;
+  selectedId: string | undefined;
+  onSelect: (id: string) => void;
+  newFileParent: string | null;
+  renamingId: string | null;
+  pending: boolean;
+  error?: string;
+  onCreateDocument?: (folderPath: string) => void;
+  onCreateFile: (folderPath: string, name: string) => void;
+  onStartRename?: (document: ProjectDocument) => void;
+  onRename: (document: ProjectDocument, name: string) => void;
+  onCancelEdit: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const containsNewFile =
+    node.type === "folder" &&
+    newFileParent !== null &&
+    (newFileParent === node.path || newFileParent.startsWith(`${node.path}/`));
+  useEffect(() => {
+    if (containsNewFile) setOpen(true);
+  }, [containsNewFile]);
+
+  if (node.type === "folder") {
+    return (
+      <li>
+        <div className="group flex items-center gap-0.5">
+          <button
+            type="button"
+            onClick={() => setOpen((value) => !value)}
+            className="flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 text-left text-sm font-medium text-foreground transition-colors hover:bg-muted"
+            aria-expanded={open}
+            aria-label={`${open ? "Collapse" : "Expand"} ${node.path} folder`}
+            title={node.path}
+          >
+            <ChevronRight
+              className={cn(
+                "size-3.5 shrink-0 text-muted-foreground transition-transform",
+                open && "rotate-90"
+              )}
+              aria-hidden="true"
+            />
+            <Folder
+              className="size-4 shrink-0 text-muted-foreground"
+              aria-hidden="true"
+            />
+            <span className="truncate">{node.name}</span>
+          </button>
+          {onCreateDocument ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className="text-muted-foreground opacity-70 hover:opacity-100"
+              onClick={() => onCreateDocument(node.path)}
+              aria-label={`Create document in ${node.path}`}
+              title={`Create document in ${node.path}`}
+            >
+              <Plus aria-hidden="true" />
+            </Button>
+          ) : null}
+        </div>
+        {open ? (
+          <ul className="ml-3 space-y-0.5 border-l border-border/70 pl-1">
+            {node.children.map((child) => (
+              <DocumentTreeItem
+                key={child.type === "folder" ? child.path : child.document.id}
+                node={child}
+                selectedId={selectedId}
+                onSelect={onSelect}
+                newFileParent={newFileParent}
+                renamingId={renamingId}
+                pending={pending}
+                error={error}
+                onCreateDocument={onCreateDocument}
+                onCreateFile={onCreateFile}
+                onStartRename={onStartRename}
+                onRename={onRename}
+                onCancelEdit={onCancelEdit}
+              />
+            ))}
+            {newFileParent === node.path ? (
+              <li>
+                <InlineDocumentName
+                  label={`New document name in ${node.path}`}
+                  pending={pending}
+                  error={error}
+                  onSubmit={(name) => onCreateFile(node.path, name)}
+                  onCancel={onCancelEdit}
+                />
+              </li>
+            ) : null}
+          </ul>
+        ) : null}
+      </li>
+    );
+  }
+
+  const selected = selectedId === node.document.id;
+  if (renamingId === node.document.id) {
+    return (
+      <li>
+        <InlineDocumentName
+          label={`Rename ${node.document.path}`}
+          initialValue={node.name}
+          pending={pending}
+          error={error}
+          onSubmit={(name) => onRename(node.document, name)}
+          onCancel={onCancelEdit}
+        />
+      </li>
+    );
+  }
+  return (
+    <li>
+      <div className="group flex items-center gap-0.5">
+        <button
+          type="button"
+          onClick={() => onSelect(node.document.id)}
+          onDoubleClick={() => onStartRename?.(node.document)}
+          onKeyDown={(event) => {
+            if (event.key === "F2") onStartRename?.(node.document);
+          }}
+          className={cn(
+            "flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-left text-sm transition-colors hover:bg-muted",
+            selected
+              ? "bg-accent text-accent-foreground"
+              : "text-muted-foreground"
+          )}
+          aria-current={selected ? "page" : undefined}
+          title={node.document.path}
+        >
+          <FileText className="size-4 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 flex-1 truncate font-medium">
+            {node.name}
+          </span>
+        </button>
+        {onStartRename ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            className="text-muted-foreground opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+            onClick={() => onStartRename(node.document)}
+            aria-label={`Rename ${node.document.path}`}
+            title="Rename"
+          >
+            <Pencil aria-hidden="true" />
+          </Button>
+        ) : null}
+      </div>
+    </li>
+  );
+}
 
 function DocumentsRoute() {
   const { projectId } = Route.useParams();
@@ -50,21 +439,68 @@ function DocumentsRoute() {
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
-  const [newPath, setNewPath] = useState("");
-  const [creating, setCreating] = useState(false);
+  const [newFileParent, setNewFileParent] = useState<string | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [newFolderPath, setNewFolderPath] = useState("");
+  const [creatingFolder, setCreatingFolder] = useState(false);
   const documents = useQuery(documentsQueryOptions(api, projectId));
   const create = useMutation({
-    mutationFn: () =>
-      api.createDocument(projectId, { path: newPath, content: "" }),
+    mutationFn: (path: string) =>
+      api.createDocument(projectId, { path, content: "" }),
     onSuccess: async (result) => {
-      setNewPath("");
-      setCreating(false);
+      setNewFileParent(null);
       setSelectedId(result.document.id);
       await queryClient.invalidateQueries({
         queryKey: coordinationKeys.documents(projectId)
       });
     }
   });
+  const createFolder = useMutation({
+    mutationFn: (path: string) => api.createDocumentFolder(projectId, { path }),
+    onSuccess: async () => {
+      setNewFolderPath("");
+      setCreatingFolder(false);
+      await queryClient.invalidateQueries({
+        queryKey: coordinationKeys.documents(projectId)
+      });
+    }
+  });
+  const renameDocument = useMutation({
+    mutationFn: (input: {
+      documentId: string;
+      path: string;
+      expectedRevision: number;
+    }) =>
+      api.renameDocument(input.documentId, {
+        path: input.path,
+        expected_revision: input.expectedRevision
+      }),
+    onSuccess: async (_, input) => {
+      setRenamingId(null);
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: coordinationKeys.documents(projectId)
+        }),
+        queryClient.invalidateQueries({
+          queryKey: coordinationKeys.document(input.documentId)
+        })
+      ]);
+    }
+  });
+  const startCreatingDocument = (folderPath: string) => {
+    create.reset();
+    renameDocument.reset();
+    setCreatingFolder(false);
+    setRenamingId(null);
+    setNewFileParent(folderPath);
+  };
+  const startRenaming = (document: ProjectDocument) => {
+    create.reset();
+    renameDocument.reset();
+    setNewFileParent(null);
+    setSelectedId(document.id);
+    setRenamingId(document.id);
+  };
 
   if (documents.isPending)
     return <DocumentMessage title="Documents" message="Loading documents…" />;
@@ -91,130 +527,172 @@ function DocumentsRoute() {
   const selected =
     visible.find((item) => item.id === selectedId) ?? visible[0] ?? null;
   const projectArchived = project?.project.status === "archived";
+  const treeError = create.error ?? renameDocument.error;
+  const treeErrorMessage =
+    treeError instanceof Error ? treeError.message : undefined;
   return (
     <div
-      className="document-workspace mx-auto flex min-h-full w-full max-w-7xl flex-col p-4 md:p-6"
-      aria-labelledby="documents-heading"
+      className="document-workspace dashboard-page min-h-full"
+      aria-label="Project documents"
     >
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1
-            id="documents-heading"
-            tabIndex={-1}
-            className="text-2xl font-semibold tracking-tight"
-          >
-            Documents
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Plans, notes, and context for your project.
-          </p>
-        </div>
-        {!projectArchived ? (
-          creating ? (
-            <form
-              className="flex flex-wrap gap-2"
-              onSubmit={(event) => {
-                event.preventDefault();
-                if (newPath.trim()) create.mutate();
-              }}
-            >
-              <Input
-                aria-label="New document path"
-                value={newPath}
-                onChange={(event) => setNewPath(event.target.value)}
-                placeholder="notes/idea.md"
-                disabled={create.isPending}
-              />
-              <Button
-                type="submit"
-                disabled={!newPath.trim() || create.isPending}
-              >
-                {create.isPending ? "Creating…" : "Create"}
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={() => setCreating(false)}
-                disabled={create.isPending}
-              >
-                Cancel
-              </Button>
-            </form>
-          ) : (
-            <Button onClick={() => setCreating(true)}>
-              <Plus aria-hidden="true" />
-              New document
-            </Button>
-          )
-        ) : null}
-      </div>
-      {create.isError ? (
-        <p role="alert" className="mt-3 text-sm text-destructive">
-          {create.error instanceof Error
-            ? create.error.message
-            : "Unable to create the document."}
-        </p>
-      ) : null}
       {projectArchived ? (
         <p className="mt-5 rounded border px-3 py-2 text-sm text-muted-foreground">
           This project is archived and read-only.
         </p>
       ) : null}
-      <div className="mt-6 flex min-h-0 flex-1 overflow-hidden rounded-xl border bg-card">
-        <div className="grid min-h-0 w-full md:grid-cols-[180px_minmax(0,1fr)] xl:grid-cols-[216px_minmax(0,1fr)]">
+      <div className="flex min-h-0 flex-1 overflow-hidden rounded-xl border bg-card">
+        <div className="grid min-h-0 w-full md:grid-cols-[240px_minmax(0,1fr)] xl:grid-cols-[280px_minmax(0,1fr)]">
           <nav
             aria-label="Project documents"
             className="min-w-0 border-b bg-muted/20 md:border-r md:border-b-0"
           >
-            <div
-              className="flex flex-wrap gap-1 border-b p-3"
-              role="group"
-              aria-label="Document state"
+            <Tabs
+              value={showArchived ? "archived" : "active"}
+              onValueChange={(value) => {
+                setShowArchived(value === "archived");
+                setCreatingFolder(false);
+                setNewFileParent(null);
+                setRenamingId(null);
+              }}
+              className="gap-0"
             >
-              <Button
-                variant={!showArchived ? "secondary" : "ghost"}
-                size="xs"
-                aria-pressed={!showArchived}
-                onClick={() => setShowArchived(false)}
-              >
-                Active ({active.length})
-              </Button>
-              <Button
-                variant={showArchived ? "secondary" : "ghost"}
-                size="xs"
-                aria-pressed={showArchived}
-                onClick={() => setShowArchived(true)}
-              >
-                Archived ({archived.length})
-              </Button>
-            </div>
-            <div className="max-h-40 space-y-1 overflow-y-auto p-2 md:max-h-[70dvh]">
-              {visible.map((item) => (
-                <button
-                  type="button"
-                  key={item.id}
-                  onClick={() => setSelectedId(item.id)}
-                  className={`flex w-full items-start gap-2 rounded-lg px-2.5 py-3 text-left text-sm transition-colors hover:bg-muted ${selected?.id === item.id ? "bg-accent text-accent-foreground" : "text-muted-foreground"}`}
-                  aria-current={selected?.id === item.id ? "page" : undefined}
-                >
-                  <FileText
-                    className="mt-0.5 size-4 shrink-0"
-                    aria-hidden="true"
+              <div className="space-y-2 border-b p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-medium">Documents</span>
+                  {!projectArchived && !showArchived ? (
+                    <div className="flex items-center gap-1">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => startCreatingDocument("")}
+                        aria-label="Create document"
+                        title="Create document"
+                      >
+                        <FilePlus aria-hidden="true" />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => {
+                          createFolder.reset();
+                          setNewFileParent(null);
+                          setRenamingId(null);
+                          setNewFolderPath("");
+                          setCreatingFolder(true);
+                        }}
+                        aria-label="Create folder"
+                        title="Create folder"
+                      >
+                        <FolderPlus aria-hidden="true" />
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
+                <TabsList className="w-full" aria-label="Document state">
+                  <TabsTrigger value="active">
+                    Active ({active.length})
+                  </TabsTrigger>
+                  <TabsTrigger value="archived">
+                    Archived ({archived.length})
+                  </TabsTrigger>
+                </TabsList>
+                {creatingFolder ? (
+                  <form
+                    className="space-y-2"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      if (newFolderPath.trim())
+                        createFolder.mutate(newFolderPath.trim());
+                    }}
+                  >
+                    <Input
+                      autoFocus
+                      aria-label="New folder path"
+                      value={newFolderPath}
+                      onChange={(event) => setNewFolderPath(event.target.value)}
+                      placeholder="notes"
+                      disabled={createFolder.isPending}
+                      className="h-8"
+                    />
+                    {createFolder.error ? (
+                      <p role="alert" className="text-xs text-destructive">
+                        {createFolder.error instanceof Error
+                          ? createFolder.error.message
+                          : "Unable to create the folder."}
+                      </p>
+                    ) : null}
+                    <div className="flex gap-1.5">
+                      <Button
+                        type="submit"
+                        size="sm"
+                        disabled={
+                          createFolder.isPending || !newFolderPath.trim()
+                        }
+                      >
+                        {createFolder.isPending ? "Creating…" : "Create"}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setCreatingFolder(false)}
+                        disabled={createFolder.isPending}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </form>
+                ) : null}
+              </div>
+              <TabsContent value={showArchived ? "archived" : "active"}>
+                <div className="max-h-40 flex flex-col gap-1 overflow-y-auto p-2 md:max-h-[70dvh]">
+                  <DocumentTree
+                    documents={visible}
+                    folderPaths={
+                      showArchived
+                        ? []
+                        : documents.data.folders.map((folder) => folder.path)
+                    }
+                    selectedId={selected?.id}
+                    onSelect={setSelectedId}
+                    newFileParent={newFileParent}
+                    renamingId={renamingId}
+                    pending={create.isPending || renameDocument.isPending}
+                    error={treeErrorMessage}
+                    onCreateDocument={
+                      !showArchived && !projectArchived
+                        ? startCreatingDocument
+                        : undefined
+                    }
+                    onCreateFile={(folderPath, name) =>
+                      create.mutate(folderPath ? `${folderPath}/${name}` : name)
+                    }
+                    onStartRename={
+                      !showArchived && !projectArchived
+                        ? startRenaming
+                        : undefined
+                    }
+                    onRename={(document, name) => {
+                      const slash = document.path.lastIndexOf("/");
+                      renameDocument.mutate({
+                        documentId: document.id,
+                        path:
+                          slash < 0
+                            ? name
+                            : `${document.path.slice(0, slash + 1)}${name}`,
+                        expectedRevision: document.current_revision
+                      });
+                    }}
+                    onCancelEdit={() => {
+                      setNewFileParent(null);
+                      setRenamingId(null);
+                    }}
                   />
-                  <span className="min-w-0">
-                    <span
-                      className="block truncate font-medium"
-                      title={item.path}
-                    >
-                      {item.path}
-                    </span>
-                    <span className="mt-1 block text-xs text-muted-foreground">
-                      Revision {item.current_revision}
-                    </span>
-                  </span>
-                </button>
-              ))}
-            </div>
+                </div>
+              </TabsContent>
+            </Tabs>
           </nav>
           {selected ? (
             <DocumentEditor
@@ -226,17 +704,23 @@ function DocumentsRoute() {
               queryClient={queryClient}
             />
           ) : (
-            <div className="flex min-h-72 flex-col items-center justify-center gap-3 p-8 text-center">
-              <FileText
-                className="size-7 text-muted-foreground"
-                aria-hidden="true"
-              />
-              <p className="text-sm text-muted-foreground">
-                {showArchived
-                  ? "No archived documents."
-                  : "Create a document to start sharing project context."}
-              </p>
-            </div>
+            <Empty className="min-h-80">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <FileText />
+                </EmptyMedia>
+                <EmptyTitle>
+                  {showArchived
+                    ? "Archive is empty"
+                    : "Make room for shared context"}
+                </EmptyTitle>
+                <EmptyDescription>
+                  {showArchived
+                    ? "No archived documents."
+                    : "Create a document to start sharing project context."}
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           )}
         </div>
       </div>
@@ -258,16 +742,13 @@ function DocumentEditor({
   queryClient: ReturnType<typeof useQueryClient>;
 }) {
   const document = useQuery(documentQueryOptions(api, documentId));
-  const attachments = useQuery(
-    documentAttachmentsQueryOptions(api, documentId)
-  );
   const [draft, setDraft] = useState("");
   const [baseContent, setBaseContent] = useState("");
   const [baseRevision, setBaseRevision] = useState<number | null>(null);
   const [remote, setRemote] = useState<RemoteRevision | null>(null);
   const [awaitingRemote, setAwaitingRemote] = useState(false);
   const [merging, setMerging] = useState(false);
-  const [status, setStatus] = useState("Saved");
+  const [autosaveRetry, setAutosaveRetry] = useState(0);
   const [rename, setRename] = useState(false);
   const [path, setPath] = useState("");
   const [editorError, setEditorError] = useState<string | null>(null);
@@ -297,9 +778,6 @@ function DocumentEditor({
       }),
       queryClient.invalidateQueries({
         queryKey: coordinationKeys.revisions(documentId)
-      }),
-      queryClient.invalidateQueries({
-        queryKey: coordinationKeys.attachments(documentId)
       })
     ]);
   }, [documentId, projectId, queryClient]);
@@ -309,7 +787,7 @@ function DocumentEditor({
       base_revision: number;
       save_kind?: "autosave";
     }) => api.updateDocument(documentId, input),
-    onSuccess: async (result, input) => {
+    onSuccess: async (result) => {
       savingRef.current = false;
       const revision = result.revision.revision_number;
       const newerRemote =
@@ -324,20 +802,12 @@ function DocumentEditor({
         awaitingRemoteRef.current = false;
         setAwaitingRemote(false);
         setRemote(newerRemote);
-        setStatus(
-          `Revision ${newerRemote.revision} saved by ${newerRemote.actor}; your draft is preserved.`
-        );
       } else {
         awaitingRemoteRef.current = false;
         setAwaitingRemote(false);
         remoteRef.current = null;
         setRemote(null);
         setMerging(false);
-        setStatus(
-          draftRef.current === input.content
-            ? `Saved revision ${revision}`
-            : "Unsaved"
-        );
       }
       await invalidateDocument();
     },
@@ -349,9 +819,6 @@ function DocumentEditor({
       ) {
         awaitingRemoteRef.current = true;
         setAwaitingRemote(true);
-        setStatus(
-          "Revision changed remotely. Resolve the conflict before saving."
-        );
         await queryClient.invalidateQueries({
           queryKey: coordinationKeys.document(documentId)
         });
@@ -364,12 +831,8 @@ function DocumentEditor({
         error instanceof DashboardApiError &&
         error.kind === "NETWORK_ERROR"
       ) {
-        setStatus("Offline, retrying");
-        return;
+        setAutosaveRetry((attempt) => attempt + 1);
       }
-      setStatus(
-        error instanceof Error ? error.message : "Unable to save this document."
-      );
     }
   });
   const saveNow = useCallback(
@@ -385,7 +848,6 @@ function DocumentEditor({
       )
         return;
       savingRef.current = true;
-      setStatus("Saving…");
       save.mutate({
         content: draftRef.current,
         base_revision: expectedRevision,
@@ -407,11 +869,9 @@ function DocumentEditor({
       setBaseContent(content);
       setBaseRevision(revision);
       setPath(next.document.path);
-      setStatus(`Saved revision ${revision}`);
       return;
     }
     if (revision <= baseRevisionRef.current) return;
-    const actor = `${next.revision.author.type} ${next.revision.author.id}`;
     if (
       !savingRef.current &&
       draftRef.current === baseContentRef.current &&
@@ -425,17 +885,17 @@ function DocumentEditor({
       editorRef.current?.setMarkdown(content);
       setBaseContent(content);
       setBaseRevision(revision);
-      setStatus(`Revision ${revision} saved by ${actor}`);
       return;
     }
-    const target = { revision, content, actor };
+    const target = {
+      revision,
+      content,
+      actor: `${next.revision.author.type} ${next.revision.author.id}`
+    };
     remoteRef.current = target;
     awaitingRemoteRef.current = false;
     setAwaitingRemote(false);
     setRemote(target);
-    setStatus(
-      `Revision ${revision} saved by ${actor}; your draft is preserved.`
-    );
   }, [document.data]);
   const archived =
     projectArchived ||
@@ -464,6 +924,7 @@ function DocumentEditor({
     };
   }, [
     archived,
+    autosaveRetry,
     awaitingRemote,
     dirty,
     draft,
@@ -472,6 +933,19 @@ function DocumentEditor({
     save.isPending,
     saveNow
   ]);
+  const uploadImage = useCallback(
+    (file: File) => uploadDocumentImage(api, documentId, file),
+    [api, documentId]
+  );
+  const previewImage = useCallback(
+    async (source: string) => {
+      const attachmentId = documentImageAttachmentId(source);
+      if (!attachmentId) return source;
+      return (await api.downloadDocumentAttachment(documentId, attachmentId))
+        .download_url;
+    },
+    [api, documentId]
+  );
   if (document.isPending)
     return (
       <p
@@ -504,20 +978,26 @@ function DocumentEditor({
       aria-labelledby="document-editor-heading"
     >
       <div className="flex shrink-0 flex-wrap items-start justify-between gap-3 border-b px-5 py-4">
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           {rename && !archived ? (
-            <div className="flex flex-wrap gap-2">
+            <div className="flex items-center gap-2">
               <Input
                 aria-label="Document path"
+                className="min-w-0 flex-1"
                 value={path}
                 onChange={(event) => setPath(event.target.value)}
               />
-              <Button size="sm" onClick={() => void renameDocument()}>
+              <Button
+                size="sm"
+                className="shrink-0"
+                onClick={() => void renameDocument()}
+              >
                 Rename
               </Button>
               <Button
                 size="sm"
                 variant="ghost"
+                className="shrink-0"
                 onClick={() => {
                   setRename(false);
                   setPath(current.document.path);
@@ -535,22 +1015,16 @@ function DocumentEditor({
               {current.document.path}
             </h2>
           )}
-          <p
-            role="status"
-            aria-live="polite"
-            className="mt-1 text-xs text-muted-foreground"
-          >
-            {status}
-            {archived ? " · Archived" : ""}
-          </p>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           <DocumentHistory
             api={api}
+            projectId={projectId}
             documentId={documentId}
             path={current.document.path}
             currentRevision={current.revision}
             hasUnsavedChanges={dirty}
+            readOnly={archived}
           />
           {!archived ? (
             <Button
@@ -659,7 +1133,6 @@ function DocumentEditor({
                 setBaseRevision(remote.revision);
                 setRemote(null);
                 setMerging(false);
-                setStatus(`Saved revision ${remote.revision}`);
               }}
             >
               Use remote
@@ -677,9 +1150,6 @@ function DocumentEditor({
                 setBaseRevision(remote.revision);
                 setMerging(true);
                 setRemote(null);
-                setStatus(
-                  "Merging locally. Autosave is paused; save explicitly when ready."
-                );
               }}
             >
               Continue merging
@@ -702,7 +1172,10 @@ function DocumentEditor({
           </div>
         </div>
       ) : null}
-      <section className="document-editor-surface flex min-h-0 flex-1 flex-col" aria-label="Markdown editor">
+      <section
+        className="document-editor-surface flex min-h-0 flex-1 flex-col"
+        aria-label="Markdown editor"
+      >
         <label htmlFor="document-content" className="sr-only">
           Markdown content
         </label>
@@ -723,16 +1196,14 @@ function DocumentEditor({
                 setEditorError(null);
                 draftRef.current = markdown;
                 setDraft(markdown);
-                if (!remote && !merging) setStatus("Unsaved");
               }}
               onError={({ error, source }) => {
                 draftRef.current = source;
                 setDraft(source);
                 setEditorError(error);
-                setStatus(
-                  "Markdown could not be rendered. Your source is preserved; fix it in Source mode."
-                );
               }}
+              imageUploadHandler={uploadImage}
+              imagePreviewHandler={previewImage}
             />
           )}
         </div>
@@ -756,334 +1227,68 @@ function DocumentEditor({
           </Button>
         </div>
       ) : null}
-      <AttachmentSection
-        api={api}
-        documentId={documentId}
-        archived={archived}
-        attachments={attachments.data?.attachments ?? []}
-        onChanged={invalidateDocument}
-      />
-    </section>
-  );
-}
-
-type AttachmentUploadState = {
-  file: File;
-  session?: DocumentAttachmentUpload;
-  mode?: "single" | "multipart";
-  progress: number;
-  message: string;
-  uploadId?: string;
-  paused?: boolean;
-  failed?: boolean;
-  complete?: boolean;
-};
-
-function AttachmentSection({
-  api,
-  documentId,
-  archived,
-  attachments,
-  onChanged
-}: {
-  api: Parameters<typeof documentsQueryOptions>[0];
-  documentId: string;
-  archived: boolean;
-  attachments: DocumentAttachment[];
-  onChanged: () => Promise<void>;
-}) {
-  const [uploading, setUploading] = useState<AttachmentUploadState | null>(
-    null
-  );
-  const inputRef = useRef<HTMLInputElement>(null);
-  const controllerRef = useRef<AbortController | null>(null);
-  const pausedRef = useRef(false);
-  const resumeWaitersRef = useRef(new Set<() => void>());
-  const waitForResume = () => {
-    if (!pausedRef.current) return Promise.resolve();
-    return new Promise<void>((resolve) =>
-      resumeWaitersRef.current.add(resolve)
-    );
-  };
-  const setPaused = (paused: boolean) => {
-    pausedRef.current = paused;
-    setUploading((current) =>
-      current
-        ? {
-            ...current,
-            paused,
-            message: paused ? "Paused" : "Uploading…"
-          }
-        : current
-    );
-    if (!paused) {
-      for (const resolve of resumeWaitersRef.current) resolve();
-      resumeWaitersRef.current.clear();
-    }
-  };
-  const upload = async (
-    file: File,
-    previousSession?: DocumentAttachmentUpload
-  ) => {
-    if (file.size > MAX_ATTACHMENT_BYTES) {
-      setUploading({
-        file,
-        progress: 0,
-        message: "Attachments are limited to 2 GiB.",
-        failed: true
-      });
-      return;
-    }
-    const controller = new AbortController();
-    controllerRef.current = controller;
-    pausedRef.current = false;
-    let session = previousSession;
-    setUploading({
-      file,
-      session,
-      mode: session?.mode,
-      progress: 0,
-      message: session ? "Resuming upload…" : "Starting upload…",
-      uploadId: session?.id
-    });
-    try {
-      if (session) {
-        session = (
-          await api.getDocumentAttachmentUpload(documentId, session.id)
-        ).upload;
-        if (session.mode === "single" && !session.upload_url)
-          session = (
-            await api.refreshDocumentAttachmentUpload(documentId, session.id)
-          ).upload;
-      } else {
-        session = (
-          await api.startDocumentAttachmentUpload(documentId, {
-            filename: file.name,
-            content_type: file.type || "application/octet-stream",
-            size_bytes: file.size
-          })
-        ).upload;
-      }
-      setUploading({
-        file,
-        session,
-        mode: session.mode,
-        progress: 0,
-        message: "Uploading…",
-        uploadId: session.id
-      });
-      if (session.mode === "single") {
-        if (!session.upload_url)
-          throw new Error("Upload session is missing its upload URL.");
-        await api.putPresignedObject(
-          session.upload_url,
-          file,
-          (loaded) =>
-            setUploading((current) =>
-              current
-                ? {
-                    ...current,
-                    progress: attachmentProgress(loaded, file.size),
-                    message: "Uploading…"
-                  }
-                : current
-            ),
-          controller.signal
-        );
-        await api.completeDocumentAttachmentUpload(documentId, session.id);
-      } else if (session.mode === "multipart")
-        await uploadMultipart(
-          api,
-          documentId,
-          session,
-          file,
-          (progress) =>
-            setUploading((current) =>
-              current
-                ? {
-                    ...current,
-                    progress,
-                    message: pausedRef.current ? "Paused" : "Uploading…"
-                  }
-                : current
-            ),
-          controller.signal,
-          waitForResume
-        );
-      else throw new Error("Upload mode does not match the attachment size.");
-      setUploading({
-        file,
-        session,
-        mode: session.mode,
-        progress: 1,
-        message: "Complete",
-        uploadId: session.id,
-        complete: true
-      });
-      await onChanged();
-      setUploading(null);
-    } catch (error) {
-      if (controller.signal.aborted) {
-        setUploading(null);
-        return;
-      }
-      setUploading((current) =>
-        current
-          ? {
-              ...current,
-              session: current.session ?? session,
-              mode: current.mode ?? session?.mode,
-              uploadId: current.uploadId ?? session?.id,
-              message:
-                error instanceof Error ? error.message : "Upload failed.",
-              failed: true,
-              paused: false
-            }
-          : {
-              file,
-              session,
-              mode: session?.mode,
-              progress: 0,
-              uploadId: session?.id,
-              message:
-                error instanceof Error ? error.message : "Upload failed.",
-              failed: true
-            }
-      );
-    }
-  };
-  const canChooseAttachment =
-    !uploading ||
-    uploading.complete ||
-    (uploading.failed && !uploading.uploadId);
-  return (
-    <section
-      className="shrink-0 border-t px-5 py-4"
-      aria-labelledby="attachments-heading"
-    >
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h3 id="attachments-heading" className="flex items-center gap-2 text-sm font-medium">
-            <Paperclip className="size-4 text-muted-foreground" aria-hidden="true" />
-            Attachments
-            {attachments.length > 0 ? <span className="text-xs text-muted-foreground">{attachments.length}</span> : null}
-          </h3>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {attachments.length > 0 ? "Private files shared with this document." : "Add supporting files for your project."}
-          </p>
-        </div>
-        <input
-          ref={inputRef}
-          type="file"
-          className="sr-only"
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            if (file) void upload(file);
-            event.currentTarget.value = "";
-          }}
-          disabled={archived || !canChooseAttachment}
-        />
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={archived || !canChooseAttachment}
-          onClick={() => inputRef.current?.click()}
-        >
-          Add attachment
-        </Button>
-      </div>
-      {uploading ? (
-        <div
-          className="mt-3 rounded border p-3"
-          role="status"
-          aria-label="Attachment upload progress"
-        >
-          <div className="flex justify-between gap-3 text-sm">
-            <span className="truncate">{uploading.file.name}</span>
-            <span>{Math.round(uploading.progress * 100)}%</span>
-          </div>
-          <div className="mt-2 h-1.5 overflow-hidden rounded bg-muted">
-            <div
-              className="h-full bg-primary"
-              style={{ width: `${uploading.progress * 100}%` }}
-            />
-          </div>
-          <p className="mt-2 text-xs text-muted-foreground">
-            {uploading.message}
-          </p>
-          <div className="mt-1 flex flex-wrap gap-2">
-            {uploading.mode === "multipart" &&
-            !uploading.failed &&
-            !uploading.complete ? (
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => setPaused(!uploading.paused)}
-              >
-                {uploading.paused ? "Resume" : "Pause"}
-              </Button>
-            ) : null}
-            {uploading.failed ? (
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => void upload(uploading.file, uploading.session)}
-              >
-                Retry
-              </Button>
-            ) : null}
-            {uploading.failed && !uploading.uploadId ? (
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => setUploading(null)}
-              >
-                Dismiss
-              </Button>
-            ) : null}
-            {uploading.uploadId && !uploading.complete ? (
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() =>
-                  void (async () => {
-                    controllerRef.current?.abort();
-                    setPaused(false);
-                    try {
-                      await api.abortDocumentAttachmentUpload(
-                        documentId,
-                        uploading.uploadId!
-                      );
-                    } finally {
-                      setUploading(null);
-                    }
-                  })()
-                }
-              >
-                Abort
-              </Button>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
-      <ul className="mt-3 space-y-2">
-        {attachments.map((attachment) => (
-          <AttachmentRow
-            key={attachment.id}
-            api={api}
-            documentId={documentId}
-            attachment={attachment}
-            archived={archived}
-            onChanged={onChanged}
-          />
-        ))}
-      </ul>
     </section>
   );
 }
 
 export function attachmentProgress(loaded: number, total: number) {
   return total > 0 ? Math.max(0, Math.min(1, loaded / total)) : 0;
+}
+
+export function documentImageAttachmentId(source: string) {
+  if (!source.startsWith(DOCUMENT_IMAGE_PREFIX)) return null;
+  return source.slice(DOCUMENT_IMAGE_PREFIX.length) || null;
+}
+
+export async function uploadDocumentImage(
+  api: Parameters<typeof documentsQueryOptions>[0],
+  documentId: string,
+  file: File
+) {
+  if (!SUPPORTED_IMAGE_TYPES.has(file.type))
+    throw new Error("Choose a PNG, JPEG, GIF, WebP, or AVIF image.");
+  if (file.size > MAX_IMAGE_BYTES)
+    throw new Error("Images are limited to 2 GiB.");
+
+  const session = (
+    await api.startDocumentAttachmentUpload(documentId, {
+      filename: file.name,
+      content_type: file.type,
+      size_bytes: file.size
+    })
+  ).upload;
+  const controller = new AbortController();
+
+  try {
+    const result =
+      session.mode === "single"
+        ? await (async () => {
+            if (!session.upload_url)
+              throw new Error("Upload session is missing its upload URL.");
+            await api.putPresignedObject(
+              session.upload_url,
+              file,
+              undefined,
+              controller.signal
+            );
+            return api.completeDocumentAttachmentUpload(documentId, session.id);
+          })()
+        : await uploadMultipart(
+            api,
+            documentId,
+            session,
+            file,
+            () => undefined,
+            controller.signal,
+            async () => undefined
+          );
+    return `${DOCUMENT_IMAGE_PREFIX}${result.attachment.id}`;
+  } catch (error) {
+    await api
+      .abortDocumentAttachmentUpload(documentId, session.id)
+      .catch(() => undefined);
+    throw error;
+  }
 }
 
 export async function uploadMultipart(
@@ -1199,82 +1404,7 @@ export async function uploadMultipart(
     signal.removeEventListener("abort", abortBatch);
     if (failure) throw failure;
   }
-  await api.completeDocumentAttachmentUpload(documentId, session.id);
-}
-
-function AttachmentRow({
-  api,
-  documentId,
-  attachment,
-  archived,
-  onChanged
-}: {
-  api: Parameters<typeof documentsQueryOptions>[0];
-  documentId: string;
-  attachment: DocumentAttachment;
-  archived: boolean;
-  onChanged: () => Promise<void>;
-}) {
-  const [busy, setBusy] = useState(false);
-  return (
-    <li className="flex flex-wrap items-center justify-between gap-2 rounded border px-3 py-2 text-sm">
-      <span className="min-w-0 truncate">
-        <span className="font-medium">{attachment.filename}</span>
-        <span className="ml-2 font-mono text-xs text-muted-foreground">
-          {formatBytes(attachment.size_bytes)}
-        </span>
-      </span>
-      <span className="flex gap-2">
-        <Button
-          size="sm"
-          variant="ghost"
-          disabled={busy}
-          onClick={() =>
-            void (async () => {
-              setBusy(true);
-              try {
-                const { download_url } = await api.downloadDocumentAttachment(
-                  documentId,
-                  attachment.id
-                );
-                window.location.assign(download_url);
-              } finally {
-                setBusy(false);
-              }
-            })()
-          }
-        >
-          Download
-        </Button>
-        {!archived ? (
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={busy}
-            onClick={() =>
-              void (async () => {
-                setBusy(true);
-                try {
-                  await api.removeDocumentAttachment(documentId, attachment.id);
-                  await onChanged();
-                } finally {
-                  setBusy(false);
-                }
-              })()
-            }
-          >
-            Remove
-          </Button>
-        ) : null}
-      </span>
-    </li>
-  );
-}
-
-function formatBytes(bytes: number) {
-  return bytes < 1024 * 1024
-    ? `${Math.ceil(bytes / 1024)} KiB`
-    : `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+  return api.completeDocumentAttachmentUpload(documentId, session.id);
 }
 function DocumentMessage({
   title,
@@ -1284,13 +1414,10 @@ function DocumentMessage({
   message: string;
 }) {
   return (
-    <div className="mx-auto w-full max-w-3xl p-6 md:p-8">
-      <h1 tabIndex={-1} className="text-2xl font-semibold">
-        {title}
-      </h1>
-      <p role="status" className="mt-3 text-sm text-muted-foreground">
-        {message}
-      </p>
-    </div>
+    <PageState
+      title={title}
+      message={message}
+      error={title.includes("unavailable")}
+    />
   );
 }

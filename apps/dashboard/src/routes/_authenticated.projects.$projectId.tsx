@@ -228,7 +228,9 @@ function ProjectLayout() {
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
       if (location.hash) return;
-      document.querySelector<HTMLElement>("#main-content h1")?.focus();
+      document
+        .querySelector<HTMLElement>("[data-slot='top-toolbar-page']")
+        ?.focus();
     });
     return () => cancelAnimationFrame(frame);
   }, [location.pathname, location.state.key, location.hash]);

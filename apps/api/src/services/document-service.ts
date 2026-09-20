@@ -7,6 +7,7 @@ import {
   S3Client
 } from "@aws-sdk/client-s3";
 import {
+  documentFolders,
   documentRevisions,
   documents,
   projects,
@@ -14,6 +15,7 @@ import {
 } from "@orchestrat/db";
 import {
   documentContentSchema,
+  type CreateDocumentFolderRequest,
   type CreateDocumentRequest,
   type DocumentHistoryQuery,
   type DocumentListQuery,
@@ -21,7 +23,7 @@ import {
   type RenameDocumentRequest,
   type UpdateDocumentRequest
 } from "@orchestrat/protocol";
-import { and, asc, eq, gt, isNull, ne, or } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNull, lt, ne, or } from "drizzle-orm";
 import { insertProjectEvent } from "./agent-service.js";
 import type { AgentPrincipal } from "./agent-service.js";
 import { ApiError } from "./api-error.js";
@@ -50,6 +52,8 @@ const isUniqueViolation = (error: unknown) => {
 };
 const duplicateDocumentPath = () =>
   new ApiError(409, "CONFLICT", "A document already uses that path.");
+const duplicateFolderPath = () =>
+  new ApiError(409, "CONFLICT", "A folder already uses that path.");
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const decodeDocumentCursor = (value: string) => {
@@ -103,6 +107,12 @@ const documentJson = (value: typeof documents.$inferSelect) => ({
       : null,
   created_at: value.createdAt.toISOString(),
   updated_at: value.updatedAt.toISOString()
+});
+const folderJson = (value: typeof documentFolders.$inferSelect) => ({
+  id: value.id,
+  project_id: value.projectId,
+  path: value.path,
+  created_at: value.createdAt.toISOString()
 });
 const revisionSummaryJson = (value: typeof documentRevisions.$inferSelect) => ({
   id: value.id,
@@ -359,8 +369,14 @@ export class DocumentService {
       .orderBy(asc(documents.updatedAt), asc(documents.id))
       .limit(query.limit + 1);
     const page = rows.slice(0, query.limit);
+    const folders = await this.db
+      .select()
+      .from(documentFolders)
+      .where(eq(documentFolders.projectId, projectId))
+      .orderBy(asc(documentFolders.path));
     return {
       documents: page.map(documentJson),
+      folders: folders.map(folderJson),
       next_cursor:
         rows.length > query.limit
           ? encode({
@@ -376,6 +392,26 @@ export class DocumentService {
   }
   async listForAgent(principal: AgentPrincipal, query: DocumentListQuery) {
     return this.listProject(principal.projectId, query);
+  }
+  async createFolder(
+    userId: string,
+    projectId: string,
+    input: CreateDocumentFolderRequest
+  ) {
+    await this.access(userId, projectId, true);
+    try {
+      return await this.db.transaction(async (tx) => {
+        await this.lockActiveProject(tx, projectId);
+        const [folder] = await tx
+          .insert(documentFolders)
+          .values({ projectId, path: input.path })
+          .returning();
+        return { folder: folderJson(folder!) };
+      });
+    } catch (error) {
+      if (isUniqueViolation(error)) throw duplicateFolderPath();
+      throw error;
+    }
   }
   async get(userId: string, id: string) {
     const [document] = await this.db
@@ -941,13 +977,13 @@ export class DocumentService {
     const clauses = [eq(documentRevisions.documentId, id)];
     if (query.cursor)
       clauses.push(
-        gt(documentRevisions.revisionNumber, decodeRevisionCursor(query.cursor))
+        lt(documentRevisions.revisionNumber, decodeRevisionCursor(query.cursor))
       );
     const rows = await this.db
       .select()
       .from(documentRevisions)
       .where(and(...clauses))
-      .orderBy(asc(documentRevisions.revisionNumber))
+      .orderBy(desc(documentRevisions.revisionNumber))
       .limit(query.limit + 1);
     const page = rows.slice(0, query.limit);
     const revisions =

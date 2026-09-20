@@ -1,3 +1,5 @@
+import { usePlatform } from "@/platform/provider";
+import { cn } from "@/lib/cn";
 import type { ReactNode } from "react";
 import { ArrowLeft } from "lucide-react";
 import { Link, useNavigate } from "@tanstack/react-router";
@@ -7,6 +9,7 @@ import { usePreferences } from "@/platform/preferences-provider";
 
 export function ProfileSettingsShell({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
+  const desktop = usePlatform().kind === "desktop";
   const { preferences } = usePreferences();
   const dashboardProjectId =
     preferences.recentProjectIds[0] ?? preferences.pinnedProjectIds[0];
@@ -14,10 +17,13 @@ export function ProfileSettingsShell({ children }: { children: ReactNode }) {
   return (
     <div className="flex h-full min-h-0 flex-col bg-background md:flex-row">
       <aside
-        className="flex w-full shrink-0 flex-col border-b bg-muted/20 md:w-64 md:border-r md:border-b-0 pt-10"
+        className={cn(
+          "flex w-full shrink-0 flex-col border-b bg-sidebar md:w-64 md:border-r md:border-b-0",
+          desktop && "md:pt-10"
+        )}
         aria-label="Settings"
       >
-        <header className="relative flex h-10 shrink-0 items-center border-b px-3 select-none">
+        <header className="relative flex h-14 shrink-0 items-center border-b px-3 select-none">
           <WindowDragRegion />
           <Button
             type="button"
@@ -36,7 +42,10 @@ export function ProfileSettingsShell({ children }: { children: ReactNode }) {
             Back to dashboard
           </Button>
         </header>
-        <nav aria-label="Settings navigation" className="flex flex-col gap-1 p-3">
+        <nav
+          aria-label="Settings navigation"
+          className="flex flex-col gap-1 p-3"
+        >
           <Link
             to="/profile"
             aria-current="page"

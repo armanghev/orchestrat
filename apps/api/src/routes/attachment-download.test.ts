@@ -62,6 +62,7 @@ test("public attachment download streams private content with safe headers", asy
         return {
           body: Readable.from(["secret"]),
           contentLength: 6,
+          contentType: "application/octet-stream",
           contentDisposition: 'attachment; filename="private.bin"'
         };
       }
@@ -95,6 +96,7 @@ test("ticket download rechecks the attachment row before fetching storage", asyn
     projectId: ids.projectId,
     documentId: ids.documentId,
     filename: "résumé.bin",
+    mimeType: "application/octet-stream",
     sizeBytes: 6
   };
   let rows: (typeof row)[] = [row];
@@ -126,9 +128,23 @@ test("ticket download rechecks the attachment row before fetching storage", asyn
   const first = store.issue(ids.attachmentId, ids.projectId, ids.documentId);
   const downloaded = await service.downloadByTicket(first.ticket);
   assert.equal(downloaded.contentLength, 6);
+  assert.equal(downloaded.contentType, "application/octet-stream");
   assert.equal(
     downloaded.contentDisposition,
     `attachment; filename="r_sum_.bin"; filename*=UTF-8''r%C3%A9sum%C3%A9.bin`
+  );
+
+  rows = [{ ...row, filename: "diagram.png", mimeType: "image/png" }];
+  const imageTicket = store.issue(
+    ids.attachmentId,
+    ids.projectId,
+    ids.documentId
+  );
+  const image = await service.downloadByTicket(imageTicket.ticket);
+  assert.equal(image.contentType, "image/png");
+  assert.equal(
+    image.contentDisposition,
+    `inline; filename="diagram.png"; filename*=UTF-8''diagram.png`
   );
 
   rows = [];

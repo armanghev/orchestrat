@@ -17,7 +17,7 @@ export async function attachmentDownloadRoutes(
       reply
         .header("Cache-Control", "private, no-store")
         .header("X-Content-Type-Options", "nosniff")
-        .header("Content-Type", "application/octet-stream")
+        .header("Content-Type", downloaded.contentType)
         .header("Content-Disposition", downloaded.contentDisposition);
       if (downloaded.contentLength !== undefined)
         reply.header("Content-Length", String(downloaded.contentLength));

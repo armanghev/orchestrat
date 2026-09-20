@@ -4,9 +4,15 @@ import { describe, expect, it, vi } from "vitest";
 import { ProfileSettingsShell } from "./profile-settings-shell";
 
 const navigate = vi.fn();
+vi.mock("@/platform/provider", () => ({
+  usePlatform: () => ({ kind: "browser" })
+}));
 
 vi.mock("@tanstack/react-router", () => ({
-  Link: ({ children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
+  Link: ({
+    children,
+    ...props
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
     <a href="/profile" {...props}>
       {children}
     </a>
@@ -31,14 +37,20 @@ describe("ProfileSettingsShell", () => {
       </ProfileSettingsShell>
     );
 
-    expect(screen.getByRole("complementary", { name: "Settings" })).toBeVisible();
-    expect(screen.getByRole("navigation", { name: "Settings navigation" })).toBeVisible();
+    expect(
+      screen.getByRole("complementary", { name: "Settings" })
+    ).toBeVisible();
+    expect(
+      screen.getByRole("navigation", { name: "Settings navigation" })
+    ).toBeVisible();
     expect(screen.getByRole("link", { name: "Profile" })).toHaveAttribute(
       "aria-current",
       "page"
     );
 
-    await userEvent.click(screen.getByRole("button", { name: "Back to dashboard" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Back to dashboard" })
+    );
     expect(navigate).toHaveBeenCalledWith({
       to: "/projects/$projectId/overview",
       params: { projectId: "project-1" }

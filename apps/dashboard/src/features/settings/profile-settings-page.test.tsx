@@ -29,12 +29,14 @@ describe("ProfileSettingsPage", () => {
     await user.click(
       screen.getByRole("button", { name: "Edit profile picture" })
     );
-    expect(screen.getByRole("menuitem", { name: "Change picture" })).toBeVisible();
+    expect(
+      screen.getByRole("menuitem", { name: "Change picture" })
+    ).toBeVisible();
     await user.click(screen.getByRole("menuitem", { name: "Remove picture" }));
     expect(container.querySelector("img")).not.toBeInTheDocument();
 
     const username = screen.getByLabelText("Username");
     expect(username).toHaveValue("arman");
-    expect(username.parentElement?.querySelector("span")).toHaveClass("select-none");
+    expect(screen.getByText("@", { exact: true })).toBeVisible();
   });
 });

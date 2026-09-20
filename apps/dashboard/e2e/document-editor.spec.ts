@@ -236,7 +236,7 @@ test("MDXEditor edits rich text, exposes source, and saves Markdown", async ({
   );
   if (testInfo.project.name === "macos-default")
     await page.screenshot({
-      path: "/private/tmp/orchestrat-mvp-editor.png",
+      path: testInfo.outputPath("orchestrat-mvp-editor.png"),
       fullPage: true
     });
   await expect(page.getByRole("radio", { name: "Source mode" })).toBeVisible();
@@ -254,7 +254,6 @@ test("MDXEditor edits rich text, exposes source, and saves Markdown", async ({
   await expect.poll(() => state.getSavedBody()).not.toBeNull();
   expect(state.getSavedBody()).toMatchObject({ base_revision: 1 });
   expect(state.getSavedBody()!.content).toContain("## Browser edit");
-  await expect(page.getByRole("status")).toContainText(/revision 2/i);
   expect(consoleErrors).toEqual([]);
 });
 
@@ -286,7 +285,9 @@ test("document history compares saved revisions and keeps the draft", async ({
         : route.fallback()
   );
   await page.goto(`/projects/${ids.project}/documents`);
-  await expect(page.getByRole("heading", { name: "Documents" })).toBeVisible();
+  await expect(page.locator('[data-slot="top-toolbar-page"]')).toHaveText(
+    "Documents"
+  );
   await expect(page.getByRole("button", { name: /^Revision 5\b/ })).toHaveCount(
     0
   );
@@ -308,7 +309,7 @@ test("document history compares saved revisions and keeps the draft", async ({
   ).toHaveAttribute("aria-pressed", "true");
   await expect(
     page.getByRole("button", { name: /^Revision 6\b/ })
-  ).toBeDisabled();
+  ).toHaveCount(0);
   const comparison = page.getByRole("textbox", { name: "Revision comparison" });
   await expect(comparison).toHaveAttribute("contenteditable", "false");
   await expect(comparison).toContainText("Previous direction.");
@@ -323,7 +324,7 @@ test("document history compares saved revisions and keeps the draft", async ({
     await page.emulateMedia({ colorScheme: theme });
     await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
     await page.screenshot({
-      path: `/private/tmp/orchestrat-document-history-${theme}-${testInfo.project.name}.png`,
+      path: testInfo.outputPath(`orchestrat-document-history-${theme}.png`),
       animations: "disabled"
     });
   }
@@ -421,7 +422,7 @@ test("document typography and editor menus follow the theme without changing Mar
     const menu = page.getByRole("listbox");
     await expect(menu).toBeVisible();
     await page.screenshot({
-      path: `/private/tmp/orchestrat-editor-${theme}-${testInfo.project.name}.png`,
+      path: testInfo.outputPath(`orchestrat-editor-${theme}.png`),
       animations: "disabled"
     });
     const colors = await menu.evaluate((element) => {
@@ -501,7 +502,7 @@ test("document typography and editor menus follow the theme without changing Mar
     selectionBefore
   );
   await page.screenshot({
-    path: `/private/tmp/orchestrat-editor-source-${testInfo.project.name}.png`,
+    path: testInfo.outputPath("orchestrat-editor-source.png"),
     animations: "disabled"
   });
   await page.getByRole("button", { name: "Save now" }).click();
@@ -620,7 +621,7 @@ for (const archived of [false, true]) {
     await page.goto(`/projects/${ids.project}/documents`);
     if (archived)
       await page
-        .getByRole("button", { name: "Archived (1)", exact: true })
+        .getByRole("tab", { name: "Archived (1)", exact: true })
         .click();
     await expect(
       page.locator(".mdxeditor.orchestrat-markdown-editor")
@@ -678,7 +679,6 @@ for (const dirty of [false, true]) {
       await page
         .getByRole("button", { name: "Use remote", exact: true })
         .click();
-    await expect(page.getByRole("status")).toContainText(/revision 2/i);
     await expect(
       page.locator(".orchestrat-markdown-editor iframe")
     ).toHaveCount(0);

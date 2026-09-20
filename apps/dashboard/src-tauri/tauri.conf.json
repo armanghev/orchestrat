@@ -22,11 +22,11 @@
         "decorations": true,
         "hiddenTitle": true,
         "titleBarStyle": "Overlay",
-        "trafficLightPosition": { "x": 20, "y": 22 }
+        "trafficLightPosition": { "x": 20, "y": 25 }
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' data: blob: https://avatars.githubusercontent.com; style-src 'self' 'unsafe-inline'; font-src 'self'; script-src 'self'; connect-src 'self' http://localhost:8801 https://api.orchestrat.dev wss://api.orchestrat.dev https://*.supabase.co wss://*.supabase.co; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'none'"
+      "csp": "default-src 'self'; img-src 'self' data: blob: http://localhost:8801 https://api.orchestrat.dev https://avatars.githubusercontent.com; style-src 'self' 'unsafe-inline'; font-src 'self'; script-src 'self'; connect-src 'self' http://localhost:8801 https://api.orchestrat.dev wss://api.orchestrat.dev https://*.supabase.co wss://*.supabase.co; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'none'"
     }
   },
   "bundle": {
