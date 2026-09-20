@@ -14,9 +14,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import type { MDXEditorMethods } from "@mdxeditor/editor";
+import type { Document as ProjectDocument } from "@orchestrat/protocol";
 import {
   Archive,
+  ChevronRight,
   FileText,
+  Folder,
   MoreHorizontal,
   Paperclip,
   Pencil,
@@ -56,6 +59,153 @@ export const Route = createFileRoute(
 )({ component: DocumentsRoute });
 
 type RemoteRevision = { revision: number; content: string; actor: string };
+type DocumentTreeFolder = {
+  type: "folder";
+  name: string;
+  path: string;
+  children: DocumentTreeNode[];
+};
+type DocumentTreeFile = {
+  type: "file";
+  name: string;
+  document: ProjectDocument;
+};
+type DocumentTreeNode = DocumentTreeFolder | DocumentTreeFile;
+
+function buildDocumentTree(documents: ProjectDocument[]) {
+  const root: DocumentTreeNode[] = [];
+
+  for (const document of documents) {
+    const parts = document.path.split("/");
+    const name = parts.pop() ?? document.path;
+    let children = root;
+    let folderPath = "";
+
+    for (const part of parts) {
+      folderPath = folderPath ? `${folderPath}/${part}` : part;
+      let folder = children.find(
+        (node): node is DocumentTreeFolder =>
+          node.type === "folder" && node.name === part
+      );
+      if (!folder) {
+        folder = { type: "folder", name: part, path: folderPath, children: [] };
+        children.push(folder);
+      }
+      children = folder.children;
+    }
+
+    children.push({ type: "file", name, document });
+  }
+
+  const sort = (nodes: DocumentTreeNode[]) => {
+    nodes.sort((left, right) => {
+      if (left.type !== right.type) return left.type === "folder" ? -1 : 1;
+      return left.name.localeCompare(right.name);
+    });
+    for (const node of nodes) if (node.type === "folder") sort(node.children);
+  };
+  sort(root);
+  return root;
+}
+
+function DocumentTree({
+  documents,
+  selectedId,
+  onSelect
+}: {
+  documents: ProjectDocument[];
+  selectedId: string | undefined;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <ul className="space-y-0.5">
+      {buildDocumentTree(documents).map((node) => (
+        <DocumentTreeItem
+          key={node.type === "folder" ? node.path : node.document.id}
+          node={node}
+          selectedId={selectedId}
+          onSelect={onSelect}
+        />
+      ))}
+    </ul>
+  );
+}
+
+function DocumentTreeItem({
+  node,
+  selectedId,
+  onSelect
+}: {
+  node: DocumentTreeNode;
+  selectedId: string | undefined;
+  onSelect: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  if (node.type === "folder") {
+    return (
+      <li>
+        <button
+          type="button"
+          onClick={() => setOpen((value) => !value)}
+          className="flex h-8 w-full items-center gap-1.5 rounded-md px-2 text-left text-sm font-medium text-foreground transition-colors hover:bg-muted"
+          aria-expanded={open}
+          aria-label={`${open ? "Collapse" : "Expand"} ${node.path} folder`}
+          title={node.path}
+        >
+          <ChevronRight
+            className={cn(
+              "size-3.5 shrink-0 text-muted-foreground transition-transform",
+              open && "rotate-90"
+            )}
+            aria-hidden="true"
+          />
+          <Folder
+            className="size-4 shrink-0 text-muted-foreground"
+            aria-hidden="true"
+          />
+          <span className="truncate">{node.name}</span>
+        </button>
+        {open ? (
+          <ul className="ml-3 space-y-0.5 border-l border-border/70 pl-1">
+            {node.children.map((child) => (
+              <DocumentTreeItem
+                key={child.type === "folder" ? child.path : child.document.id}
+                node={child}
+                selectedId={selectedId}
+                onSelect={onSelect}
+              />
+            ))}
+          </ul>
+        ) : null}
+      </li>
+    );
+  }
+
+  const selected = selectedId === node.document.id;
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={() => onSelect(node.document.id)}
+        className={cn(
+          "flex h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm transition-colors hover:bg-muted",
+          selected
+            ? "bg-accent text-accent-foreground"
+            : "text-muted-foreground"
+        )}
+        aria-current={selected ? "page" : undefined}
+        title={node.document.path}
+      >
+        <FileText className="size-4 shrink-0" aria-hidden="true" />
+        <span className="min-w-0 flex-1 truncate font-medium">{node.name}</span>
+        <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+          r{node.document.current_revision}
+        </span>
+      </button>
+    </li>
+  );
+}
 
 function DocumentsRoute() {
   const { projectId } = Route.useParams();
@@ -163,7 +313,7 @@ function DocumentsRoute() {
         </p>
       ) : null}
       <div className="flex min-h-0 flex-1 overflow-hidden rounded-xl border bg-card">
-        <div className="grid min-h-0 w-full md:grid-cols-[180px_minmax(0,1fr)] xl:grid-cols-[216px_minmax(0,1fr)]">
+        <div className="grid min-h-0 w-full md:grid-cols-[240px_minmax(0,1fr)] xl:grid-cols-[280px_minmax(0,1fr)]">
           <nav
             aria-label="Project documents"
             className="min-w-0 border-b bg-muted/20 md:border-r md:border-b-0"
@@ -185,38 +335,11 @@ function DocumentsRoute() {
               </div>
               <TabsContent value={showArchived ? "archived" : "active"}>
                 <div className="max-h-40 flex flex-col gap-1 overflow-y-auto p-2 md:max-h-[70dvh]">
-                  {visible.map((item) => (
-                    <button
-                      type="button"
-                      key={item.id}
-                      onClick={() => setSelectedId(item.id)}
-                      className={cn(
-                        "flex w-full items-start gap-2 rounded-lg px-2.5 py-3 text-left text-sm transition-colors hover:bg-muted",
-                        selected?.id === item.id
-                          ? "bg-accent text-accent-foreground"
-                          : "text-muted-foreground"
-                      )}
-                      aria-current={
-                        selected?.id === item.id ? "page" : undefined
-                      }
-                    >
-                      <FileText
-                        className="mt-0.5 size-4 shrink-0"
-                        aria-hidden="true"
-                      />
-                      <span className="min-w-0">
-                        <span
-                          className="block truncate font-medium"
-                          title={item.path}
-                        >
-                          {item.path}
-                        </span>
-                        <span className="mt-1 block text-xs text-muted-foreground">
-                          Revision {item.current_revision}
-                        </span>
-                      </span>
-                    </button>
-                  ))}
+                  <DocumentTree
+                    documents={visible}
+                    selectedId={selected?.id}
+                    onSelect={setSelectedId}
+                  />
                 </div>
               </TabsContent>
             </Tabs>

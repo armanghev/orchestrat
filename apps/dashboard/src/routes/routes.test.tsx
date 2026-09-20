@@ -434,6 +434,78 @@ describe("dashboard routes", () => {
     expect(screen.getAllByText("Task Updated")).toHaveLength(1);
   });
 
+  it("nests documents in collapsible path folders", async () => {
+    const expectedProject = project();
+    const root = documentDetail({
+      document: { ...documentDetail().document, project_id: expectedProject.id }
+    });
+    const setup = {
+      ...root.document,
+      id: "00000000-0000-4000-8000-000000000009",
+      path: "guides/setup.md"
+    };
+    const security = {
+      ...root.document,
+      id: "00000000-0000-4000-8000-00000000000a",
+      path: "guides/advanced/security.md"
+    };
+    const listed = [root.document, setup, security];
+    const documentHandlers = [
+      http.get(
+        `http://localhost:8801/api/v1/projects/${expectedProject.id}/documents`,
+        () => HttpResponse.json({ documents: listed, next_cursor: null })
+      ),
+      http.get(
+        "http://localhost:8801/api/v1/documents/:documentId",
+        ({ params }) => {
+          const document = listed.find((item) => item.id === params.documentId);
+          return document
+            ? HttpResponse.json({
+                document,
+                revision: {
+                  ...root.revision,
+                  document_id: document.id
+                }
+              })
+            : HttpResponse.json({}, { status: 404 });
+        }
+      ),
+      ...handlers
+    ];
+    await renderDashboardRoute({
+      path: `/projects/${expectedProject.id}/documents`,
+      auth: new FakeAuthClient({
+        status: "signedIn",
+        identityKey: "test-user"
+      }),
+      platform: platform(),
+      handlers: documentHandlers
+    });
+
+    const user = userEvent.setup();
+    const guides = await screen.findByRole("button", {
+      name: "Expand guides folder"
+    });
+    expect(screen.queryByText("setup.md")).not.toBeInTheDocument();
+
+    await user.click(guides);
+    expect(guides).toHaveAttribute("aria-expanded", "true");
+    expect(guides.closest("li")).toContainElement(screen.getByText("setup.md"));
+    const advanced = screen.getByRole("button", {
+      name: "Expand guides/advanced folder"
+    });
+    expect(screen.queryByText("security.md")).not.toBeInTheDocument();
+
+    await user.click(advanced);
+    expect(advanced.closest("li")).toContainElement(
+      screen.getByText("security.md")
+    );
+
+    await user.click(guides);
+    expect(guides).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("setup.md")).not.toBeInTheDocument();
+  });
+
   it("preserves an unsaved document draft after conflict and shows summary history", async () => {
     const expectedProject = project();
     const initial = documentDetail({
