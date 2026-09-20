@@ -238,7 +238,7 @@ export function OverviewPage({ context }: { context: ProjectContext }) {
                     .length
                 }
               ].map(({ label, value }) => (
-                <div key={label} className="border-l-2 pl-3">
+                <div key={label} className={`pl-3 ${label == "Queued" ? "" : "border-l-2"}`}>
                   <dt className="text-xs text-muted-foreground">{label}</dt>
                   <dd className="mt-1 text-lg font-medium">{value}</dd>
                 </div>
