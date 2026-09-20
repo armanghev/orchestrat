@@ -16,8 +16,10 @@ import type { Document as ProjectDocument } from "@orchestrat/protocol";
 import {
   Archive,
   ChevronRight,
+  FilePlus,
   FileText,
   Folder,
+  FolderPlus,
   MoreHorizontal,
   Pencil,
   Plus,
@@ -25,7 +27,6 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { TopToolbarActions } from "@/components/app-shell/app-shell";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -75,16 +76,16 @@ type DocumentTreeFile = {
 };
 type DocumentTreeNode = DocumentTreeFolder | DocumentTreeFile;
 
-function buildDocumentTree(documents: ProjectDocument[]) {
+function buildDocumentTree(
+  documents: ProjectDocument[],
+  folderPaths: string[]
+) {
   const root: DocumentTreeNode[] = [];
-
-  for (const document of documents) {
-    const parts = document.path.split("/");
-    const name = parts.pop() ?? document.path;
+  const folderChildren = (path: string) => {
     let children = root;
     let folderPath = "";
 
-    for (const part of parts) {
+    for (const part of path.split("/").filter(Boolean)) {
       folderPath = folderPath ? `${folderPath}/${part}` : part;
       let folder = children.find(
         (node): node is DocumentTreeFolder =>
@@ -96,6 +97,15 @@ function buildDocumentTree(documents: ProjectDocument[]) {
       }
       children = folder.children;
     }
+    return children;
+  };
+
+  for (const path of folderPaths) folderChildren(path);
+
+  for (const document of documents) {
+    const parts = document.path.split("/");
+    const name = parts.pop() ?? document.path;
+    const children = folderChildren(parts.join("/"));
 
     children.push({ type: "file", name, document });
   }
@@ -111,23 +121,36 @@ function buildDocumentTree(documents: ProjectDocument[]) {
   return root;
 }
 
+function markdownPath(value: string) {
+  const path = value.trim();
+  const name = path.split("/").at(-1) ?? "";
+  if (!name) return null;
+  if (name.toLowerCase().endsWith(".md")) return path;
+  return name.includes(".") ? null : `${path}.md`;
+}
+
 function DocumentTree({
   documents,
+  folderPaths,
   selectedId,
-  onSelect
+  onSelect,
+  onCreateDocument
 }: {
   documents: ProjectDocument[];
+  folderPaths: string[];
   selectedId: string | undefined;
   onSelect: (id: string) => void;
+  onCreateDocument?: (folderPath: string) => void;
 }) {
   return (
     <ul className="space-y-0.5">
-      {buildDocumentTree(documents).map((node) => (
+      {buildDocumentTree(documents, folderPaths).map((node) => (
         <DocumentTreeItem
           key={node.type === "folder" ? node.path : node.document.id}
           node={node}
           selectedId={selectedId}
           onSelect={onSelect}
+          onCreateDocument={onCreateDocument}
         />
       ))}
     </ul>
@@ -137,38 +160,55 @@ function DocumentTree({
 function DocumentTreeItem({
   node,
   selectedId,
-  onSelect
+  onSelect,
+  onCreateDocument
 }: {
   node: DocumentTreeNode;
   selectedId: string | undefined;
   onSelect: (id: string) => void;
+  onCreateDocument?: (folderPath: string) => void;
 }) {
   const [open, setOpen] = useState(false);
 
   if (node.type === "folder") {
     return (
       <li>
-        <button
-          type="button"
-          onClick={() => setOpen((value) => !value)}
-          className="flex h-8 w-full items-center gap-1.5 rounded-md px-2 text-left text-sm font-medium text-foreground transition-colors hover:bg-muted"
-          aria-expanded={open}
-          aria-label={`${open ? "Collapse" : "Expand"} ${node.path} folder`}
-          title={node.path}
-        >
-          <ChevronRight
-            className={cn(
-              "size-3.5 shrink-0 text-muted-foreground transition-transform",
-              open && "rotate-90"
-            )}
-            aria-hidden="true"
-          />
-          <Folder
-            className="size-4 shrink-0 text-muted-foreground"
-            aria-hidden="true"
-          />
-          <span className="truncate">{node.name}</span>
-        </button>
+        <div className="group flex items-center gap-0.5">
+          <button
+            type="button"
+            onClick={() => setOpen((value) => !value)}
+            className="flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 text-left text-sm font-medium text-foreground transition-colors hover:bg-muted"
+            aria-expanded={open}
+            aria-label={`${open ? "Collapse" : "Expand"} ${node.path} folder`}
+            title={node.path}
+          >
+            <ChevronRight
+              className={cn(
+                "size-3.5 shrink-0 text-muted-foreground transition-transform",
+                open && "rotate-90"
+              )}
+              aria-hidden="true"
+            />
+            <Folder
+              className="size-4 shrink-0 text-muted-foreground"
+              aria-hidden="true"
+            />
+            <span className="truncate">{node.name}</span>
+          </button>
+          {onCreateDocument ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className="text-muted-foreground opacity-70 hover:opacity-100"
+              onClick={() => onCreateDocument(node.path)}
+              aria-label={`Create document in ${node.path}`}
+              title={`Create document in ${node.path}`}
+            >
+              <Plus aria-hidden="true" />
+            </Button>
+          ) : null}
+        </div>
         {open ? (
           <ul className="ml-3 space-y-0.5 border-l border-border/70 pl-1">
             {node.children.map((child) => (
@@ -177,6 +217,7 @@ function DocumentTreeItem({
                 node={child}
                 selectedId={selectedId}
                 onSelect={onSelect}
+                onCreateDocument={onCreateDocument}
               />
             ))}
           </ul>
@@ -217,20 +258,36 @@ function DocumentsRoute() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [newPath, setNewPath] = useState("");
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating] = useState<"document" | "folder" | null>(null);
   const documents = useQuery(documentsQueryOptions(api, projectId));
   const create = useMutation({
-    mutationFn: () =>
-      api.createDocument(projectId, { path: newPath, content: "" }),
+    mutationFn: (path: string) =>
+      api.createDocument(projectId, { path, content: "" }),
     onSuccess: async (result) => {
       setNewPath("");
-      setCreating(false);
+      setCreating(null);
       setSelectedId(result.document.id);
       await queryClient.invalidateQueries({
         queryKey: coordinationKeys.documents(projectId)
       });
     }
   });
+  const createFolder = useMutation({
+    mutationFn: (path: string) => api.createDocumentFolder(projectId, { path }),
+    onSuccess: async () => {
+      setNewPath("");
+      setCreating(null);
+      await queryClient.invalidateQueries({
+        queryKey: coordinationKeys.documents(projectId)
+      });
+    }
+  });
+  const startCreating = (kind: "document" | "folder", folderPath = "") => {
+    create.reset();
+    createFolder.reset();
+    setNewPath(folderPath ? `${folderPath}/` : "");
+    setCreating(kind);
+  };
 
   if (documents.isPending)
     return <DocumentMessage title="Documents" message="Loading documents…" />;
@@ -257,59 +314,15 @@ function DocumentsRoute() {
   const selected =
     visible.find((item) => item.id === selectedId) ?? visible[0] ?? null;
   const projectArchived = project?.project.status === "archived";
+  const nextDocumentPath =
+    creating === "document" ? markdownPath(newPath) : null;
+  const creationError = create.error ?? createFolder.error;
+  const creationPending = create.isPending || createFolder.isPending;
   return (
     <div
       className="document-workspace dashboard-page min-h-full"
       aria-label="Project documents"
     >
-      <TopToolbarActions>
-        {!projectArchived ? (
-          creating ? (
-            <form
-              className="flex items-center gap-2"
-              onSubmit={(event) => {
-                event.preventDefault();
-                if (newPath.trim()) create.mutate();
-              }}
-            >
-              <Input
-                aria-label="New document path"
-                value={newPath}
-                onChange={(event) => setNewPath(event.target.value)}
-                placeholder="notes/idea.md"
-                disabled={create.isPending}
-                className="w-44"
-              />
-              <Button
-                type="submit"
-                disabled={!newPath.trim() || create.isPending}
-              >
-                {create.isPending ? "Creating…" : "Create"}
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={() => setCreating(false)}
-                disabled={create.isPending}
-              >
-                Cancel
-              </Button>
-            </form>
-          ) : (
-            <Button onClick={() => setCreating(true)}>
-              <Plus aria-hidden="true" />
-              New document
-            </Button>
-          )
-        ) : null}
-      </TopToolbarActions>
-      {create.isError ? (
-        <p role="alert" className="mt-3 text-sm text-destructive">
-          {create.error instanceof Error
-            ? create.error.message
-            : "Unable to create the document."}
-        </p>
-      ) : null}
       {projectArchived ? (
         <p className="mt-5 rounded border px-3 py-2 text-sm text-muted-foreground">
           This project is archived and read-only.
@@ -323,11 +336,41 @@ function DocumentsRoute() {
           >
             <Tabs
               value={showArchived ? "archived" : "active"}
-              onValueChange={(value) => setShowArchived(value === "archived")}
+              onValueChange={(value) => {
+                setShowArchived(value === "archived");
+                setCreating(null);
+              }}
               className="gap-0"
             >
-              <div className="border-b p-3">
-                <TabsList aria-label="Document state">
+              <div className="space-y-2 border-b p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-medium">Documents</span>
+                  {!projectArchived && !showArchived ? (
+                    <div className="flex items-center gap-1">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => startCreating("document")}
+                        aria-label="Create document"
+                        title="Create document"
+                      >
+                        <FilePlus aria-hidden="true" />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => startCreating("folder")}
+                        aria-label="Create folder"
+                        title="Create folder"
+                      >
+                        <FolderPlus aria-hidden="true" />
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
+                <TabsList className="w-full" aria-label="Document state">
                   <TabsTrigger value="active">
                     Active ({active.length})
                   </TabsTrigger>
@@ -335,13 +378,88 @@ function DocumentsRoute() {
                     Archived ({archived.length})
                   </TabsTrigger>
                 </TabsList>
+                {creating ? (
+                  <form
+                    className="space-y-2"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      if (creating === "document" && nextDocumentPath)
+                        create.mutate(nextDocumentPath);
+                      if (creating === "folder" && newPath.trim())
+                        createFolder.mutate(newPath.trim());
+                    }}
+                  >
+                    <Input
+                      autoFocus
+                      aria-label={
+                        creating === "document"
+                          ? "New document path"
+                          : "New folder path"
+                      }
+                      value={newPath}
+                      onChange={(event) => setNewPath(event.target.value)}
+                      placeholder={
+                        creating === "document" ? "notes/idea.md" : "notes"
+                      }
+                      disabled={creationPending}
+                      className="h-8"
+                    />
+                    {creating === "document" &&
+                    newPath.trim() &&
+                    !nextDocumentPath ? (
+                      <p className="text-xs text-destructive">
+                        Documents must use the .md extension.
+                      </p>
+                    ) : null}
+                    {creationError ? (
+                      <p role="alert" className="text-xs text-destructive">
+                        {creationError instanceof Error
+                          ? creationError.message
+                          : `Unable to create the ${creating}.`}
+                      </p>
+                    ) : null}
+                    <div className="flex gap-1.5">
+                      <Button
+                        type="submit"
+                        size="sm"
+                        disabled={
+                          creationPending ||
+                          (creating === "document"
+                            ? !nextDocumentPath
+                            : !newPath.trim())
+                        }
+                      >
+                        {creationPending ? "Creating…" : "Create"}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setCreating(null)}
+                        disabled={creationPending}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </form>
+                ) : null}
               </div>
               <TabsContent value={showArchived ? "archived" : "active"}>
                 <div className="max-h-40 flex flex-col gap-1 overflow-y-auto p-2 md:max-h-[70dvh]">
                   <DocumentTree
                     documents={visible}
+                    folderPaths={
+                      showArchived
+                        ? []
+                        : documents.data.folders.map((folder) => folder.path)
+                    }
                     selectedId={selected?.id}
                     onSelect={setSelectedId}
+                    onCreateDocument={
+                      !showArchived && !projectArchived
+                        ? (folderPath) => startCreating("document", folderPath)
+                        : undefined
+                    }
                   />
                 </div>
               </TabsContent>

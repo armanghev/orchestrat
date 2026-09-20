@@ -471,10 +471,40 @@ describe("dashboard routes", () => {
       path: "guides/advanced/security.md"
     };
     const listed = [root.document, setup, security];
+    let createdPath = "";
     const documentHandlers = [
       http.get(
         `http://localhost:8801/api/v1/projects/${expectedProject.id}/documents`,
-        () => HttpResponse.json({ documents: listed, next_cursor: null })
+        () =>
+          HttpResponse.json({
+            documents: listed,
+            folders: [
+              {
+                id: "00000000-0000-4000-8000-00000000000b",
+                project_id: expectedProject.id,
+                path: "empty",
+                created_at: root.document.created_at
+              }
+            ],
+            next_cursor: null
+          })
+      ),
+      http.post(
+        `http://localhost:8801/api/v1/projects/${expectedProject.id}/documents`,
+        async ({ request }) => {
+          createdPath = ((await request.json()) as { path: string }).path;
+          return HttpResponse.json(
+            {
+              ...root,
+              document: {
+                ...root.document,
+                id: "00000000-0000-4000-8000-00000000000c",
+                path: createdPath
+              }
+            },
+            { status: 201 }
+          );
+        }
       ),
       http.get(
         "http://localhost:8801/api/v1/documents/:documentId",
@@ -507,7 +537,22 @@ describe("dashboard routes", () => {
     const guides = await screen.findByRole("button", {
       name: "Expand guides folder"
     });
+    expect(
+      screen.getByRole("button", { name: "Expand empty folder" })
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Create folder" })).toBeVisible();
     expect(screen.queryByText("setup.md")).not.toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", { name: "Create document in guides" })
+    );
+    const newPath = screen.getByRole("textbox", {
+      name: "New document path"
+    });
+    expect(newPath).toHaveValue("guides/");
+    await user.type(newPath, "quickstart");
+    await user.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(createdPath).toBe("guides/quickstart.md"));
 
     await user.click(guides);
     expect(guides).toHaveAttribute("aria-expanded", "true");

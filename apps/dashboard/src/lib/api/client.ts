@@ -23,6 +23,7 @@ import {
   type UpdateOrganizationRequest,
   type UpdateProjectRequest,
   documentDetailSchema,
+  documentFolderSchema,
   documentSchema,
   documentRevisionsResponseSchema,
   historicalDocumentRevisionResponseSchema,
@@ -42,6 +43,7 @@ import {
   type AgentPresence,
   type AgentsResponse,
   type CreateDocumentRequest,
+  type CreateDocumentFolderRequest,
   type CreateTaskCommentRequest,
   type CreateTaskDependencyRequest,
   type CreateTaskRequest,
@@ -71,6 +73,7 @@ import {
 import { z, type ZodType } from "zod";
 
 const documentLifecycleResponseSchema = z.object({ document: documentSchema });
+const documentFolderResponseSchema = z.object({ folder: documentFolderSchema });
 
 export type DocumentRevisionSummary = z.infer<
   typeof documentRevisionSummarySchema
@@ -491,6 +494,17 @@ export class ApiClient {
       `/api/v1/projects/${encodeURIComponent(projectId)}/documents`,
       { method: "POST", body: input },
       documentDetailSchema
+    );
+  }
+
+  createDocumentFolder(
+    projectId: string,
+    input: CreateDocumentFolderRequest
+  ): Promise<{ folder: z.infer<typeof documentFolderSchema> }> {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/document-folders`,
+      { method: "POST", body: input },
+      documentFolderResponseSchema
     );
   }
 
