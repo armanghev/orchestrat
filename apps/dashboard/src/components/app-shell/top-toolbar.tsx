@@ -142,54 +142,58 @@ export function TopToolbar({
       <WindowDragRegion />
       <div
         className={cn(
-          "relative z-10 flex min-w-0 flex-1 items-center gap-2 transition-[padding-left] duration-200 ease-linear",
+          "relative z-10 flex min-w-0 flex-1 items-center gap-2 transition-[padding-left] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none",
           desktop && collapsed && "md:pl-28"
         )}
       >
-        <SidebarTrigger
-          aria-label={
-            isMobile
-              ? openMobile
-                ? "Close navigation"
-                : "Open navigation"
-              : collapsed
-                ? "Restore sidebar"
-                : "Collapse sidebar"
-          }
-          className={cn("mr-1", desktop && "md:hidden")}
-        />
-        <Separator
-          orientation="vertical"
-          className={cn(
-            "mr-2 h-5 data-[orientation=vertical]:self-center",
-            desktop && !collapsed && "md:hidden"
-          )}
-        />
-        <Breadcrumb className="min-w-0">
-          <BreadcrumbList className="flex-nowrap">
-            {context ? (
-              <>
-                <BreadcrumbItem className="hidden min-w-0 sm:inline-flex">
-                  <BreadcrumbLink asChild>
-                    <Link
-                      to="/projects/$projectId/overview"
-                      params={{ projectId: context.project.id }}
-                      className="truncate"
-                    >
-                      {context.project.name}
-                    </Link>
-                  </BreadcrumbLink>
-                </BreadcrumbItem>
-                <BreadcrumbSeparator className="hidden sm:block" />
-              </>
-            ) : null}
-            <BreadcrumbItem>
-              <BreadcrumbPage className="text-primary-text">
-                {activeRoute[0].toUpperCase() + activeRoute.slice(1)}
-              </BreadcrumbPage>
-            </BreadcrumbItem>
-          </BreadcrumbList>
-        </Breadcrumb>
+        <div className="flex min-w-0 items-center">
+          <SidebarTrigger
+            aria-label={
+              isMobile
+                ? openMobile
+                  ? "Close navigation"
+                  : "Open navigation"
+                : collapsed
+                  ? "Restore sidebar"
+                  : "Collapse sidebar"
+            }
+            className={cn("mr-3", desktop && "md:hidden")}
+          />
+          <Separator
+            orientation="vertical"
+            className={cn(
+              "mr-4 h-5 data-[orientation=vertical]:self-center transition-[width,margin,opacity] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none",
+              desktop &&
+                !collapsed &&
+                "md:mr-0 md:opacity-0 md:data-[orientation=vertical]:w-0"
+            )}
+          />
+          <Breadcrumb className="min-w-0">
+            <BreadcrumbList className="flex-nowrap">
+              {context ? (
+                <>
+                  <BreadcrumbItem className="hidden min-w-0 sm:inline-flex">
+                    <BreadcrumbLink asChild>
+                      <Link
+                        to="/projects/$projectId/overview"
+                        params={{ projectId: context.project.id }}
+                        className="truncate"
+                      >
+                        {context.project.name}
+                      </Link>
+                    </BreadcrumbLink>
+                  </BreadcrumbItem>
+                  <BreadcrumbSeparator className="hidden sm:block" />
+                </>
+              ) : null}
+              <BreadcrumbItem>
+                <BreadcrumbPage className="text-primary-text">
+                  {activeRoute[0].toUpperCase() + activeRoute.slice(1)}
+                </BreadcrumbPage>
+              </BreadcrumbItem>
+            </BreadcrumbList>
+          </Breadcrumb>
+        </div>
         <Button
           ref={commandTriggerRef}
           variant="outline"
