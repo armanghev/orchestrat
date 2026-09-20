@@ -30,6 +30,22 @@ describe("desktop browser authentication handoff", () => {
     );
   });
 
+  it("returns dev sign-ins to the dev receiver instead of the installed app", () => {
+    expect(
+      desktopAppCallback("?sb_flow_id=" + flowId + "&code=single-use", true)
+    ).toBe(
+      "dev.orchestrat.app.local://auth/callback?sb_flow_id=" +
+        flowId +
+        "&code=single-use"
+    );
+    expect(
+      desktopAppCallback(
+        "?sb_flow_id=" + flowId + "&code=x&access_token=secret",
+        true
+      )
+    ).toBeNull();
+  });
+
   it("rejects duplicate, extra, mismatched, and token-bearing inputs", () => {
     expect(parseDesktopAuthRequest(`?sb_flow_id=${flowId}`)).toBeNull();
     expect(

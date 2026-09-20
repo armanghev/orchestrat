@@ -101,6 +101,15 @@ to the app without putting access or refresh tokens in a URL.
 For production, set the portal URL to `https://app.orchestrat.dev/auth/desktop`
 and allow `https://app.orchestrat.dev/auth/desktop/callback` in Supabase.
 
+On macOS, start desktop development with
+`pnpm --filter @orchestrat/dashboard dev:desktop`. The launcher registers a small
+`Orchestrat Dev Auth.app` receiver in your user Applications folder so
+browser callbacks reach the running dev binary. Dev mode uses its own app
+identity, the development Keychain namespace, and the local auth portal above;
+the installed production app keeps its existing callback scheme. Restart the
+dev command after changing this setup. To check the native handoff without
+signing in, run `node apps/dashboard/scripts/macos-dev-auth.mjs --self-check`.
+
 To create a local user, organization, and project without using the UI, set the
 `ORCHESTRAT_SEED_*` variables from `.env.example`, including a stable Supabase
 user UUID for `ORCHESTRAT_SEED_AUTH_SUBJECT`, then run:

@@ -3,7 +3,12 @@ import { createFileRoute } from "@tanstack/react-router";
 import { desktopAppCallback } from "@/features/auth/desktop-auth-portal";
 
 function DesktopCallbackRoute() {
-  const [callback] = useState(() => desktopAppCallback(window.location.search));
+  const [callback] = useState(() =>
+    desktopAppCallback(
+      window.location.search,
+      import.meta.env.DEV && import.meta.env.VITE_DESKTOP_DEV === "1"
+    )
+  );
 
   useLayoutEffect(() => {
     window.history.replaceState(
