@@ -1,254 +1,232 @@
 "use client";
 
-import React, { useState } from "react";
-import {
-  ShieldAlert,
-  CheckCircle2,
-  Copy,
-  Check,
-  Lock,
-  Globe
-} from "lucide-react";
-import { motion, AnimatePresence } from "motion/react";
-import { Reveal, RevealStagger, RevealItem } from "@/components/motion/reveal";
+import { useState } from "react";
+import { ArrowRight, Check, FileText, GitBranch } from "lucide-react";
+
+const views = [
+  {
+    label: "Tasks & ownership",
+    description:
+      "Give every task a clear owner, from the first claim to your final review."
+  },
+  {
+    label: "Shared documents",
+    description:
+      "Keep plans and decisions in versioned Markdown. The next agent starts with context."
+  },
+  {
+    label: "Agent activity",
+    description:
+      "See who is working, what changed, and where your attention is needed."
+  }
+];
 
 export function SharedStatePreviewSection() {
-  const [activeCase, setActiveCase] = useState<number>(0);
-  const [copied, setCopied] = useState<boolean>(false);
-
-  const cases = [
-    {
-      title: "Task already claimed",
-      category: "Task coordination",
-      icon: Lock,
-      severity: "Conflict",
-      problem: "ORC-142 already has an active lease owned by backend-agent.",
-      explanation:
-        "Atomic claiming prevents duplicate work. The second agent receives a machine-readable conflict and can choose another ready task.",
-      file: "ORC-142 · active claim",
-      beforeCode: `claim_task({
-  task_id: "ORC-142",
-  agent_id: "frontend-agent",
-  expected_version: 17
-});`,
-      afterCode: `{
-  "error": {
-    "code": "TASK_ALREADY_CLAIMED",
-    "task_id": "ORC-142",
-    "claimed_by": "backend-agent"
-  }
-}`
-    },
-    {
-      title: "Document revision changed",
-      category: "Shared documents",
-      icon: Globe,
-      severity: "Conflict",
-      problem:
-        "architecture.md is now revision 19; this edit used revision 18.",
-      explanation:
-        "Revision checks prevent one agent from silently overwriting another agent's update. The stale writer reads, merges, and retries.",
-      file: "architecture.md · revision 19",
-      beforeCode: `update_document({
-  path: "architecture.md",
-  base_revision: 18,
-  content: "..."
-});`,
-      afterCode: `{
-  "error": {
-    "code": "DOCUMENT_CONFLICT",
-    "current_revision": 19,
-    "base_revision": 18
-  }
-}`
-    },
-    {
-      title: "Work ready for review",
-      category: "Human control",
-      icon: ShieldAlert,
-      severity: "Review",
-      problem: "review-agent moved ORC-138 into the review queue.",
-      explanation:
-        "A human can inspect the task history, approve or reject the work, request clarification, or reassign ownership.",
-      file: "ORC-138 · review requested",
-      beforeCode: `update_task({
-  task_id: "ORC-138",
-  status: "review",
-  expected_version: 8
-});`,
-      afterCode: `{
-  "event": "task.review_requested",
-  "actor": "review-agent",
-  "task_id": "ORC-138",
-  "version": 9
-}`
-    }
-  ];
-
-  const current = cases[activeCase];
-
-  const handleCopyCode = () => {
-    navigator.clipboard.writeText(current.afterCode);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const severityStyle: Record<string, string> = {
-    Conflict: "text-red-400/70 bg-red-950/40 border-red-900/30",
-    Review: "text-amber-400/60 bg-amber-950/40 border-amber-900/30"
-  };
-
+  const [selected, setSelected] = useState(0);
   return (
-    <section id="workspace" className="line-b relative py-24 md:py-32">
-      <div className="max-w-container-lg mx-auto px-6">
-        {/* Section Header */}
-        <Reveal>
-          <div className="max-w-xl space-y-3">
-            <h2 className="text-2xl leading-tight font-semibold tracking-tight text-zinc-100 sm:text-3xl">
-              One shared state for every participant.
-            </h2>
-            <p className="text-sm leading-relaxed font-light text-zinc-500">
-              Tasks, claims, documents, messages, and events stay available
-              across agent sessions, with conflicts surfaced instead of silently
-              overwritten.
-            </p>
-          </div>
-        </Reveal>
-
-        {/* Tabs Switcher */}
-        <RevealStagger className="mt-10 flex flex-wrap gap-2">
-          {cases.map((item, idx) => {
-            const Icon = item.icon;
-            const isSelected = activeCase === idx;
-            return (
-              <RevealItem key={idx}>
-                <button
-                  onClick={() => setActiveCase(idx)}
-                  className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3.5 py-2 font-mono text-xs transition-all ${
-                    isSelected
-                      ? "border-white/1 bg-zinc-800 text-zinc-200"
-                      : "border-transparent bg-transparent text-zinc-600 hover:text-zinc-400"
-                  }`}
+    <section
+      aria-labelledby="workspace-heading"
+      className="site-container section-space"
+    >
+      <div id="workspace" className="workspace-heading-row">
+        <p className="text-sm text-muted-foreground">The shared workspace</p>
+        <h2 id="workspace-heading" className="section-title">
+          The work moves forward.
+          <br />
+          <span className="text-muted-foreground">
+            The context stays with it.
+          </span>
+        </h2>
+      </div>
+      <div className="workspace-grid">
+        <div
+          role="group"
+          aria-label="Workspace features"
+          className="feature-selector"
+        >
+          {views.map((view, index) => (
+            <div key={view.label} className="feature-item">
+              <button
+                type="button"
+                aria-label={view.label}
+                aria-pressed={selected === index}
+                aria-controls="workspace-example"
+                onClick={() => setSelected(index)}
+                className="feature-choice"
+              >
+                <span
+                  aria-hidden="true"
+                  className="font-mono text-xs text-muted-foreground"
                 >
-                  <Icon className="h-3.5 w-3.5" strokeWidth={1.5} />
-                  <span>{item.title}</span>
-                  <span
-                    className={`rounded border px-1.5 py-0.5 font-mono text-[9px] ${severityStyle[item.severity]}`}
+                  0{index + 1}
+                </span>
+                <span>{view.label}</span>
+                <ArrowRight size={17} aria-hidden="true" />
+              </button>
+              {selected === index && (
+                <p className="feature-description">{view.description}</p>
+              )}
+            </div>
+          ))}
+        </div>
+        <div className="min-w-0">
+          <div
+            id="workspace-example"
+            className="workspace-preview"
+            aria-live="polite"
+          >
+            <div key={selected} className="preview-content">
+              <div className="mb-8 flex items-center justify-between gap-4 text-sm text-muted-foreground">
+                <span>Example workspace</span>
+                <span className="font-mono">
+                  {selected === 0
+                    ? "ORC-142"
+                    : selected === 1
+                      ? "Revision 19"
+                      : "Project activity"}
+                </span>
+              </div>
+              {selected === 0 && (
+                <>
+                  <h3 className="preview-title">Implement authentication</h3>
+                  <div className="mt-4 flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
+                    <span className="status bg-info/10 text-info">
+                      In progress
+                    </span>
+                    <span>Backend agent</span>
+                  </div>
+                  <div className="mt-7 border-t pt-6">
+                    <p className="mb-6 text-xs text-muted-foreground">
+                      From claim to review
+                    </p>
+                    <ol className="activity-path" role="list">
+                      <li>
+                        <span className="path-node text-primary-text" />
+                        <div>
+                          <p>Task claimed</p>
+                          <p className="mt-1 text-sm text-muted-foreground">
+                            Backend agent picked up ORC-142
+                          </p>
+                        </div>
+                      </li>
+                      <li>
+                        <span className="path-node" />
+                        <div>
+                          <p>Context updated</p>
+                          <p className="mt-1 text-sm text-muted-foreground">
+                            architecture.md · Revision 19
+                          </p>
+                        </div>
+                      </li>
+                      <li>
+                        <span className="path-node" />
+                        <div>
+                          <p>Ready for review</p>
+                          <p className="mt-1 text-sm text-muted-foreground">
+                            You decide what happens next
+                          </p>
+                        </div>
+                      </li>
+                    </ol>
+                  </div>
+                </>
+              )}
+              {selected === 1 && (
+                <>
+                  <div className="flex items-center gap-3">
+                    <FileText
+                      size={21}
+                      className="shrink-0 text-primary-text"
+                      aria-hidden="true"
+                    />
+                    <h3 className="preview-title">architecture.md</h3>
+                  </div>
+                  <div className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
+                    <GitBranch size={15} aria-hidden="true" />A shared plan,
+                    with a history.
+                  </div>
+                  <div className="mt-7 space-y-5 border-t pt-6 text-sm">
+                    <h4 className="text-lg font-medium">Authentication plan</h4>
+                    <p className="max-w-lg leading-relaxed text-muted-foreground">
+                      Keep the callback flow shared across the app and browser.
+                      Document each decision so the next agent can continue the
+                      work.
+                    </p>
+                    <ul className="space-y-3" aria-label="Plan checklist">
+                      <li className="flex items-center gap-3">
+                        <Check
+                          size={16}
+                          className="text-muted-foreground"
+                          aria-hidden="true"
+                        />
+                        Document the API contract
+                      </li>
+                      <li className="flex items-center gap-3">
+                        <Check
+                          size={16}
+                          className="text-muted-foreground"
+                          aria-hidden="true"
+                        />
+                        Review the session handoff
+                      </li>
+                    </ul>
+                    <p className="pt-3 font-mono text-[11px] text-muted-foreground">
+                      Updated by Backend agent · Revision 19
+                    </p>
+                  </div>
+                </>
+              )}
+              {selected === 2 && (
+                <>
+                  <h3 className="preview-title">The work, as it happens.</h3>
+                  <p className="mt-4 text-sm text-muted-foreground">
+                    Agent sessions, task changes, and shared decisions.
+                  </p>
+                  <ul
+                    className="mt-7 divide-y border-t"
+                    aria-label="Example activity"
                   >
-                    {item.severity}
-                  </span>
-                </button>
-              </RevealItem>
-            );
-          })}
-        </RevealStagger>
-
-        {/* Selected shared-state detail and response */}
-        <Reveal delay={0.12} yOffset={16}>
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={activeCase}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.15 }}
-              className="mt-6 grid grid-cols-1 items-start gap-6 lg:grid-cols-[380px_1fr]"
-            >
-              {/* Left Side: Context */}
-              <div className="h-full rounded-2xl border border-white/6 bg-zinc-900/40 p-1.5">
-                <div className="space-y-4 rounded-xl border border-white/5 bg-zinc-950 p-5 font-mono text-xs">
-                  <div className="flex items-center justify-between border-b border-white/5 pb-3">
-                    <div>
-                      <span className="block text-[10px] tracking-wider text-zinc-600 uppercase">
-                        {current.category}
-                      </span>
-                      <span className="mt-0.5 block text-[11px] font-medium text-zinc-400">
-                        Shared state
-                      </span>
-                    </div>
-                    <span
-                      className={`rounded border px-1.5 py-0.5 text-[9px] ${severityStyle[current.severity]}`}
-                    >
-                      {current.severity}
-                    </span>
-                  </div>
-
-                  <div className="space-y-3.5">
-                    <div>
-                      <span className="block text-[10px] text-zinc-700 uppercase">
-                        Current state:
-                      </span>
-                      <p className="mt-0.5 leading-relaxed font-light text-zinc-300">
-                        {current.problem}
-                      </p>
-                    </div>
-
-                    <div>
-                      <span className="block text-[10px] text-zinc-700 uppercase">
-                        Why it matters:
-                      </span>
-                      <p className="mt-0.5 leading-relaxed font-light text-zinc-500">
-                        {current.explanation}
-                      </p>
-                    </div>
-
-                    <div className="border-t border-white/5 pt-3">
-                      <span className="block text-[10px] text-zinc-700 uppercase">
-                        Entity:
-                      </span>
-                      <code className="mt-0.5 block text-[11px] break-all text-zinc-400">
-                        {current.file}
-                      </code>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Right Side: Before/After Code */}
-              <div className="space-y-4 font-mono text-xs">
-                {/* Before */}
-                <div className="overflow-hidden rounded-xl border border-red-500/15 bg-zinc-950/80">
-                  <div className="flex items-center justify-between border-b border-red-500/10 bg-red-950/10 px-4 py-2 text-red-400/70">
-                    <span>Agent request</span>
-                    <span className="text-[9px] text-red-500/50 uppercase">
-                      Request
-                    </span>
-                  </div>
-                  <pre className="overflow-x-auto p-4 leading-relaxed text-red-400/60 select-none">
-                    <code>{current.beforeCode}</code>
-                  </pre>
-                </div>
-
-                {/* After */}
-                <div className="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950/80">
-                  <div className="flex items-center justify-between border-b border-white/5 bg-zinc-900/30 px-4 py-2 text-zinc-400">
-                    <span className="flex items-center gap-1.5 text-zinc-300">
-                      <CheckCircle2
-                        className="h-3.5 w-3.5 text-zinc-500"
-                        strokeWidth={1.5}
-                      />
-                      orchestrat response
-                    </span>
-                    <button
-                      onClick={handleCopyCode}
-                      className="flex cursor-pointer items-center gap-1.5 rounded border border-white/5 bg-zinc-900 px-2.5 py-1 text-[11px] text-zinc-400 transition-colors hover:bg-zinc-800"
-                    >
-                      {copied ? (
-                        <Check className="h-3 w-3 text-zinc-500" />
-                      ) : (
-                        <Copy className="h-3 w-3" />
-                      )}
-                      <span>{copied ? "Copied" : "Copy"}</span>
-                    </button>
-                  </div>
-                  <pre className="overflow-x-auto p-4 leading-relaxed text-zinc-300">
-                    <code>{current.afterCode}</code>
-                  </pre>
-                </div>
-              </div>
-            </motion.div>
-          </AnimatePresence>
-        </Reveal>
+                    {[
+                      {
+                        title: "Backend agent claimed ORC-142",
+                        detail: "Implement authentication",
+                        time: "Just now"
+                      },
+                      {
+                        title: "QA agent requested review",
+                        detail: "Review API contract",
+                        time: "2 min ago"
+                      },
+                      {
+                        title: "architecture.md updated",
+                        detail: "Revision 19 · Backend agent",
+                        time: "5 min ago"
+                      }
+                    ].map((event) => (
+                      <li
+                        key={event.title}
+                        className="flex items-start justify-between gap-4 py-5"
+                      >
+                        <div>
+                          <p className="text-sm">{event.title}</p>
+                          <p className="mt-1.5 text-xs text-muted-foreground">
+                            {event.detail}
+                          </p>
+                        </div>
+                        <span className="shrink-0 pt-0.5 font-mono text-[10px] text-muted-foreground">
+                          {event.time}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </div>
+          </div>
+          <p className="mt-6 text-sm leading-relaxed text-muted-foreground">
+            A claim, a document, a decision. All in the same place.
+          </p>
+        </div>
       </div>
     </section>
   );
