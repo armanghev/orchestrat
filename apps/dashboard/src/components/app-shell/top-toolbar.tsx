@@ -117,7 +117,7 @@ export function TopToolbar({
   const { isMobile, openMobile } = useSidebar();
   const { theme, setTheme } = useTheme();
   const shortcut = navigator.platform.toLowerCase().includes("mac")
-    ? "⌘ K"
+    ? "⌘K"
     : "Ctrl K";
   return (
     <header
@@ -342,8 +342,7 @@ export function TopToolbar({
           onClick={onOpenCommands}
         >
           <Search data-icon="inline-start" />
-          Search{" "}
-          <kbd className="hidden text-xs text-muted-foreground sm:inline">
+          <kbd className="hidden text-sm text-muted-foreground sm:inline">
             {shortcut}
           </kbd>
         </Button>
