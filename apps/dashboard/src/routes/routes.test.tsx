@@ -837,8 +837,8 @@ describe("dashboard routes", () => {
     });
     expect(newestPrior).toHaveAttribute("aria-pressed", "true");
     expect(
-      screen.getByRole("button", { name: /^Revision 6\b/ })
-    ).toBeDisabled();
+      screen.queryByRole("button", { name: /^Revision 6\b/ })
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /^Revision 7\b/ })
     ).not.toBeInTheDocument();

@@ -108,8 +108,7 @@ function HistoryDialog({
           aria-label="Document revisions"
         >
           <RevisionList
-            revisions={revisions}
-            currentRevision={currentRevision.revision_number}
+            revisions={historicalRevisions}
             selectedRevision={selectedRevision}
             onSelect={setSelectedRevisionNumber}
             loading={history.isPending}
@@ -191,7 +190,6 @@ function HistoryDialog({
 
 function RevisionList({
   revisions,
-  currentRevision,
   selectedRevision,
   onSelect,
   loading,
@@ -199,7 +197,6 @@ function RevisionList({
   onRetry
 }: {
   revisions: DocumentRevisionSummary[];
-  currentRevision: number;
   selectedRevision: number | null;
   onSelect: (revision: number) => void;
   loading: boolean;
@@ -225,34 +222,23 @@ function RevisionList({
 
   return (
     <div className="space-y-1">
-      {revisions.map((revision) => {
-        const current = revision.revision_number === currentRevision;
-        return (
-          <button
-            key={revision.revision_number}
-            type="button"
-            disabled={current}
-            aria-pressed={
-              !current && selectedRevision === revision.revision_number
-            }
-            className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-muted disabled:cursor-default aria-pressed:bg-muted"
-            onClick={() => onSelect(revision.revision_number)}
-          >
-            <span className="flex items-center justify-between gap-2 font-medium">
-              Revision {revision.revision_number}{" "}
-              {current ? (
-                <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[0.7rem] text-primary-text">
-                  Current
-                </span>
-              ) : null}
-            </span>{" "}
-            <span className="mt-1 block text-xs text-muted-foreground">
-              {revision.author.type} ·{" "}
-              {new Date(revision.created_at).toLocaleString()}
-            </span>
-          </button>
-        );
-      })}
+      {revisions.map((revision) => (
+        <button
+          key={revision.revision_number}
+          type="button"
+          aria-pressed={selectedRevision === revision.revision_number}
+          className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-muted aria-pressed:bg-muted"
+          onClick={() => onSelect(revision.revision_number)}
+        >
+          <span className="font-medium">
+            Revision {revision.revision_number}
+          </span>{" "}
+          <span className="mt-1 block text-xs text-muted-foreground">
+            {revision.author.type} ·{" "}
+            {new Date(revision.created_at).toLocaleString()}
+          </span>
+        </button>
+      ))}
     </div>
   );
 }
