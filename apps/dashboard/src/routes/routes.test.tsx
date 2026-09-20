@@ -835,6 +835,7 @@ describe("dashboard routes", () => {
     const newestPrior = await screen.findByRole("button", {
       name: /^Revision 5\b/
     });
+    expect(screen.getByRole("list", { name: /revisions$/ })).toBeVisible();
     expect(newestPrior).toHaveAttribute("aria-pressed", "true");
     expect(
       screen.queryByRole("button", { name: /^Revision 6\b/ })

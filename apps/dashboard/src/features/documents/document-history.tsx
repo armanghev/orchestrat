@@ -143,7 +143,7 @@ function HistoryDialog({
           </p>
         ) : null}
       </DialogHeader>
-      <div className="grid min-h-0 grid-cols-1 grid-rows-[minmax(0,10rem)_minmax(0,1fr)] sm:grid-cols-[200px_minmax(0,1fr)] sm:grid-rows-1">
+      <div className="grid min-h-0 grid-cols-1 grid-rows-[minmax(0,10rem)_minmax(0,1fr)] sm:grid-cols-[260px_minmax(0,1fr)] sm:grid-rows-1">
         <aside
           className="min-h-0 overflow-auto border-b p-3 sm:border-r sm:border-b-0"
           aria-label="Document revisions"
@@ -287,27 +287,85 @@ function RevisionList({
       </p>
     );
 
+  const groups = Array.from(
+    revisions.reduce((grouped, revision) => {
+      const date = new Date(revision.created_at);
+      const key = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+      const group = grouped.get(key);
+      if (group) group.revisions.push(revision);
+      else grouped.set(key, { date, revisions: [revision] });
+      return grouped;
+    }, new Map<string, { date: Date; revisions: DocumentRevisionSummary[] }>())
+  ).map(([, group]) => group);
+
   return (
-    <div className="space-y-1">
-      {revisions.map((revision) => (
-        <button
-          key={revision.revision_number}
-          type="button"
-          aria-pressed={selectedRevision === revision.revision_number}
-          className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-muted aria-pressed:bg-muted"
-          onClick={() => onSelect(revision.revision_number)}
-        >
-          <span className="font-medium">
-            Revision {revision.revision_number}
-          </span>{" "}
-          <span className="mt-1 block text-xs text-muted-foreground">
-            {revision.author.type} ·{" "}
-            {new Date(revision.created_at).toLocaleString()}
-          </span>
-        </button>
+    <div className="space-y-5">
+      {groups.map((group) => (
+        <section key={group.date.toISOString()}>
+          <h3 className="mb-2 px-1 text-xs font-medium text-muted-foreground">
+            {formatRevisionDay(group.date)}
+          </h3>
+          <ol
+            className="relative ml-2 border-l border-border pl-4"
+            aria-label={`${formatRevisionDay(group.date)} revisions`}
+          >
+            {group.revisions.map((revision) => {
+              const selected = selectedRevision === revision.revision_number;
+              const createdAt = new Date(revision.created_at);
+              const time = createdAt.toLocaleTimeString([], {
+                hour: "numeric",
+                minute: "2-digit"
+              });
+              return (
+                <li key={revision.revision_number} className="relative py-0.5">
+                  <span
+                    aria-hidden="true"
+                    className={`absolute -left-[1.3rem] top-4 size-2.5 rounded-full border-2 border-background ${selected ? "bg-primary" : "bg-muted-foreground/45"}`}
+                  />
+                  <button
+                    type="button"
+                    aria-pressed={selected}
+                    aria-label={`Revision ${revision.revision_number}, ${time}, ${revision.author.type} edit`}
+                    className="w-full rounded-lg px-3 py-2.5 text-left text-sm transition-colors hover:bg-muted aria-pressed:bg-muted"
+                    onClick={() => onSelect(revision.revision_number)}
+                  >
+                    <span className="flex items-baseline justify-between gap-2">
+                      <span className="font-medium text-foreground">
+                        Revision {revision.revision_number}
+                      </span>
+                      <time
+                        className="shrink-0 text-xs text-muted-foreground"
+                        dateTime={revision.created_at}
+                      >
+                        {time}
+                      </time>
+                    </span>
+                    <span className="mt-1 block text-xs capitalize text-muted-foreground">
+                      {revision.author.type} edit
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
+        </section>
       ))}
     </div>
   );
+}
+
+function formatRevisionDay(date: Date) {
+  const today = new Date();
+  if (date.toDateString() === today.toDateString()) return "Today";
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  if (date.toDateString() === yesterday.toDateString()) return "Yesterday";
+  return date.toLocaleDateString([], {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: date.getFullYear() === today.getFullYear() ? undefined : "numeric"
+  });
 }
 
 function ErrorState({
