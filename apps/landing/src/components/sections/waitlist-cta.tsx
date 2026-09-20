@@ -1,16 +1,12 @@
 "use client";
 
 import { type FormEvent, useEffect, useState } from "react";
+import Link from "next/link";
 import { ArrowRight, Check } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { Reveal } from "@/components/motion/reveal";
 
-type WaitlistStatus =
-  | "joined"
-  | "invalid"
-  | "unavailable"
-  | "error"
-  | null;
+type WaitlistStatus = "joined" | "invalid" | "unavailable" | "error" | null;
 
 export function WaitlistCtaSection() {
   const [email, setEmail] = useState("");
@@ -200,6 +196,24 @@ export function WaitlistCtaSection() {
                       )}
                     </button>
                   </div>
+
+                  <p className="max-w-lg text-xs leading-relaxed text-muted-foreground">
+                    By joining, you agree to our{" "}
+                    <Link
+                      href="/terms"
+                      className="text-foreground underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring"
+                    >
+                      Terms of Service
+                    </Link>
+                    . Read our{" "}
+                    <Link
+                      href="/privacy"
+                      className="text-foreground underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring"
+                    >
+                      Privacy Policy
+                    </Link>{" "}
+                    to learn how we use your email for early-access updates.
+                  </p>
 
                   {error && (
                     <p

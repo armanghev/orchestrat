@@ -24,10 +24,10 @@ export function Footer() {
             </h3>
             <ul className="space-y-2.5">
               {[
-                { label: "Workspace", href: "#workspace" },
-                { label: "Protocol", href: "#protocol" },
-                { label: "Workflow", href: "#workflow" },
-                { label: "Waitlist", href: "#waitlist" }
+                { label: "Workspace", href: "/#workspace" },
+                { label: "Protocol", href: "/#protocol" },
+                { label: "Workflow", href: "/#workflow" },
+                { label: "Waitlist", href: "/#waitlist" }
               ].map((item) => (
                 <li key={item.label}>
                   <Link
@@ -66,7 +66,20 @@ export function Footer() {
             <OrchestratIcon className="text-primary-text" />
             humans in control
           </p>
-          <span>orchestrat.dev</span>
+          <nav aria-label="Legal" className="flex flex-wrap gap-x-5 gap-y-3">
+            <Link
+              href="/terms"
+              className="transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring"
+            >
+              Terms of Service
+            </Link>
+            <Link
+              href="/privacy"
+              className="transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring"
+            >
+              Privacy Policy
+            </Link>
+          </nav>
         </div>
       </div>
     </footer>

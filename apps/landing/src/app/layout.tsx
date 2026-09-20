@@ -23,6 +23,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
+      data-scroll-behavior="smooth"
       className={`dark ${outfit.variable} ${geistMono.variable}`}
     >
       <body className="noise min-h-full bg-background font-sans text-foreground selection:bg-accent selection:text-accent-foreground">

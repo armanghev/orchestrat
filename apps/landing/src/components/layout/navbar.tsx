@@ -16,8 +16,8 @@ export function Navbar() {
   }, []);
 
   const links = [
-    { label: "Workspace", href: "#workspace" },
-    { label: "Protocol", href: "#protocol" }
+    { label: "Workspace", href: "/#workspace" },
+    { label: "Protocol", href: "/#protocol" }
   ];
 
   return (
@@ -44,7 +44,7 @@ export function Navbar() {
             </Link>
           ))}
           <Link
-            href="#waitlist"
+            href="/#waitlist"
             className="rounded-md bg-primary px-3.5 py-1.5 text-[13px] font-medium text-primary-foreground transition-opacity hover:opacity-90"
           >
             Waitlist
@@ -78,7 +78,7 @@ export function Navbar() {
               </Link>
             ))}
             <Link
-              href="#waitlist"
+              href="/#waitlist"
               onClick={() => setMobileOpen(false)}
               className="mt-1 rounded-md bg-primary px-4 py-2.5 text-center text-sm font-medium text-primary-foreground"
             >
