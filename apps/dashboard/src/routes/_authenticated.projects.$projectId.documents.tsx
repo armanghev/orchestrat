@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { TopToolbarActions } from "@/components/app-shell/app-shell";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -106,25 +107,13 @@ function DocumentsRoute() {
   return (
     <div
       className="document-workspace dashboard-page min-h-full"
-      aria-labelledby="documents-heading"
+      aria-label="Project documents"
     >
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1
-            id="documents-heading"
-            tabIndex={-1}
-            className="text-2xl font-semibold tracking-tight"
-          >
-            Documents
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Plans, notes, and context for your project.
-          </p>
-        </div>
+      <TopToolbarActions>
         {!projectArchived ? (
           creating ? (
             <form
-              className="flex flex-wrap gap-2"
+              className="flex items-center gap-2"
               onSubmit={(event) => {
                 event.preventDefault();
                 if (newPath.trim()) create.mutate();
@@ -136,6 +125,7 @@ function DocumentsRoute() {
                 onChange={(event) => setNewPath(event.target.value)}
                 placeholder="notes/idea.md"
                 disabled={create.isPending}
+                className="w-44"
               />
               <Button
                 type="submit"
@@ -159,7 +149,7 @@ function DocumentsRoute() {
             </Button>
           )
         ) : null}
-      </div>
+      </TopToolbarActions>
       {create.isError ? (
         <p role="alert" className="mt-3 text-sm text-destructive">
           {create.error instanceof Error

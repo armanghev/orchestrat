@@ -22,7 +22,6 @@ import {
   Breadcrumb,
   BreadcrumbList,
   BreadcrumbItem,
-  BreadcrumbPage,
   BreadcrumbSeparator
 } from "@/components/ui/breadcrumb";
 import {
@@ -121,6 +120,7 @@ export function TopToolbar({
     : "Ctrl K";
   return (
     <header
+      data-slot="top-toolbar"
       className={cn(
         "relative flex h-14 shrink-0 select-none items-center gap-3 border-b px-4 sm:px-6",
         desktop && "md:h-12 md:bg-sidebar"
@@ -328,9 +328,14 @@ export function TopToolbar({
                 </>
               ) : null}
               <BreadcrumbItem>
-                <BreadcrumbPage className="text-primary-text">
+                <h1
+                  data-slot="top-toolbar-page"
+                  tabIndex={-1}
+                  aria-current="page"
+                  className="text-sm font-normal text-primary-text outline-none"
+                >
                   {activeRoute[0].toUpperCase() + activeRoute.slice(1)}
-                </BreadcrumbPage>
+                </h1>
               </BreadcrumbItem>
             </BreadcrumbList>
           </Breadcrumb>

@@ -264,7 +264,9 @@ describe("dashboard routes", () => {
       handlers: taskHandlers
     });
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: "New task" }));
+    const newTask = await screen.findByRole("button", { name: "New task" });
+    expect(newTask.closest("[data-slot='top-toolbar']")).toBeVisible();
+    await user.click(newTask);
     await user.type(await screen.findByLabelText("Title"), "Created task");
     await user.click(screen.getByRole("button", { name: "Create task" }));
     expect(await screen.findByText("DASH-1")).toBeVisible();

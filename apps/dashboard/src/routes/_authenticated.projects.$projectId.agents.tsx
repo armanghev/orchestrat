@@ -1,10 +1,7 @@
 import { useState } from "react";
 import { Bot, Search, HeartPulse } from "lucide-react";
-import {
-  PageHeader,
-  PageState,
-  StatusBadge
-} from "@/components/dashboard/page";
+import { PageState, StatusBadge } from "@/components/dashboard/page";
+import { TopToolbarActions } from "@/components/app-shell/app-shell";
 import {
   Card,
   CardHeader,
@@ -85,15 +82,11 @@ function AgentsRoute() {
   ).length;
   return (
     <section className="dashboard-page" aria-label="Project agents">
-      <PageHeader
-        title="Agents"
-        description="Your connected runtimes, their presence, and what they’re working on."
-        actions={
-          <Badge variant="outline">
-            {online} online · {agents.data.agents.length} total
-          </Badge>
-        }
-      />
+      <TopToolbarActions>
+        <Badge variant="outline">
+          {online} online · {agents.data.agents.length} total
+        </Badge>
+      </TopToolbarActions>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-sm font-medium">Agent directory</h2>
         <InputGroup className="w-full sm:w-64">

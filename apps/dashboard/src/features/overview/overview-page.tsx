@@ -19,11 +19,7 @@ import {
 } from "@/features/coordination/query-options";
 import { derivePresence } from "@/features/agents/presence";
 import { DashboardApiError } from "@/lib/api/client";
-import {
-  PageHeader,
-  PageState,
-  StatusBadge
-} from "@/components/dashboard/page";
+import { PageState, StatusBadge } from "@/components/dashboard/page";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -118,27 +114,6 @@ export function OverviewPage({ context }: { context: ProjectContext }) {
 
   return (
     <section className="dashboard-page" aria-label="Project overview">
-      <PageHeader
-        title="Overview"
-        description={
-          project.description ||
-          "A clear view of your agents, work, and what needs you next."
-        }
-        actions={
-          <>
-            <StatusBadge status={project.status} />
-            <Button asChild variant="outline">
-              <Link
-                to="/projects/$projectId/tasks"
-                params={{ projectId: project.id }}
-              >
-                View tasks
-                <ArrowUpRight data-icon="inline-end" />
-              </Link>
-            </Button>
-          </>
-        }
-      />
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {[
           {
@@ -238,7 +213,10 @@ export function OverviewPage({ context }: { context: ProjectContext }) {
                     .length
                 }
               ].map(({ label, value }) => (
-                <div key={label} className={`pl-3 ${label == "Queued" ? "" : "border-l-2"}`}>
+                <div
+                  key={label}
+                  className={`pl-3 ${label == "Queued" ? "" : "border-l-2"}`}
+                >
                   <dt className="text-xs text-muted-foreground">{label}</dt>
                   <dd className="mt-1 text-lg font-medium">{value}</dd>
                 </div>

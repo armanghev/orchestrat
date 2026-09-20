@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { Project } from "@orchestrat/protocol";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { PageHeader, StatusBadge } from "@/components/dashboard/page";
+import { StatusBadge } from "@/components/dashboard/page";
 import {
   Card,
   CardHeader,
@@ -101,10 +101,6 @@ export function ProjectSettingsPage({
 
   return (
     <section className="dashboard-page" aria-label="Project settings">
-      <PageHeader
-        title="Project settings"
-        description="Manage project details, access, and lifecycle."
-      />
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
         <Card>
           <CardHeader>

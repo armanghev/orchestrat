@@ -1,4 +1,6 @@
 import {
+  createContext,
+  useContext,
   useCallback,
   useEffect,
   useMemo,
@@ -22,6 +24,19 @@ import { usePlatform } from "@/platform/provider";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ConnectivityBanner } from "@/features/connectivity/connectivity-banner";
 import { WindowDragRegion } from "./top-toolbar";
+
+const TopToolbarActionsContext = createContext<
+  ((actions: ReactNode | null) => void) | null
+>(null);
+
+export function TopToolbarActions({ children }: { children: ReactNode }) {
+  const setActions = useContext(TopToolbarActionsContext);
+  useEffect(() => {
+    setActions?.(children);
+    return () => setActions?.(null);
+  }, [children, setActions]);
+  return null;
+}
 
 export type AppShellProps = {
   catalog: ProjectCatalog;
@@ -60,6 +75,7 @@ export function AppShell({
   const desktop = usePlatform().kind === "desktop";
   const { setTheme } = useTheme();
   const [open, setOpen] = useState(false);
+  const [routeActions, setRouteActions] = useState<ReactNode>(null);
   const commandInvokerRef = useRef<HTMLElement>(null);
   const defaultCommandTriggerRef = useRef<HTMLButtonElement>(null);
   const openCommands = useCallback(() => {
@@ -173,6 +189,7 @@ export function AppShell({
           activeRoute={activeRoute}
           onOpenCommands={openCommands}
           collapsed={preferences.contextSidebarCollapsed}
+          routeActions={routeActions}
           commandTriggerRef={defaultCommandTriggerRef}
         />
         <main
@@ -197,7 +214,9 @@ export function AppShell({
               </AlertDescription>
             </Alert>
           ) : null}
-          {children}
+          <TopToolbarActionsContext.Provider value={setRouteActions}>
+            {children}
+          </TopToolbarActionsContext.Provider>
         </main>
       </div>
       <CommandMenu

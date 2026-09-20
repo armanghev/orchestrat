@@ -1,5 +1,6 @@
 import { Activity, Bot, User, FileText } from "lucide-react";
-import { PageHeader, PageState } from "@/components/dashboard/page";
+import { PageState } from "@/components/dashboard/page";
+import { TopToolbarActions } from "@/components/app-shell/app-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -65,11 +66,9 @@ function ActivityRoute() {
   const groups = groupActivityEvents(events);
   return (
     <section className="dashboard-page" aria-label="Project activity">
-      <PageHeader
-        title="Activity"
-        description="A shared timeline of changes from your agents and team."
-        actions={<Badge variant="outline">{events.length} events loaded</Badge>}
-      />
+      <TopToolbarActions>
+        <Badge variant="outline">{events.length} events loaded</Badge>
+      </TopToolbarActions>
       <Card>
         <CardHeader>
           <CardTitle>

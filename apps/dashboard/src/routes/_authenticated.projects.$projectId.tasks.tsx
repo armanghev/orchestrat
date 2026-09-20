@@ -12,11 +12,8 @@ import {
   MessageSquare,
   ListTodo
 } from "lucide-react";
-import {
-  PageHeader,
-  PageState,
-  StatusBadge
-} from "@/components/dashboard/page";
+import { PageState, StatusBadge } from "@/components/dashboard/page";
+import { TopToolbarActions } from "@/components/app-shell/app-shell";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -257,22 +254,18 @@ function TasksRoute() {
   );
   return (
     <section className="dashboard-page" aria-label="Project tasks">
-      <PageHeader
-        title="Tasks"
-        description="Plan the work. Keep every agent moving in the same direction."
-        actions={
-          <Button
-            disabled={archived}
-            onClick={() => {
-              create.reset();
-              setCreating(true);
-            }}
-          >
-            <Plus data-icon="inline-start" />
-            New task
-          </Button>
-        }
-      />
+      <TopToolbarActions>
+        <Button
+          disabled={archived}
+          onClick={() => {
+            create.reset();
+            setCreating(true);
+          }}
+        >
+          <Plus data-icon="inline-start" />
+          New task
+        </Button>
+      </TopToolbarActions>
       {archived ? (
         <Alert role="status">
           <AlertDescription>
