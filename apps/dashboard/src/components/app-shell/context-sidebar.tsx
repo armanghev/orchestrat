@@ -23,8 +23,6 @@ import {
 import {
   Sidebar,
   SidebarContent,
-  SidebarHeader,
-  SidebarTrigger,
   useSidebar,
   SidebarFooter,
   SidebarGroup,
@@ -35,7 +33,6 @@ import {
   SidebarMenuItem
 } from "@/components/ui/sidebar";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Separator } from "@/components/ui/separator";
 import { usePlatform } from "@/platform/provider";
 import { cn } from "@/lib/cn";
 import { WindowDragRegion } from "./top-toolbar";
