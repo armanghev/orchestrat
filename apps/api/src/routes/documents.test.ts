@@ -188,6 +188,31 @@ test("documents protect revisions, paths, archives, and agent project scope", as
       payload: { path: "../secret.md", content: "no" }
     });
     assert.equal(invalid.statusCode, 400);
+    const invalidExtension = await app.inject({
+      method: "POST",
+      url: `/api/v1/projects/${project.id}/documents`,
+      headers: bearer("alice"),
+      payload: { path: "src/index.ts", content: "no" }
+    });
+    assert.equal(invalidExtension.statusCode, 400);
+
+    const folder = await app.inject({
+      method: "POST",
+      url: `/api/v1/projects/${project.id}/document-folders`,
+      headers: bearer("alice"),
+      payload: { path: "empty/folder" }
+    });
+    assert.equal(folder.statusCode, 201);
+    assert.equal(folder.json().folder.path, "empty/folder");
+    const listedDocuments = await app.inject({
+      method: "GET",
+      url: `/api/v1/projects/${project.id}/documents`,
+      headers: bearer("alice")
+    });
+    assert.deepEqual(
+      listedDocuments.json().folders.map((item: { path: string }) => item.path),
+      ["empty/folder"]
+    );
 
     const updates = await Promise.all([
       app.inject({

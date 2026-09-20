@@ -9,6 +9,7 @@ import {
   attachmentPartsRequestSchema,
   claimResponseSchema,
   createAttachmentUploadRequestSchema,
+  createDocumentFolderRequestSchema,
   createDocumentRequestSchema,
   documentAttachmentUploadParamsSchema,
   documentConflictDetailsSchema,
@@ -139,6 +140,13 @@ test("accepts normalized document paths and revision conflicts", () => {
     createDocumentRequestSchema.parse({ path: "README.md", content: "# Notes" })
       .content,
     "# Notes"
+  );
+  assert.throws(() =>
+    createDocumentRequestSchema.parse({ path: "src/index.ts", content: "" })
+  );
+  assert.equal(
+    createDocumentFolderRequestSchema.parse({ path: "docs/guides" }).path,
+    "docs/guides"
   );
 });
 

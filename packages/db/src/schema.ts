@@ -700,6 +700,27 @@ export const documents = pgTable(
   ]
 );
 
+export const documentFolders = pgTable(
+  "document_folders",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    path: text("path").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    uniqueIndex("document_folders_project_path_unique").on(
+      table.projectId,
+      table.path
+    ),
+    check("document_folders_path_not_blank", sql`btrim(${table.path}) <> ''`)
+  ]
+);
+
 export const documentRevisions = pgTable(
   "document_revisions",
   {
