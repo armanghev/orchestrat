@@ -43,6 +43,13 @@ const PART_SIZE_BYTES = 16 * 1024 * 1024;
 const UPLOAD_TTL_MS = 24 * 60 * 60 * 1000;
 const URL_TTL_SECONDS = 15 * 60;
 const DOWNLOAD_TTL_MS = 60_000;
+const INLINE_IMAGE_TYPES = new Set([
+  "image/avif",
+  "image/gif",
+  "image/jpeg",
+  "image/png",
+  "image/webp"
+]);
 const attachmentJson = (value: typeof documentAttachments.$inferSelect) => ({
   id: value.id,
   document_id: value.documentId,
@@ -51,13 +58,13 @@ const attachmentJson = (value: typeof documentAttachments.$inferSelect) => ({
   size_bytes: value.sizeBytes,
   created_at: value.createdAt.toISOString()
 });
-const attachmentDisposition = (filename: string) => {
+const attachmentDisposition = (filename: string, inline = false) => {
   const fallback = filename.replace(/[^\x20-\x7e]|["\\\r\n]/g, "_");
   const encoded = encodeURIComponent(filename).replace(
     /[!'()*]/g,
     (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`
   );
-  return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`;
+  return `${inline ? "inline" : "attachment"}; filename="${fallback}"; filename*=UTF-8''${encoded}`;
 };
 export class AttachmentService {
   private readonly permissions: PermissionService;
@@ -975,10 +982,12 @@ export class AttachmentService {
         "Attachment content is unavailable."
       );
     }
+    const inline = INLINE_IMAGE_TYPES.has(row.mimeType ?? "");
     return {
       body,
       contentLength: object.ContentLength ?? row.sizeBytes,
-      contentDisposition: attachmentDisposition(row.filename)
+      contentType: inline ? row.mimeType! : "application/octet-stream",
+      contentDisposition: attachmentDisposition(row.filename, inline)
     };
   }
   async remove(userId: string, documentId: string, id: string) {
