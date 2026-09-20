@@ -1260,14 +1260,13 @@ describe("dashboard routes", () => {
       await Promise.resolve();
       await Promise.resolve();
       expect(attempts).toBe(1);
-      expect(screen.getByRole("status")).toHaveTextContent("Offline, retrying");
       await act(async () => {
         await vi.advanceTimersByTimeAsync(1_500);
       });
       await Promise.resolve();
       await Promise.resolve();
       expect(attempts).toBe(2);
-      expect(screen.getByRole("status")).toHaveTextContent("Saved revision 2");
+      expect(editor).toHaveValue("Offline draft");
     } finally {
       vi.useRealTimers();
     }

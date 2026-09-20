@@ -748,7 +748,7 @@ function DocumentEditor({
   const [remote, setRemote] = useState<RemoteRevision | null>(null);
   const [awaitingRemote, setAwaitingRemote] = useState(false);
   const [merging, setMerging] = useState(false);
-  const [status, setStatus] = useState("Saved");
+  const [autosaveRetry, setAutosaveRetry] = useState(0);
   const [rename, setRename] = useState(false);
   const [path, setPath] = useState("");
   const [editorError, setEditorError] = useState<string | null>(null);
@@ -787,7 +787,7 @@ function DocumentEditor({
       base_revision: number;
       save_kind?: "autosave";
     }) => api.updateDocument(documentId, input),
-    onSuccess: async (result, input) => {
+    onSuccess: async (result) => {
       savingRef.current = false;
       const revision = result.revision.revision_number;
       const newerRemote =
@@ -802,20 +802,12 @@ function DocumentEditor({
         awaitingRemoteRef.current = false;
         setAwaitingRemote(false);
         setRemote(newerRemote);
-        setStatus(
-          `Revision ${newerRemote.revision} saved by ${newerRemote.actor}; your draft is preserved.`
-        );
       } else {
         awaitingRemoteRef.current = false;
         setAwaitingRemote(false);
         remoteRef.current = null;
         setRemote(null);
         setMerging(false);
-        setStatus(
-          draftRef.current === input.content
-            ? `Saved revision ${revision}`
-            : "Unsaved"
-        );
       }
       await invalidateDocument();
     },
@@ -827,9 +819,6 @@ function DocumentEditor({
       ) {
         awaitingRemoteRef.current = true;
         setAwaitingRemote(true);
-        setStatus(
-          "Revision changed remotely. Resolve the conflict before saving."
-        );
         await queryClient.invalidateQueries({
           queryKey: coordinationKeys.document(documentId)
         });
@@ -842,12 +831,8 @@ function DocumentEditor({
         error instanceof DashboardApiError &&
         error.kind === "NETWORK_ERROR"
       ) {
-        setStatus("Offline, retrying");
-        return;
+        setAutosaveRetry((attempt) => attempt + 1);
       }
-      setStatus(
-        error instanceof Error ? error.message : "Unable to save this document."
-      );
     }
   });
   const saveNow = useCallback(
@@ -863,7 +848,6 @@ function DocumentEditor({
       )
         return;
       savingRef.current = true;
-      setStatus("Saving…");
       save.mutate({
         content: draftRef.current,
         base_revision: expectedRevision,
@@ -885,11 +869,9 @@ function DocumentEditor({
       setBaseContent(content);
       setBaseRevision(revision);
       setPath(next.document.path);
-      setStatus(`Saved revision ${revision}`);
       return;
     }
     if (revision <= baseRevisionRef.current) return;
-    const actor = `${next.revision.author.type} ${next.revision.author.id}`;
     if (
       !savingRef.current &&
       draftRef.current === baseContentRef.current &&
@@ -903,17 +885,17 @@ function DocumentEditor({
       editorRef.current?.setMarkdown(content);
       setBaseContent(content);
       setBaseRevision(revision);
-      setStatus(`Revision ${revision} saved by ${actor}`);
       return;
     }
-    const target = { revision, content, actor };
+    const target = {
+      revision,
+      content,
+      actor: `${next.revision.author.type} ${next.revision.author.id}`
+    };
     remoteRef.current = target;
     awaitingRemoteRef.current = false;
     setAwaitingRemote(false);
     setRemote(target);
-    setStatus(
-      `Revision ${revision} saved by ${actor}; your draft is preserved.`
-    );
   }, [document.data]);
   const archived =
     projectArchived ||
@@ -942,6 +924,7 @@ function DocumentEditor({
     };
   }, [
     archived,
+    autosaveRetry,
     awaitingRemote,
     dirty,
     draft,
@@ -1150,7 +1133,6 @@ function DocumentEditor({
                 setBaseRevision(remote.revision);
                 setRemote(null);
                 setMerging(false);
-                setStatus(`Saved revision ${remote.revision}`);
               }}
             >
               Use remote
@@ -1168,9 +1150,6 @@ function DocumentEditor({
                 setBaseRevision(remote.revision);
                 setMerging(true);
                 setRemote(null);
-                setStatus(
-                  "Merging locally. Autosave is paused; save explicitly when ready."
-                );
               }}
             >
               Continue merging
@@ -1217,15 +1196,11 @@ function DocumentEditor({
                 setEditorError(null);
                 draftRef.current = markdown;
                 setDraft(markdown);
-                if (!remote && !merging) setStatus("Unsaved");
               }}
               onError={({ error, source }) => {
                 draftRef.current = source;
                 setDraft(source);
                 setEditorError(error);
-                setStatus(
-                  "Markdown could not be rendered. Your source is preserved; fix it in Source mode."
-                );
               }}
               imageUploadHandler={uploadImage}
               imagePreviewHandler={previewImage}
