@@ -378,11 +378,25 @@ test("summary history avoids object reads and detail reads one historical object
     content: "two"
   });
   storage.getCount = 0;
-  const summary = await service.revisions(userId, document.document.id, {
+  const newest = await service.revisions(userId, document.document.id, {
     view: "summary",
-    limit: 50
+    limit: 1
   });
-  assert.equal(summary.revisions.length, 2);
+  assert.deepEqual(
+    newest.revisions.map((revision) => revision.revision_number),
+    [2]
+  );
+  assert.ok(newest.next_cursor);
+  const older = await service.revisions(userId, document.document.id, {
+    view: "summary",
+    limit: 1,
+    cursor: newest.next_cursor
+  });
+  assert.deepEqual(
+    older.revisions.map((revision) => revision.revision_number),
+    [1]
+  );
+  assert.equal(older.next_cursor, null);
   assert.equal(storage.getCount, 0);
 
   const detail = await service.revision(userId, document.document.id, 2);

@@ -23,7 +23,7 @@ import {
   type RenameDocumentRequest,
   type UpdateDocumentRequest
 } from "@orchestrat/protocol";
-import { and, asc, eq, gt, isNull, ne, or } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNull, lt, ne, or } from "drizzle-orm";
 import { insertProjectEvent } from "./agent-service.js";
 import type { AgentPrincipal } from "./agent-service.js";
 import { ApiError } from "./api-error.js";
@@ -977,13 +977,13 @@ export class DocumentService {
     const clauses = [eq(documentRevisions.documentId, id)];
     if (query.cursor)
       clauses.push(
-        gt(documentRevisions.revisionNumber, decodeRevisionCursor(query.cursor))
+        lt(documentRevisions.revisionNumber, decodeRevisionCursor(query.cursor))
       );
     const rows = await this.db
       .select()
       .from(documentRevisions)
       .where(and(...clauses))
-      .orderBy(asc(documentRevisions.revisionNumber))
+      .orderBy(desc(documentRevisions.revisionNumber))
       .limit(query.limit + 1);
     const page = rows.slice(0, query.limit);
     const revisions =
