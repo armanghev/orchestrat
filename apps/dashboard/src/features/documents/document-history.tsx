@@ -1,5 +1,10 @@
 import { useMemo, useState } from "react";
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient
+} from "@tanstack/react-query";
 import { HistoryIcon } from "lucide-react";
 import type { DocumentRevision } from "@orchestrat/protocol";
 import { Button } from "@/components/ui/button";
@@ -18,10 +23,12 @@ import { DocumentDiff } from "./document-diff";
 
 export type DocumentHistoryProps = {
   api: ApiClient;
+  projectId: string;
   documentId: string;
   path: string;
   currentRevision: DocumentRevision;
   hasUnsavedChanges: boolean;
+  readOnly: boolean;
 };
 
 export function DocumentHistory(props: DocumentHistoryProps) {
@@ -35,18 +42,24 @@ export function DocumentHistory(props: DocumentHistoryProps) {
           History
         </Button>
       </DialogTrigger>
-      {open ? <HistoryDialog {...props} /> : null}
+      {open ? (
+        <HistoryDialog {...props} onRestored={() => setOpen(false)} />
+      ) : null}
     </Dialog>
   );
 }
 
 function HistoryDialog({
   api,
+  projectId,
   documentId,
   path,
   currentRevision,
-  hasUnsavedChanges
-}: DocumentHistoryProps) {
+  hasUnsavedChanges,
+  readOnly,
+  onRestored
+}: DocumentHistoryProps & { onRestored: () => void }) {
+  const queryClient = useQueryClient();
   const [selectedRevisionNumber, setSelectedRevisionNumber] = useState<
     number | null
   >(null);
@@ -89,6 +102,34 @@ function HistoryDialog({
     queryFn: () => api.getDocumentRevision(documentId, selectedRevision!),
     enabled: selectedRevision !== null
   });
+  const restore = useMutation({
+    mutationFn: () => {
+      if (!detail.data) throw new Error("This revision is not available yet.");
+      return api.updateDocument(documentId, {
+        content: detail.data.content,
+        base_revision: currentRevision.revision_number
+      });
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: coordinationKeys.documents(projectId)
+        }),
+        queryClient.invalidateQueries({
+          queryKey: coordinationKeys.document(documentId)
+        }),
+        queryClient.invalidateQueries({
+          queryKey: coordinationKeys.revisions(documentId)
+        })
+      ]);
+      onRestored();
+    }
+  });
+  const restoreBlockedReason = hasUnsavedChanges
+    ? "Save or discard your draft before restoring a revision."
+    : readOnly
+      ? "Archived documents are read-only."
+      : undefined;
 
   return (
     <DialogContent className="document-history-dialog h-[min(80dvh,760px)] w-[calc(100vw-2rem)] max-w-[1100px] grid-rows-[auto_minmax(0,1fr)] overflow-hidden p-0 sm:max-w-[1100px]">
@@ -110,7 +151,10 @@ function HistoryDialog({
           <RevisionList
             revisions={historicalRevisions}
             selectedRevision={selectedRevision}
-            onSelect={setSelectedRevisionNumber}
+            onSelect={(revision) => {
+              restore.reset();
+              setSelectedRevisionNumber(revision);
+            }}
             loading={history.isPending}
             error={history.isError && !history.data}
             onRetry={() => history.refetch()}
@@ -140,24 +184,47 @@ function HistoryDialog({
           className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-3 overflow-hidden p-4"
           aria-live="polite"
         >
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-            <span className="font-medium text-foreground">
-              {selectedRevision === null
-                ? "Select a revision"
-                : `Revision ${selectedRevision}`}
-            </span>
-            <span>vs</span>
-            <span className="font-medium text-foreground">
-              Current saved · Revision {currentRevision.revision_number}
-            </span>
-            <span>
-              <span className="mr-1 inline-block size-2 rounded-sm bg-destructive/45" />
-              Removed
-            </span>
-            <span>
-              <span className="mr-1 inline-block size-2 rounded-sm bg-success/45" />
-              Added
-            </span>
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+              <span className="font-medium text-foreground">
+                {selectedRevision === null
+                  ? "Select a revision"
+                  : `Revision ${selectedRevision}`}
+              </span>
+              <span>vs</span>
+              <span className="font-medium text-foreground">
+                Current saved · Revision {currentRevision.revision_number}
+              </span>
+              <span>
+                <span className="mr-1 inline-block size-2 rounded-sm bg-destructive/45" />
+                Removed
+              </span>
+              <span>
+                <span className="mr-1 inline-block size-2 rounded-sm bg-success/45" />
+                Added
+              </span>
+              <Button
+                className="ml-auto"
+                size="sm"
+                disabled={
+                  selectedRevision === null ||
+                  !detail.data ||
+                  restore.isPending ||
+                  Boolean(restoreBlockedReason)
+                }
+                title={restoreBlockedReason}
+                onClick={() => restore.mutate()}
+              >
+                {restore.isPending ? "Restoring…" : "Restore as new revision"}
+              </Button>
+            </div>
+            {restore.isError ? (
+              <p role="alert" className="text-xs text-destructive">
+                {restore.error instanceof Error
+                  ? restore.error.message
+                  : "Unable to restore this revision."}
+              </p>
+            ) : null}
           </div>
           {detail.isPending && selectedRevision !== null ? (
             <Skeleton className="h-full min-h-64" />

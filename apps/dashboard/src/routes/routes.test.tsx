@@ -845,6 +845,9 @@ describe("dashboard routes", () => {
     expect(await screen.findByLabelText("Original revision")).toHaveValue(
       "Saved content 5"
     );
+    expect(
+      screen.getByRole("button", { name: "Restore as new revision" })
+    ).toBeDisabled();
     expect(screen.getByLabelText("Current saved revision")).toHaveValue(
       "Current saved content"
     );
@@ -878,6 +881,100 @@ describe("dashboard routes", () => {
     expect(screen.getByLabelText("Markdown content")).toHaveValue(
       "Unsaved draft"
     );
+  });
+
+  it("restores an old document version as a new revision", async () => {
+    const expectedProject = project();
+    const old = documentDetail({
+      document: {
+        ...documentDetail().document,
+        project_id: expectedProject.id,
+        current_revision: 3
+      },
+      revision: {
+        ...documentDetail().revision,
+        revision_number: 2,
+        content: "Old content"
+      }
+    });
+    let current = {
+      ...old,
+      revision: {
+        ...old.revision,
+        revision_number: 3,
+        content: "Current content"
+      }
+    };
+    let patchRequests = 0;
+    const documentHandlers = [
+      http.get(
+        `http://localhost:8801/api/v1/projects/${expectedProject.id}/documents`,
+        () =>
+          HttpResponse.json({
+            documents: [current.document],
+            next_cursor: null
+          })
+      ),
+      http.get(
+        `http://localhost:8801/api/v1/documents/${old.document.id}`,
+        () => HttpResponse.json(current)
+      ),
+      http.get(
+        `http://localhost:8801/api/v1/documents/${old.document.id}/revisions`,
+        () =>
+          HttpResponse.json({
+            revisions: [current.revision, old.revision].map(revisionSummary),
+            next_cursor: null
+          })
+      ),
+      http.get(
+        `http://localhost:8801/api/v1/documents/${old.document.id}/revisions/2`,
+        () => HttpResponse.json({ revision: old.revision })
+      ),
+      http.patch(
+        `http://localhost:8801/api/v1/documents/${old.document.id}`,
+        async ({ request }) => {
+          patchRequests += 1;
+          expect(await request.json()).toEqual({
+            content: "Old content",
+            base_revision: 3
+          });
+          current = {
+            ...current,
+            document: { ...current.document, current_revision: 4 },
+            revision: {
+              ...current.revision,
+              revision_number: 4,
+              content: "Old content"
+            }
+          };
+          return HttpResponse.json(current);
+        }
+      ),
+      ...handlers
+    ];
+    await renderDashboardRoute({
+      path: `/projects/${expectedProject.id}/documents`,
+      auth: new FakeAuthClient({
+        status: "signedIn",
+        identityKey: "test-user"
+      }),
+      platform: platform(),
+      handlers: documentHandlers
+    });
+    const user = userEvent.setup();
+    await screen.findByLabelText("Markdown content");
+    await user.click(screen.getByRole("button", { name: "History" }));
+    await screen.findByRole("button", { name: /^Revision 2\b/ });
+    const restore = await screen.findByRole("button", {
+      name: "Restore as new revision"
+    });
+    await waitFor(() => expect(restore).toBeEnabled());
+    await user.click(restore);
+    await waitFor(() => expect(patchRequests).toBe(1));
+    expect(
+      screen.queryByRole("dialog", { name: "Document history" })
+    ).not.toBeInTheDocument();
   });
 
   it("debounces autosaves and serializes a queued edit", async () => {

@@ -1041,10 +1041,12 @@ function DocumentEditor({
         <div className="flex shrink-0 items-center gap-1.5">
           <DocumentHistory
             api={api}
+            projectId={projectId}
             documentId={documentId}
             path={current.document.path}
             currentRevision={current.revision}
             hasUnsavedChanges={dirty}
+            readOnly={archived}
           />
           {!archived ? (
             <Button
