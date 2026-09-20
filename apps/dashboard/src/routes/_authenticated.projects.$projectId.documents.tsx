@@ -129,28 +129,136 @@ function markdownPath(value: string) {
   return name.includes(".") ? null : `${path}.md`;
 }
 
+function InlineDocumentName({
+  label,
+  initialValue = "",
+  pending,
+  error,
+  onSubmit,
+  onCancel
+}: {
+  label: string;
+  initialValue?: string;
+  pending: boolean;
+  error?: string;
+  onSubmit: (name: string) => void;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState(initialValue);
+  const [invalid, setInvalid] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const input = inputRef.current;
+    if (!input) return;
+    input.focus();
+    const extension = input.value.toLowerCase().endsWith(".md") ? 3 : 0;
+    input.setSelectionRange(0, input.value.length - extension);
+  }, [error, invalid]);
+  const commit = () => {
+    if (pending) return;
+    if (!value.trim()) return onCancel();
+    const name = markdownPath(value);
+    if (!name || name.includes("/")) return setInvalid(true);
+    onSubmit(name);
+  };
+
+  return (
+    <div className="px-1 py-0.5">
+      <div className="flex items-center gap-1.5">
+        <FileText
+          className="size-4 shrink-0 text-muted-foreground"
+          aria-hidden="true"
+        />
+        <Input
+          ref={inputRef}
+          autoFocus
+          aria-label={label}
+          value={value}
+          onChange={(event) => {
+            setValue(event.target.value);
+            setInvalid(false);
+          }}
+          onBlur={commit}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              commit();
+            }
+            if (event.key === "Escape") {
+              event.preventDefault();
+              onCancel();
+            }
+          }}
+          disabled={pending}
+          className="h-7 min-w-0 px-1.5 text-sm"
+        />
+      </div>
+      {invalid || error ? (
+        <p role="alert" className="mt-1 pl-5 text-xs text-destructive">
+          {error ?? "Use a Markdown filename ending in .md."}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function DocumentTree({
   documents,
   folderPaths,
   selectedId,
   onSelect,
-  onCreateDocument
+  newFileParent,
+  renamingId,
+  pending,
+  error,
+  onCreateDocument,
+  onCreateFile,
+  onStartRename,
+  onRename,
+  onCancelEdit
 }: {
   documents: ProjectDocument[];
   folderPaths: string[];
   selectedId: string | undefined;
   onSelect: (id: string) => void;
+  newFileParent: string | null;
+  renamingId: string | null;
+  pending: boolean;
+  error?: string;
   onCreateDocument?: (folderPath: string) => void;
+  onCreateFile: (folderPath: string, name: string) => void;
+  onStartRename?: (document: ProjectDocument) => void;
+  onRename: (document: ProjectDocument, name: string) => void;
+  onCancelEdit: () => void;
 }) {
   return (
     <ul className="space-y-0.5">
+      {newFileParent === "" ? (
+        <li>
+          <InlineDocumentName
+            label="New document name"
+            pending={pending}
+            error={error}
+            onSubmit={(name) => onCreateFile("", name)}
+            onCancel={onCancelEdit}
+          />
+        </li>
+      ) : null}
       {buildDocumentTree(documents, folderPaths).map((node) => (
         <DocumentTreeItem
           key={node.type === "folder" ? node.path : node.document.id}
           node={node}
           selectedId={selectedId}
           onSelect={onSelect}
+          newFileParent={newFileParent}
+          renamingId={renamingId}
+          pending={pending}
+          error={error}
           onCreateDocument={onCreateDocument}
+          onCreateFile={onCreateFile}
+          onStartRename={onStartRename}
+          onRename={onRename}
+          onCancelEdit={onCancelEdit}
         />
       ))}
     </ul>
@@ -161,14 +269,37 @@ function DocumentTreeItem({
   node,
   selectedId,
   onSelect,
-  onCreateDocument
+  newFileParent,
+  renamingId,
+  pending,
+  error,
+  onCreateDocument,
+  onCreateFile,
+  onStartRename,
+  onRename,
+  onCancelEdit
 }: {
   node: DocumentTreeNode;
   selectedId: string | undefined;
   onSelect: (id: string) => void;
+  newFileParent: string | null;
+  renamingId: string | null;
+  pending: boolean;
+  error?: string;
   onCreateDocument?: (folderPath: string) => void;
+  onCreateFile: (folderPath: string, name: string) => void;
+  onStartRename?: (document: ProjectDocument) => void;
+  onRename: (document: ProjectDocument, name: string) => void;
+  onCancelEdit: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const containsNewFile =
+    node.type === "folder" &&
+    newFileParent !== null &&
+    (newFileParent === node.path || newFileParent.startsWith(`${node.path}/`));
+  useEffect(() => {
+    if (containsNewFile) setOpen(true);
+  }, [containsNewFile]);
 
   if (node.type === "folder") {
     return (
@@ -217,9 +348,28 @@ function DocumentTreeItem({
                 node={child}
                 selectedId={selectedId}
                 onSelect={onSelect}
+                newFileParent={newFileParent}
+                renamingId={renamingId}
+                pending={pending}
+                error={error}
                 onCreateDocument={onCreateDocument}
+                onCreateFile={onCreateFile}
+                onStartRename={onStartRename}
+                onRename={onRename}
+                onCancelEdit={onCancelEdit}
               />
             ))}
+            {newFileParent === node.path ? (
+              <li>
+                <InlineDocumentName
+                  label={`New document name in ${node.path}`}
+                  pending={pending}
+                  error={error}
+                  onSubmit={(name) => onCreateFile(node.path, name)}
+                  onCancel={onCancelEdit}
+                />
+              </li>
+            ) : null}
           </ul>
         ) : null}
       </li>
@@ -227,26 +377,61 @@ function DocumentTreeItem({
   }
 
   const selected = selectedId === node.document.id;
+  if (renamingId === node.document.id) {
+    return (
+      <li>
+        <InlineDocumentName
+          label={`Rename ${node.document.path}`}
+          initialValue={node.name}
+          pending={pending}
+          error={error}
+          onSubmit={(name) => onRename(node.document, name)}
+          onCancel={onCancelEdit}
+        />
+      </li>
+    );
+  }
   return (
     <li>
-      <button
-        type="button"
-        onClick={() => onSelect(node.document.id)}
-        className={cn(
-          "flex h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm transition-colors hover:bg-muted",
-          selected
-            ? "bg-accent text-accent-foreground"
-            : "text-muted-foreground"
-        )}
-        aria-current={selected ? "page" : undefined}
-        title={node.document.path}
-      >
-        <FileText className="size-4 shrink-0" aria-hidden="true" />
-        <span className="min-w-0 flex-1 truncate font-medium">{node.name}</span>
-        <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
-          r{node.document.current_revision}
-        </span>
-      </button>
+      <div className="group flex items-center gap-0.5">
+        <button
+          type="button"
+          onClick={() => onSelect(node.document.id)}
+          onDoubleClick={() => onStartRename?.(node.document)}
+          onKeyDown={(event) => {
+            if (event.key === "F2") onStartRename?.(node.document);
+          }}
+          className={cn(
+            "flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-left text-sm transition-colors hover:bg-muted",
+            selected
+              ? "bg-accent text-accent-foreground"
+              : "text-muted-foreground"
+          )}
+          aria-current={selected ? "page" : undefined}
+          title={node.document.path}
+        >
+          <FileText className="size-4 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 flex-1 truncate font-medium">
+            {node.name}
+          </span>
+          <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+            r{node.document.current_revision}
+          </span>
+        </button>
+        {onStartRename ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            className="text-muted-foreground opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+            onClick={() => onStartRename(node.document)}
+            aria-label={`Rename ${node.document.path}`}
+            title="Rename"
+          >
+            <Pencil aria-hidden="true" />
+          </Button>
+        ) : null}
+      </div>
     </li>
   );
 }
@@ -257,15 +442,16 @@ function DocumentsRoute() {
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
-  const [newPath, setNewPath] = useState("");
-  const [creating, setCreating] = useState<"document" | "folder" | null>(null);
+  const [newFileParent, setNewFileParent] = useState<string | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [newFolderPath, setNewFolderPath] = useState("");
+  const [creatingFolder, setCreatingFolder] = useState(false);
   const documents = useQuery(documentsQueryOptions(api, projectId));
   const create = useMutation({
     mutationFn: (path: string) =>
       api.createDocument(projectId, { path, content: "" }),
     onSuccess: async (result) => {
-      setNewPath("");
-      setCreating(null);
+      setNewFileParent(null);
       setSelectedId(result.document.id);
       await queryClient.invalidateQueries({
         queryKey: coordinationKeys.documents(projectId)
@@ -275,18 +461,48 @@ function DocumentsRoute() {
   const createFolder = useMutation({
     mutationFn: (path: string) => api.createDocumentFolder(projectId, { path }),
     onSuccess: async () => {
-      setNewPath("");
-      setCreating(null);
+      setNewFolderPath("");
+      setCreatingFolder(false);
       await queryClient.invalidateQueries({
         queryKey: coordinationKeys.documents(projectId)
       });
     }
   });
-  const startCreating = (kind: "document" | "folder", folderPath = "") => {
+  const renameDocument = useMutation({
+    mutationFn: (input: {
+      documentId: string;
+      path: string;
+      expectedRevision: number;
+    }) =>
+      api.renameDocument(input.documentId, {
+        path: input.path,
+        expected_revision: input.expectedRevision
+      }),
+    onSuccess: async (_, input) => {
+      setRenamingId(null);
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: coordinationKeys.documents(projectId)
+        }),
+        queryClient.invalidateQueries({
+          queryKey: coordinationKeys.document(input.documentId)
+        })
+      ]);
+    }
+  });
+  const startCreatingDocument = (folderPath: string) => {
     create.reset();
-    createFolder.reset();
-    setNewPath(folderPath ? `${folderPath}/` : "");
-    setCreating(kind);
+    renameDocument.reset();
+    setCreatingFolder(false);
+    setRenamingId(null);
+    setNewFileParent(folderPath);
+  };
+  const startRenaming = (document: ProjectDocument) => {
+    create.reset();
+    renameDocument.reset();
+    setNewFileParent(null);
+    setSelectedId(document.id);
+    setRenamingId(document.id);
   };
 
   if (documents.isPending)
@@ -314,10 +530,9 @@ function DocumentsRoute() {
   const selected =
     visible.find((item) => item.id === selectedId) ?? visible[0] ?? null;
   const projectArchived = project?.project.status === "archived";
-  const nextDocumentPath =
-    creating === "document" ? markdownPath(newPath) : null;
-  const creationError = create.error ?? createFolder.error;
-  const creationPending = create.isPending || createFolder.isPending;
+  const treeError = create.error ?? renameDocument.error;
+  const treeErrorMessage =
+    treeError instanceof Error ? treeError.message : undefined;
   return (
     <div
       className="document-workspace dashboard-page min-h-full"
@@ -338,7 +553,9 @@ function DocumentsRoute() {
               value={showArchived ? "archived" : "active"}
               onValueChange={(value) => {
                 setShowArchived(value === "archived");
-                setCreating(null);
+                setCreatingFolder(false);
+                setNewFileParent(null);
+                setRenamingId(null);
               }}
               className="gap-0"
             >
@@ -351,7 +568,7 @@ function DocumentsRoute() {
                         type="button"
                         variant="ghost"
                         size="icon-sm"
-                        onClick={() => startCreating("document")}
+                        onClick={() => startCreatingDocument("")}
                         aria-label="Create document"
                         title="Create document"
                       >
@@ -361,7 +578,13 @@ function DocumentsRoute() {
                         type="button"
                         variant="ghost"
                         size="icon-sm"
-                        onClick={() => startCreating("folder")}
+                        onClick={() => {
+                          createFolder.reset();
+                          setNewFileParent(null);
+                          setRenamingId(null);
+                          setNewFolderPath("");
+                          setCreatingFolder(true);
+                        }}
                         aria-label="Create folder"
                         title="Create folder"
                       >
@@ -378,44 +601,29 @@ function DocumentsRoute() {
                     Archived ({archived.length})
                   </TabsTrigger>
                 </TabsList>
-                {creating ? (
+                {creatingFolder ? (
                   <form
                     className="space-y-2"
                     onSubmit={(event) => {
                       event.preventDefault();
-                      if (creating === "document" && nextDocumentPath)
-                        create.mutate(nextDocumentPath);
-                      if (creating === "folder" && newPath.trim())
-                        createFolder.mutate(newPath.trim());
+                      if (newFolderPath.trim())
+                        createFolder.mutate(newFolderPath.trim());
                     }}
                   >
                     <Input
                       autoFocus
-                      aria-label={
-                        creating === "document"
-                          ? "New document path"
-                          : "New folder path"
-                      }
-                      value={newPath}
-                      onChange={(event) => setNewPath(event.target.value)}
-                      placeholder={
-                        creating === "document" ? "notes/idea.md" : "notes"
-                      }
-                      disabled={creationPending}
+                      aria-label="New folder path"
+                      value={newFolderPath}
+                      onChange={(event) => setNewFolderPath(event.target.value)}
+                      placeholder="notes"
+                      disabled={createFolder.isPending}
                       className="h-8"
                     />
-                    {creating === "document" &&
-                    newPath.trim() &&
-                    !nextDocumentPath ? (
-                      <p className="text-xs text-destructive">
-                        Documents must use the .md extension.
-                      </p>
-                    ) : null}
-                    {creationError ? (
+                    {createFolder.error ? (
                       <p role="alert" className="text-xs text-destructive">
-                        {creationError instanceof Error
-                          ? creationError.message
-                          : `Unable to create the ${creating}.`}
+                        {createFolder.error instanceof Error
+                          ? createFolder.error.message
+                          : "Unable to create the folder."}
                       </p>
                     ) : null}
                     <div className="flex gap-1.5">
@@ -423,20 +631,17 @@ function DocumentsRoute() {
                         type="submit"
                         size="sm"
                         disabled={
-                          creationPending ||
-                          (creating === "document"
-                            ? !nextDocumentPath
-                            : !newPath.trim())
+                          createFolder.isPending || !newFolderPath.trim()
                         }
                       >
-                        {creationPending ? "Creating…" : "Create"}
+                        {createFolder.isPending ? "Creating…" : "Create"}
                       </Button>
                       <Button
                         type="button"
                         variant="ghost"
                         size="sm"
-                        onClick={() => setCreating(null)}
-                        disabled={creationPending}
+                        onClick={() => setCreatingFolder(false)}
+                        disabled={createFolder.isPending}
                       >
                         Cancel
                       </Button>
@@ -455,11 +660,38 @@ function DocumentsRoute() {
                     }
                     selectedId={selected?.id}
                     onSelect={setSelectedId}
+                    newFileParent={newFileParent}
+                    renamingId={renamingId}
+                    pending={create.isPending || renameDocument.isPending}
+                    error={treeErrorMessage}
                     onCreateDocument={
                       !showArchived && !projectArchived
-                        ? (folderPath) => startCreating("document", folderPath)
+                        ? startCreatingDocument
                         : undefined
                     }
+                    onCreateFile={(folderPath, name) =>
+                      create.mutate(folderPath ? `${folderPath}/${name}` : name)
+                    }
+                    onStartRename={
+                      !showArchived && !projectArchived
+                        ? startRenaming
+                        : undefined
+                    }
+                    onRename={(document, name) => {
+                      const slash = document.path.lastIndexOf("/");
+                      renameDocument.mutate({
+                        documentId: document.id,
+                        path:
+                          slash < 0
+                            ? name
+                            : `${document.path.slice(0, slash + 1)}${name}`,
+                        expectedRevision: document.current_revision
+                      });
+                    }}
+                    onCancelEdit={() => {
+                      setNewFileParent(null);
+                      setRenamingId(null);
+                    }}
                   />
                 </div>
               </TabsContent>

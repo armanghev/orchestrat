@@ -472,6 +472,7 @@ describe("dashboard routes", () => {
     };
     const listed = [root.document, setup, security];
     let createdPath = "";
+    let renamedPath = "";
     const documentHandlers = [
       http.get(
         `http://localhost:8801/api/v1/projects/${expectedProject.id}/documents`,
@@ -506,6 +507,20 @@ describe("dashboard routes", () => {
           );
         }
       ),
+      http.patch(
+        `http://localhost:8801/api/v1/documents/${setup.id}/path`,
+        async ({ request }) => {
+          const body = (await request.json()) as {
+            path: string;
+            expected_revision: number;
+          };
+          renamedPath = body.path;
+          expect(body.expected_revision).toBe(setup.current_revision);
+          return HttpResponse.json({
+            document: { ...setup, path: renamedPath }
+          });
+        }
+      ),
       http.get(
         "http://localhost:8801/api/v1/documents/:documentId",
         ({ params }) => {
@@ -534,7 +549,7 @@ describe("dashboard routes", () => {
     });
 
     const user = userEvent.setup();
-    const guides = await screen.findByRole("button", {
+    await screen.findByRole("button", {
       name: "Expand guides folder"
     });
     expect(
@@ -543,20 +558,42 @@ describe("dashboard routes", () => {
     expect(screen.getByRole("button", { name: "Create folder" })).toBeVisible();
     expect(screen.queryByText("setup.md")).not.toBeInTheDocument();
 
+    await user.click(screen.getByRole("button", { name: "Create document" }));
+    const unnamed = screen.getByRole("textbox", {
+      name: "New document name"
+    });
+    expect(unnamed).toHaveValue("");
+    await user.keyboard("{Escape}");
+    expect(
+      screen.queryByRole("textbox", { name: "New document name" })
+    ).not.toBeInTheDocument();
+
     await user.click(
       screen.getByRole("button", { name: "Create document in guides" })
     );
     const newPath = screen.getByRole("textbox", {
-      name: "New document path"
+      name: "New document name in guides"
     });
-    expect(newPath).toHaveValue("guides/");
-    await user.type(newPath, "quickstart");
-    await user.click(screen.getByRole("button", { name: "Create" }));
+    expect(newPath).toHaveValue("");
+    await user.type(newPath, "quickstart{Enter}");
     await waitFor(() => expect(createdPath).toBe("guides/quickstart.md"));
 
-    await user.click(guides);
-    expect(guides).toHaveAttribute("aria-expanded", "true");
-    expect(guides.closest("li")).toContainElement(screen.getByText("setup.md"));
+    const openGuides = screen.getByRole("button", {
+      name: "Collapse guides folder"
+    });
+    expect(openGuides.closest("li")).toContainElement(
+      screen.getByText("setup.md")
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Rename guides/setup.md" })
+    );
+    const rename = screen.getByRole("textbox", {
+      name: "Rename guides/setup.md"
+    });
+    await user.clear(rename);
+    await user.type(rename, "install{Enter}");
+    await waitFor(() => expect(renamedPath).toBe("guides/install.md"));
+
     const advanced = screen.getByRole("button", {
       name: "Expand guides/advanced folder"
     });
@@ -567,8 +604,8 @@ describe("dashboard routes", () => {
       screen.getByText("security.md")
     );
 
-    await user.click(guides);
-    expect(guides).toHaveAttribute("aria-expanded", "false");
+    await user.click(openGuides);
+    expect(openGuides).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByText("setup.md")).not.toBeInTheDocument();
   });
 
