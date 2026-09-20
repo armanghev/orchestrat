@@ -1,3 +1,5 @@
+import { usePlatform } from "@/platform/provider";
+import { cn } from "@/lib/cn";
 import type { ReactNode } from "react";
 import { ArrowLeft } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
@@ -5,15 +7,25 @@ import { Button } from "@/components/ui/button";
 import { WindowDragRegion } from "@/components/app-shell/top-toolbar";
 import { usePreferences } from "@/platform/preferences-provider";
 
-export function OrganizationSettingsShell({ children }: { children: ReactNode }) {
+export function OrganizationSettingsShell({
+  children
+}: {
+  children: ReactNode;
+}) {
   const navigate = useNavigate();
+  const desktop = usePlatform().kind === "desktop";
   const { preferences } = usePreferences();
   const dashboardProjectId =
     preferences.recentProjectIds[0] ?? preferences.pinnedProjectIds[0];
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
-      <header className="relative flex h-10 shrink-0 items-center border-b pl-22 select-none">
+      <header
+        className={cn(
+          "relative flex h-14 shrink-0 items-center border-b px-4 select-none",
+          desktop && "md:pl-22"
+        )}
+      >
         <WindowDragRegion />
         <Button
           type="button"
