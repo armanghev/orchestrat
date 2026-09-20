@@ -137,7 +137,7 @@ export function WaitlistCtaSection() {
                 >
                   <div className="space-y-2.5">
                     <p className="font-mono text-[11px] tracking-wider text-muted-foreground uppercase">
-                      What do you want to coordinate?
+                      What do you want to orchestrat?
                     </p>
                     <div className="flex flex-wrap gap-2">
                       {options.map((option) => {
