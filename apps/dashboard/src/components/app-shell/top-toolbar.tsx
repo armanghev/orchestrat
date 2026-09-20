@@ -346,6 +346,7 @@ export function TopToolbar({
         <Button
           ref={commandTriggerRef}
           variant="outline"
+          aria-label="Search"
           onClick={onOpenCommands}
         >
           <Search data-icon="inline-start" />

@@ -216,7 +216,7 @@ test("sign-out survives reload", async ({ page }) => {
   await seed(page);
   await mockHierarchy(page, populatedState());
   await page.goto(`/projects/${ids.alpha}/overview`);
-  await page.getByRole("button", { name: "Search ⌘ K", exact: true }).click();
+  await page.getByRole("button", { name: "Search", exact: true }).click();
   await page.getByPlaceholder("Search commands…").fill("Sign out");
   await page.getByText("Sign out", { exact: true }).click();
   await expect(
@@ -234,7 +234,9 @@ test("a 401 forces one token refresh and retries the request", async ({
   await seed(page);
   await mockHierarchy(page, { ...populatedState(), unauthorized: "once" });
   await page.goto(`/projects/${ids.alpha}/overview`);
-  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+  await expect(page.locator('[data-slot="top-toolbar-page"]')).toHaveText(
+    "Overview"
+  );
   await expect
     .poll(() =>
       page.evaluate(() =>
@@ -285,7 +287,9 @@ test("creates organization and project sequentially", async ({ page }) => {
   await page.getByRole("button", { name: "Create organization" }).click();
   await page.getByLabel("Project name").fill("Alpha");
   await page.getByRole("button", { name: "Create project" }).click();
-  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+  await expect(page.locator('[data-slot="top-toolbar-page"]')).toHaveText(
+    "Overview"
+  );
   await expectNoAxe(page);
 });
 
@@ -299,7 +303,7 @@ test("project shell switches projects and persists recency", async ({
     page.getByRole("complementary", { name: "Project navigation" })
   ).toBeVisible();
   await expect(page.getByRole("banner")).toContainText("Alpha");
-  await page.getByRole("button", { name: "Search ⌘ K", exact: true }).click();
+  await page.getByRole("button", { name: "Search", exact: true }).click();
   await page.getByPlaceholder("Search commands…").fill("Beta");
   await page.getByText("Open Beta", { exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/projects/${ids.beta}/overview$`));
@@ -496,7 +500,9 @@ test("preserves successful projects when one hierarchy branch fails", async ({
   await seed(page);
   await mockHierarchy(page, state);
   await page.goto(`/projects/${ids.alpha}/overview`);
-  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+  await expect(page.locator('[data-slot="top-toolbar-page"]')).toHaveText(
+    "Overview"
+  );
   await expect(
     page.getByText("Some projects could not be loaded.")
   ).toBeVisible();
@@ -544,7 +550,9 @@ test("command palette search selects a project and restores focus", async ({
   await seed(page);
   await mockHierarchy(page, populatedState());
   await page.goto(`/projects/${ids.alpha}/overview`);
-  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+  await expect(page.locator('[data-slot="top-toolbar-page"]')).toHaveText(
+    "Overview"
+  );
   await page.waitForTimeout(50);
   await page.keyboard.down("Meta");
   await page.keyboard.press("k");
@@ -553,7 +561,7 @@ test("command palette search selects a project and restores focus", async ({
   await page.getByText("Open Beta", { exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/projects/${ids.beta}/overview$`));
   const trigger = page.getByRole("button", {
-    name: "Search ⌘ K",
+    name: "Search",
     exact: true
   });
   await trigger.focus();
@@ -590,7 +598,7 @@ test("compact shell collapses and restores sidebar without horizontal overflow",
         return rect.y + rect.height / 2;
       })
     );
-  expect(centers).toHaveLength(4);
+  expect(centers).toHaveLength(6);
   expect(Math.max(...centers) - Math.min(...centers)).toBeLessThanOrEqual(1);
 });
 
@@ -610,10 +618,14 @@ test("has no axe violations on setup, overview, Tasks, profile, and themes", asy
   await page.unrouteAll();
   await mockHierarchy(page, populatedState());
   await page.goto(`/projects/${ids.alpha}/overview`);
-  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+  await expect(page.locator('[data-slot="top-toolbar-page"]')).toHaveText(
+    "Overview"
+  );
   await expectNoAxe(page);
   await page.goto(`/projects/${ids.alpha}/tasks`);
-  await expect(page.getByRole("heading", { name: "Tasks" })).toBeVisible();
+  await expect(page.locator('[data-slot="top-toolbar-page"]')).toHaveText(
+    "Tasks"
+  );
   await expectNoAxe(page);
   await page.goto("/profile");
   await expect(
@@ -640,9 +652,9 @@ test("mobile navigation opens, changes pages, and closes without overflow", asyn
   for (const name of ["Tasks", "Agents", "Activity", "Overview"]) {
     await page.getByRole("button", { name: "Open navigation" }).click();
     await page.getByRole("button", { name, exact: true }).click();
-    await expect(
-      page.getByRole("heading", { name, exact: true })
-    ).toBeVisible();
+    await expect(page.locator('[data-slot="top-toolbar-page"]')).toHaveText(
+      name
+    );
     await expect(
       page.getByRole("dialog", { name: "Sidebar" })
     ).not.toBeVisible();
