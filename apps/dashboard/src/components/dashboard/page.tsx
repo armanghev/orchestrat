@@ -88,7 +88,7 @@ export function StatusBadge({ status }: { status: string }) {
   return (
     <Badge variant={variant}>
       <span className="size-1.5 rounded-full bg-current" aria-hidden="true" />
-      {status.replaceAll("_", " ")}
+      {status.charAt(0).toLocaleUpperCase() + status.slice(1).replaceAll("_", " ")}
     </Badge>
   );
 }

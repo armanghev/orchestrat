@@ -340,10 +340,12 @@ export function TopToolbar({
             </BreadcrumbList>
           </Breadcrumb>
         </div>
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          {routeActions}
+        </div>
         <Button
           ref={commandTriggerRef}
           variant="outline"
-          className="ml-auto"
           onClick={onOpenCommands}
         >
           <Search data-icon="inline-start" />
@@ -378,7 +380,6 @@ export function TopToolbar({
             </DropdownMenuRadioGroup>
           </DropdownMenuContent>
         </DropdownMenu>
-        {routeActions}
       </div>
     </header>
   );
