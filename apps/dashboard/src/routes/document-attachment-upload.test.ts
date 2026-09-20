@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { DocumentAttachmentUpload } from "@/lib/api/client";
 import {
   attachmentProgress,
+  documentImageAttachmentId,
   uploadMultipart
 } from "@/routes/_authenticated.projects.$projectId.documents";
 
@@ -10,7 +11,18 @@ const documentId = "00000000-0000-4000-8000-000000000005";
 const uploadId = "00000000-0000-4000-8000-000000000006";
 const expiresAt = "2026-08-25T00:00:00.000Z";
 
-describe("document attachment uploads", () => {
+describe("document image uploads", () => {
+  it("recognizes durable document image sources", () => {
+    expect(
+      documentImageAttachmentId(
+        "orchestrat-attachment:00000000-0000-4000-8000-000000000007"
+      )
+    ).toBe("00000000-0000-4000-8000-000000000007");
+    expect(
+      documentImageAttachmentId("https://example.com/image.png")
+    ).toBeNull();
+  });
+
   it("keeps zero-byte upload progress finite", () => {
     expect(attachmentProgress(0, 0)).toBe(0);
     expect(Number.isFinite(attachmentProgress(0, 0))).toBe(true);

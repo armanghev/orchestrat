@@ -7,8 +7,6 @@ import {
   EmptyTitle,
   EmptyDescription
 } from "@/components/ui/empty";
-import { Progress } from "@/components/ui/progress";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/cn";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -21,7 +19,6 @@ import {
   FileText,
   Folder,
   MoreHorizontal,
-  Paperclip,
   Pencil,
   Plus,
   RotateCcw
@@ -39,20 +36,26 @@ import { MarkdownEditor } from "@/features/documents/markdown-editor";
 import { DocumentHistory } from "@/features/documents/document-history";
 import {
   coordinationKeys,
-  documentAttachmentsQueryOptions,
   documentQueryOptions,
   documentsQueryOptions
 } from "@/features/coordination/query-options";
 import {
   DashboardApiError,
-  type DocumentAttachment,
   type DocumentAttachmentUpload
 } from "@/lib/api/client";
 
 const AUTOSAVE_DELAY_MS = 1_500;
 const PART_SIZE_BYTES = 16 * 1024 * 1024;
 const PART_SIGN_BATCH_SIZE = 100;
-const MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024 * 1024;
+const MAX_IMAGE_BYTES = 2 * 1024 * 1024 * 1024;
+const DOCUMENT_IMAGE_PREFIX = "orchestrat-attachment:";
+const SUPPORTED_IMAGE_TYPES = new Set([
+  "image/avif",
+  "image/gif",
+  "image/jpeg",
+  "image/png",
+  "image/webp"
+]);
 
 export const Route = createFileRoute(
   "/_authenticated/projects/$projectId/documents"
@@ -392,9 +395,6 @@ function DocumentEditor({
   queryClient: ReturnType<typeof useQueryClient>;
 }) {
   const document = useQuery(documentQueryOptions(api, documentId));
-  const attachments = useQuery(
-    documentAttachmentsQueryOptions(api, documentId)
-  );
   const [draft, setDraft] = useState("");
   const [baseContent, setBaseContent] = useState("");
   const [baseRevision, setBaseRevision] = useState<number | null>(null);
@@ -431,9 +431,6 @@ function DocumentEditor({
       }),
       queryClient.invalidateQueries({
         queryKey: coordinationKeys.revisions(documentId)
-      }),
-      queryClient.invalidateQueries({
-        queryKey: coordinationKeys.attachments(documentId)
       })
     ]);
   }, [documentId, projectId, queryClient]);
@@ -606,6 +603,19 @@ function DocumentEditor({
     save.isPending,
     saveNow
   ]);
+  const uploadImage = useCallback(
+    (file: File) => uploadDocumentImage(api, documentId, file),
+    [api, documentId]
+  );
+  const previewImage = useCallback(
+    async (source: string) => {
+      const attachmentId = documentImageAttachmentId(source);
+      if (!attachmentId) return source;
+      return (await api.downloadDocumentAttachment(documentId, attachmentId))
+        .download_url;
+    },
+    [api, documentId]
+  );
   if (document.isPending)
     return (
       <p
@@ -870,6 +880,8 @@ function DocumentEditor({
                   "Markdown could not be rendered. Your source is preserved; fix it in Source mode."
                 );
               }}
+              imageUploadHandler={uploadImage}
+              imagePreviewHandler={previewImage}
             />
           )}
         </div>
@@ -893,343 +905,68 @@ function DocumentEditor({
           </Button>
         </div>
       ) : null}
-      <AttachmentSection
-        api={api}
-        documentId={documentId}
-        archived={archived}
-        attachments={attachments.data?.attachments ?? []}
-        onChanged={invalidateDocument}
-      />
-    </section>
-  );
-}
-
-type AttachmentUploadState = {
-  file: File;
-  session?: DocumentAttachmentUpload;
-  mode?: "single" | "multipart";
-  progress: number;
-  message: string;
-  uploadId?: string;
-  paused?: boolean;
-  failed?: boolean;
-  complete?: boolean;
-};
-
-function AttachmentSection({
-  api,
-  documentId,
-  archived,
-  attachments,
-  onChanged
-}: {
-  api: Parameters<typeof documentsQueryOptions>[0];
-  documentId: string;
-  archived: boolean;
-  attachments: DocumentAttachment[];
-  onChanged: () => Promise<void>;
-}) {
-  const [uploading, setUploading] = useState<AttachmentUploadState | null>(
-    null
-  );
-  const inputRef = useRef<HTMLInputElement>(null);
-  const controllerRef = useRef<AbortController | null>(null);
-  const pausedRef = useRef(false);
-  const resumeWaitersRef = useRef(new Set<() => void>());
-  const waitForResume = () => {
-    if (!pausedRef.current) return Promise.resolve();
-    return new Promise<void>((resolve) =>
-      resumeWaitersRef.current.add(resolve)
-    );
-  };
-  const setPaused = (paused: boolean) => {
-    pausedRef.current = paused;
-    setUploading((current) =>
-      current
-        ? {
-            ...current,
-            paused,
-            message: paused ? "Paused" : "Uploading…"
-          }
-        : current
-    );
-    if (!paused) {
-      for (const resolve of resumeWaitersRef.current) resolve();
-      resumeWaitersRef.current.clear();
-    }
-  };
-  const upload = async (
-    file: File,
-    previousSession?: DocumentAttachmentUpload
-  ) => {
-    if (file.size > MAX_ATTACHMENT_BYTES) {
-      setUploading({
-        file,
-        progress: 0,
-        message: "Attachments are limited to 2 GiB.",
-        failed: true
-      });
-      return;
-    }
-    const controller = new AbortController();
-    controllerRef.current = controller;
-    pausedRef.current = false;
-    let session = previousSession;
-    setUploading({
-      file,
-      session,
-      mode: session?.mode,
-      progress: 0,
-      message: session ? "Resuming upload…" : "Starting upload…",
-      uploadId: session?.id
-    });
-    try {
-      if (session) {
-        session = (
-          await api.getDocumentAttachmentUpload(documentId, session.id)
-        ).upload;
-        if (session.mode === "single" && !session.upload_url)
-          session = (
-            await api.refreshDocumentAttachmentUpload(documentId, session.id)
-          ).upload;
-      } else {
-        session = (
-          await api.startDocumentAttachmentUpload(documentId, {
-            filename: file.name,
-            content_type: file.type || "application/octet-stream",
-            size_bytes: file.size
-          })
-        ).upload;
-      }
-      setUploading({
-        file,
-        session,
-        mode: session.mode,
-        progress: 0,
-        message: "Uploading…",
-        uploadId: session.id
-      });
-      if (session.mode === "single") {
-        if (!session.upload_url)
-          throw new Error("Upload session is missing its upload URL.");
-        await api.putPresignedObject(
-          session.upload_url,
-          file,
-          (loaded) =>
-            setUploading((current) =>
-              current
-                ? {
-                    ...current,
-                    progress: attachmentProgress(loaded, file.size),
-                    message: "Uploading…"
-                  }
-                : current
-            ),
-          controller.signal
-        );
-        await api.completeDocumentAttachmentUpload(documentId, session.id);
-      } else if (session.mode === "multipart")
-        await uploadMultipart(
-          api,
-          documentId,
-          session,
-          file,
-          (progress) =>
-            setUploading((current) =>
-              current
-                ? {
-                    ...current,
-                    progress,
-                    message: pausedRef.current ? "Paused" : "Uploading…"
-                  }
-                : current
-            ),
-          controller.signal,
-          waitForResume
-        );
-      else throw new Error("Upload mode does not match the attachment size.");
-      setUploading({
-        file,
-        session,
-        mode: session.mode,
-        progress: 1,
-        message: "Complete",
-        uploadId: session.id,
-        complete: true
-      });
-      await onChanged();
-      setUploading(null);
-    } catch (error) {
-      if (controller.signal.aborted) {
-        setUploading(null);
-        return;
-      }
-      setUploading((current) =>
-        current
-          ? {
-              ...current,
-              session: current.session ?? session,
-              mode: current.mode ?? session?.mode,
-              uploadId: current.uploadId ?? session?.id,
-              message:
-                error instanceof Error ? error.message : "Upload failed.",
-              failed: true,
-              paused: false
-            }
-          : {
-              file,
-              session,
-              mode: session?.mode,
-              progress: 0,
-              uploadId: session?.id,
-              message:
-                error instanceof Error ? error.message : "Upload failed.",
-              failed: true
-            }
-      );
-    }
-  };
-  const canChooseAttachment =
-    !uploading ||
-    uploading.complete ||
-    (uploading.failed && !uploading.uploadId);
-  return (
-    <section
-      className="shrink-0 border-t px-5 py-4"
-      aria-labelledby="attachments-heading"
-    >
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h3
-            id="attachments-heading"
-            className="flex items-center gap-2 text-sm font-medium"
-          >
-            <Paperclip
-              className="size-4 text-muted-foreground"
-              aria-hidden="true"
-            />
-            Attachments
-            {attachments.length > 0 ? (
-              <Badge variant="secondary">{attachments.length}</Badge>
-            ) : null}
-          </h3>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {attachments.length > 0
-              ? "Private files shared with this document."
-              : "Add supporting files for your project."}
-          </p>
-        </div>
-        <input
-          ref={inputRef}
-          type="file"
-          className="sr-only"
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            if (file) void upload(file);
-            event.currentTarget.value = "";
-          }}
-          disabled={archived || !canChooseAttachment}
-        />
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={archived || !canChooseAttachment}
-          onClick={() => inputRef.current?.click()}
-        >
-          Add attachment
-        </Button>
-      </div>
-      {uploading ? (
-        <div
-          className="mt-3 rounded border p-3"
-          role="status"
-          aria-label="Attachment upload progress"
-        >
-          <div className="flex justify-between gap-3 text-sm">
-            <span className="truncate">{uploading.file.name}</span>
-            <span>{Math.round(uploading.progress * 100)}%</span>
-          </div>
-          <Progress
-            className="mt-2"
-            value={uploading.progress * 100}
-            aria-label="File upload"
-          />
-          <p className="mt-2 text-xs text-muted-foreground">
-            {uploading.message}
-          </p>
-          <div className="mt-1 flex flex-wrap gap-2">
-            {uploading.mode === "multipart" &&
-            !uploading.failed &&
-            !uploading.complete ? (
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => setPaused(!uploading.paused)}
-              >
-                {uploading.paused ? "Resume" : "Pause"}
-              </Button>
-            ) : null}
-            {uploading.failed ? (
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => void upload(uploading.file, uploading.session)}
-              >
-                Retry
-              </Button>
-            ) : null}
-            {uploading.failed && !uploading.uploadId ? (
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => setUploading(null)}
-              >
-                Dismiss
-              </Button>
-            ) : null}
-            {uploading.uploadId && !uploading.complete ? (
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() =>
-                  void (async () => {
-                    controllerRef.current?.abort();
-                    setPaused(false);
-                    try {
-                      await api.abortDocumentAttachmentUpload(
-                        documentId,
-                        uploading.uploadId!
-                      );
-                    } finally {
-                      setUploading(null);
-                    }
-                  })()
-                }
-              >
-                Abort
-              </Button>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
-      <ul className="mt-3 space-y-2">
-        {attachments.map((attachment) => (
-          <AttachmentRow
-            key={attachment.id}
-            api={api}
-            documentId={documentId}
-            attachment={attachment}
-            archived={archived}
-            onChanged={onChanged}
-          />
-        ))}
-      </ul>
     </section>
   );
 }
 
 export function attachmentProgress(loaded: number, total: number) {
   return total > 0 ? Math.max(0, Math.min(1, loaded / total)) : 0;
+}
+
+export function documentImageAttachmentId(source: string) {
+  if (!source.startsWith(DOCUMENT_IMAGE_PREFIX)) return null;
+  return source.slice(DOCUMENT_IMAGE_PREFIX.length) || null;
+}
+
+export async function uploadDocumentImage(
+  api: Parameters<typeof documentsQueryOptions>[0],
+  documentId: string,
+  file: File
+) {
+  if (!SUPPORTED_IMAGE_TYPES.has(file.type))
+    throw new Error("Choose a PNG, JPEG, GIF, WebP, or AVIF image.");
+  if (file.size > MAX_IMAGE_BYTES)
+    throw new Error("Images are limited to 2 GiB.");
+
+  const session = (
+    await api.startDocumentAttachmentUpload(documentId, {
+      filename: file.name,
+      content_type: file.type,
+      size_bytes: file.size
+    })
+  ).upload;
+  const controller = new AbortController();
+
+  try {
+    const result =
+      session.mode === "single"
+        ? await (async () => {
+            if (!session.upload_url)
+              throw new Error("Upload session is missing its upload URL.");
+            await api.putPresignedObject(
+              session.upload_url,
+              file,
+              undefined,
+              controller.signal
+            );
+            return api.completeDocumentAttachmentUpload(documentId, session.id);
+          })()
+        : await uploadMultipart(
+            api,
+            documentId,
+            session,
+            file,
+            () => undefined,
+            controller.signal,
+            async () => undefined
+          );
+    return `${DOCUMENT_IMAGE_PREFIX}${result.attachment.id}`;
+  } catch (error) {
+    await api
+      .abortDocumentAttachmentUpload(documentId, session.id)
+      .catch(() => undefined);
+    throw error;
+  }
 }
 
 export async function uploadMultipart(
@@ -1345,82 +1082,7 @@ export async function uploadMultipart(
     signal.removeEventListener("abort", abortBatch);
     if (failure) throw failure;
   }
-  await api.completeDocumentAttachmentUpload(documentId, session.id);
-}
-
-function AttachmentRow({
-  api,
-  documentId,
-  attachment,
-  archived,
-  onChanged
-}: {
-  api: Parameters<typeof documentsQueryOptions>[0];
-  documentId: string;
-  attachment: DocumentAttachment;
-  archived: boolean;
-  onChanged: () => Promise<void>;
-}) {
-  const [busy, setBusy] = useState(false);
-  return (
-    <li className="flex flex-wrap items-center justify-between gap-2 rounded border px-3 py-2 text-sm">
-      <span className="min-w-0 truncate">
-        <span className="font-medium">{attachment.filename}</span>
-        <span className="ml-2 font-mono text-xs text-muted-foreground">
-          {formatBytes(attachment.size_bytes)}
-        </span>
-      </span>
-      <span className="flex gap-2">
-        <Button
-          size="sm"
-          variant="ghost"
-          disabled={busy}
-          onClick={() =>
-            void (async () => {
-              setBusy(true);
-              try {
-                const { download_url } = await api.downloadDocumentAttachment(
-                  documentId,
-                  attachment.id
-                );
-                window.location.assign(download_url);
-              } finally {
-                setBusy(false);
-              }
-            })()
-          }
-        >
-          Download
-        </Button>
-        {!archived ? (
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={busy}
-            onClick={() =>
-              void (async () => {
-                setBusy(true);
-                try {
-                  await api.removeDocumentAttachment(documentId, attachment.id);
-                  await onChanged();
-                } finally {
-                  setBusy(false);
-                }
-              })()
-            }
-          >
-            Remove
-          </Button>
-        ) : null}
-      </span>
-    </li>
-  );
-}
-
-function formatBytes(bytes: number) {
-  return bytes < 1024 * 1024
-    ? `${Math.ceil(bytes / 1024)} KiB`
-    : `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+  return api.completeDocumentAttachmentUpload(documentId, session.id);
 }
 function DocumentMessage({
   title,

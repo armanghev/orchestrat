@@ -17,8 +17,12 @@ vi.mock("@/features/documents/markdown-editor", () => ({
       markdown: string;
       readOnly: boolean;
       onChange: (markdown: string, initialMarkdownNormalize?: boolean) => void;
+      imageUploadHandler: (file: File) => Promise<string | null>;
     }
-  >(function TestMarkdownEditor({ markdown, readOnly, onChange }, ref) {
+  >(function TestMarkdownEditor(
+    { markdown, readOnly, onChange, imageUploadHandler },
+    ref
+  ) {
     const [value, setValue] = useState(markdown);
     useImperativeHandle(
       ref,
@@ -31,15 +35,32 @@ vi.mock("@/features/documents/markdown-editor", () => ({
       [onChange]
     );
     return (
-      <textarea
-        aria-label="Markdown content"
-        value={value}
-        disabled={readOnly}
-        onChange={(event) => {
-          setValue(event.target.value);
-          onChange(event.target.value);
-        }}
-      />
+      <>
+        <textarea
+          aria-label="Markdown content"
+          value={value}
+          disabled={readOnly}
+          onChange={(event) => {
+            setValue(event.target.value);
+            onChange(event.target.value);
+          }}
+        />
+        <input
+          type="file"
+          aria-label="Insert image"
+          disabled={readOnly}
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (!file) return;
+            void imageUploadHandler(file).then((source) => {
+              if (!source) return;
+              const next = `![${file.name}](${source})`;
+              setValue(next);
+              onChange(next);
+            });
+          }}
+        />
+      </>
     );
   })
 }));
@@ -1251,7 +1272,7 @@ describe("dashboard routes", () => {
     expect(screen.getAllByDisplayValue("Human draft")).toHaveLength(2);
   });
 
-  it("removes completed attachment progress after refreshing the attachment row", async () => {
+  it("uploads editor images without rendering a separate attachment section", async () => {
     const expectedProject = project();
     const initial = documentDetail({
       document: { ...documentDetail().document, project_id: expectedProject.id }
@@ -1260,17 +1281,14 @@ describe("dashboard routes", () => {
     const attachment = {
       id: "00000000-0000-4000-8000-000000000022",
       document_id: initial.document.id,
-      filename: "receipt.txt",
-      content_type: "text/plain",
+      filename: "diagram.png",
+      content_type: "image/png",
       size_bytes: 7,
       created_at: "2026-08-24T00:00:00.000Z"
     };
-    let attachments: (typeof attachment)[] = [];
     const putPresignedObject = vi
       .spyOn(ApiClient.prototype, "putPresignedObject")
-      .mockImplementation(async (_url, body, onProgress) => {
-        onProgress?.(body.size);
-      });
+      .mockResolvedValue();
     const documentHandlers = [
       http.get(
         `http://localhost:8801/api/v1/projects/${expectedProject.id}/documents`,
@@ -1292,10 +1310,6 @@ describe("dashboard routes", () => {
             next_cursor: null
           })
       ),
-      http.get(
-        `http://localhost:8801/api/v1/documents/${initial.document.id}/attachments`,
-        () => HttpResponse.json({ attachments })
-      ),
       http.post(
         `http://localhost:8801/api/v1/documents/${initial.document.id}/attachments/uploads`,
         () =>
@@ -1310,10 +1324,7 @@ describe("dashboard routes", () => {
       ),
       http.post(
         `http://localhost:8801/api/v1/documents/${initial.document.id}/attachments/uploads/${uploadId}/complete`,
-        () => {
-          attachments = [attachment];
-          return HttpResponse.json({ attachment });
-        }
+        () => HttpResponse.json({ attachment })
       ),
       ...handlers
     ];
@@ -1328,21 +1339,16 @@ describe("dashboard routes", () => {
         handlers: documentHandlers
       });
       await screen.findByLabelText("Markdown content");
-      const input =
-        document.querySelector<HTMLInputElement>("input[type=file]");
-      expect(input).not.toBeNull();
-      fireEvent.change(input!, {
+      fireEvent.change(screen.getByLabelText("Insert image"), {
         target: {
-          files: [new File(["receipt"], "receipt.txt", { type: "text/plain" })]
+          files: [new File(["diagram"], "diagram.png", { type: "image/png" })]
         }
       });
       await waitFor(() => expect(putPresignedObject).toHaveBeenCalledOnce());
-      await waitFor(() =>
-        expect(
-          screen.queryByLabelText("Attachment upload progress")
-        ).not.toBeInTheDocument()
+      expect(await screen.findByLabelText("Markdown content")).toHaveValue(
+        `![diagram.png](orchestrat-attachment:${attachment.id})`
       );
-      expect(screen.getByText("receipt.txt")).toBeVisible();
+      expect(screen.queryByText("Attachments")).not.toBeInTheDocument();
     } finally {
       putPresignedObject.mockRestore();
     }
@@ -1392,9 +1398,7 @@ describe("dashboard routes", () => {
     const user = userEvent.setup();
     await user.click(await screen.findByRole("tab", { name: "Archived (1)" }));
     expect(await screen.findByLabelText("Markdown content")).toBeDisabled();
-    expect(
-      screen.getByRole("button", { name: "Add attachment" })
-    ).toBeDisabled();
+    expect(screen.getByLabelText("Insert image")).toBeDisabled();
     await user.click(screen.getByRole("button", { name: "Document actions" }));
     expect(screen.getByRole("menuitem", { name: "Restore" })).toBeVisible();
     expect(
