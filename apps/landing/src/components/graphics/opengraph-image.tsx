@@ -3,11 +3,7 @@ import { join } from "node:path";
 import { ImageResponse } from "next/og";
 import sharp from "sharp";
 
-export const alt =
-  "Orchestrat — Keep your agents on the same page. Tasks, context, and agent activity in one shared workspace. Join the waitlist at orchestrat.dev.";
-export const size = { width: 2400, height: 1260 };
-export const contentType = "image/png";
-export const dynamic = "force-static";
+const size = { width: 2400, height: 1260 };
 
 export default async function OpenGraphImage() {
   // Resample before embedding so the OG renderer does not lose fine UI detail.

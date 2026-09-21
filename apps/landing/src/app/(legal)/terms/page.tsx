@@ -1,23 +1,25 @@
-import type { Metadata } from "next";
 import Link from "next/link";
+import { founder, pageMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = {
-  title: "Terms of Service | Orchestrat",
-  description:
-    "Terms for using the Orchestrat website, waitlist, and agent coordination service.",
-  alternates: { canonical: "https://orchestrat.dev/terms" }
-};
+export const metadata = pageMetadata(
+  "Terms of Service",
+  "Terms for using the Orchestrat website, waitlist, and agent coordination service.",
+  "/terms"
+);
 
 export default function TermsPage() {
   return (
     <>
       <h1>Terms of Service</h1>
+      <p className="text-xs">
+        Last updated <time dateTime="2026-09-20">September 20, 2026</time>
+      </p>
       <p>
         These terms govern your use of orchestrat.dev, its waitlist, and the
         Orchestrat applications, CLI, and hosted services (the “Service”). The
-        Service is operated by Arman Ghevondyan (“Orchestrat,” “we,” “us”). By
-        using the Service, you agree to these terms. If you do not agree, do not
-        use the Service.
+        Service is operated by <a href={founder.url}>{founder.name}</a>{" "}
+        (“Orchestrat,” “we,” “us”). By using the Service, you agree to these
+        terms. If you do not agree, do not use the Service.
       </p>
 
       <section>
@@ -147,8 +149,8 @@ export default function TermsPage() {
       <section>
         <h2>9. Contact</h2>
         <p>
-          Questions about these terms or the Service can be sent to Arman
-          Ghevondyan at{" "}
+          Questions about these terms or the Service can be sent to{" "}
+          <a href={founder.url}>{founder.name}</a> at{" "}
           <a href="mailto:arman@orchestrat.dev">arman@orchestrat.dev</a>.
         </p>
       </section>

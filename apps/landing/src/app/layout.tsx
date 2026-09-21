@@ -3,19 +3,11 @@ import "./globals.css";
 import { Footer } from "@/components/layout/footer";
 import { Navbar } from "@/components/layout/navbar";
 import { Analytics } from "@vercel/analytics/next";
-
-const siteTitle = "Orchestrat | Keep your agents on the same page.";
-const siteDescription =
-  "Coordinate tasks, shared documents, and live agent activity in one workspace. A clear view of the work, with you in control.";
-const siteUrl = "https://orchestrat.dev";
+import { siteUrl } from "@/lib/seo";
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
-  title: siteTitle,
-  description: siteDescription,
-  alternates: {
-    canonical: siteUrl
-  },
+  title: "Orchestrat",
   icons: {
     icon: [
       { url: "/favicon.svg", type: "image/svg+xml", sizes: "any" },
@@ -31,19 +23,6 @@ export const metadata: Metadata = {
   appleWebApp: {
     title: "Orchestrat",
     capable: false
-  },
-  openGraph: {
-    title: siteTitle,
-    description: siteDescription,
-    url: siteUrl,
-    siteName: "Orchestrat",
-    type: "website",
-    locale: "en_US"
-  },
-  twitter: {
-    card: "summary_large_image",
-    title: siteTitle,
-    description: siteDescription
   }
 };
 

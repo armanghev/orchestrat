@@ -1,23 +1,25 @@
-import type { Metadata } from "next";
 import Link from "next/link";
+import { founder, pageMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = {
-  title: "Privacy Policy | Orchestrat",
-  description:
-    "How Orchestrat handles waitlist, account, project, and analytics data, and how to contact us about your privacy.",
-  alternates: { canonical: "https://orchestrat.dev/privacy" }
-};
+export const metadata = pageMetadata(
+  "Privacy Policy",
+  "How Orchestrat handles waitlist, account, project, and analytics data, and how to contact us about your privacy.",
+  "/privacy"
+);
 
 export default function PrivacyPage() {
   return (
     <>
       <h1>Privacy Policy</h1>
+      <p className="text-xs">
+        Last updated <time dateTime="2026-09-20">September 20, 2026</time>
+      </p>
       <p>
-        Arman Ghevondyan operates Orchestrat (“we,” “us”) and is responsible for
-        the personal information described here. This policy covers
-        orchestrat.dev, our waitlist, and the Orchestrat applications, CLI, and
-        hosted services. It explains what we collect, why we use it, and the
-        choices available to you.
+        <a href={founder.url}>{founder.name}</a> operates Orchestrat (“we,”
+        “us”) and is responsible for the personal information described here.
+        This policy covers orchestrat.dev, our waitlist, and the Orchestrat
+        applications, CLI, and hosted services. It explains what we collect, why
+        we use it, and the choices available to you.
       </p>
 
       <section>
@@ -193,7 +195,8 @@ export default function PrivacyPage() {
       <section>
         <h2>9. Contact</h2>
         <p>
-          For privacy questions or requests, contact Arman Ghevondyan at{" "}
+          For privacy questions or requests, contact{" "}
+          <a href={founder.url}>{founder.name}</a> at{" "}
           <a href="mailto:arman@orchestrat.dev">arman@orchestrat.dev</a>. Please
           do not include passwords, access tokens, or other secrets in your
           message.
