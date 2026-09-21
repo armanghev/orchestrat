@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { ImageResponse } from "next/og";
 import sharp from "sharp";
 
-const size = { width: 2400, height: 1260 };
+const size = { width: 1200, height: 630 };
 
 export default async function OpenGraphImage() {
   // Resample before embedding so the OG renderer does not lose fine UI detail.
@@ -20,8 +20,6 @@ export default async function OpenGraphImage() {
       style={{
         width: 1200,
         height: 630,
-        transform: "scale(2)",
-        transformOrigin: "top left",
         display: "flex",
         flexDirection: "column",
         padding: "52px 60px",

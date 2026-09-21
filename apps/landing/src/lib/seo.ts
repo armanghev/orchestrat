@@ -15,8 +15,8 @@ export function pageMetadata(
   const images = [
     {
       url: `${siteUrl}/opengraph-image`,
-      width: 2400,
-      height: 1260,
+      width: 1200,
+      height: 630,
       alt: "Orchestrat workspace for AI coding agents"
     }
   ];
