@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
+import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -66,11 +67,15 @@ import {
   tasksQueryOptions
 } from "@/features/coordination/query-options";
 import { DashboardApiError } from "@/lib/api/client";
+import { MarkdownContent } from "@/features/coordination/markdown-content";
 import type { HumanTaskStatus, Task, TaskPriority } from "@orchestrat/protocol";
 
 export const Route = createFileRoute(
   "/_authenticated/projects/$projectId/tasks"
-)({ component: TasksRoute });
+)({
+  validateSearch: z.object({ task: z.string().uuid().optional() }),
+  component: TasksRoute
+});
 const statuses: HumanTaskStatus[] = [
   "backlog",
   "ready",
@@ -89,9 +94,10 @@ const priorities: TaskPriority[] = ["urgent", "high", "medium", "low", "none"];
 
 function TasksRoute() {
   const { projectId } = Route.useParams();
+  const { task: selectedTaskId } = Route.useSearch();
+  const navigate = Route.useNavigate();
   const { api, project } = Route.useRouteContext();
   const queryClient = useQueryClient();
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -100,15 +106,15 @@ function TasksRoute() {
   const taskId = selectedTaskId ?? "00000000-0000-4000-8000-000000000000";
   const selected = useQuery({
     ...taskQueryOptions(api, taskId),
-    enabled: selectedTaskId !== null
+    enabled: Boolean(selectedTaskId)
   });
   const comments = useQuery({
     ...taskCommentsQueryOptions(api, taskId),
-    enabled: selectedTaskId !== null
+    enabled: Boolean(selectedTaskId)
   });
   const dependencies = useQuery({
     ...taskDependenciesQueryOptions(api, taskId),
-    enabled: selectedTaskId !== null
+    enabled: Boolean(selectedTaskId)
   });
   const refresh = () =>
     queryClient.invalidateQueries({
@@ -131,7 +137,7 @@ function TasksRoute() {
     }) => api.createTask(projectId, input, crypto.randomUUID()),
     onSuccess: async (task) => {
       setCreating(false);
-      setSelectedTaskId(task.id);
+      void navigate({ search: { task: task.id } });
       await refresh();
     }
   });
@@ -205,6 +211,77 @@ function TasksRoute() {
     },
     onError: (error) => setNotice(message(error))
   });
+  const addDependency = useMutation({
+    mutationFn: ({
+      id,
+      dependsOnTaskId,
+      version
+    }: {
+      id: string;
+      dependsOnTaskId: string;
+      version: number;
+    }) =>
+      api.addTaskDependency(id, {
+        depends_on_task_id: dependsOnTaskId,
+        expected_version: version
+      }),
+    onSuccess: async (task) => {
+      setNotice(null);
+      await Promise.all([
+        refresh(),
+        queryClient.invalidateQueries({
+          queryKey: coordinationKeys.task(task.id)
+        }),
+        queryClient.invalidateQueries({
+          queryKey: coordinationKeys.dependencies(task.id)
+        })
+      ]);
+    },
+    onError: async (error) => {
+      if (
+        error instanceof DashboardApiError &&
+        error.kind === "TASK_VERSION_CONFLICT"
+      )
+        await conflict();
+      else if (
+        error instanceof DashboardApiError &&
+        error.kind === "TASK_DEPENDENCY_CYCLE"
+      )
+        setNotice("That dependency would create a cycle.");
+      else setNotice(message(error));
+    }
+  });
+  const removeDependency = useMutation({
+    mutationFn: ({
+      id,
+      dependsOnTaskId,
+      version
+    }: {
+      id: string;
+      dependsOnTaskId: string;
+      version: number;
+    }) => api.removeTaskDependency(id, dependsOnTaskId, version),
+    onSuccess: async (task) => {
+      setNotice(null);
+      await Promise.all([
+        refresh(),
+        queryClient.invalidateQueries({
+          queryKey: coordinationKeys.task(task.id)
+        }),
+        queryClient.invalidateQueries({
+          queryKey: coordinationKeys.dependencies(task.id)
+        })
+      ]);
+    },
+    onError: async (error) => {
+      if (
+        error instanceof DashboardApiError &&
+        error.kind === "TASK_VERSION_CONFLICT"
+      )
+        await conflict();
+      else setNotice(message(error));
+    }
+  });
   if (tasks.isPending)
     return <TaskMessage title="Tasks" message="Loading tasks…" />;
   if (tasks.isError)
@@ -230,8 +307,8 @@ function TasksRoute() {
     }));
   const archived = project?.project.status === "archived";
   const selectTask = (id: string) => {
-    setSelectedTaskId(id);
     setNotice(null);
+    void navigate({ search: { task: id } });
   };
   const emptyState = (
     <Empty className="min-h-72 border">
@@ -470,9 +547,9 @@ function TasksRoute() {
         </DialogContent>
       </Dialog>
       <Sheet
-        open={selectedTaskId !== null}
+        open={Boolean(selectedTaskId)}
         onOpenChange={(open) => {
-          if (!open) setSelectedTaskId(null);
+          if (!open) void navigate({ search: {} });
         }}
       >
         <SheetContent className="overflow-y-auto data-[side=right]:w-full data-[side=right]:sm:max-w-2xl">
@@ -501,16 +578,20 @@ function TasksRoute() {
           ) : null}
           {selected.data ? (
             <TaskDetail
-              key={`${selected.data.id}:${selected.data.version}`}
+              key={selected.data.id}
               task={selected.data}
               comments={comments.data?.comments ?? []}
               dependencies={dependencies.data}
+              taskOptions={tasks.data.tasks}
               archived={archived}
               saving={update.isPending}
               moving={move.isPending}
               commenting={addComment.isPending}
+              changingDependencies={
+                addDependency.isPending || removeDependency.isPending
+              }
               onUpdate={(input) =>
-                update.mutate({ id: selected.data!.id, input })
+                update.mutateAsync({ id: selected.data!.id, input })
               }
               onMove={(status) =>
                 move.mutate({
@@ -520,7 +601,21 @@ function TasksRoute() {
                 })
               }
               onComment={(body) =>
-                addComment.mutate({ id: selected.data!.id, body })
+                addComment.mutateAsync({ id: selected.data!.id, body })
+              }
+              onAddDependency={(dependsOnTaskId) =>
+                addDependency.mutateAsync({
+                  id: selected.data!.id,
+                  dependsOnTaskId,
+                  version: selected.data!.version
+                })
+              }
+              onRemoveDependency={(dependsOnTaskId) =>
+                removeDependency.mutateAsync({
+                  id: selected.data!.id,
+                  dependsOnTaskId,
+                  version: selected.data!.version
+                })
               }
             />
           ) : null}
@@ -646,13 +741,17 @@ function TaskDetail({
   task,
   comments,
   dependencies,
+  taskOptions,
   archived,
   saving,
   moving,
   commenting,
+  changingDependencies,
   onUpdate,
   onMove,
-  onComment
+  onComment,
+  onAddDependency,
+  onRemoveDependency
 }: {
   task: Task;
   comments: Array<{
@@ -662,24 +761,54 @@ function TaskDetail({
     author: { type: "human" | "agent"; full_name: string };
   }>;
   dependencies?: { depends_on: Task[]; blocks: Task[] };
+  taskOptions: Task[];
   archived: boolean;
   saving: boolean;
   moving: boolean;
   commenting: boolean;
+  changingDependencies: boolean;
   onUpdate: (input: {
     title?: string;
     description?: string | null;
     priority?: TaskPriority;
     expected_version: number;
-  }) => void;
+  }) => Promise<Task>;
   onMove: (status: HumanTaskStatus) => void;
-  onComment: (body: string) => void;
+  onComment: (body: string) => Promise<unknown>;
+  onAddDependency: (dependsOnTaskId: string) => Promise<unknown>;
+  onRemoveDependency: (dependsOnTaskId: string) => Promise<unknown>;
 }) {
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description ?? "");
   const [priority, setPriority] = useState<TaskPriority>(task.priority);
   const [comment, setComment] = useState("");
+  const [dependsOnTaskId, setDependsOnTaskId] = useState("");
+  const [base, setBase] = useState(() => taskSnapshot(task));
   const claimed = task.status === "claimed";
+  const dirty =
+    title !== base.title ||
+    description !== base.description ||
+    priority !== base.priority;
+  const staleDraft = dirty && task.version !== base.version;
+  useEffect(() => {
+    const next = taskSnapshot(task);
+    if (next.id !== base.id || !dirty) {
+      setTitle(next.title);
+      setDescription(next.description);
+      setPriority(next.priority);
+      setBase(next);
+      if (next.id !== base.id) {
+        setComment("");
+        setDependsOnTaskId("");
+      }
+    }
+  }, [base.id, dirty, task]);
+  const existingDependencies = new Set(
+    dependencies?.depends_on.map((item) => item.id) ?? []
+  );
+  const dependencyOptions = taskOptions.filter(
+    (item) => item.id !== task.id && !existingDependencies.has(item.id)
+  );
   return (
     <section className="p-5 pt-0" aria-labelledby="task-detail-heading">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -728,6 +857,46 @@ function TaskDetail({
           <dd>{new Date(task.updated_at).toLocaleString()}</dd>
         </div>
       </dl>
+      {staleDraft ? (
+        <Alert className="mt-5">
+          <AlertDescription>
+            This task changed on the server. Review the latest version before
+            retrying.
+            <details className="my-2">
+              <summary className="cursor-pointer">
+                Latest server version
+              </summary>
+              <p className="mt-2 font-medium">{task.title}</p>
+              <p className="my-1 capitalize">Priority: {task.priority}</p>
+              <MarkdownContent content={task.description} />
+            </details>
+            <span className="ml-3 inline-flex gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  const next = taskSnapshot(task);
+                  setTitle(next.title);
+                  setDescription(next.description);
+                  setPriority(next.priority);
+                  setBase(next);
+                }}
+              >
+                Use latest
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setBase(taskSnapshot(task))}
+              >
+                Keep my draft and retry
+              </Button>
+            </span>
+          </AlertDescription>
+        </Alert>
+      ) : null}
       <div className="mt-5 grid gap-4 md:grid-cols-2">
         <div>
           <Label htmlFor="detail-title">Title</Label>
@@ -749,6 +918,12 @@ function TaskDetail({
             rows={5}
             className="mt-2"
           />
+          <div className="mt-3 rounded-lg border bg-muted/30 p-3">
+            <p className="mb-2 text-xs font-medium text-muted-foreground">
+              Preview
+            </p>
+            <MarkdownContent content={description} />
+          </div>
           <Label htmlFor="detail-priority" className="mt-4">
             Priority
           </Label>
@@ -770,25 +945,92 @@ function TaskDetail({
           <Button
             className="mt-3"
             disabled={archived || claimed || saving || !title.trim()}
-            onClick={() =>
-              onUpdate({
+            onClick={() => {
+              void onUpdate({
                 title: title.trim(),
                 description: description || null,
                 priority,
-                expected_version: task.version
+                expected_version: base.version
               })
-            }
+                .then((saved) => {
+                  const next = taskSnapshot(saved);
+                  setTitle(next.title);
+                  setDescription(next.description);
+                  setPriority(next.priority);
+                  setBase(next);
+                })
+                .catch(() => undefined);
+            }}
           >
             {saving ? "Saving…" : "Save changes"}
           </Button>
         </div>
         <div>
           <h3 className="text-sm font-semibold">Dependencies</h3>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Depends on:{" "}
-            {dependencies?.depends_on.map((item) => item.key).join(", ") ||
-              "None"}
-          </p>
+          <div className="mt-2 space-y-2">
+            {dependencies?.depends_on.length ? (
+              dependencies.depends_on.map((item) => (
+                <div
+                  key={item.id}
+                  className="flex items-center justify-between gap-2 rounded-md bg-muted/50 px-2 py-1.5 text-sm"
+                >
+                  <span className="min-w-0 truncate">
+                    <span className="font-mono text-xs text-muted-foreground">
+                      {item.key}
+                    </span>{" "}
+                    {item.title}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={archived || claimed || changingDependencies}
+                    onClick={() => {
+                      void onRemoveDependency(item.id).catch(() => undefined);
+                    }}
+                  >
+                    Remove
+                  </Button>
+                </div>
+              ))
+            ) : (
+              <p className="text-sm text-muted-foreground">None</p>
+            )}
+          </div>
+          <div className="mt-3 flex gap-2">
+            <NativeSelect
+              aria-label="Add task dependency"
+              value={dependsOnTaskId}
+              disabled={
+                archived ||
+                claimed ||
+                changingDependencies ||
+                !dependencyOptions.length
+              }
+              onChange={(event) => setDependsOnTaskId(event.target.value)}
+            >
+              <NativeSelectOption value="">Add dependency…</NativeSelectOption>
+              {dependencyOptions.map((item) => (
+                <NativeSelectOption key={item.id} value={item.id}>
+                  {item.key} · {item.title}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={
+                archived || claimed || changingDependencies || !dependsOnTaskId
+              }
+              onClick={() => {
+                void onAddDependency(dependsOnTaskId)
+                  .then(() => setDependsOnTaskId(""))
+                  .catch(() => undefined);
+              }}
+            >
+              Add
+            </Button>
+          </div>
           <p className="mt-1 text-sm text-muted-foreground">
             Blocks:{" "}
             {dependencies?.blocks.map((item) => item.key).join(", ") || "None"}
@@ -797,13 +1039,13 @@ function TaskDetail({
           <div className="mt-2 flex flex-col gap-2">
             {comments.length ? (
               comments.map((item) => (
-                <p key={item.id} className="rounded bg-muted/50 p-2 text-sm">
+                <div key={item.id} className="rounded bg-muted/50 p-2 text-sm">
                   <span className="font-medium">
                     {item.author.full_name}
                     {item.author.type === "agent" ? " (agent)" : ""}
                   </span>
-                  : {item.body_markdown}
-                </p>
+                  <MarkdownContent content={item.body_markdown} empty="" />
+                </div>
               ))
             ) : (
               <p className="text-sm text-muted-foreground">No comments yet.</p>
@@ -814,8 +1056,9 @@ function TaskDetail({
             onSubmit={(event) => {
               event.preventDefault();
               if (!comment.trim()) return;
-              onComment(comment.trim());
-              setComment("");
+              void onComment(comment.trim())
+                .then(() => setComment(""))
+                .catch(() => undefined);
             }}
           >
             <Input
@@ -837,6 +1080,16 @@ function TaskDetail({
       </div>
     </section>
   );
+}
+
+function taskSnapshot(task: Task) {
+  return {
+    id: task.id,
+    version: task.version,
+    title: task.title,
+    description: task.description ?? "",
+    priority: task.priority
+  };
 }
 
 function TaskMessage({

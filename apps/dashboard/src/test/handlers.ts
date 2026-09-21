@@ -54,6 +54,11 @@ export const handlers = [
       avatar_url: null
     });
   }),
+  http.get(`${apiUrl}/organizations/:organizationId/members`, ({ request }) => {
+    assertAuthorization(request);
+    assertBodylessRequest(request);
+    return HttpResponse.json({ members: [] });
+  }),
   http.get(`${apiUrl}/projects/:projectId`, ({ request }) => {
     assertAuthorization(request);
     assertBodylessRequest(request);

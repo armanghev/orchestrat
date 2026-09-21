@@ -8,7 +8,14 @@ export const hierarchyKeys = {
   all: ["hierarchy"] as const,
   organizations: () => [...hierarchyKeys.all, "organizations"] as const,
   projects: (organizationId: string) =>
-    [...hierarchyKeys.all, "organizations", organizationId, "projects"] as const,
+    [
+      ...hierarchyKeys.all,
+      "organizations",
+      organizationId,
+      "projects"
+    ] as const,
+  members: (organizationId: string) =>
+    [...hierarchyKeys.all, "organizations", organizationId, "members"] as const,
   catalog: () => [...hierarchyKeys.all, "catalog"] as const
 };
 
@@ -24,6 +31,17 @@ export function projectsQueryOptions(api: ApiClient, organizationId: string) {
   return queryOptions({
     queryKey: hierarchyKeys.projects(organizationId),
     queryFn: () => api.listProjects(organizationId),
+    staleTime: hierarchyStaleTime
+  });
+}
+
+export function organizationMembersQueryOptions(
+  api: ApiClient,
+  organizationId: string
+) {
+  return queryOptions({
+    queryKey: hierarchyKeys.members(organizationId),
+    queryFn: () => api.listOrganizationMembers(organizationId),
     staleTime: hierarchyStaleTime
   });
 }

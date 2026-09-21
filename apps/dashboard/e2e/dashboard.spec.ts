@@ -434,8 +434,9 @@ test("creates, edits, and comments on a task with human and agent authors", asyn
   await expect(
     page.getByRole("heading", { name: "Ship editor" })
   ).toBeVisible();
+  await expect(page.getByText("Codex (agent)", { exact: true })).toBeVisible();
   await expect(
-    page.getByText("Codex (agent): Agent context is ready.")
+    page.getByText("Agent context is ready.", { exact: true })
   ).toBeVisible();
   await page
     .getByRole("dialog", { name: "Task details" })
@@ -448,7 +449,12 @@ test("creates, edits, and comments on a task with human and agent authors", asyn
   await page.getByLabel("Add comment").fill("Human review complete.");
   await page.getByRole("button", { name: "Comment" }).click();
   await expect(
-    page.getByText("E2E User: Human review complete.")
+    page
+      .getByRole("dialog", { name: "Task details" })
+      .getByText("E2E User", { exact: true })
+  ).toBeVisible();
+  await expect(
+    page.getByText("Human review complete.", { exact: true })
   ).toBeVisible();
   await expectNoAxe(page);
 });

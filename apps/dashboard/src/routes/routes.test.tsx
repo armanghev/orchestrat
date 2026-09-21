@@ -340,14 +340,14 @@ describe("dashboard routes", () => {
     expect(screen.getByRole("table")).toHaveTextContent("Agent-owned task");
   });
 
-  it("refetches and replaces stale task data after a version conflict", async () => {
+  it("keeps an unsaved task draft after a version conflict", async () => {
     const expectedProject = project();
     const stale = taskCard({
       project_id: expectedProject.id,
       title: "Stale title",
       version: 1
     });
-    const latest = taskCard({
+    let current = taskCard({
       project_id: expectedProject.id,
       title: "Latest title",
       version: 2
@@ -360,7 +360,7 @@ describe("dashboard routes", () => {
       ),
       http.get(`http://localhost:8801/api/v1/tasks/${stale.id}`, () => {
         detailRequests += 1;
-        return HttpResponse.json(detailRequests === 1 ? stale : latest);
+        return HttpResponse.json(detailRequests === 1 ? stale : current);
       }),
       http.get(`http://localhost:8801/api/v1/tasks/${stale.id}/comments`, () =>
         HttpResponse.json({ comments: [], next_cursor: null })
@@ -369,18 +369,31 @@ describe("dashboard routes", () => {
         `http://localhost:8801/api/v1/tasks/${stale.id}/dependencies`,
         () => HttpResponse.json({ depends_on: [], blocks: [] })
       ),
-      http.patch(`http://localhost:8801/api/v1/tasks/${stale.id}`, () =>
-        HttpResponse.json(
-          {
-            error: {
-              code: "TASK_VERSION_CONFLICT",
-              message: "Task changed.",
-              details: { current_version: 2 },
-              request_id: "req_conflict"
-            }
-          },
-          { status: 409 }
-        )
+      http.patch(
+        `http://localhost:8801/api/v1/tasks/${stale.id}`,
+        async ({ request }) => {
+          const body = await request.json();
+          if (detailRequests < 2) {
+            expect(body).toMatchObject({ expected_version: 1 });
+            return HttpResponse.json(
+              {
+                error: {
+                  code: "TASK_VERSION_CONFLICT",
+                  message: "Task changed.",
+                  details: { current_version: 2 },
+                  request_id: "req_conflict"
+                }
+              },
+              { status: 409 }
+            );
+          }
+          expect(body).toMatchObject({
+            expected_version: 2,
+            title: "Local draft"
+          });
+          current = { ...current, title: "Local draft", version: 3 };
+          return HttpResponse.json(current);
+        }
       ),
       ...handlers
     ];
@@ -396,12 +409,310 @@ describe("dashboard routes", () => {
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: /DASH-1/ }));
     await screen.findByRole("heading", { name: "Stale title" });
+    await user.clear(screen.getByLabelText("Title"));
+    await user.type(screen.getByLabelText("Title"), "Local draft");
     await user.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(
+      await screen.findByText(/This task changed elsewhere/)
+    ).toBeVisible();
+    expect(await screen.findByDisplayValue("Local draft")).toBeVisible();
+    expect(screen.getByText(/version 2/)).toBeVisible();
+    expect(detailRequests).toBeGreaterThanOrEqual(2);
+    await user.click(
+      screen.getByRole("button", { name: "Keep my draft and retry" })
+    );
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(screen.getByText(/version 3/)).toBeVisible());
+  });
+
+  it("opens a task sheet from its task deep link", async () => {
+    const expectedProject = project();
+    const task = taskCard({ project_id: expectedProject.id });
+    const taskHandlers = [
+      http.get(
+        `http://localhost:8801/api/v1/projects/${expectedProject.id}/tasks`,
+        () => HttpResponse.json({ tasks: [task], total: 1, next_cursor: null })
+      ),
+      http.get(`http://localhost:8801/api/v1/tasks/${task.id}`, () =>
+        HttpResponse.json(task)
+      ),
+      http.get(`http://localhost:8801/api/v1/tasks/${task.id}/comments`, () =>
+        HttpResponse.json({ comments: [], next_cursor: null })
+      ),
+      http.get(
+        `http://localhost:8801/api/v1/tasks/${task.id}/dependencies`,
+        () => HttpResponse.json({ depends_on: [], blocks: [] })
+      ),
+      ...handlers
+    ];
+    const view = await renderDashboardRoute({
+      path: `/projects/${expectedProject.id}/tasks?task=${task.id}`,
+      auth: new FakeAuthClient({
+        status: "signedIn",
+        identityKey: "test-user"
+      }),
+      platform: platform(),
+      handlers: taskHandlers
+    });
+
+    expect(await screen.findByDisplayValue(task.title)).toBeVisible();
+    expect(view.router.state.location.search).toEqual({ task: task.id });
+  });
+
+  it("does not apply a pending save from one task to another task draft", async () => {
+    const expectedProject = project();
+    const first = taskCard({ project_id: expectedProject.id, title: "First" });
+    const second = taskCard({
+      id: "00000000-0000-4000-8000-000000000007",
+      key: "DASH-2",
+      project_id: expectedProject.id,
+      title: "Second"
+    });
+    let finishSave: (() => void) | undefined;
+    let saveStarted = false;
+    const savePending = new Promise<void>((resolve) => {
+      finishSave = resolve;
+    });
+    const taskHandlers = [
+      http.get(
+        `http://localhost:8801/api/v1/projects/${expectedProject.id}/tasks`,
+        () =>
+          HttpResponse.json({
+            tasks: [first, second],
+            total: 2,
+            next_cursor: null
+          })
+      ),
+      http.get(`http://localhost:8801/api/v1/tasks/${first.id}`, () =>
+        HttpResponse.json(first)
+      ),
+      http.get(`http://localhost:8801/api/v1/tasks/${second.id}`, () =>
+        HttpResponse.json(second)
+      ),
+      http.get(`http://localhost:8801/api/v1/tasks/:taskId/comments`, () =>
+        HttpResponse.json({ comments: [], next_cursor: null })
+      ),
+      http.get(`http://localhost:8801/api/v1/tasks/:taskId/dependencies`, () =>
+        HttpResponse.json({ depends_on: [], blocks: [] })
+      ),
+      http.patch(`http://localhost:8801/api/v1/tasks/${first.id}`, async () => {
+        saveStarted = true;
+        await savePending;
+        return HttpResponse.json({
+          ...first,
+          title: "First draft",
+          version: 2
+        });
+      }),
+      ...handlers
+    ];
+    const view = await renderDashboardRoute({
+      path: `/projects/${expectedProject.id}/tasks?task=${first.id}`,
+      auth: new FakeAuthClient({
+        status: "signedIn",
+        identityKey: "test-user"
+      }),
+      platform: platform(),
+      handlers: taskHandlers
+    });
+    const user = userEvent.setup();
+    const title = await screen.findByLabelText("Title");
+    await user.clear(title);
+    await user.type(title, "First draft");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(saveStarted).toBe(true));
+    await act(async () => {
+      await view.router.navigate({
+        to: "/projects/$projectId/tasks",
+        params: { projectId: expectedProject.id },
+        search: { task: second.id }
+      });
+    });
+    expect(await screen.findByDisplayValue("Second")).toBeVisible();
+    finishSave?.();
+    await waitFor(() =>
+      expect(screen.getByDisplayValue("Second")).toBeVisible()
+    );
+    expect(screen.queryByDisplayValue("First draft")).not.toBeInTheDocument();
+  });
+
+  it("adds and removes a dependency with the current task version", async () => {
+    const expectedProject = project();
+    const dependency = taskCard({
+      id: "00000000-0000-4000-8000-000000000007",
+      key: "DASH-2",
+      project_id: expectedProject.id,
+      title: "Prerequisite"
+    });
+    let current = taskCard({ project_id: expectedProject.id, version: 1 });
+    let dependsOn = [] as (typeof current)[];
+    const taskHandlers = [
+      http.get(
+        `http://localhost:8801/api/v1/projects/${expectedProject.id}/tasks`,
+        () =>
+          HttpResponse.json({
+            tasks: [current, dependency],
+            total: 2,
+            next_cursor: null
+          })
+      ),
+      http.get(`http://localhost:8801/api/v1/tasks/${current.id}`, () =>
+        HttpResponse.json(current)
+      ),
+      http.get(
+        `http://localhost:8801/api/v1/tasks/${current.id}/comments`,
+        () => HttpResponse.json({ comments: [], next_cursor: null })
+      ),
+      http.get(
+        `http://localhost:8801/api/v1/tasks/${current.id}/dependencies`,
+        () => HttpResponse.json({ depends_on: dependsOn, blocks: [] })
+      ),
+      http.post(
+        `http://localhost:8801/api/v1/tasks/${current.id}/dependencies`,
+        async ({ request }) => {
+          expect(await request.json()).toEqual({
+            depends_on_task_id: dependency.id,
+            expected_version: 1
+          });
+          dependsOn = [dependency];
+          current = { ...current, version: 2 };
+          return HttpResponse.json(current);
+        }
+      ),
+      http.delete(
+        `http://localhost:8801/api/v1/tasks/${current.id}/dependencies/${dependency.id}`,
+        async ({ request }) => {
+          expect(await request.json()).toEqual({ expected_version: 2 });
+          dependsOn = [];
+          current = { ...current, version: 3 };
+          return HttpResponse.json(current);
+        }
+      ),
+      ...handlers
+    ];
+    await renderDashboardRoute({
+      path: `/projects/${expectedProject.id}/tasks?task=${current.id}`,
+      auth: new FakeAuthClient({
+        status: "signedIn",
+        identityKey: "test-user"
+      }),
+      platform: platform(),
+      handlers: taskHandlers
+    });
+    const user = userEvent.setup();
+    await screen.findByDisplayValue(current.title);
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Add task dependency" }),
+      dependency.id
+    );
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    await user.click(await screen.findByRole("button", { name: "Remove" }));
+    await waitFor(() => expect(dependsOn).toEqual([]));
+  });
+
+  it("keeps task dependency and comment drafts after rejected mutations", async () => {
+    const expectedProject = project();
+    const task = taskCard({ project_id: expectedProject.id });
+    const dependency = taskCard({
+      id: "00000000-0000-4000-8000-000000000007",
+      key: "DASH-2",
+      project_id: expectedProject.id
+    });
+    let dependencyAttempts = 0;
+    const taskHandlers = [
+      http.get(
+        `http://localhost:8801/api/v1/projects/${expectedProject.id}/tasks`,
+        () =>
+          HttpResponse.json({
+            tasks: [task, dependency],
+            total: 2,
+            next_cursor: null
+          })
+      ),
+      http.get(`http://localhost:8801/api/v1/tasks/${task.id}`, () =>
+        HttpResponse.json(task)
+      ),
+      http.get(`http://localhost:8801/api/v1/tasks/${task.id}/comments`, () =>
+        HttpResponse.json({ comments: [], next_cursor: null })
+      ),
+      http.get(
+        `http://localhost:8801/api/v1/tasks/${task.id}/dependencies`,
+        () => HttpResponse.json({ depends_on: [], blocks: [] })
+      ),
+      http.post(
+        `http://localhost:8801/api/v1/tasks/${task.id}/dependencies`,
+        () => {
+          dependencyAttempts += 1;
+          return dependencyAttempts === 1
+            ? HttpResponse.json(
+                {
+                  error: {
+                    code: "TASK_VERSION_CONFLICT",
+                    message: "Task changed.",
+                    details: { current_version: 2 },
+                    request_id: "req_dependency_conflict"
+                  }
+                },
+                { status: 409 }
+              )
+            : HttpResponse.json(
+                {
+                  error: {
+                    code: "TASK_DEPENDENCY_CYCLE",
+                    message: "Cycle rejected.",
+                    details: {},
+                    request_id: "req_cycle"
+                  }
+                },
+                { status: 409 }
+              );
+        }
+      ),
+      http.post(`http://localhost:8801/api/v1/tasks/${task.id}/comments`, () =>
+        HttpResponse.json(
+          {
+            error: {
+              code: "INTERNAL_ERROR",
+              message: "Comment rejected.",
+              details: {},
+              request_id: "req_comment"
+            }
+          },
+          { status: 500 }
+        )
+      ),
+      ...handlers
+    ];
+    await renderDashboardRoute({
+      path: `/projects/${expectedProject.id}/tasks?task=${task.id}`,
+      auth: new FakeAuthClient({
+        status: "signedIn",
+        identityKey: "test-user"
+      }),
+      platform: platform(),
+      handlers: taskHandlers
+    });
+    const user = userEvent.setup();
+    await screen.findByDisplayValue(task.title);
+    const dependencyPicker = screen.getByRole("combobox", {
+      name: "Add task dependency"
+    });
+    await user.selectOptions(dependencyPicker, dependency.id);
+    await user.click(screen.getByRole("button", { name: "Add" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "changed elsewhere"
     );
-    expect(await screen.findByDisplayValue("Latest title")).toBeVisible();
-    expect(detailRequests).toBeGreaterThanOrEqual(2);
+    expect(dependencyPicker).toHaveValue(dependency.id);
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "create a cycle"
+    );
+    expect(dependencyPicker).toHaveValue(dependency.id);
+    const comment = screen.getByRole("textbox", { name: "Add comment" });
+    await user.type(comment, "keep this comment");
+    await user.click(screen.getByRole("button", { name: "Comment" }));
+    expect(await screen.findByText("Comment rejected.")).toBeVisible();
+    expect(comment).toHaveValue("keep this comment");
   });
 
   it("paginates activity without rendering duplicate events", async () => {
@@ -446,13 +757,72 @@ describe("dashboard routes", () => {
       handlers: activityHandlers
     });
     const user = userEvent.setup();
-    expect(await screen.findByText("Task Created")).toBeVisible();
-    expect(screen.queryByText("Tool Call")).not.toBeInTheDocument();
+    expect(await screen.findByText("System created a task")).toBeVisible();
+    expect(screen.queryByText("tool call")).not.toBeInTheDocument();
     await user.click(
       screen.getByRole("button", { name: "Load more activity" })
     );
-    await screen.findByText("Task Done");
-    expect(screen.getAllByText("Task Updated")).toHaveLength(1);
+    await screen.findByText("System completed a task");
+    expect(screen.getAllByText("System updated a task")).toHaveLength(1);
+  });
+
+  it("links claim activity to its payload task", async () => {
+    const expectedProject = project();
+    const task = taskCard({ project_id: expectedProject.id });
+    const agent = {
+      id: "00000000-0000-4000-8000-000000000007",
+      project_id: expectedProject.id,
+      name: "Runner",
+      status: "active",
+      created_at: "2024-01-01T00:00:00.000Z",
+      updated_at: "2024-01-01T00:00:00.000Z",
+      revoked_at: null
+    };
+    const activityHandlers = [
+      http.get(
+        `http://localhost:8801/api/v1/projects/${expectedProject.id}/tasks`,
+        () => HttpResponse.json({ tasks: [task], total: 1, next_cursor: null })
+      ),
+      http.get(
+        `http://localhost:8801/api/v1/projects/${expectedProject.id}/agents`,
+        () => HttpResponse.json({ agents: [agent] })
+      ),
+      http.get(
+        `http://localhost:8801/api/v1/projects/${expectedProject.id}/events`,
+        () =>
+          HttpResponse.json({
+            events: [
+              {
+                id: 1,
+                project_id: expectedProject.id,
+                type: "claim.completed",
+                actor_agent_id: agent.id,
+                actor_user_id: null,
+                entity_id: "00000000-0000-4000-8000-000000000008",
+                payload: { task_id: task.id },
+                occurred_at: "2024-01-01T00:00:00.000Z"
+              }
+            ],
+            next_cursor: null
+          })
+      ),
+      ...handlers
+    ];
+    await renderDashboardRoute({
+      path: `/projects/${expectedProject.id}/activity`,
+      auth: new FakeAuthClient({
+        status: "signedIn",
+        identityKey: "test-user"
+      }),
+      platform: platform(),
+      handlers: activityHandlers
+    });
+
+    expect(await screen.findByText("Runner completed")).toBeVisible();
+    expect(screen.getByRole("link", { name: task.key })).toHaveAttribute(
+      "href",
+      `/projects/${expectedProject.id}/tasks?task=${task.id}`
+    );
   });
 
   it("nests documents in collapsible path folders", async () => {

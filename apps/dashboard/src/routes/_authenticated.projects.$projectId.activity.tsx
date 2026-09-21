@@ -17,10 +17,20 @@ import {
   EmptyTitle,
   EmptyDescription
 } from "@/components/ui/empty";
-import { useInfiniteQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { Link, createFileRoute } from "@tanstack/react-router";
 import { coordinationKeys } from "@/features/coordination/query-options";
 import { groupActivityEvents } from "@/features/coordination/group-activity-events";
+import {
+  activityTaskId,
+  activityVerb
+} from "@/features/coordination/activity-copy";
+import {
+  agentsQueryOptions,
+  documentsQueryOptions,
+  tasksQueryOptions
+} from "@/features/coordination/query-options";
+import { organizationMembersQueryOptions } from "@/features/hierarchy/query-options";
 import { DashboardApiError } from "@/lib/api/client";
 
 export const Route = createFileRoute(
@@ -29,7 +39,13 @@ export const Route = createFileRoute(
 
 function ActivityRoute() {
   const { projectId } = Route.useParams();
-  const { api } = Route.useRouteContext();
+  const { api, project } = Route.useRouteContext();
+  const tasks = useQuery(tasksQueryOptions(api, projectId));
+  const agents = useQuery(agentsQueryOptions(api, projectId));
+  const documents = useQuery(documentsQueryOptions(api, projectId));
+  const members = useQuery(
+    organizationMembersQueryOptions(api, project?.project.organization_id ?? "")
+  );
   const activity = useInfiniteQuery({
     queryKey: coordinationKeys.eventsInfinite(projectId),
     initialPageParam: undefined as string | undefined,
@@ -64,6 +80,18 @@ function ActivityRoute() {
     ).values()
   ].sort((left, right) => right.id - left.id);
   const groups = groupActivityEvents(events);
+  const taskById = new Map(
+    (tasks.data?.tasks ?? []).map((task) => [task.id, task])
+  );
+  const documentById = new Map(
+    (documents.data?.documents ?? []).map((document) => [document.id, document])
+  );
+  const agentById = new Map(
+    (agents.data?.agents ?? []).map((agent) => [agent.id, agent])
+  );
+  const memberById = new Map(
+    (members.data?.members ?? []).map((member) => [member.user_id, member])
+  );
   return (
     <section className="dashboard-page" aria-label="Project activity">
       <TopToolbarActions>
@@ -94,6 +122,17 @@ function ActivityRoute() {
           ) : (
             <ol className="flex flex-col">
               {groups.map(({ event, events: groupedEvents }) => {
+                const taskId = activityTaskId(event);
+                const task = taskId ? taskById.get(taskId) : undefined;
+                const document = event.entity_id
+                  ? documentById.get(event.entity_id)
+                  : undefined;
+                const actor = event.actor_agent_id
+                  ? (agentById.get(event.actor_agent_id)?.name ?? "An agent")
+                  : event.actor_user_id
+                    ? (memberById.get(event.actor_user_id)?.full_name ??
+                      "A member")
+                    : "System";
                 const Icon = event.type.startsWith("document")
                   ? FileText
                   : event.actor_agent_id
@@ -119,7 +158,23 @@ function ActivityRoute() {
                     <div className="min-w-0 flex-1 pt-1">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <h3 className="text-sm font-medium">
-                          {formatEvent(event.type)}
+                          {actor} {activityVerb(event.type)}{" "}
+                          {task ? (
+                            <Link
+                              to="/projects/$projectId/tasks"
+                              params={{ projectId }}
+                              search={{ task: task.id }}
+                              className="font-mono text-primary underline-offset-4 hover:underline"
+                            >
+                              {task.key}
+                            </Link>
+                          ) : document ? (
+                            document.path
+                          ) : event.type.startsWith("task.") ? (
+                            "a task"
+                          ) : event.type.startsWith("document.") ? (
+                            "a document"
+                          ) : null}
                           {groupedEvents.length > 1
                             ? ` (${groupedEvents.length} revisions)`
                             : ""}
@@ -131,14 +186,11 @@ function ActivityRoute() {
                           {new Date(event.occurred_at).toLocaleString()}
                         </time>
                       </div>
-                      <p className="mt-1.5 break-all text-xs text-muted-foreground">
-                        {event.actor_agent_id
-                          ? `Agent ${event.actor_agent_id}`
-                          : event.actor_user_id
-                            ? `User ${event.actor_user_id}`
-                            : "System"}
-                        {event.entity_id ? ` · ${event.entity_id}` : ""}
-                      </p>
+                      {task ? (
+                        <p className="mt-1.5 truncate text-xs text-muted-foreground">
+                          {task.key} · {task.title}
+                        </p>
+                      ) : null}
                     </div>
                   </li>
                 );
@@ -159,10 +211,4 @@ function ActivityRoute() {
       ) : null}
     </section>
   );
-}
-
-function formatEvent(type: string) {
-  return type
-    .replace(/[._]/g, " ")
-    .replace(/\b\w/g, (character) => character.toUpperCase());
 }
