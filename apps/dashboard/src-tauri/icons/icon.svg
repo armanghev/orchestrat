@@ -1,5 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="112" fill="#191714"/>
-  <path d="M256 104c-84 0-152 68-152 152s68 152 152 152 152-68 152-152S340 104 256 104Zm0 64c49 0 88 39 88 88s-39 88-88 88-88-39-88-88 39-88 88-88Z" fill="#F5852A"/>
-  <circle cx="256" cy="256" r="32" fill="#F3EFEA"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 32 32" fill="none">
+  <!-- Matches the app's dark background: oklch(0.24 0 0). -->
+  <rect width="32" height="32" fill="#1f1f1f"/>
+  <circle cx="16" cy="16" r="12" stroke="#f39b3a" stroke-width="2.8" stroke-linecap="round" stroke-dasharray="0.1 6.18"/>
+  <circle cx="16" cy="16" r="4" fill="#f39b3a"/>
 </svg>
