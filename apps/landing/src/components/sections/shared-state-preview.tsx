@@ -63,9 +63,7 @@ export function SharedStatePreviewSection() {
                 <span>{view.label}</span>
                 <ArrowRight size={17} aria-hidden="true" />
               </button>
-              {selected === index && (
-                <p className="feature-description">{view.description}</p>
-              )}
+              <p className="feature-description">{view.description}</p>
             </div>
           ))}
         </div>

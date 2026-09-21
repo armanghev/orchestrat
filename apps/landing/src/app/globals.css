@@ -202,6 +202,27 @@
     content: "";
     @apply size-1.5 rounded-full bg-current;
   }
+  .content-prose {
+    @apply text-base leading-7 text-muted-foreground;
+  }
+  .content-prose h2 {
+    @apply mb-5 text-2xl leading-tight font-medium tracking-tight text-foreground;
+  }
+  .content-prose p + p {
+    @apply mt-5;
+  }
+  .content-prose ul {
+    @apply mt-5 list-disc space-y-3 pl-5;
+  }
+  .content-prose pre {
+    @apply my-6 overflow-x-auto rounded-md border bg-rail p-5 font-mono text-xs leading-7 text-foreground sm:text-sm;
+  }
+  .content-prose a {
+    @apply text-primary-text underline underline-offset-4;
+  }
+  .content-prose .content-links {
+    @apply list-none pl-0;
+  }
 }
 
 @keyframes product-enter {

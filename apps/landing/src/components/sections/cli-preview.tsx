@@ -112,9 +112,15 @@ export function CliPreviewSection() {
             </button>
           </div>
           <div id="connection-example" className="px-5 py-6 sm:px-7 sm:py-8">
-            <pre className="min-h-40 overflow-x-auto font-mono text-[12px] leading-8 sm:text-sm">
-              <code>{current.code}</code>
-            </pre>
+            {examples.map((example, index) => (
+              <pre
+                key={example.name}
+                hidden={selected !== index}
+                className="min-h-40 overflow-x-auto font-mono text-[12px] leading-8 sm:text-sm"
+              >
+                <code>{example.code}</code>
+              </pre>
+            ))}
             <p
               role="status"
               className="mt-6 border-t pt-5 text-xs leading-relaxed text-muted-foreground"

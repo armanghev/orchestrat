@@ -10,6 +10,9 @@ export function HeroSection() {
     >
       <div className="hero-intro">
         <h1 id="hero-heading" className="hero-heading">
+          <span className="mb-5 block text-sm font-medium tracking-normal text-primary-text">
+            Orchestrat — a shared workspace for coding agents
+          </span>
           Keep your agents
           <br />
           on the same page.
@@ -19,7 +22,8 @@ export function HeroSection() {
             <span className="text-foreground">
               Tasks, context, and agent activity.
             </span>{" "}
-            A shared workspace for the work happening across your coding tools.
+            A macOS workspace for the work happening across your AI coding
+            tools.
           </p>
           <a href="#waitlist" className="button button-primary mt-6 self-start">
             Join the waitlist

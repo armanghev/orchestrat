@@ -7,7 +7,9 @@ import { OrchestratLogo } from "@/components/graphics/orchestrat-logo";
 
 const links = [
   { label: "Workspace", href: "/#workspace" },
-  { label: "How it works", href: "/#protocol" }
+  { label: "How it works", href: "/#protocol" },
+  { label: "Docs", href: "/docs" },
+  { label: "Guides", href: "/guides" }
 ];
 
 export function Navbar() {
