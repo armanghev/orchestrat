@@ -15,13 +15,17 @@ import {
   renameDocumentRequestSchema,
   updateDocumentRequestSchema
 } from "@orchestrat/protocol";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, preHandlerHookHandler } from "fastify";
 import type { DocumentService } from "../services/document-service.js";
 import type { AttachmentService } from "../services/attachment-service.js";
 
 export async function documentRoutes(
   app: FastifyInstance,
-  options: { documents: DocumentService; attachments: AttachmentService }
+  options: {
+    documents: DocumentService;
+    attachments: AttachmentService;
+    expensiveRateLimit: preHandlerHookHandler;
+  }
 ) {
   app.get("/projects/:projectId/documents", (request) =>
     options.documents.list(
@@ -114,16 +118,19 @@ export async function documentRoutes(
       }).id
     )
   );
-  app.post("/documents/:documentId/attachments/uploads", (request, reply) =>
-    options.attachments
-      .create(
-        request.userId,
-        documentIdParamsSchema.parse({
-          id: (request.params as { documentId: string }).documentId
-        }).id,
-        createAttachmentUploadRequestSchema.parse(request.body)
-      )
-      .then((value) => reply.code(201).send(value))
+  app.post(
+    "/documents/:documentId/attachments/uploads",
+    { preHandler: options.expensiveRateLimit },
+    (request, reply) =>
+      options.attachments
+        .create(
+          request.userId,
+          documentIdParamsSchema.parse({
+            id: (request.params as { documentId: string }).documentId
+          }).id,
+          createAttachmentUploadRequestSchema.parse(request.body)
+        )
+        .then((value) => reply.code(201).send(value))
   );
   app.get("/documents/:documentId/attachments/uploads/:uploadId", (request) =>
     (() => {
@@ -137,6 +144,7 @@ export async function documentRoutes(
   );
   app.post(
     "/documents/:documentId/attachments/uploads/:uploadId/refresh",
+    { preHandler: options.expensiveRateLimit },
     (request) => {
       const params = documentAttachmentUploadParamsSchema.parse(request.params);
       return options.attachments.refresh(
@@ -148,6 +156,7 @@ export async function documentRoutes(
   );
   app.post(
     "/documents/:documentId/attachments/uploads/:uploadId/parts",
+    { preHandler: options.expensiveRateLimit },
     (request) => {
       const params = documentAttachmentUploadParamsSchema.parse(request.params);
       return options.attachments.signPartsForUser(
@@ -160,6 +169,7 @@ export async function documentRoutes(
   );
   app.post(
     "/documents/:documentId/attachments/uploads/:uploadId/complete",
+    { preHandler: options.expensiveRateLimit },
     (request) => {
       const params = documentAttachmentUploadParamsSchema.parse(request.params);
       return options.attachments.complete(
@@ -172,6 +182,7 @@ export async function documentRoutes(
   );
   app.delete(
     "/documents/:documentId/attachments/uploads/:uploadId",
+    { preHandler: options.expensiveRateLimit },
     (request) => {
       const params = documentAttachmentUploadParamsSchema.parse(request.params);
       return options.attachments.abort(
@@ -181,18 +192,22 @@ export async function documentRoutes(
       );
     }
   );
-  app.delete("/documents/:documentId/attachments/:attachmentId", (request) =>
-    (() => {
-      const params = documentAttachmentParamsSchema.parse(request.params);
-      return options.attachments.remove(
-        request.userId,
-        params.documentId,
-        params.attachmentId
-      );
-    })()
+  app.delete(
+    "/documents/:documentId/attachments/:attachmentId",
+    { preHandler: options.expensiveRateLimit },
+    (request) =>
+      (() => {
+        const params = documentAttachmentParamsSchema.parse(request.params);
+        return options.attachments.remove(
+          request.userId,
+          params.documentId,
+          params.attachmentId
+        );
+      })()
   );
   app.post(
     "/documents/:documentId/attachments/:attachmentId/download",
+    { preHandler: options.expensiveRateLimit },
     (request) => {
       const params = documentAttachmentParamsSchema.parse(request.params);
       return options.attachments.download(

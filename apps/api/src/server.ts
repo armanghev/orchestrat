@@ -5,12 +5,14 @@ import { createDatabase } from "@orchestrat/db";
 import { logger } from "@orchestrat/logger";
 import { buildApp } from "./app.js";
 import { readDocumentStorageConfig } from "./document-storage-config.js";
+import { createShutdownHandler } from "./services/shutdown.js";
 
 loadEnv({ path: "../../.env" });
 
 const config = loadApiConfig();
 const { db, pool } = createDatabase({
-  connectionString: config.ORCHESTRAT_DATABASE_URL
+  connectionString: config.ORCHESTRAT_DATABASE_URL,
+  connectionTimeoutMillis: 2_000
 });
 const auth = createSupabaseAuth({
   algorithm: config.ORCHESTRAT_SUPABASE_JWT_ALGORITHM,
@@ -26,6 +28,10 @@ const s3SecretAccessKey = process.env.SUPABASE_S3_SECRET_ACCESS_KEY;
 const app = buildApp({
   allowedOrigins: config.ORCHESTRAT_ALLOWED_ORIGINS,
   auth,
+  checkDatabase: async () => {
+    const query = { text: "select 1", query_timeout: 2_000 };
+    await pool.query(query);
+  },
   closeDatabase: () => pool.end(),
   db,
   avatarStorage:
@@ -39,8 +45,12 @@ const app = buildApp({
           publicUrlBase: `${s3Endpoint.replace(/\/storage\/v1\/s3\/?$/, "")}/storage/v1/object/public/${avatarBucket}`
         }
       : undefined,
-  documentStorage
+  documentStorage,
+  trustProxyHops: config.ORCHESTRAT_TRUST_PROXY_HOPS
 });
+const shutdown = createShutdownHandler(() => app.close());
+process.once("SIGINT", shutdown);
+process.once("SIGTERM", shutdown);
 
 try {
   await app.listen({

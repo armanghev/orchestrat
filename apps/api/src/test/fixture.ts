@@ -10,6 +10,12 @@ import type { DocumentStorageConfig } from "../services/document-service.js";
 export async function fixture(
   options: {
     documentStorage?: DocumentStorageConfig;
+    trustProxyHops?: number;
+    rateLimits?: Partial<{
+      publicCliCreate: number;
+      publicCliPoll: number;
+      expensive: number;
+    }>;
   } = {}
 ): Promise<{
   app: FastifyInstance;
@@ -95,14 +101,17 @@ export async function fixture(
       const value = [...(request.headers as Iterable<[string, string]>)]
         .find(([name]) => name.toLowerCase() === "authorization")?.[1]
         ?.replace(/^Bearer\s+/, "");
-      if (value !== "alice") return null;
+      if (value !== "alice" && value !== "bob") return null;
       return {
-        authSubject: "550e8400-e29b-41d4-a716-446655440000",
+        authSubject:
+          value === "alice"
+            ? "550e8400-e29b-41d4-a716-446655440000"
+            : "550e8400-e29b-41d4-a716-446655440001",
         avatarUrl: null,
-        email: "alice@example.com",
-        name: "alice",
+        email: `${value}@example.com`,
+        name: value,
         provider: "supabase",
-        username: "alice"
+        username: value
       };
     }
   };
@@ -114,7 +123,9 @@ export async function fixture(
       allowedOrigins: [],
       auth,
       db,
-      documentStorage: options.documentStorage
+      documentStorage: options.documentStorage,
+      rateLimits: options.rateLimits,
+      trustProxyHops: options.trustProxyHops
     }),
     db
   };

@@ -3,6 +3,7 @@ import { z } from "zod";
 export const apiConfigSchema = z.object({
   ORCHESTRAT_API_HOST: z.string().default("0.0.0.0"),
   ORCHESTRAT_API_PORT: z.coerce.number().int().min(1).max(65535).default(8801),
+  ORCHESTRAT_TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(3).default(0),
   ORCHESTRAT_ALLOWED_ORIGINS: z
     .string()
     .default("http://localhost:8813")

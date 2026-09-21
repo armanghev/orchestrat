@@ -13,13 +13,17 @@ import {
   renameDocumentRequestSchema,
   updateDocumentRequestSchema
 } from "@orchestrat/protocol";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, preHandlerHookHandler } from "fastify";
 import type { DocumentService } from "../services/document-service.js";
 import type { AttachmentService } from "../services/attachment-service.js";
 
 export async function agentDocumentRoutes(
   app: FastifyInstance,
-  options: { documents: DocumentService; attachments: AttachmentService }
+  options: {
+    documents: DocumentService;
+    attachments: AttachmentService;
+    expensiveRateLimit: preHandlerHookHandler;
+  }
 ) {
   app.get("/documents", (request) =>
     options.documents.listForAgent(
@@ -101,6 +105,7 @@ export async function agentDocumentRoutes(
   );
   app.post(
     "/documents/:documentId/attachments/uploads",
+    { preHandler: options.expensiveRateLimit },
     async (request, reply) => {
       const documentId = documentIdParamsSchema.parse({
         id: (request.params as { documentId: string }).documentId
@@ -128,6 +133,7 @@ export async function agentDocumentRoutes(
   );
   app.post(
     "/documents/:documentId/attachments/uploads/:uploadId/refresh",
+    { preHandler: options.expensiveRateLimit },
     (request) => {
       const params = documentAttachmentUploadParamsSchema.parse(request.params);
       return options.attachments.refreshForAgent(
@@ -139,6 +145,7 @@ export async function agentDocumentRoutes(
   );
   app.post(
     "/documents/:documentId/attachments/uploads/:uploadId/parts",
+    { preHandler: options.expensiveRateLimit },
     (request) => {
       const params = documentAttachmentUploadParamsSchema.parse(request.params);
       return options.attachments.signPartsForAgent(
@@ -151,6 +158,7 @@ export async function agentDocumentRoutes(
   );
   app.post(
     "/documents/:documentId/attachments/uploads/:uploadId/complete",
+    { preHandler: options.expensiveRateLimit },
     (request) =>
       (() => {
         const params = documentAttachmentUploadParamsSchema.parse(
@@ -166,6 +174,7 @@ export async function agentDocumentRoutes(
   );
   app.delete(
     "/documents/:documentId/attachments/uploads/:uploadId",
+    { preHandler: options.expensiveRateLimit },
     (request) => {
       const params = documentAttachmentUploadParamsSchema.parse(request.params);
       return options.attachments.abortForAgent(
@@ -175,18 +184,22 @@ export async function agentDocumentRoutes(
       );
     }
   );
-  app.delete("/documents/:documentId/attachments/:attachmentId", (request) =>
-    (() => {
-      const params = documentAttachmentParamsSchema.parse(request.params);
-      return options.attachments.removeForAgent(
-        request.agentPrincipal!,
-        params.documentId,
-        params.attachmentId
-      );
-    })()
+  app.delete(
+    "/documents/:documentId/attachments/:attachmentId",
+    { preHandler: options.expensiveRateLimit },
+    (request) =>
+      (() => {
+        const params = documentAttachmentParamsSchema.parse(request.params);
+        return options.attachments.removeForAgent(
+          request.agentPrincipal!,
+          params.documentId,
+          params.attachmentId
+        );
+      })()
   );
   app.post(
     "/documents/:documentId/attachments/:attachmentId/download",
+    { preHandler: options.expensiveRateLimit },
     (request) => {
       const params = documentAttachmentParamsSchema.parse(request.params);
       return options.attachments.downloadForAgent(

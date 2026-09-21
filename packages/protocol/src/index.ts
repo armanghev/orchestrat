@@ -36,6 +36,7 @@ const baseErrorCodeSchema = z.enum([
   "VALIDATION_ERROR",
   "NOT_FOUND",
   "CONFLICT",
+  "RATE_LIMITED",
   "INTERNAL_ERROR"
 ]);
 

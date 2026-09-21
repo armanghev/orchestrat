@@ -47,6 +47,7 @@ import {
   cliAuthorizationHumanRoutes,
   cliAuthorizationPublicRoutes
 } from "./routes/cli-authorization.js";
+import { FixedWindowRateLimit, rateLimitHook } from "./services/rate-limit.js";
 
 type AppOptions = {
   allowedOrigins: string[];
@@ -55,6 +56,13 @@ type AppOptions = {
   db: Database;
   avatarStorage?: AvatarStorageConfig;
   documentStorage?: DocumentStorageConfig;
+  checkDatabase?: () => Promise<void>;
+  trustProxyHops?: number;
+  rateLimits?: Partial<{
+    publicCliCreate: number;
+    publicCliPoll: number;
+    expensive: number;
+  }>;
 };
 
 const errorResponse = (
@@ -77,7 +85,8 @@ const rawHeaderEntries = (rawHeaders: string[]) => {
 export function buildApp(options: AppOptions) {
   const app = Fastify({
     genReqId: () => `req_${randomUUID()}`,
-    logger: true
+    logger: true,
+    trustProxy: options.trustProxyHops ?? false
   });
   const realtimeTickets = new RealtimeTicketStore();
   const attachmentDownloadTickets = new AttachmentDownloadTicketStore();
@@ -104,6 +113,27 @@ export function buildApp(options: AppOptions) {
   );
   const cliAuthorization = new CliAuthorizationService(db);
   const cliSetup = new CliSetupService(db);
+  const rateLimits = {
+    publicCliCreate: 10,
+    publicCliPoll: 120,
+    expensive: 120,
+    ...options.rateLimits
+  };
+  const publicCliCreateRateLimit = rateLimitHook(
+    new FixedWindowRateLimit(rateLimits.publicCliCreate, 60_000),
+    (request) => request.ip
+  );
+  const publicCliPollRateLimit = rateLimitHook(
+    new FixedWindowRateLimit(rateLimits.publicCliPoll, 60_000),
+    (request) => request.ip
+  );
+  const expensiveRateLimit = rateLimitHook(
+    new FixedWindowRateLimit(rateLimits.expensive, 60_000),
+    (request) =>
+      request.agentPrincipal
+        ? `agent:${request.agentPrincipal.credentialId}`
+        : `user:${request.userId}`
+  );
 
   app.register(cors, {
     origin: options.allowedOrigins,
@@ -185,15 +215,20 @@ export function buildApp(options: AppOptions) {
       .send(errorResponse(request.id, "NOT_FOUND", "Route not found."))
   );
 
-  app.register(healthRoutes);
-  app.register(healthRoutes, { prefix: "/api/v1" });
+  app.register(healthRoutes, { checkDatabase: options.checkDatabase });
+  app.register(healthRoutes, {
+    prefix: "/api/v1",
+    checkDatabase: options.checkDatabase
+  });
   app.register(attachmentDownloadRoutes, {
     prefix: "/api/v1",
     attachments
   });
   app.register(cliAuthorizationPublicRoutes, {
     prefix: "/api/v1",
-    authorization: cliAuthorization
+    authorization: cliAuthorization,
+    createRateLimit: publicCliCreateRateLimit,
+    pollRateLimit: publicCliPollRateLimit
   });
   app.register(cliSetupRoutes, { prefix: "/api/v1", setup: cliSetup });
   app.decorateRequest("agentPrincipal", null);
@@ -230,13 +265,22 @@ export function buildApp(options: AppOptions) {
         request.suggestedUsername = principal.username;
         request.userId = await identities.resolveUserId(principal);
       });
-      api.register(v1Routes, { projects, profiles, tasks });
+      api.register(v1Routes, {
+        projects,
+        profiles,
+        tasks,
+        expensiveRateLimit
+      });
       api.register(realtimeTicketRoutes, {
         prefix: "/realtime",
         projects,
         tickets: realtimeTickets
       });
-      api.register(documentRoutes, { documents, attachments });
+      api.register(documentRoutes, {
+        documents,
+        attachments,
+        expensiveRateLimit
+      });
       api.register(agentManagementRoutes, { agents });
       api.register(cliAuthorizationHumanRoutes, {
         authorization: cliAuthorization
@@ -273,7 +317,11 @@ export function buildApp(options: AppOptions) {
         request.agentPrincipal = await agents.authenticate(match[1]);
       });
       api.register(agentActionRoutes, { agents, tasks, claims });
-      api.register(agentDocumentRoutes, { documents, attachments });
+      api.register(agentDocumentRoutes, {
+        documents,
+        attachments,
+        expensiveRateLimit
+      });
     },
     { prefix: "/api/v1/agent" }
   );

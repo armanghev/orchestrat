@@ -21,7 +21,7 @@ import {
   deleteTaskDependencyParamsSchema,
   deleteTaskDependencyRequestSchema
 } from "@orchestrat/protocol";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, preHandlerHookHandler } from "fastify";
 import type { ProjectService } from "../services/project-service.js";
 import type { ProfileService } from "../services/profile-service.js";
 import type { TaskService } from "../services/task-service.js";
@@ -32,6 +32,7 @@ export async function v1Routes(
     projects: ProjectService;
     profiles: ProfileService;
     tasks: TaskService;
+    expensiveRateLimit: preHandlerHookHandler;
   }
 ) {
   app.get("/profile", async (request) => ({
@@ -50,16 +51,20 @@ export async function v1Routes(
     options.profiles.removeAvatar(request.userId)
   );
 
-  app.post("/profile/avatar", async (request) => {
-    const file = await request.file();
-    if (!file) throw new Error("An avatar image is required.");
-    if (!["image/jpeg", "image/png", "image/webp"].includes(file.mimetype))
-      throw new Error("Avatars must be JPEG, PNG, or WebP images.");
-    return options.profiles.updateAvatar(request.userId, {
-      mimetype: file.mimetype,
-      buffer: await file.toBuffer()
-    });
-  });
+  app.post(
+    "/profile/avatar",
+    { preHandler: options.expensiveRateLimit },
+    async (request) => {
+      const file = await request.file();
+      if (!file) throw new Error("An avatar image is required.");
+      if (!["image/jpeg", "image/png", "image/webp"].includes(file.mimetype))
+        throw new Error("Avatars must be JPEG, PNG, or WebP images.");
+      return options.profiles.updateAvatar(request.userId, {
+        mimetype: file.mimetype,
+        buffer: await file.toBuffer()
+      });
+    }
+  );
 
   app.get("/organizations", (request) =>
     options.projects.listOrganizations(request.userId)

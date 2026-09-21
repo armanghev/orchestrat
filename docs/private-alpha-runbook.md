@@ -160,14 +160,29 @@ docker compose -f deploy/private-alpha.compose.yml up -d api
 docker compose -f deploy/private-alpha.compose.yml ps
 docker compose -f deploy/private-alpha.compose.yml logs --tail=200 api
 curl -fsS -D - -o /dev/null https://api.orchestrat.dev/health
+curl -fsS -D - -o /dev/null https://api.orchestrat.dev/ready
 ```
 
-The migration command is intentionally not part of API startup. Stop the
-service with `docker compose -f deploy/private-alpha.compose.yml down`; follow
-logs with `... logs -f api`. The API also exposes `/api/v1/health`. Every
-request receives an `x-request-id`; retain that ID with the timestamp when
-diagnosing a failure, but redact authorization headers, cookies, database
-URLs, tokens, and sensitive request bodies before sharing logs.
+The migration command is intentionally not part of API startup. `/health` is
+process liveness; `/ready` also verifies a database query and is the container
+health check. Versioned aliases are available under `/api/v1`. Stop the service
+with `docker compose -f deploy/private-alpha.compose.yml down`; `SIGTERM` and
+`SIGINT` stop new requests, drain in-flight work, close the database pool, and
+force a nonzero exit if draining exceeds 10 seconds. Follow logs with
+`... logs -f api`. Every request receives an `x-request-id`; retain that ID
+with the timestamp when diagnosing a failure, but redact authorization
+headers, cookies, database URLs, tokens, and sensitive request bodies before
+sharing logs.
+
+Public CLI authorization creation is limited to 10 requests/minute/client IP
+and polling to 120/minute/client IP. Storage-heavy authenticated operations
+are limited to 120/minute/resolved user or agent credential; rejected requests
+return `429`, `Retry-After`, and `RATE_LIMITED`. Agent session heartbeats are
+not rate-limited. These per-process, bounded limits match the required
+one-replica topology. Set
+`ORCHESTRAT_TRUST_PROXY_HOPS` to the exact number of controlled proxy hops that
+append `X-Forwarded-For` (maximum 3); leave it `0` for direct exposure. Never
+enable arbitrary proxy-header trust.
 
 If the health check fails, inspect `docker compose ... ps`, recent API logs,
 the injected env-file, database connectivity, and the one-replica constraint

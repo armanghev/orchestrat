@@ -1,4 +1,4 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, preHandlerHookHandler } from "fastify";
 import type { CliAuthorizationService } from "../services/cli-authorization-service.js";
 import {
   cliAuthorizationApprovalRequestSchema,
@@ -9,16 +9,27 @@ import {
 
 export async function cliAuthorizationPublicRoutes(
   app: FastifyInstance,
-  options: { authorization: CliAuthorizationService }
+  options: {
+    authorization: CliAuthorizationService;
+    createRateLimit: preHandlerHookHandler;
+    pollRateLimit: preHandlerHookHandler;
+  }
 ) {
-  app.post("/cli/authorization/attempts", async (_request, reply) =>
-    reply.code(201).send(await options.authorization.createAttempt())
+  app.post(
+    "/cli/authorization/attempts",
+    { preHandler: options.createRateLimit },
+    async (_request, reply) =>
+      reply.code(201).send(await options.authorization.createAttempt())
   );
-  app.post("/cli/authorization/attempts/:attemptId/poll", async (request) => {
-    const params = cliAuthorizationAttemptParamsSchema.parse(request.params);
-    const body = cliAuthorizationPollRequestSchema.parse(request.body);
-    return options.authorization.poll(params.attemptId, body.secret);
-  });
+  app.post(
+    "/cli/authorization/attempts/:attemptId/poll",
+    { preHandler: options.pollRateLimit },
+    async (request) => {
+      const params = cliAuthorizationAttemptParamsSchema.parse(request.params);
+      const body = cliAuthorizationPollRequestSchema.parse(request.body);
+      return options.authorization.poll(params.attemptId, body.secret);
+    }
+  );
 }
 
 export async function cliAuthorizationHumanRoutes(

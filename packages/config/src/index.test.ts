@@ -12,6 +12,7 @@ const env = {
 test("defaults to dedicated local ports and rejects invalid TCP ports", () => {
   const config = loadApiConfig(env);
   assert.equal(config.ORCHESTRAT_API_PORT, 8801);
+  assert.equal(config.ORCHESTRAT_TRUST_PROXY_HOPS, 0);
   assert.deepEqual(config.ORCHESTRAT_ALLOWED_ORIGINS, [
     "http://localhost:8813"
   ]);
@@ -21,6 +22,18 @@ test("defaults to dedicated local ports and rejects invalid TCP ports", () => {
     loadApiConfig({ ...env, ORCHESTRAT_API_PORT: "65535" }).ORCHESTRAT_API_PORT,
     65535
   );
+});
+
+test("accepts only a bounded trusted proxy hop count", () => {
+  assert.equal(
+    loadApiConfig({ ...env, ORCHESTRAT_TRUST_PROXY_HOPS: "1" })
+      .ORCHESTRAT_TRUST_PROXY_HOPS,
+    1
+  );
+  for (const hops of ["-1", "4", "true"])
+    assert.throws(() =>
+      loadApiConfig({ ...env, ORCHESTRAT_TRUST_PROXY_HOPS: hops })
+    );
 });
 
 test("loads Supabase human JWT configuration independently from CORS", () => {
