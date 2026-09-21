@@ -112,10 +112,11 @@ export default function PrivacyPage() {
         <h2>4. When information is shared</h2>
         <p>
           We use service providers for hosting, authentication, databases,
-          storage, and analytics. These include Vercel for the website and
-          analytics, Supabase for authentication and database services, and
-          Cloudflare R2 for document and attachment storage where configured.
-          These providers process information needed to perform their services.
+          storage, email delivery, and analytics. These include Vercel for the
+          website and analytics, Supabase for authentication and database
+          services, Resend for waitlist emails, and Cloudflare R2 for document
+          and attachment storage where configured. These providers process
+          information needed to perform their services.
         </p>
         <p>
           Project content and activity are available to authorized project users
