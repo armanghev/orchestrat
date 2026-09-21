@@ -459,6 +459,43 @@ describe("dashboard routes", () => {
     expect(view.router.state.location.search).toEqual({ task: task.id });
   });
 
+  it("rejects a task deep link from another project", async () => {
+    const currentProject = project();
+    const otherTask = taskCard({
+      project_id: "00000000-0000-4000-8000-000000000099",
+      title: "Task from another project"
+    });
+    const commentsRequested = vi.fn(() =>
+      HttpResponse.json({ comments: [], next_cursor: null })
+    );
+    await renderDashboardRoute({
+      path: `/projects/${currentProject.id}/tasks?task=${otherTask.id}`,
+      auth: new FakeAuthClient({
+        status: "signedIn",
+        identityKey: "test-user"
+      }),
+      platform: platform(),
+      handlers: [
+        http.get(`http://localhost:8801/api/v1/tasks/${otherTask.id}`, () =>
+          HttpResponse.json(otherTask)
+        ),
+        http.get(
+          `http://localhost:8801/api/v1/tasks/${otherTask.id}/comments`,
+          commentsRequested
+        ),
+        ...handlers
+      ]
+    });
+    expect(
+      await screen.findByText(/This task belongs to a different project/)
+    ).toBeVisible();
+    expect(screen.queryByDisplayValue(otherTask.title)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Save changes" })
+    ).not.toBeInTheDocument();
+    expect(commentsRequested).not.toHaveBeenCalled();
+  });
+
   it("does not apply a pending save from one task to another task draft", async () => {
     const expectedProject = project();
     const first = taskCard({ project_id: expectedProject.id, title: "First" });

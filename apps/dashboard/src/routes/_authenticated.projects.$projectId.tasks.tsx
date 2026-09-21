@@ -108,13 +108,14 @@ function TasksRoute() {
     ...taskQueryOptions(api, taskId),
     enabled: Boolean(selectedTaskId)
   });
+  const selectedInProject = selected.data?.project_id === projectId;
   const comments = useQuery({
     ...taskCommentsQueryOptions(api, taskId),
-    enabled: Boolean(selectedTaskId)
+    enabled: selectedInProject
   });
   const dependencies = useQuery({
     ...taskDependenciesQueryOptions(api, taskId),
-    enabled: Boolean(selectedTaskId)
+    enabled: selectedInProject
   });
   const refresh = () =>
     queryClient.invalidateQueries({
@@ -576,7 +577,15 @@ function TasksRoute() {
               </AlertDescription>
             </Alert>
           ) : null}
-          {selected.data ? (
+          {selected.data && !selectedInProject ? (
+            <Alert variant="destructive" className="mx-4 w-auto">
+              <AlertDescription>
+                This task belongs to a different project. Open it from that
+                project's task list.
+              </AlertDescription>
+            </Alert>
+          ) : null}
+          {selected.data && selectedInProject ? (
             <TaskDetail
               key={selected.data.id}
               task={selected.data}
