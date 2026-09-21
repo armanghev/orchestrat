@@ -57,37 +57,51 @@ export function Navbar() {
             aria-label={open ? "Close menu" : "Open menu"}
             aria-expanded={open}
             aria-controls="mobile-navigation"
-            className="flex size-11 items-center justify-center rounded-md hover:bg-secondary md:hidden"
-            onClick={() => setOpen(!open)}
+            className="group relative flex size-11 items-center justify-center rounded-md hover:bg-secondary md:hidden"
+            onClick={() => setOpen((current) => !current)}
           >
-            {open ? <X size={20} /> : <Menu size={20} />}
+            <Menu
+              size={20}
+              aria-hidden="true"
+              className="absolute transition-[transform,opacity] duration-200 ease-out group-aria-expanded:rotate-90 group-aria-expanded:opacity-0"
+            />
+            <X
+              size={20}
+              aria-hidden="true"
+              className="absolute -rotate-90 opacity-0 transition-[transform,opacity] duration-200 ease-out group-aria-expanded:rotate-0 group-aria-expanded:opacity-100"
+            />
           </button>
         </div>
-        {open && (
-          <div
-            id="mobile-navigation"
-            className="flex flex-col gap-1 border-t pb-5 pt-3 md:hidden"
-          >
-            {links.map((link) => (
+        <div
+          id="mobile-navigation"
+          data-open={open}
+          aria-hidden={!open}
+          inert={!open}
+          className="grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] data-[open=true]:grid-rows-[1fr] data-[open=true]:opacity-100 md:hidden"
+        >
+          <div className="min-h-0 overflow-hidden">
+            <div className="flex flex-col gap-1 border-t pb-5 pt-3">
+              {links.map((link) => (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  className="rounded-md px-3 py-3 text-sm text-muted-foreground hover:bg-secondary"
+                  onClick={() => setOpen(false)}
+                >
+                  {link.label}
+                </Link>
+              ))}
               <Link
-                key={link.href}
-                href={link.href}
-                className="rounded-md px-3 py-3 text-sm text-muted-foreground hover:bg-secondary"
+                href="/#waitlist"
+                className="button button-primary mt-2"
                 onClick={() => setOpen(false)}
               >
-                {link.label}
+                Join waitlist
+                <ArrowRight size={16} />
               </Link>
-            ))}
-            <Link
-              href="/#waitlist"
-              className="button button-primary mt-2"
-              onClick={() => setOpen(false)}
-            >
-              Join waitlist
-              <ArrowRight size={16} />
-            </Link>
+            </div>
           </div>
-        )}
+        </div>
       </nav>
     </header>
   );
