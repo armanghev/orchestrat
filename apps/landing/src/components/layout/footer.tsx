@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { OrchestratLogo } from "@/components/graphics/orchestrat-logo";
 import { founder } from "@/lib/seo";
+import { CookiePreferences } from "@/components/cookie-preferences";
 
 export function Footer() {
   return (
@@ -55,6 +56,7 @@ export function Footer() {
           <Link href="/privacy#cookies" className="hover:text-primary-text">
             Cookie information
           </Link>
+          <CookiePreferences />
         </nav>
       </div>
     </footer>

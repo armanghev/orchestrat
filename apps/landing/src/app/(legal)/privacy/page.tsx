@@ -74,16 +74,28 @@ export default function PrivacyPage() {
       <section id="cookies">
         <h2>3. Cookies, analytics, and local storage</h2>
         <p>
-          The website uses Vercel Web Analytics to understand visits and improve
-          the site. It processes page views, referrers, approximate location,
-          and device and browser information as aggregate usage statistics.
-          Vercel describes this analytics service as not using third-party
-          cookies and using a temporary visitor hash rather than a persistent
-          cross-site identifier. See{" "}
+          If you accept optional analytics, the website uses Vercel Web
+          Analytics to understand visits and improve the site. Analytics stays
+          off until you accept. It processes page views, referrers, approximate
+          location, and device and browser information as aggregate usage
+          statistics. Vercel describes this analytics service as not using
+          third-party cookies and using a temporary visitor hash rather than a
+          persistent cross-site identifier. See{" "}
           <a href="https://vercel.com/docs/analytics/privacy-policy">
             Vercel’s analytics privacy documentation
           </a>{" "}
           for details.
+        </p>
+        <p>
+          We store your analytics preference in your browser’s local storage
+          under the key <code>orchestrat:analytics-consent:v1</code>. This
+          stores only your choice, not an advertising identifier. Use “Cookie
+          settings” in the footer to accept or reject optional analytics at any
+          time. Rejecting stops future analytics events; it does not remove
+          statistics already received. Your choice stays on this browser until
+          you change it or clear site data. If browser storage is unavailable,
+          the choice applies only to the current visit. The website and waitlist
+          work whether you accept or reject analytics.
         </p>
         <p>
           The web dashboard stores authentication session information locally in

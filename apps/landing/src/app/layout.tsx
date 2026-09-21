@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { Footer } from "@/components/layout/footer";
 import { Navbar } from "@/components/layout/navbar";
-import { Analytics } from "@vercel/analytics/next";
 import { siteUrl } from "@/lib/seo";
 
 export const metadata: Metadata = {
@@ -41,7 +40,6 @@ export default function RootLayout({
         <Navbar />
         <main id="main-content">{children}</main>
         <Footer />
-        <Analytics />
       </body>
     </html>
   );

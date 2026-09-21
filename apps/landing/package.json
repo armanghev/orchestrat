@@ -7,7 +7,7 @@
     "build": "next build",
     "lint": "eslint src",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/lib/waitlist.test.ts",
+    "test": "tsx --test src/lib/waitlist.test.ts src/lib/consent.test.ts",
     "test:seo": "tsx --test src/lib/seo.test.ts"
   },
   "dependencies": {
