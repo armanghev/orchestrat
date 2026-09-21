@@ -28,8 +28,8 @@ export default function PrivacyPage() {
           <li>
             <strong>Waitlist and correspondence.</strong> Your email address
             when you join the waitlist, and any information you choose to send
-            when you contact us. The waitlist stores your email address; the
-            feature-interest buttons on the landing page are not submitted.
+            when you contact us. The waitlist stores your email address and does
+            not ask for your name, company, or payment details.
           </li>
           <li>
             <strong>Account information.</strong> When you use the app, your
@@ -71,8 +71,8 @@ export default function PrivacyPage() {
         </p>
       </section>
 
-      <section>
-        <h2>3. Analytics and local storage</h2>
+      <section id="cookies">
+        <h2>3. Cookies, analytics, and local storage</h2>
         <p>
           The website uses Vercel Web Analytics to understand visits and improve
           the site. It processes page views, referrers, approximate location,

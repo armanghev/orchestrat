@@ -84,8 +84,7 @@ export function WaitlistCtaSection() {
                   name="email"
                   autoComplete="email"
                   maxLength={254}
-                  aria-describedby={error ? "waitlist-error" : "waitlist-note"}
-                  aria-invalid={Boolean(error)}
+                  aria-describedby={`waitlist-note${error ? " waitlist-error" : ""}`}
                   value={email}
                   onChange={(event) => setEmail(event.target.value)}
                   placeholder="you@company.com"
@@ -122,9 +121,16 @@ export function WaitlistCtaSection() {
               )}
               <p
                 id="waitlist-note"
-                className="text-center text-xs text-muted-foreground"
+                className="text-center text-xs leading-6 text-muted-foreground"
               >
-                Early access. No spam. Read our{" "}
+                By joining, you’re requesting Orchestrat early-access emails.{" "}
+                <a
+                  href="mailto:arman@orchestrat.dev?subject=Remove%20me%20from%20the%20waitlist"
+                  className="underline underline-offset-4 hover:text-primary-text"
+                >
+                  Request removal anytime
+                </a>
+                . Read our{" "}
                 <Link
                   href="/privacy"
                   className="underline underline-offset-4 hover:text-primary-text"
