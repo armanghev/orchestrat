@@ -9,7 +9,9 @@ describe("activityVerb", () => {
   });
 
   it("keeps unknown event types readable", () => {
-    expect(activityVerb("hook.triggered")).toBe("hook triggered");
+    expect(activityVerb("hook.unknown_event")).toBe("hook unknown event");
+    expect(activityVerb("credential.issued")).toBe("issued a credential");
+    expect(activityVerb("claim.expired")).toBe("expired the claim on");
   });
 
   it("uses payload task IDs for claim activity", () => {

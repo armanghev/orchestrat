@@ -13,7 +13,7 @@ export function activityVerb(type: string) {
     "agent.revoked": "revoked",
     "claim.created": "claimed",
     "claim.completed": "completed",
-    "claim.expired": "lost the claim on",
+    "claim.expired": "expired the claim on",
     "claim.revoked": "released",
     "session.opened": "opened a session",
     "session.closed": "closed a session",
@@ -21,7 +21,10 @@ export function activityVerb(type: string) {
     "session.ended": "ended a session",
     "session.stopped": "stopped a session",
     "session.heartbeat": "reported a heartbeat",
-    "run.failed": "had a failed run"
+    "credential.issued": "issued a credential",
+    "credential.revoked": "revoked a credential",
+    "hook.triggered": "triggered a hook",
+    "run.failed": "reported a failed run"
   };
   const [entity, action] = type.split(".");
   return (

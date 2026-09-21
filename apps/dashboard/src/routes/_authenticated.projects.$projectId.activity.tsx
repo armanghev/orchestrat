@@ -127,6 +127,10 @@ function ActivityRoute() {
                 const document = event.entity_id
                   ? documentById.get(event.entity_id)
                   : undefined;
+                const targetAgent =
+                  event.type.startsWith("agent.") && event.entity_id
+                    ? agentById.get(event.entity_id)
+                    : undefined;
                 const actor = event.actor_agent_id
                   ? (agentById.get(event.actor_agent_id)?.name ?? "An agent")
                   : event.actor_user_id
@@ -170,6 +174,8 @@ function ActivityRoute() {
                             </Link>
                           ) : document ? (
                             document.path
+                          ) : event.type.startsWith("agent.") ? (
+                            (targetAgent?.name ?? "an agent")
                           ) : event.type.startsWith("task.") ? (
                             "a task"
                           ) : event.type.startsWith("document.") ? (
