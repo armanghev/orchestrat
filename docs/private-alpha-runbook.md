@@ -134,8 +134,8 @@ URLs.
 Create two separately authorized Vercel projects, only with explicit approval:
 
 1. Set Root Directory to `apps/landing`, framework Next.js, and domain
-   `orchestrat.dev`. Provide `SUPABASE_URL` and
-   `SUPABASE_PUBLISHABLE_KEY` as server-side landing settings.
+   `orchestrat.dev`. Provide the pooled `WAITLIST_DATABASE_URL` and
+   `RESEND_API_KEY` as server-side landing settings.
 2. Set Root Directory to `apps/dashboard`, framework Vite, and domain
    `app.orchestrat.dev`. The app-root [`vercel.json`](../apps/dashboard/vercel.json)
    rewrites SPA deep links to `/index.html`. Provide

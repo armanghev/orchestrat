@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { POST } from "../app/api/waitlist/route";
+import { waitlistDatabase } from "./waitlist-db";
 
 function request(email: string, company = "", json = false) {
   const formData = new FormData();
@@ -15,11 +16,7 @@ function request(email: string, company = "", json = false) {
 }
 
 test("validates signups and welcomes only newly saved waitlist members", async (t) => {
-  const envKeys = [
-    "SUPABASE_URL",
-    "SUPABASE_PUBLISHABLE_KEY",
-    "RESEND_API_KEY"
-  ];
+  const envKeys = ["WAITLIST_DATABASE_URL", "RESEND_API_KEY"];
   const originalEnv = envKeys.map((key) => [key, process.env[key]] as const);
   t.after(() => {
     for (const [key, value] of originalEnv) {
@@ -29,23 +26,24 @@ test("validates signups and welcomes only newly saved waitlist members", async (
   });
 
   let calls: { url: string; init?: RequestInit }[] = [];
-  let databaseResult: number | Error = 201;
+  let databaseResult: "joined" | "duplicate" | Error = "joined";
   let emailResult: number | Error = 200;
   const errors = t.mock.method(console, "error", () => {});
 
-  process.env.SUPABASE_URL = "https://example.supabase.co";
-  process.env.SUPABASE_PUBLISHABLE_KEY = "sb_publishable_test";
+  process.env.WAITLIST_DATABASE_URL = "postgresql://example.test/waitlist";
   process.env.RESEND_API_KEY = "re_test";
+  t.mock.method(waitlistDatabase, "insert", async () => {
+    if (databaseResult instanceof Error) throw databaseResult;
+    return databaseResult;
+  });
   t.mock.method(
     globalThis,
     "fetch",
     async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       calls.push({ url, init });
-      const isDatabase =
-        url === "https://example.supabase.co/rest/v1/orchestrat";
-      if (!isDatabase) assert.equal(url, "https://api.resend.com/emails");
-      const result = isDatabase ? databaseResult : emailResult;
+      assert.equal(url, "https://api.resend.com/emails");
+      const result = emailResult;
       if (result instanceof Error) throw result;
       return new Response(null, { status: result });
     }
@@ -74,16 +72,9 @@ test("validates signups and welcomes only newly saved waitlist members", async (
   );
   assert.deepEqual(
     calls.map(({ url }) => url),
-    [
-      "https://example.supabase.co/rest/v1/orchestrat",
-      "https://api.resend.com/emails"
-    ]
+    ["https://api.resend.com/emails"]
   );
-  assert.equal(
-    calls[0]?.init?.body,
-    JSON.stringify({ email: "dev@example.com" })
-  );
-  const sent = calls[1]?.init;
+  const sent = calls[0]?.init;
   assert.equal(sent?.method, "POST");
   assert.equal(
     new Headers(sent?.headers).get("Authorization"),
@@ -103,25 +94,28 @@ test("validates signups and welcomes only newly saved waitlist members", async (
   assert.ok(sent?.signal instanceof AbortSignal);
 
   calls = [];
-  databaseResult = 409;
+  databaseResult = "duplicate";
   const duplicate = await POST(request("dev@example.com", "", true));
   assert.equal(duplicate.status, 200);
   assert.deepEqual(await duplicate.json(), { status: "joined" });
   assert.equal(
     calls.length,
-    1,
+    0,
     "duplicate signups must not send another email"
   );
 
-  for (databaseResult of [500, new TypeError("Database unavailable")]) {
+  for (databaseResult of [
+    new Error("Database unavailable"),
+    new TypeError("Database unavailable")
+  ]) {
     calls = [];
     const failed = await POST(request("dev@example.com", "", true));
     assert.equal(failed.status, 503);
     assert.deepEqual(await failed.json(), { status: "error" });
-    assert.equal(calls.length, 1, "failed inserts must not send an email");
+    assert.equal(calls.length, 0, "failed inserts must not send an email");
   }
 
-  databaseResult = 201;
+  databaseResult = "joined";
   for (emailResult of [
     200,
     429,
@@ -133,7 +127,7 @@ test("validates signups and welcomes only newly saved waitlist members", async (
     const accepted = await POST(request("dev@example.com", "", true));
     assert.equal(accepted.status, 200);
     assert.deepEqual(await accepted.json(), { status: "joined" });
-    assert.equal(calls.length, 2);
+    assert.equal(calls.length, 1);
   }
 
   calls = [];
@@ -141,7 +135,7 @@ test("validates signups and welcomes only newly saved waitlist members", async (
   const withoutEmail = await POST(request("dev@example.com", "", true));
   assert.equal(withoutEmail.status, 200);
   assert.deepEqual(await withoutEmail.json(), { status: "joined" });
-  assert.equal(calls.length, 1);
+  assert.equal(calls.length, 0);
   assert.equal(
     errors.mock.callCount(),
     7,
@@ -149,7 +143,7 @@ test("validates signups and welcomes only newly saved waitlist members", async (
   );
 
   calls = [];
-  delete process.env.SUPABASE_URL;
+  delete process.env.WAITLIST_DATABASE_URL;
   const unavailable = await POST(request("dev@example.com", "", true));
   assert.equal(unavailable.status, 503);
   assert.deepEqual(await unavailable.json(), { status: "unavailable" });

@@ -1,4 +1,7 @@
 import { waitlistWelcomeEmail } from "../../../lib/waitlist-email";
+import { waitlistDatabase } from "../../../lib/waitlist-db";
+
+export const runtime = "nodejs";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -68,34 +71,22 @@ export async function POST(request: Request) {
     return redirect(request, "invalid");
   }
 
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const publishableKey = process.env.SUPABASE_PUBLISHABLE_KEY;
-  if (!supabaseUrl || !publishableKey) {
+  if (!process.env.WAITLIST_DATABASE_URL) {
     return redirect(request, "unavailable");
   }
 
   try {
-    const response = await fetch(new URL("/rest/v1/orchestrat", supabaseUrl), {
-      method: "POST",
-      headers: {
-        apikey: publishableKey,
-        "Content-Type": "application/json",
-        Prefer: "return=minimal"
-      },
-      body: JSON.stringify({ email }),
-      cache: "no-store"
-    });
-
-    if (response.ok) {
+    const result = await waitlistDatabase.insert(email);
+    if (result === "joined") {
       await sendWelcomeEmail(email);
       return redirect(request, "joined");
     }
 
-    if (response.status === 409) {
+    if (result === "duplicate") {
       return redirect(request, "joined");
     }
 
-    console.error("Waitlist insert failed", response.status);
+    console.error("Waitlist insert failed: database is unavailable");
   } catch (error) {
     console.error("Waitlist insert failed", error);
   }
