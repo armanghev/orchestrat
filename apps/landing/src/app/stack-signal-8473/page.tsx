@@ -11,7 +11,7 @@ export default function StackSignal8473Page() {
         </a>
         <a href="https://saasearch.io/product/orchestrat?utm_source=badge&amp;utm_medium=referral&amp;utm_campaign=featured_badge&amp;ref=saasearch">
           <img
-            src="https://saasearch.io/api/badge/orchestrat?theme=light"
+            src="https://saasearch.io/api/badge/orchestrat?theme=dark"
             alt="Featured on SaaSearch"
           />
         </a>
