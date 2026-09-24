@@ -116,8 +116,9 @@ credentials or claim tokens, and terminates only its own MCP children.
   deferred editor and shared CodeMirror chunks: 1345.38 kB total route/editor
   JavaScript (450.07 kB gzip). This is deferral, not removal of editor cost.
 - An isolated debug app bundle built and launched through session restoration
-  to the local dashboard. Actual Notification Center delivery, body/Open
-  click-through, and a signed packaged release remain **UNVERIFIED**.
+  to the local dashboard. At that checkpoint, actual Notification Center
+  delivery, click-through, and a signed packaged release were unverified;
+  subsequent hosted native evidence follows below.
 
 ### Hosted native candidate follow-up
 
@@ -145,10 +146,11 @@ credentials or claim tokens, and terminates only its own MCP children.
   delivery is verified by logs. The user's `2026-09-23 21:49:39` screenshot
   additionally confirms visible Notification Center entries: two `Task
   completed` notifications and one `Agent blocked`, all for the acceptance
-  task. Unsuppressed banner presentation and body/Open click-through remain
-  **UNVERIFIED**. Opening the stored notification is the
-  next manual UI gate; the available automation could not open the menu-bar
-  Notification Center control or send the Fn-N shortcut.
+  task. The user then clicked the newest completion notification and confirmed
+  that it opened the app and brought the acceptance task forward:
+  **notification body click-through, app activation, and correct-task
+  navigation PASS (user-confirmed)**. The distinct Open action button and
+  unsuppressed banner presentation remain untested; Focus was left unchanged.
 - Artifact inspection reports an ad-hoc linker signature, no TeamIdentifier,
   and no sealed resources. This build does not establish Developer ID signing,
   notarization, or clean-machine distribution trust.
