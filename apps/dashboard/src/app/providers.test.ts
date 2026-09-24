@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AuthSnapshot } from "@/features/auth/auth-client";
 import { createDashboardQueryClient } from "./query-client";
-import { watchAuthSessionBoundaries } from "./providers";
+import {
+  watchAuthSessionBoundaries,
+  watchNotificationActions
+} from "./providers";
 
 function authFixture(initial: AuthSnapshot) {
   let snapshot = initial;
@@ -57,5 +60,70 @@ describe("watchAuthSessionBoundaries", () => {
     expect(queryClient.getQueryData(["private"])).toBeUndefined();
     expect(navigate).toHaveBeenCalledWith({ to: "/" });
     stop();
+  });
+});
+
+describe("watchNotificationActions", () => {
+  it("routes task and activity destinations across projects", async () => {
+    let handle:
+      | ((
+          destination:
+            | { kind: "task"; projectId: string; taskId: string }
+            | { kind: "activity"; projectId: string }
+        ) => void)
+      | undefined;
+    const unlisten = vi.fn();
+    const platform = {
+      onNotificationAction: vi.fn(async (listener) => {
+        handle = listener;
+        return unlisten;
+      })
+    };
+    const navigate = vi.fn();
+    const stop = watchNotificationActions(platform, { navigate });
+    await Promise.resolve();
+
+    handle?.({
+      kind: "task",
+      projectId: "11111111-1111-4111-8111-111111111111",
+      taskId: "22222222-2222-4222-8222-222222222222"
+    });
+    handle?.({
+      kind: "activity",
+      projectId: "33333333-3333-4333-8333-333333333333"
+    });
+
+    expect(navigate.mock.calls).toEqual([
+      [
+        {
+          to: "/projects/$projectId/tasks",
+          params: { projectId: "11111111-1111-4111-8111-111111111111" },
+          search: { task: "22222222-2222-4222-8222-222222222222" }
+        }
+      ],
+      [
+        {
+          to: "/projects/$projectId/activity",
+          params: { projectId: "33333333-3333-4333-8333-333333333333" }
+        }
+      ]
+    ]);
+    stop();
+    expect(unlisten).toHaveBeenCalledOnce();
+  });
+
+  it("unlistens when the provider is disposed before subscription resolves", async () => {
+    let resolve!: (unsubscribe: () => void) => void;
+    const unlisten = vi.fn();
+    const platform = {
+      onNotificationAction: vi.fn(
+        () => new Promise<() => void>((done) => (resolve = done))
+      )
+    };
+    const stop = watchNotificationActions(platform, { navigate: vi.fn() });
+    stop();
+    resolve(unlisten);
+    await Promise.resolve();
+    expect(unlisten).toHaveBeenCalledOnce();
   });
 });

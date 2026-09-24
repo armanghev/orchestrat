@@ -4,6 +4,7 @@ import type {
   Platform,
   Unsubscribe
 } from "./contract";
+import { nativeNotificationDestinationSchema } from "./contract";
 import { invoke } from "@tauri-apps/api/core";
 import { preferencesSchema } from "./preferences";
 
@@ -141,12 +142,23 @@ export function createTauriPlatform(): Platform {
         throw error;
       }
     },
+    async onNotificationAction(handler): Promise<Unsubscribe> {
+      const { listen } = await import("@tauri-apps/api/event");
+      return listen<unknown>("notification-action", (event) => {
+        const destination = nativeNotificationDestinationSchema.safeParse(
+          event.payload
+        );
+        if (destination.success) handler(destination.data);
+      });
+    },
     async notify(notification: NativeNotification) {
-      const { isPermissionGranted, requestPermission, sendNotification } =
+      const { isPermissionGranted, requestPermission } =
         await import("@tauri-apps/plugin-notification");
       let granted = await isPermissionGranted();
       if (!granted) granted = (await requestPermission()) === "granted";
-      if (granted) sendNotification(notification);
+      if (granted) {
+        await invoke("show_native_notification", { notification });
+      }
     },
     async isBackgrounded() {
       const { getCurrentWindow } = await import("@tauri-apps/api/window");

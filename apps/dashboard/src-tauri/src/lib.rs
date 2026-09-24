@@ -1,5 +1,6 @@
 mod auth;
 mod integrations;
+mod notifications;
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
 
@@ -149,6 +150,7 @@ pub fn run() {
             auth::commands::auth_refresh,
             auth::commands::auth_expire,
             auth::commands::auth_sign_out,
+            notifications::show_native_notification,
             zoom_window
         ])
         .run(tauri::generate_context!())

@@ -16,6 +16,7 @@ tauri-build = { version = "2.6.3", features = [] }
 url = "2.5.8"
 
 [target.'cfg(target_os = "macos")'.dependencies]
+notify-rust = "=4.18.0"
 objc2-app-kit = { version = "0.3.2", features = ["NSScreen", "NSWindow"] }
 objc2-core-foundation = "0.3.2"
 

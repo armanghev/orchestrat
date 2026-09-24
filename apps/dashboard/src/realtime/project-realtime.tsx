@@ -17,7 +17,7 @@ import {
   invalidateCoordinationQueries,
   invalidateRealtimeEvent
 } from "@/features/coordination/query-options";
-import type { Platform } from "@/platform/contract";
+import type { NativeNotification, Platform } from "@/platform/contract";
 
 export type RealtimeStatus = "connecting" | "connected" | "disconnected";
 export type SocketLike = Pick<WebSocket, "close" | "send"> & {
@@ -31,21 +31,78 @@ export type SocketFactory = (url: string) => SocketLike;
 
 const defaultSocket: SocketFactory = (url) => new WebSocket(url);
 const MAX_RECONNECT_MS = 30_000;
+const notificationEventTypes = new Set([
+  "run.failed",
+  "claim.completed",
+  "claim.expired",
+  "task.moved"
+]);
+
+function notificationBody(value: string) {
+  const normalized = value
+    .replace(/\p{Cc}/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  return (
+    [...normalized].slice(0, 240).join("").trim() || "Task status changed."
+  );
+}
 
 export function notificationForRealtimeEvent(
   event: RealtimeEventEnvelope,
-  task?: Pick<Task, "status" | "title">
-) {
+  task?: Pick<Task, "status" | "title">,
+  claimTaskId?: string
+): NativeNotification | null {
   if (event.event_type === "run.failed")
-    return { title: "Agent run failed", body: "An agent run failed." };
+    return {
+      title: "Agent run failed",
+      body: "An agent run failed.",
+      destination: { kind: "activity", projectId: event.project_id }
+    };
   if (event.event_type === "claim.completed")
-    return { title: "Task completed", body: "An agent completed a task." };
+    return {
+      title: "Task completed",
+      body: "An agent completed a task.",
+      destination: claimTaskId
+        ? { kind: "task", projectId: event.project_id, taskId: claimTaskId }
+        : { kind: "activity", projectId: event.project_id }
+    };
   if (event.event_type === "claim.expired")
-    return { title: "Claim expired", body: "An agent claim expired." };
-  if (event.entity_type === "task" && task?.status === "done")
-    return { title: "Task completed", body: task.title };
-  if (event.entity_type === "task" && task?.status === "blocked")
-    return { title: "Agent blocked", body: task.title };
+    return {
+      title: "Claim expired",
+      body: "An agent claim expired.",
+      destination: claimTaskId
+        ? { kind: "task", projectId: event.project_id, taskId: claimTaskId }
+        : { kind: "activity", projectId: event.project_id }
+    };
+  if (
+    event.entity_type === "task" &&
+    event.entity_id &&
+    task?.status === "done"
+  )
+    return {
+      title: "Task completed",
+      body: notificationBody(task.title),
+      destination: {
+        kind: "task",
+        projectId: event.project_id,
+        taskId: event.entity_id
+      }
+    };
+  if (
+    event.entity_type === "task" &&
+    event.entity_id &&
+    task?.status === "blocked"
+  )
+    return {
+      title: "Agent blocked",
+      body: notificationBody(task.title),
+      destination: {
+        kind: "task",
+        projectId: event.project_id,
+        taskId: event.entity_id
+      }
+    };
   return null;
 }
 
@@ -58,6 +115,7 @@ export class ProjectRealtimeController {
   private catchUpSocket: SocketLike | null = null;
   private buffered: RealtimeEventEnvelope[] = [];
   private lastNotifiedSequence = 0;
+  private notificationQueue = Promise.resolve();
   private status: RealtimeStatus = "disconnected";
   private readonly listeners = new Set<() => void>();
 
@@ -203,31 +261,74 @@ export class ProjectRealtimeController {
     if (event.sequence <= this.lastSequence) return;
     this.lastSequence = event.sequence;
     void invalidateRealtimeEvent(this.queryClient, this.projectId, event);
-    void this.notifyForEvent(event);
+    if (!notificationEventTypes.has(event.event_type)) return;
+    this.notificationQueue = this.notificationQueue.then(() =>
+      this.notifyForEvent(event)
+    );
   }
 
   private async notifyForEvent(event: RealtimeEventEnvelope) {
     try {
       if (
+        this.stopped ||
         this.platform?.kind !== "desktop" ||
         !this.platform.notify ||
         event.sequence <= this.lastNotifiedSequence
       )
         return;
-      if (!(await this.isBackgrounded())) return;
+      if (!(await this.isBackgrounded()) || this.stopped) return;
       let task: Pick<Task, "status" | "title"> | undefined;
+      let claimTaskId: string | undefined;
+      let resolvedTarget = false;
       if (
         event.entity_type === "task" &&
         event.entity_id &&
         event.event_type === "task.moved"
-      )
+      ) {
         task = await this.api.getTask(event.entity_id);
-      const notification = notificationForRealtimeEvent(event, task);
-      if (!notification) return;
+        resolvedTarget = true;
+      }
+      if (
+        event.event_type === "claim.completed" ||
+        event.event_type === "claim.expired"
+      ) {
+        claimTaskId = await this.claimTaskId(event);
+        resolvedTarget = true;
+      }
+      if (resolvedTarget && (!(await this.isBackgrounded()) || this.stopped))
+        return;
+      const notification = notificationForRealtimeEvent(
+        event,
+        task,
+        claimTaskId
+      );
+      if (!notification || this.stopped) return;
       this.lastNotifiedSequence = event.sequence;
       await this.platform.notify(notification);
     } catch {
       // Notifications are best effort and must never affect realtime processing.
+    }
+  }
+
+  private async claimTaskId(event: RealtimeEventEnvelope) {
+    try {
+      const response = await this.api.listProjectEvents(this.projectId, {
+        after: event.sequence > 1 ? String(event.sequence - 1) : undefined,
+        limit: 1
+      });
+      const durable = response.events.find(
+        (candidate) =>
+          candidate.id === event.sequence && candidate.type === event.event_type
+      );
+      const taskId = durable?.payload.task_id;
+      return typeof taskId === "string" &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
+          taskId
+        )
+        ? taskId
+        : undefined;
+    } catch {
+      return undefined;
     }
   }
 

@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 export type Unsubscribe = () => void;
 
 export interface PreferenceStore {
@@ -23,9 +25,28 @@ export type LocalIntegrationStatus = {
   error?: string;
 };
 
+export const nativeNotificationDestinationSchema = z.discriminatedUnion(
+  "kind",
+  [
+    z.object({
+      kind: z.literal("task"),
+      projectId: z.string().uuid(),
+      taskId: z.string().uuid()
+    }),
+    z.object({
+      kind: z.literal("activity"),
+      projectId: z.string().uuid()
+    })
+  ]
+);
+export type NativeNotificationDestination = z.infer<
+  typeof nativeNotificationDestinationSchema
+>;
+
 export type NativeNotification = {
   title: string;
   body: string;
+  destination: NativeNotificationDestination;
 };
 
 export interface Platform {
@@ -33,6 +54,9 @@ export interface Platform {
   preferences: PreferenceStore;
   openExternal(url: URL): Promise<void>;
   onAuthCallback(handler: (url: URL) => void): Promise<Unsubscribe>;
+  onNotificationAction?(
+    handler: (destination: NativeNotificationDestination) => void
+  ): Promise<Unsubscribe>;
   isBackgrounded?(): Promise<boolean>;
   notify?(notification: NativeNotification): Promise<void>;
   localIntegrationStatus?(projectId: string): Promise<LocalIntegrationStatus>;

@@ -2937,6 +2937,7 @@ dependencies = [
  "dotenvy",
  "httpmock",
  "keyring",
+ "notify-rust",
  "objc2-app-kit",
  "objc2-core-foundation",
  "rand 0.10.2",

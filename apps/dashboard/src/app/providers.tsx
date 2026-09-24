@@ -10,6 +10,10 @@ import {
 } from "@/features/auth/auth-client";
 import { useAuthClient } from "@/features/auth/auth-context";
 import { ApiClient } from "@/lib/api/client";
+import type {
+  NativeNotificationDestination,
+  Platform
+} from "@/platform/contract";
 import { PlatformProvider, usePlatform } from "@/platform/provider";
 import { PreferencesProvider } from "@/platform/preferences-provider";
 import { ThemeProvider } from "@/features/theme/theme-provider";
@@ -42,6 +46,53 @@ export function watchAuthSessionBoundaries(
   });
 }
 
+type NotificationNavigation =
+  | {
+      to: "/projects/$projectId/tasks";
+      params: { projectId: string };
+      search: { task: string };
+    }
+  | {
+      to: "/projects/$projectId/activity";
+      params: { projectId: string };
+    };
+
+export function watchNotificationActions(
+  platform: Pick<Platform, "onNotificationAction">,
+  router: { navigate(options: NotificationNavigation): unknown }
+) {
+  if (!platform.onNotificationAction) return () => undefined;
+  let active = true;
+  let unsubscribe: (() => void) | undefined;
+  void platform
+    .onNotificationAction((destination: NativeNotificationDestination) => {
+      if (!active) return;
+      if (destination.kind === "task") {
+        void router.navigate({
+          to: "/projects/$projectId/tasks",
+          params: { projectId: destination.projectId },
+          search: { task: destination.taskId }
+        });
+      } else {
+        void router.navigate({
+          to: "/projects/$projectId/activity",
+          params: { projectId: destination.projectId }
+        });
+      }
+    })
+    .then((stop) => {
+      if (active) unsubscribe = stop;
+      else stop();
+    })
+    .catch(() => {
+      // Notification click delivery is best effort and must not disrupt the app shell.
+    });
+  return () => {
+    active = false;
+    unsubscribe?.();
+  };
+}
+
 function RouterRuntime({ config }: { config: PublicConfig }) {
   const auth = useAuthClient();
   const platform = usePlatform();
@@ -54,6 +105,10 @@ function RouterRuntime({ config }: { config: PublicConfig }) {
   useEffect(
     () => watchAuthSessionBoundaries(auth, queryClient, router),
     [auth, queryClient, router]
+  );
+  useEffect(
+    () => watchNotificationActions(platform, router),
+    [platform, router]
   );
 
   return (

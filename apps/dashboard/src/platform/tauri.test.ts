@@ -3,10 +3,17 @@ import { createTauriPlatform } from "./tauri";
 
 const mocks = vi.hoisted(() => ({
   deepLink: { getCurrent: vi.fn(), onOpenUrl: vi.fn() },
+  event: { listen: vi.fn() },
+  notification: {
+    isPermissionGranted: vi.fn(),
+    requestPermission: vi.fn()
+  },
   invoke: vi.fn()
 }));
 
 vi.mock("@tauri-apps/plugin-deep-link", () => mocks.deepLink);
+vi.mock("@tauri-apps/api/event", () => mocks.event);
+vi.mock("@tauri-apps/plugin-notification", () => mocks.notification);
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
 
 describe("Tauri auth callbacks", () => {
@@ -75,6 +82,64 @@ describe("Tauri auth callbacks", () => {
       error
     );
     expect(mocks.deepLink.onOpenUrl).toHaveBeenCalledOnce();
+    expect(unlisten).toHaveBeenCalledOnce();
+  });
+});
+
+describe("Tauri notifications", () => {
+  const projectId = "11111111-1111-4111-8111-111111111111";
+  const taskId = "22222222-2222-4222-8222-222222222222";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.notification.isPermissionGranted.mockResolvedValue(true);
+    mocks.notification.requestPermission.mockResolvedValue("granted");
+  });
+
+  it("invokes the native response-aware notification command", async () => {
+    const notification = {
+      title: "Task completed",
+      body: "Ship it",
+      destination: { kind: "task" as const, projectId, taskId }
+    };
+    await createTauriPlatform().notify?.(notification);
+    expect(mocks.invoke).toHaveBeenCalledWith("show_native_notification", {
+      notification
+    });
+  });
+
+  it("does not invoke native delivery when permission is denied", async () => {
+    mocks.notification.isPermissionGranted.mockResolvedValue(false);
+    mocks.notification.requestPermission.mockResolvedValue("denied");
+    await createTauriPlatform().notify?.({
+      title: "Agent run failed",
+      body: "An agent run failed.",
+      destination: { kind: "activity", projectId }
+    });
+    expect(mocks.invoke).not.toHaveBeenCalled();
+  });
+
+  it("delivers only validated typed native click destinations", async () => {
+    let listener: ((event: { payload: unknown }) => void) | undefined;
+    const unlisten = vi.fn();
+    mocks.event.listen.mockImplementation(async (_name, callback) => {
+      listener = callback;
+      return unlisten;
+    });
+    const received = vi.fn();
+    const stop = await createTauriPlatform().onNotificationAction?.(received);
+    expect(mocks.event.listen).toHaveBeenCalledWith(
+      "notification-action",
+      expect.any(Function)
+    );
+    listener?.({ payload: { kind: "task", projectId, taskId } });
+    listener?.({
+      payload: { kind: "task", projectId, taskId: "../../settings" }
+    });
+    listener?.({ payload: { kind: "url", url: "https://example.com" } });
+    expect(received).toHaveBeenCalledOnce();
+    expect(received).toHaveBeenCalledWith({ kind: "task", projectId, taskId });
+    stop?.();
     expect(unlisten).toHaveBeenCalledOnce();
   });
 });
