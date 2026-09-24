@@ -261,7 +261,9 @@ ORCHESTRAT_DESKTOP_AUTH_PORTAL_URL
 
 ## CLI install and setup
 
-The publishable CLI requires Node.js `>=20` and bundles its SDK/MCP runtime.
+The publishable CLI requires Node.js `^20.19.0 || >=22.12.0` and bundles its SDK/MCP runtime.
+Earlier Node 20 releases cannot load the prompt library's `node:util.styleText`
+import and are not supported.
 Agent-authored tasks make `created_by_user_id` nullable, so testers must upgrade
 to `0.1.0-alpha.1` before agent task creation is enabled. Older clients may
 reject a task list containing an agent-authored task; no human creator is

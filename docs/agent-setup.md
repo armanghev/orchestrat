@@ -2,7 +2,8 @@
 
 This guide covers the current macOS/private-alpha path for connecting supported
 coding agents to one Orchestrat project. It is for trusted testers running from
-the intended project directory. The CLI requires Node.js 20+ and installs a
+the intended project directory. The CLI requires Node.js 20.19+ on the 20.x line
+or Node.js 22.12+ and installs a
 self-contained managed runtime under `~/.orchestrat/runtimes` with a stable
 `~/.local/bin/orchestrat` launcher. Use the
 [private-alpha runbook](private-alpha-runbook.md) for verified release
