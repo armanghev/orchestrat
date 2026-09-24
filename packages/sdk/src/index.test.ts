@@ -275,6 +275,12 @@ test("maps typed agent document routes and sends revision preconditions", async 
     author: { type: "agent", id },
     created_at: timestamp
   };
+  const folder = {
+    id,
+    project_id: id,
+    path: "docs",
+    created_at: timestamp
+  };
   const calls: Array<{ url: string; init?: RequestInit }> = [];
   const client = new AgentApiClient({
     baseUrl: "https://api.test",
@@ -285,14 +291,14 @@ test("maps typed agent document routes and sends revision preconditions", async 
         JSON.stringify(
           init?.method === "GET" &&
             new URL(String(url)).pathname.endsWith("/documents")
-            ? { documents: [document], next_cursor: null }
+            ? { documents: [document], folders: [folder], next_cursor: null }
             : { document, revision }
         ),
         { status: 200 }
       );
     }
   });
-  await client.listDocuments({ limit: 1 });
+  const listed = await client.listDocuments({ limit: 1 });
   await client.readDocument(id);
   await client.createDocument({ path: "docs/README.md", content: "hello" });
   await client.updateDocument(id, { content: "updated", base_revision: 1 });
@@ -300,6 +306,7 @@ test("maps typed agent document routes and sends revision preconditions", async 
     calls[0]!.url,
     "https://api.test/api/v1/agent/documents?limit=1&include_archived=false"
   );
+  assert.deepEqual(listed.folders, [folder]);
   assert.equal(calls[1]!.url, `https://api.test/api/v1/agent/documents/${id}`);
   assert.equal(calls[2]!.init?.method, "POST");
   assert.equal(calls[3]!.init?.method, "PATCH");
@@ -307,6 +314,29 @@ test("maps typed agent document routes and sends revision preconditions", async 
     content: "updated",
     base_revision: 1
   });
+});
+
+test("rejects non-Markdown document create and rename paths before HTTP", () => {
+  let calls = 0;
+  const client = new AgentApiClient({
+    baseUrl: "https://api.test",
+    token,
+    fetch: async () => {
+      calls += 1;
+      return new Response();
+    }
+  });
+
+  assert.throws(() =>
+    client.createDocument({ path: "docs/notes.txt", content: "notes" })
+  );
+  assert.throws(() =>
+    client.renameDocument(id, {
+      path: "docs/renamed.txt",
+      expected_revision: 1
+    })
+  );
+  assert.equal(calls, 0);
 });
 
 test("supports exact edits, summary history, lifecycle, and unsigned object puts", async () => {

@@ -268,38 +268,63 @@ reject a task list containing an agent-authored task; no human creator is
 fabricated for compatibility.
 
 Before publication, build, pack, and install the exact alpha into a disposable
-prefix:
+prefix. The current release candidate is `0.1.0-alpha.2`; it includes origin-bound
+credentials, safe setup writes, document folders and Markdown-path validation,
+and the `RATE_LIMITED` wire error. Rebuild workspace dependencies before packing:
 
 ```sh
-mkdir -p /private/tmp/orchestrat-alpha/install
-pnpm --filter @orchestrat/cli build
-pnpm --filter @orchestrat/cli pack --pack-destination /private/tmp/orchestrat-alpha
-npm install --prefix /private/tmp/orchestrat-alpha/install \
-  --cache /private/tmp/orchestrat-alpha/npm-cache \
+release_dir=$(mktemp -d /private/tmp/orchestrat-alpha.XXXXXX)
+pnpm --filter @orchestrat/cli... build
+pnpm --filter @orchestrat/cli pack --pack-destination "$release_dir"
+npm install --prefix "$release_dir/install" \
+  --cache "$release_dir/npm-cache" \
   --ignore-scripts --no-audit --no-fund \
-  /private/tmp/orchestrat-alpha/orchestrat-cli-0.1.0-alpha.1.tgz
+  "$release_dir/orchestrat-cli-0.1.0-alpha.2.tgz"
 scripts/acceptance/verify-cli-alpha.sh \
-  /private/tmp/orchestrat-alpha/install/node_modules/.bin/orchestrat
+  "$release_dir/install/node_modules/.bin/orchestrat" 0.1.0-alpha.2
 ```
 
-After an authorized npm publication exists, the intended clean-Mac command is:
+Publish that exact verified tarball with `npm publish <tarball> --access public
+--tag alpha --ignore-scripts`. Fetch the version from npm into a fresh prefix,
+verify its integrity and repeat artifact checks, then run hosted two-agent
+acceptance before promoting it with `npm dist-tag add @orchestrat/cli@0.1.0-alpha.2
+latest`. A failed acceptance must not advance `latest` or overwrite a version.
+Record publication and live acceptance separately; a source build alone proves
+neither. Hosted testing uses alpha at `api.orchestrat.dev` and
+`app.orchestrat.dev`; dev credentials belong only to localhost.
+
+After the staged npm publication exists, install or upgrade from the intended
+project directory using the exact version:
+
+```sh
+npx --yes @orchestrat/cli@0.1.0-alpha.2 setup
+orchestrat --version
+orchestrat doctor
+```
+
+Setup refreshes the persistent launcher as well as configuring the selected
+agents. Merely downloading a package does not replace an older managed runtime;
+verify the launcher reports `0.1.0-alpha.2` and restart agent MCP connections.
+After promotion, the default clean-Mac command is:
 
 ```sh
 npx @orchestrat/cli@latest setup
 ```
 
-That registry flow is **not currently verified**. The disposable-prefix check
-validates the packed local artifact and bundled MCP registry, but it is not a
-registry publication or clean-Mac setup test. A source build check is:
+The disposable-prefix check validates the packed artifact and bundled MCP
+registry, but is not itself a clean-Mac setup test. A source build check is:
 
 ```sh
-pnpm --filter @orchestrat/cli build
+pnpm --filter @orchestrat/cli... build
 node apps/cli/dist/main.js --version
 ```
 
-Setup uses browser authorization, stores separate `cli`,
-`agent:codex`, and `agent:claude-code` credentials in macOS Keychain, and
+Setup uses browser authorization, stores separate `cli:<api-origin>` and
+`agent:<project-id>:<integration>:<api-origin>` credentials in macOS Keychain, and
 merges only managed Codex/Claude entries after printing a preview. The
+self-contained runtime ignores legacy unbound credentials: run setup again for
+each intended API after upgrading an older installation; never copy a localhost
+credential into a hosted credential slot. The
 self-contained runtime is copied under `~/.orchestrat/runtimes`; the stable
 launcher is `~/.local/bin/orchestrat`. If setup reports that `.local/bin` is
 not on PATH, apply its printed command, for example:

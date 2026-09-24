@@ -4,8 +4,8 @@ This guide covers the current macOS/private-alpha path for connecting supported
 coding agents to one Orchestrat project. It is for trusted testers running from
 the intended project directory. The CLI requires Node.js 20+ and installs a
 self-contained managed runtime under `~/.orchestrat/runtimes` with a stable
-`~/.local/bin/orchestrat` launcher. Official registry distribution is not yet
-verified; use the [private-alpha runbook](private-alpha-runbook.md) for release
+`~/.local/bin/orchestrat` launcher. Use the
+[private-alpha runbook](private-alpha-runbook.md) for verified release
 status, deployment operations, and the clean-Mac acceptance boundary.
 
 ## Prerequisites
@@ -25,6 +25,12 @@ Run setup from the project directory whose mapping should be used:
 ```bash
 orchestrat setup
 ```
+
+For the `0.1.0-alpha.2` release, once available on npm, install or upgrade with
+`npx --yes @orchestrat/cli@0.1.0-alpha.2 setup`, then check `orchestrat --version`
+and restart agent MCP connections. Running an older persistent launcher does
+not automatically fetch the newest npm package. The `latest` tag advances only
+after hosted acceptance; use the exact version during staged release testing.
 
 Setup detects installed Claude Code, Codex, Cursor, Antigravity, OpenCode, and
 Pi commands, then asks which configurable agents to connect. Before any
