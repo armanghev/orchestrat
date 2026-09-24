@@ -44,17 +44,6 @@ export function Footer() {
           arman@orchestrat.dev
         </a>
       </p>
-      <a
-        href="https://maidensail.com/startup/orchestrat-2"
-        rel="dofollow"
-        className="mb-7 inline-block"
-      >
-        <img
-          src="https://maidensail.com/badge/orchestrat-2.svg?theme=dark"
-          alt="Featured on Maidensail"
-          height="44"
-        />
-      </a>
       <div className="flex flex-col justify-between gap-3 border-t py-7 text-xs text-muted-foreground sm:flex-row">
         <p>© {new Date().getFullYear()} Orchestrat. All rights reserved.</p>
         <nav aria-label="Legal" className="flex flex-wrap gap-x-5 gap-y-3">

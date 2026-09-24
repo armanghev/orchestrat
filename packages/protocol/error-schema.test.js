@@ -24,6 +24,7 @@ import {
   realtimeSocketQuerySchema,
   realtimeTicketRequestSchema,
   realtimeTicketResponseSchema,
+  renameDocumentRequestSchema,
   updateDocumentRequestSchema
 } from "./dist/index.js";
 
@@ -40,6 +41,20 @@ test("preserves task errors on the full wire schema", () => {
   assert.equal(
     apiErrorResponseSchema.parse(taskError).error.code,
     "TASK_VERSION_CONFLICT"
+  );
+});
+
+test("preserves rate-limit errors on the full wire schema", () => {
+  assert.equal(
+    apiErrorResponseSchema.parse({
+      error: {
+        code: "RATE_LIMITED",
+        message: "Too many requests.",
+        details: { retry_after_seconds: 60 },
+        request_id: "req_rate_limited"
+      }
+    }).error.code,
+    "RATE_LIMITED"
   );
 });
 
@@ -142,7 +157,16 @@ test("accepts normalized document paths and revision conflicts", () => {
     "# Notes"
   );
   assert.throws(() =>
-    createDocumentRequestSchema.parse({ path: "src/index.ts", content: "" })
+    createDocumentRequestSchema.parse({
+      path: "src/index.ts",
+      content: "# Notes"
+    })
+  );
+  assert.throws(() =>
+    renameDocumentRequestSchema.parse({
+      path: "docs/notes.txt",
+      expected_revision: 1
+    })
   );
   assert.equal(
     createDocumentFolderRequestSchema.parse({ path: "docs/guides" }).path,

@@ -2,14 +2,15 @@
 set -eu
 
 cli=${1-}
-[ -n "$cli" ] && [ -x "$cli" ] || {
-  echo "usage: $0 /absolute/path/to/orchestrat" >&2
+expected_version=${2-}
+[ "$#" -eq 2 ] && [ -n "$cli" ] && [ -x "$cli" ] && [ -n "$expected_version" ] || {
+  echo "usage: $0 /absolute/path/to/orchestrat expected-version" >&2
   exit 64
 }
 
 version=$("$cli" --version)
-[ "$version" = "0.1.0-alpha.1" ] || {
-  echo "expected 0.1.0-alpha.1, got $version" >&2
+[ "$version" = "$expected_version" ] || {
+  echo "expected $expected_version, got $version" >&2
   exit 1
 }
 
@@ -47,9 +48,9 @@ await mkdir(dirname(copiedBundle), { recursive: true });
 let source = await readFile(bundle, "utf8");
 source = source.replace(
   /export \{\s*main,\s*parseInvocationArgs\s*\};/,
-  "export { main, parseInvocationArgs, startStdioBridge };"
+  "export { main, parseInvocationArgs, startStdioBridge, apiErrorResponseSchema, documentsResponseSchema, createDocumentRequestSchema, renameDocumentRequestSchema };"
 );
-assert.match(source, /export \{ main, parseInvocationArgs, startStdioBridge \};/);
+assert.match(source, /export \{ main, parseInvocationArgs, startStdioBridge, apiErrorResponseSchema, documentsResponseSchema, createDocumentRequestSchema, renameDocumentRequestSchema \};/);
 await writeFile(copiedBundle, source);
 await copyFile(join(dirname(dirname(bundle)), "package.json"), join(packageRoot, "package.json"));
 await writeFile(
@@ -62,8 +63,18 @@ await writeFile(
 );
 
 const runner = `
-  import { startStdioBridge } from ${JSON.stringify(pathToFileURL(copiedBundle).href)};
+  import assert from "node:assert/strict";
+  import { startStdioBridge, apiErrorResponseSchema, documentsResponseSchema, createDocumentRequestSchema, renameDocumentRequestSchema } from ${JSON.stringify(pathToFileURL(copiedBundle).href)};
   const id = "00000000-0000-4000-8000-000000000001";
+  assert.equal(apiErrorResponseSchema.parse({ error: {
+    code: "RATE_LIMITED", message: "Slow down", details: {}, request_id: "req_artifact"
+  } }).error.code, "RATE_LIMITED");
+  const folder = { id, project_id: id, path: "docs", created_at: "2026-09-24T00:00:00.000Z" };
+  assert.deepEqual(documentsResponseSchema.parse({ documents: [], folders: [folder], next_cursor: null }).folders, [folder]);
+  assert.deepEqual(documentsResponseSchema.parse({ documents: [], next_cursor: null }).folders, []);
+  assert.equal(createDocumentRequestSchema.parse({ path: "docs/README.md", content: "hello" }).path, "docs/README.md");
+  assert.throws(() => createDocumentRequestSchema.parse({ path: "docs/file.txt", content: "hello" }));
+  assert.throws(() => renameDocumentRequestSchema.parse({ path: "docs/file.txt", expected_revision: 1 }));
   const client = {
     async openSession() { return { session: { id } }; },
     async closeSession() { return {}; },
