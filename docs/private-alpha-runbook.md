@@ -261,6 +261,12 @@ ORCHESTRAT_DESKTOP_AUTH_PORTAL_URL
 
 ## CLI install and setup
 
+`0.1.0-alpha.2` is published under both `alpha` and `latest`. The exact registry
+artifact passed hosted-alpha two-agent acceptance; see the
+[release record](acceptance/2026-09-24-cli-alpha2-release.md) for evidence and the
+existing-Mac testing boundary. The procedure below records the staged release
+workflow; do not republish the immutable version.
+
 The publishable CLI requires Node.js `^20.19.0 || >=22.12.0` and bundles its SDK/MCP runtime.
 Earlier Node 20 releases cannot load the prompt library's `node:util.styleText`
 import and are not supported.
@@ -270,7 +276,7 @@ reject a task list containing an agent-authored task; no human creator is
 fabricated for compatibility.
 
 Before publication, build, pack, and install the exact alpha into a disposable
-prefix. The current release candidate is `0.1.0-alpha.2`; it includes origin-bound
+prefix. Release `0.1.0-alpha.2` includes origin-bound
 credentials, safe setup writes, document folders and Markdown-path validation,
 and the `RATE_LIMITED` wire error. Rebuild workspace dependencies before packing:
 

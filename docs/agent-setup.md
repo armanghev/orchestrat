@@ -27,7 +27,9 @@ Run setup from the project directory whose mapping should be used:
 orchestrat setup
 ```
 
-For the `0.1.0-alpha.2` release, once available on npm, install or upgrade with
+The `0.1.0-alpha.2` release is published under both `alpha` and `latest`;
+see the [release acceptance record](acceptance/2026-09-24-cli-alpha2-release.md).
+Install or upgrade with
 `npx --yes @orchestrat/cli@0.1.0-alpha.2 setup`, then check `orchestrat --version`
 and restart agent MCP connections. Running an older persistent launcher does
 not automatically fetch the newest npm package. The `latest` tag advances only
