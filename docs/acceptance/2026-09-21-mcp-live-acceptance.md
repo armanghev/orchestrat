@@ -81,12 +81,24 @@ credentials or claim tokens, and terminates only its own MCP children.
   Git ancestry confirms it contains API hardening commit `f3be8ee`; its
   `apps/api` and `packages/config` trees match this candidate. These health
   checks do not independently exercise hosted rate limits or shutdown.
-- At `2026-09-24T03:01:17Z`, the public dashboard still served
-  `assets/index-DJmpbZcD.js` containing alpha Supabase ref
-  `smksrtwjwgwyfjhozamd`, not the requested dev ref
-  `gyljsbasvnxpeowfonqp`. Its API origin was correct. Hosted acceptance remains
-  **BLOCKED** until the frontend is rebuilt against the dev authentication
-  project and fresh sign-in succeeds end to end.
+- The user clarified the release target: **both hosted services use alpha**
+  (`smksrtwjwgwyfjhozamd`); dev credentials are for localhost only. The earlier
+  request to rebuild the hosted dashboard against dev was a test-target error,
+  not a deployment requirement. No hosted configuration was changed in this
+  follow-up.
+- The dashboard custom domain now resolves to the ready deployment of PR #14
+  merge commit `471cef3`, serving `assets/index-vvgE9XGi.js`. Fresh GitHub
+  sign-in completed and the real alpha dashboard loaded existing projects.
+  A new disposable project, `c72ed7bb-6497-4c2a-a6f5-ccb3ad0cc29b`
+  (`Alpha acceptance 2026-09-24`), was created for the remaining checks.
+- The installed CLI remains `0.1.0-alpha.1`, SHA-256
+  `b5f4af41ea2e0a788d4e7a54d4401965dd9bbcdc946dd0fc0a10253c3ad4f388`.
+  Direct inspection confirms it uses bare `cli` and
+  `agent:<project>:<integration>` Keychain accounts, unlike the current source's
+  origin-scoped accounts. Existing localhost credentials must not be reused for
+  hosted authorization. A fresh, memory-only CLI authorization was requested
+  but expired without approval. No test agents, credentials, or mappings were
+  created. The hosted two-agent run remains **PENDING** user approval.
 
 ### Candidate checks and remaining native gate
 
@@ -106,3 +118,34 @@ credentials or claim tokens, and terminates only its own MCP children.
 - An isolated debug app bundle built and launched through session restoration
   to the local dashboard. Actual Notification Center delivery, body/Open
   click-through, and a signed packaged release remain **UNVERIFIED**.
+
+### Hosted native candidate follow-up
+
+- Built and launched a separate `Orchestrat Alpha Acceptance.app` from this
+  checkout with hosted alpha public configuration, bundle identifier
+  `dev.orchestrat.desktop.alpha-acceptance`, and isolated auth namespace
+  `alpha-acceptance`. The installed application and repository environment
+  files were not replaced. This is a local debug bundle, not a published release.
+- Its GitHub browser sign-in returned successfully to the native dashboard and
+  loaded the disposable alpha project. The first callback targeted the earlier
+  local debug `Orchestrat Dev.app`; it was cancelled before handoff. Removing
+  only that temporary bundle's competing Launch Services registration and
+  registering the alpha test bundle resolved the callback target.
+- Created disposable task `efe4fad1-b5ec-4d23-a51c-e2597af04d63` (`ALP-1`,
+  `Native alpha notification acceptance`) through the hosted dashboard. The
+  native overview received its creation and completion in real time.
+- Completing it while the native app was backgrounded produced the macOS
+  notification-permission prompt for `Orchestrat Alpha Acceptance`. The user
+  approved allowing notifications; System Settings confirms permission is on
+  with Desktop and Notification Center enabled.
+- Subsequent blocked/completed transitions reached the macOS notification
+  service. At `2026-09-24T04:45:37Z`, system logs confirm successful delivery
+  and storage in Notification Center, but report `muted by DND suppression:
+  delay` under the active Focus mode. Focus settings were not changed. Native
+  delivery is verified by logs; visible banner presentation and body/Open
+  click-through remain **UNVERIFIED**. Opening the stored notification is the
+  next manual UI gate; the available automation could not open the menu-bar
+  Notification Center control or send the Fn-N shortcut.
+- Artifact inspection reports an ad-hoc linker signature, no TeamIdentifier,
+  and no sealed resources. This build does not establish Developer ID signing,
+  notarization, or clean-machine distribution trust.
