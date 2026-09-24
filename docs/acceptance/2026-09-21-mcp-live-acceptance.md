@@ -142,8 +142,11 @@ credentials or claim tokens, and terminates only its own MCP children.
   service. At `2026-09-24T04:45:37Z`, system logs confirm successful delivery
   and storage in Notification Center, but report `muted by DND suppression:
   delay` under the active Focus mode. Focus settings were not changed. Native
-  delivery is verified by logs; visible banner presentation and body/Open
-  click-through remain **UNVERIFIED**. Opening the stored notification is the
+  delivery is verified by logs. The user's `2026-09-23 21:49:39` screenshot
+  additionally confirms visible Notification Center entries: two `Task
+  completed` notifications and one `Agent blocked`, all for the acceptance
+  task. Unsuppressed banner presentation and body/Open click-through remain
+  **UNVERIFIED**. Opening the stored notification is the
   next manual UI gate; the available automation could not open the menu-bar
   Notification Center control or send the Fn-N shortcut.
 - Artifact inspection reports an ad-hoc linker signature, no TeamIdentifier,
