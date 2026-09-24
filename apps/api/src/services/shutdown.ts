@@ -14,7 +14,6 @@ export const createShutdownHandler = (
       logger.error({ signal, timeout_ms: timeoutMs }, "API shutdown timed out");
       exit(1);
     }, timeoutMs);
-    timeout.unref();
     void close().then(
       () => {
         clearTimeout(timeout);
