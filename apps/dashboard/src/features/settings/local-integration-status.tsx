@@ -133,7 +133,11 @@ export function LocalIntegrationStatusSection({
       </div>
       <div className="space-y-2">
         <div className="flex items-center justify-between gap-3">
-          <code className="min-w-0 flex-1 overflow-x-auto rounded bg-background px-2 py-1 text-xs">
+          <code
+            tabIndex={0}
+            aria-label="Setup command"
+            className="min-w-0 flex-1 overflow-x-auto rounded bg-background px-2 py-1 text-xs"
+          >
             {setupCommand}
           </code>
           <Button
@@ -153,7 +157,11 @@ export function LocalIntegrationStatusSection({
       <div className="grid gap-2 sm:grid-cols-2">
         {[statusCommand, doctorCommand].map((command) => (
           <div key={command} className="flex items-center gap-2">
-            <code className="min-w-0 flex-1 overflow-x-auto rounded bg-background px-2 py-1 text-xs">
+            <code
+              tabIndex={0}
+              aria-label="Local integration command"
+              className="min-w-0 flex-1 overflow-x-auto rounded bg-background px-2 py-1 text-xs"
+            >
               {command}
             </code>
             <Button

@@ -8,7 +8,14 @@ import {
   EmptyDescription
 } from "@/components/ui/empty";
 import { cn } from "@/lib/cn";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useRef,
+  useState
+} from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import type { MDXEditorMethods } from "@mdxeditor/editor";
@@ -33,7 +40,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
-import { MarkdownEditor } from "@/features/documents/markdown-editor";
 import { DocumentHistory } from "@/features/documents/document-history";
 import {
   coordinationKeys,
@@ -57,6 +63,11 @@ const SUPPORTED_IMAGE_TYPES = new Set([
   "image/png",
   "image/webp"
 ]);
+const MarkdownEditor = lazy(() =>
+  import("@/features/documents/markdown-editor").then(({ MarkdownEditor }) => ({
+    default: MarkdownEditor
+  }))
+);
 
 export const Route = createFileRoute(
   "/_authenticated/projects/$projectId/documents"
@@ -1183,28 +1194,36 @@ function DocumentEditor({
           {baseRevision === null ? (
             <p className="p-4 text-sm text-muted-foreground">Loading editor…</p>
           ) : (
-            <MarkdownEditor
-              ref={editorRef}
-              markdown={draft}
-              readOnly={archived}
-              onChange={(markdown, initialMarkdownNormalize) => {
-                if (programmaticMarkdownRef.current !== null) {
-                  programmaticMarkdownRef.current = null;
-                  return;
-                }
-                if (initialMarkdownNormalize) return;
-                setEditorError(null);
-                draftRef.current = markdown;
-                setDraft(markdown);
-              }}
-              onError={({ error, source }) => {
-                draftRef.current = source;
-                setDraft(source);
-                setEditorError(error);
-              }}
-              imageUploadHandler={uploadImage}
-              imagePreviewHandler={previewImage}
-            />
+            <Suspense
+              fallback={
+                <p role="status" className="p-4 text-sm text-muted-foreground">
+                  Loading editor…
+                </p>
+              }
+            >
+              <MarkdownEditor
+                ref={editorRef}
+                markdown={draft}
+                readOnly={archived}
+                onChange={(markdown, initialMarkdownNormalize) => {
+                  if (programmaticMarkdownRef.current !== null) {
+                    programmaticMarkdownRef.current = null;
+                    return;
+                  }
+                  if (initialMarkdownNormalize) return;
+                  setEditorError(null);
+                  draftRef.current = markdown;
+                  setDraft(markdown);
+                }}
+                onError={({ error, source }) => {
+                  draftRef.current = source;
+                  setDraft(source);
+                  setEditorError(error);
+                }}
+                imageUploadHandler={uploadImage}
+                imagePreviewHandler={previewImage}
+              />
+            </Suspense>
           )}
         </div>
       </section>

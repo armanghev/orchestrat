@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { lazy, Suspense, useMemo, useState } from "react";
 import {
   useInfiniteQuery,
   useMutation,
@@ -19,7 +19,12 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { coordinationKeys } from "@/features/coordination/query-options";
 import type { ApiClient, DocumentRevisionSummary } from "@/lib/api/client";
-import { DocumentDiff } from "./document-diff";
+
+const DocumentDiff = lazy(() =>
+  import("./document-diff").then(({ DocumentDiff }) => ({
+    default: DocumentDiff
+  }))
+);
 
 export type DocumentHistoryProps = {
   api: ApiClient;
@@ -238,10 +243,12 @@ function HistoryDialog({
               No changes from the current version.
             </p>
           ) : detail.data ? (
-            <DocumentDiff
-              original={detail.data.content}
-              current={currentRevision.content}
-            />
+            <Suspense fallback={<Skeleton className="h-full min-h-64" />}>
+              <DocumentDiff
+                original={detail.data.content}
+                current={currentRevision.content}
+              />
+            </Suspense>
           ) : (
             <p className="place-self-center text-sm text-muted-foreground">
               {history.isPending

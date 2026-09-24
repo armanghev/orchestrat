@@ -16,6 +16,10 @@ const now = "2026-01-01T00:00:00.000Z";
 type HierarchyState = {
   organizations: Array<Record<string, unknown>>;
   projects: Record<string, Array<Record<string, unknown>>>;
+  tasks?: Array<Record<string, unknown>>;
+  agents?: Array<Record<string, unknown>>;
+  documents?: Array<Record<string, unknown>>;
+  events?: Array<Record<string, unknown>>;
   failingOrganizationId?: string;
   abortOrganizations?: boolean;
   unauthorized?: "once" | "always";
@@ -127,16 +131,46 @@ async function mockHierarchy(page: Page, state: HierarchyState) {
           avatar_url: null
         }
       });
+    if (/^\/api\/v1\/organizations\/[^/]+\/members$/.test(path))
+      return route.fulfill({
+        json: {
+          members: [
+            {
+              user_id: ids.user,
+              username: "e2e_user",
+              full_name: "E2E User",
+              email: "e2e@example.com",
+              avatar_url: null,
+              role: "owner",
+              created_at: now
+            }
+          ]
+        }
+      });
     if (/^\/api\/v1\/projects\/[^/]+\/tasks$/.test(path))
       return route.fulfill({
-        json: { tasks: [], total: 0, next_cursor: null }
+        json: {
+          tasks: state.tasks ?? [],
+          total: state.tasks?.length ?? 0,
+          next_cursor: null
+        }
       });
     if (/^\/api\/v1\/projects\/[^/]+\/agents$/.test(path))
-      return route.fulfill({ json: { agents: [] } });
+      return route.fulfill({ json: { agents: state.agents ?? [] } });
+    if (/^\/api\/v1\/projects\/[^/]+\/documents$/.test(path))
+      return route.fulfill({
+        json: {
+          documents: state.documents ?? [],
+          folders: [],
+          next_cursor: null
+        }
+      });
     if (/^\/api\/v1\/projects\/[^/]+\/presence$/.test(path))
       return route.fulfill({ json: { agents: [] } });
     if (/^\/api\/v1\/projects\/[^/]+\/events$/.test(path))
-      return route.fulfill({ json: { events: [], next_cursor: null } });
+      return route.fulfill({
+        json: { events: state.events ?? [], next_cursor: null }
+      });
     if (path === "/api/v1/realtime/tickets")
       return route.fulfill({
         json: { ticket: "e2e-realtime-ticket", expires_at: now }
@@ -322,7 +356,7 @@ test("project shell switches projects and persists recency", async ({
   await expectNoAxe(page);
 });
 
-test("creates, edits, and comments on a task with human and agent authors", async ({
+test("@phone creates, edits, and comments on a task with human and agent authors", async ({
   page
 }) => {
   await seed(page);
@@ -456,6 +490,190 @@ test("creates, edits, and comments on a task with human and agent authors", asyn
   await expect(
     page.getByText("Human review complete.", { exact: true })
   ).toBeVisible();
+  await expectNoAxe(page);
+});
+
+test("@phone task details render Markdown and edit dependencies", async ({
+  page
+}) => {
+  const task = {
+    id: ids.task,
+    project_id: ids.alpha,
+    key: "ALPHA-1",
+    title: "Ship phone controls",
+    description: "**Ready** for the [mobile guide](https://example.com/guide).",
+    priority: "medium",
+    status: "ready",
+    position: 0,
+    version: 1,
+    created_by: { type: "human", id: ids.user },
+    created_by_user_id: ids.user,
+    created_at: now,
+    updated_at: now,
+    started_at: null,
+    completed_at: null,
+    cancelled_at: null,
+    comment_count: 0,
+    unresolved_blocker_count: 0
+  };
+  const dependency = {
+    ...task,
+    id: "00000000-0000-4000-8000-000000000012",
+    key: "ALPHA-2",
+    title: "Publish the guide",
+    position: 1,
+    description: null
+  };
+  let dependsOn = false;
+  await seed(page);
+  await mockHierarchy(page, { ...populatedState(), tasks: [task, dependency] });
+  await page.route(
+    `https://api.orchestrat.test/api/v1/tasks/${ids.task}**`,
+    async (route) => {
+      const path = new URL(route.request().url()).pathname;
+      const method = route.request().method();
+      if (path.endsWith("/comments"))
+        return route.fulfill({ json: { comments: [], next_cursor: null } });
+      if (path.endsWith("/dependencies")) {
+        if (method === "GET")
+          return route.fulfill({
+            json: { depends_on: dependsOn ? [dependency] : [], blocks: [] }
+          });
+        dependsOn = true;
+        task.version++;
+        return route.fulfill({ json: task });
+      }
+      if (path.endsWith(`/dependencies/${dependency.id}`)) {
+        dependsOn = false;
+        task.version++;
+        return route.fulfill({ json: task });
+      }
+      return route.fulfill({ json: task });
+    }
+  );
+  await page.goto(`/projects/${ids.alpha}/tasks?task=${ids.task}`);
+  await expect(
+    page.getByRole("dialog", { name: "Task details" }).getByRole("link", {
+      name: "mobile guide"
+    })
+  ).toHaveAttribute("href", "https://example.com/guide");
+  await page.getByLabel("Add task dependency").selectOption(dependency.id);
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await expect(
+    page.getByText("Publish the guide", { exact: true })
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Remove", exact: true }).click();
+  await expect(
+    page.getByRole("dialog", { name: "Task details" }).getByText("None", {
+      exact: true
+    })
+  ).toBeVisible();
+  expect(
+    await page
+      .locator("#main-content")
+      .evaluate((element) => element.scrollWidth <= element.clientWidth)
+  ).toBe(true);
+  await expectNoAxe(page);
+});
+
+test("@phone activity resolves people and task links", async ({ page }) => {
+  const task = {
+    id: ids.task,
+    project_id: ids.alpha,
+    key: "ALPHA-7",
+    title: "Make activity readable",
+    description: null,
+    priority: "medium",
+    status: "done",
+    position: 0,
+    version: 1,
+    created_by: { type: "human", id: ids.user },
+    created_by_user_id: ids.user,
+    created_at: now,
+    updated_at: now,
+    started_at: null,
+    completed_at: now,
+    cancelled_at: null,
+    comment_count: 0,
+    unresolved_blocker_count: 0
+  };
+  await seed(page);
+  await mockHierarchy(page, {
+    ...populatedState(),
+    tasks: [task],
+    agents: [
+      {
+        id: ids.agent,
+        project_id: ids.alpha,
+        name: "Terra",
+        status: "active",
+        created_at: now,
+        updated_at: now,
+        revoked_at: null
+      }
+    ],
+    events: [
+      {
+        id: 2,
+        project_id: ids.alpha,
+        type: "claim.completed",
+        actor_agent_id: ids.agent,
+        actor_user_id: null,
+        entity_id: "00000000-0000-4000-8000-000000000013",
+        payload: { task_id: ids.task },
+        occurred_at: now
+      },
+      {
+        id: 1,
+        project_id: ids.alpha,
+        type: "task.done",
+        actor_agent_id: null,
+        actor_user_id: ids.user,
+        entity_id: ids.task,
+        payload: {},
+        occurred_at: now
+      }
+    ]
+  });
+  await page.goto(`/projects/${ids.alpha}/activity`);
+  await expect(
+    page.getByText("Terra completed", { exact: false })
+  ).toBeVisible();
+  await expect(
+    page.getByText("E2E User completed", { exact: false })
+  ).toBeVisible();
+  const taskLinks = page.getByRole("link", { name: "ALPHA-7" });
+  await expect(taskLinks).toHaveCount(2);
+  await expect(taskLinks.first()).toHaveAttribute(
+    "href",
+    `/projects/${ids.alpha}/tasks?task=${ids.task}`
+  );
+  expect(
+    await page
+      .locator("#main-content")
+      .evaluate((element) => element.scrollWidth <= element.clientWidth)
+  ).toBe(true);
+  await expectNoAxe(page);
+});
+
+test("@phone settings keep local agent commands usable", async ({ page }) => {
+  await seed(page);
+  await mockHierarchy(page, populatedState());
+  await page.goto(`/projects/${ids.alpha}/settings`);
+  await expect(
+    page.getByText("The browser cannot inspect local agent configuration.")
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Copy setup command" })
+  ).toBeVisible();
+  await expect(
+    page.getByText("ORCHESTRAT_API_URL", { exact: false }).first()
+  ).toBeVisible();
+  expect(
+    await page
+      .locator("#main-content")
+      .evaluate((element) => element.scrollWidth <= element.clientWidth)
+  ).toBe(true);
   await expectNoAxe(page);
 });
 

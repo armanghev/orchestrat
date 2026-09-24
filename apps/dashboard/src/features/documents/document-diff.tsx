@@ -3,7 +3,7 @@ import { markdown } from "@codemirror/lang-markdown";
 import { unifiedMergeView } from "@codemirror/merge";
 import { EditorState } from "@codemirror/state";
 import { EditorView, lineNumbers } from "@codemirror/view";
-import { codeMirrorExtensions } from "./markdown-editor";
+import { codeMirrorExtensions } from "./codemirror-theme";
 
 type DocumentDiffProps = {
   original: string;

@@ -1,4 +1,5 @@
 import { expect, test, type Page, type WebSocketRoute } from "@playwright/test";
+import AxeBuilder from "@axe-core/playwright";
 import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { parseEnv } from "node:util";
@@ -48,6 +49,10 @@ async function seed(page: Page) {
     localStorage.clear();
     localStorage.setItem("orchestrat.e2e.auth", "signedIn");
   });
+}
+
+async function expectNoAxe(page: Page) {
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 }
 
 async function mockDocuments(
@@ -212,7 +217,7 @@ async function mockDocuments(
   };
 }
 
-test("MDXEditor edits rich text, exposes source, and saves Markdown", async ({
+test("@phone MDXEditor edits rich text, exposes source, and saves Markdown", async ({
   page
 }, testInfo) => {
   const consoleErrors: string[] = [];
@@ -254,10 +259,16 @@ test("MDXEditor edits rich text, exposes source, and saves Markdown", async ({
   await expect.poll(() => state.getSavedBody()).not.toBeNull();
   expect(state.getSavedBody()).toMatchObject({ base_revision: 1 });
   expect(state.getSavedBody()!.content).toContain("## Browser edit");
+  expect(
+    await page
+      .locator("#main-content")
+      .evaluate((element) => element.scrollWidth <= element.clientWidth)
+  ).toBe(true);
+  await expectNoAxe(page);
   expect(consoleErrors).toEqual([]);
 });
 
-test("document history compares saved revisions and keeps the draft", async ({
+test("@phone document history compares saved revisions and keeps the draft", async ({
   page
 }, testInfo) => {
   const current = "# Roadmap\n\nCurrent saved direction.\n\nShared line";
@@ -307,13 +318,14 @@ test("document history compares saved revisions and keeps the draft", async ({
   await expect(
     page.getByRole("button", { name: /^Revision 5\b/ })
   ).toHaveAttribute("aria-pressed", "true");
-  await expect(
-    page.getByRole("button", { name: /^Revision 6\b/ })
-  ).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^Revision 6\b/ })).toHaveCount(
+    0
+  );
   const comparison = page.getByRole("textbox", { name: "Revision comparison" });
   await expect(comparison).toHaveAttribute("contenteditable", "false");
   await expect(comparison).toContainText("Previous direction.");
   await expect(comparison).toContainText("Current saved direction.");
+  await expectNoAxe(page);
 
   await page.getByRole("button", { name: /^Revision 4\b/ }).click();
   await expect(comparison).toContainText("Retired direction.");

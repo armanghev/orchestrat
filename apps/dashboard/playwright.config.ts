@@ -34,6 +34,11 @@ export default defineConfig({
       name: "phone-auth",
       grep: /@auth/,
       use: { ...devices["iPhone 13"], viewport: { width: 390, height: 844 } }
+    },
+    {
+      name: "phone-project",
+      grep: /@phone/,
+      use: { ...devices["iPhone 13"], viewport: { width: 390, height: 844 } }
     }
   ]
 });
