@@ -234,6 +234,7 @@ export const projectStatusSchema = z.enum(["active", "archived"]);
 export type ProjectStatus = z.infer<typeof projectStatusSchema>;
 
 export const projectSchema = z.object({
+  role: organizationRoleSchema.optional(),
   id: idSchema,
   organization_id: idSchema,
   name: z.string(),
@@ -762,6 +763,8 @@ export type RealtimeProjectParams = z.infer<typeof realtimeProjectParamsSchema>;
 export type RealtimeSocketQuery = z.infer<typeof realtimeSocketQuerySchema>;
 
 export const realtimeEntityTypeSchema = z.enum([
+  "chat",
+  "project",
   "task",
   "claim",
   "agent",
@@ -1123,3 +1126,147 @@ export const eventSchema = z.object({
 });
 export const mcpSchema = z.object({});
 export const hookSchema = z.object({});
+
+// Messaging uses authenticated principals; callers never supply an author.
+export const participantRefSchema = z.object({
+  type: z.enum(["human", "agent"]),
+  id: idSchema
+});
+export type ParticipantRef = z.infer<typeof participantRefSchema>;
+export const messageCandidateSchema = participantRefSchema.extend({
+  name: z.string(),
+  avatar_url: avatarUrlSchema
+});
+export const messageCandidatesResponseSchema = z.object({
+  candidates: z.array(messageCandidateSchema)
+});
+export type MessageCandidate = z.infer<typeof messageCandidateSchema>;
+export const chatSchema = z.object({
+  id: idSchema,
+  project_id: idSchema,
+  kind: z.enum(["direct", "group"]),
+  name: z.string().nullable(),
+  has_human: z.boolean(),
+  creator: participantRefSchema,
+  participants: z.array(messageCandidateSchema),
+  is_participant: z.boolean(),
+  can_manage: z.boolean(),
+  can_join: z.boolean(),
+  last_sequence: z.number().int().nonnegative(),
+  last_read_sequence: z.number().int().nonnegative(),
+  unread_count: z.number().int().nonnegative(),
+  mention_count: z.number().int().nonnegative(),
+  created_at: dateSchema,
+  updated_at: dateSchema
+});
+export type Chat = z.infer<typeof chatSchema>;
+export const chatsResponseSchema = z.object({ chats: z.array(chatSchema) });
+export const createChatRequestSchema = z
+  .object({
+    kind: z.enum(["direct", "group"]),
+    name: nameSchema.optional(),
+    participants: z.array(participantRefSchema).min(1).max(99)
+  })
+  .refine((value) => value.kind !== "group" || Boolean(value.name), {
+    message: "Groups need a name."
+  });
+export type CreateChatRequest = z.infer<typeof createChatRequestSchema>;
+export const manageChatMembersRequestSchema = z.object({
+  action: z.enum(["add", "remove"]),
+  participant: participantRefSchema
+});
+export type ManageChatMembersRequest = z.infer<
+  typeof manageChatMembersRequestSchema
+>;
+export const sendMessageRequestSchema = z.object({
+  body_markdown: markdownSchema,
+  mentions: z.array(participantRefSchema).max(100).default([]),
+  document_ids: z.array(idSchema).max(20).default([])
+});
+export type SendMessageRequest = z.infer<typeof sendMessageRequestSchema>;
+export const chatMessageSchema = z.object({
+  id: idSchema,
+  chat_id: idSchema,
+  project_id: idSchema,
+  sequence: z.number().int().positive(),
+  author: participantRefSchema.extend({ name: z.string() }),
+  body_markdown: markdownSchema,
+  mentions: z.array(participantRefSchema.extend({ name: z.string() })),
+  documents: z.array(z.object({ id: idSchema, path: z.string() })),
+  created_at: dateSchema
+});
+export type ChatMessage = z.infer<typeof chatMessageSchema>;
+export const chatMessagesQuerySchema = z
+  .object({
+    after: z.coerce.number().int().nonnegative().optional(),
+    before: z.coerce.number().int().positive().optional(),
+    unread_only: z
+      .union([z.boolean(), z.enum(["true", "false"])])
+      .transform((value) => value === true || value === "true")
+      .default(false),
+    limit: z.coerce.number().int().min(1).max(100).default(50)
+  })
+  .refine((value) => value.after === undefined || value.before === undefined, {
+    message: "Use after or before, not both."
+  });
+export type ChatMessagesQuery = z.infer<typeof chatMessagesQuerySchema>;
+export const chatMessagesResponseSchema = z.object({
+  messages: z.array(chatMessageSchema),
+  has_more: z.boolean(),
+  next_after: z.number().int().nullable(),
+  next_before: z.number().int().nullable()
+});
+export const acknowledgeMessagesRequestSchema = z.object({
+  through_message_id: idSchema
+});
+export const acknowledgeMessagesResponseSchema = z.object({
+  last_read_sequence: z.number().int().nonnegative()
+});
+export const inboxSummarySchema = z.object({
+  unread_chats: z.array(
+    z.object({
+      chat_id: idSchema,
+      unread_count: z.number().int().nonnegative(),
+      mention_count: z.number().int().nonnegative()
+    })
+  )
+});
+export type InboxSummary = z.infer<typeof inboxSummarySchema>;
+export const projectMemberSchema = organizationMemberSchema;
+export type ProjectMember = z.infer<typeof projectMemberSchema>;
+export const projectMembersResponseSchema = z.object({
+  members: z.array(projectMemberSchema)
+});
+export const addProjectMemberRequestSchema = z.object({
+  user_id: idSchema,
+  role: organizationRoleSchema.optional()
+});
+export const updateProjectMemberRequestSchema = z.object({
+  role: organizationRoleSchema
+});
+export const projectInvitationSchema = z.object({
+  id: idSchema,
+  project_id: idSchema,
+  created_by: idSchema,
+  created_at: dateSchema,
+  expires_at: dateSchema,
+  revoked_at: dateSchema.nullable(),
+  accepted_at: dateSchema.nullable()
+});
+export type ProjectInvitation = z.infer<typeof projectInvitationSchema>;
+export const projectInvitationsResponseSchema = z.object({
+  invitations: z.array(projectInvitationSchema)
+});
+export const createProjectInvitationResponseSchema = z.object({
+  invitation: projectInvitationSchema,
+  token: z.string().regex(/^[A-Za-z0-9_-]{43}$/)
+});
+export const acceptProjectInvitationRequestSchema = z.object({
+  token: z.string().regex(/^[A-Za-z0-9_-]{43}$/)
+});
+export const acceptProjectInvitationResponseSchema = z.object({
+  project: projectSchema
+});
+
+export const projectChatParamsSchema = z.object({ projectId: idSchema });
+export const chatParamsSchema = z.object({ id: idSchema });

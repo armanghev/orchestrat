@@ -11,6 +11,7 @@ import {
   jsonb,
   integer,
   bigint,
+  boolean,
   text,
   timestamp,
   uniqueIndex,
@@ -877,5 +878,206 @@ export const documentAttachmentUploads = pgTable(
       "document_attachment_uploads_mode_provider_consistent",
       sql`(${table.uploadMode} = 'single' and ${table.providerUploadId} is null) or (${table.uploadMode} = 'multipart' and ${table.providerUploadId} is not null)`
     )
+  ]
+);
+
+export const projectMembers = pgTable(
+  "project_members",
+  {
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    role: organizationRole("role").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    primaryKey({ columns: [table.projectId, table.userId] }),
+    index("project_members_user_idx").on(table.userId)
+  ]
+);
+
+export const projectInvitations = pgTable(
+  "project_invitations",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    createdBy: uuid("created_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    tokenHash: text("token_hash").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    acceptedBy: uuid("accepted_by").references(() => users.id, {
+      onDelete: "restrict"
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    uniqueIndex("project_invitations_token_unique").on(table.tokenHash),
+    index("project_invitations_project_idx").on(table.projectId),
+    check(
+      "project_invitations_token_hash_not_blank",
+      sql`btrim(${table.tokenHash}) <> ''`
+    ),
+    check(
+      "project_invitations_acceptance_consistent",
+      sql`(${table.acceptedAt} is null and ${table.acceptedBy} is null) or (${table.acceptedAt} is not null and ${table.acceptedBy} is not null)`
+    )
+  ]
+);
+
+export const chats = pgTable(
+  "chats",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<"direct" | "group">().notNull(),
+    name: text("name"),
+    directKey: text("direct_key"),
+    hasHuman: boolean("has_human").default(false).notNull(),
+    creatorType: documentAuthorType("creator_type").notNull(),
+    creatorUserId: uuid("creator_user_id").references(() => users.id, {
+      onDelete: "restrict"
+    }),
+    creatorAgentId: uuid("creator_agent_id"),
+    lastSequence: integer("last_sequence").default(0).notNull(),
+    ...timestamps
+  },
+  (table) => [
+    unique("chats_project_id_id_unique").on(table.projectId, table.id),
+    uniqueIndex("chats_direct_pair_unique").on(
+      table.projectId,
+      table.directKey
+    ),
+    index("chats_project_updated_idx").on(table.projectId, table.updatedAt),
+    foreignKey({
+      columns: [table.projectId, table.creatorAgentId],
+      foreignColumns: [agents.projectId, agents.id],
+      name: "chats_creator_agent_project_fk"
+    }),
+    check(
+      "chats_kind_consistent",
+      sql`(${table.kind} = 'direct' and ${table.directKey} is not null and ${table.name} is null) or (${table.kind} = 'group' and ${table.directKey} is null and ${table.name} is not null and btrim(${table.name}) <> '')`
+    ),
+    check(
+      "chats_creator_consistent",
+      sql`(${table.creatorType} = 'human' and ${table.creatorUserId} is not null and ${table.creatorAgentId} is null) or (${table.creatorType} = 'agent' and ${table.creatorAgentId} is not null and ${table.creatorUserId} is null)`
+    ),
+    check("chats_last_sequence_nonnegative", sql`${table.lastSequence} >= 0`)
+  ]
+);
+
+export const chatParticipants = pgTable(
+  "chat_participants",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    projectId: uuid("project_id").notNull(),
+    chatId: uuid("chat_id").notNull(),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+    agentId: uuid("agent_id"),
+    lastReadSequence: integer("last_read_sequence").default(0).notNull(),
+    joinedAt: timestamp("joined_at", { withTimezone: true })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    unique("chat_participants_user_unique").on(table.chatId, table.userId),
+    unique("chat_participants_agent_unique").on(table.chatId, table.agentId),
+    index("chat_participants_project_chat_idx").on(
+      table.projectId,
+      table.chatId
+    ),
+    index("chat_participants_user_idx").on(table.userId),
+    index("chat_participants_agent_idx").on(table.agentId),
+    foreignKey({
+      columns: [table.projectId, table.chatId],
+      foreignColumns: [chats.projectId, chats.id],
+      name: "chat_participants_chat_project_fk"
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.projectId, table.agentId],
+      foreignColumns: [agents.projectId, agents.id],
+      name: "chat_participants_agent_project_fk"
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.projectId, table.userId],
+      foreignColumns: [projectMembers.projectId, projectMembers.userId],
+      name: "chat_participants_user_project_fk"
+    }).onDelete("cascade"),
+    check(
+      "chat_participants_actor_consistent",
+      sql`(${table.userId} is not null and ${table.agentId} is null) or (${table.agentId} is not null and ${table.userId} is null)`
+    ),
+    check(
+      "chat_participants_read_nonnegative",
+      sql`${table.lastReadSequence} >= 0`
+    )
+  ]
+);
+
+export const chatMessages = pgTable(
+  "chat_messages",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    projectId: uuid("project_id").notNull(),
+    chatId: uuid("chat_id").notNull(),
+    sequence: integer("sequence").notNull(),
+    authorType: documentAuthorType("author_type").notNull(),
+    authorUserId: uuid("author_user_id").references(() => users.id, {
+      onDelete: "restrict"
+    }),
+    authorAgentId: uuid("author_agent_id"),
+    authorName: text("author_name").notNull(),
+    bodyMarkdown: text("body_markdown").notNull(),
+    mentions: jsonb("mentions")
+      .$type<{ type: "human" | "agent"; id: string; name: string }[]>()
+      .default([])
+      .notNull(),
+    documentRefs: jsonb("document_refs")
+      .$type<{ id: string; path: string }[]>()
+      .default([])
+      .notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    unique("chat_messages_sequence_unique").on(table.chatId, table.sequence),
+    index("chat_messages_project_chat_sequence_idx").on(
+      table.projectId,
+      table.chatId,
+      table.sequence
+    ),
+    foreignKey({
+      columns: [table.projectId, table.chatId],
+      foreignColumns: [chats.projectId, chats.id],
+      name: "chat_messages_chat_project_fk"
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.projectId, table.authorAgentId],
+      foreignColumns: [agents.projectId, agents.id],
+      name: "chat_messages_author_agent_project_fk"
+    }),
+    check(
+      "chat_messages_author_consistent",
+      sql`(${table.authorType} = 'human' and ${table.authorUserId} is not null and ${table.authorAgentId} is null) or (${table.authorType} = 'agent' and ${table.authorAgentId} is not null and ${table.authorUserId} is null)`
+    ),
+    check(
+      "chat_messages_body_not_blank",
+      sql`btrim(${table.bodyMarkdown}) <> ''`
+    ),
+    check("chat_messages_sequence_positive", sql`${table.sequence} > 0`)
   ]
 );

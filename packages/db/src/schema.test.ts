@@ -9,10 +9,15 @@ import {
   agentSessions,
   agents,
   apiIdempotencyKeys,
+  chatMessages,
+  chatParticipants,
+  chats,
   documentAttachmentUploads,
   documentRevisions,
   documents,
   projectEvents,
+  projectInvitations,
+  projectMembers,
   projects,
   taskClaims,
   taskComments,
@@ -54,7 +59,48 @@ test("agent lifecycle idempotency is project/agent scoped and hash-only", async 
       "utf8"
     )
   ) as { entries: { tag: string }[] };
-  assert.equal(journal.entries.at(-1)?.tag, "0012_document_folders");
+  assert.equal(journal.entries.at(-1)?.tag, "0013_project_messaging");
+});
+
+test("project messaging schema preserves access, authorship, and ordering", async () => {
+  assert.equal(projectMembers.role.notNull, true);
+  assert.equal(projectInvitations.tokenHash.notNull, true);
+  assert.equal(chats.hasHuman.hasDefault, true);
+  assert.equal(chats.lastSequence.hasDefault, true);
+  assert.equal(chatParticipants.lastReadSequence.hasDefault, true);
+  assert.equal(chatMessages.bodyMarkdown.notNull, true);
+  assert.equal(chatMessages.sequence.notNull, true);
+
+  const chatConfig = getTableConfig(chats);
+  assert.ok(
+    chatConfig.indexes.find(
+      (index) => index.config.name === "chats_direct_pair_unique"
+    )?.config.unique
+  );
+  assert.equal(
+    chatConfig.foreignKeys.some(
+      (foreignKey) => foreignKey.getName() === "chats_creator_user_project_fk"
+    ),
+    false
+  );
+  assert.ok(
+    getTableConfig(chatParticipants).foreignKeys.find(
+      (foreignKey) =>
+        foreignKey.getName() === "chat_participants_user_project_fk"
+    )
+  );
+
+  const sql = await readFile(
+    new URL("../drizzle/0013_project_messaging.sql", import.meta.url),
+    "utf8"
+  );
+  assert.match(sql, /CREATE TABLE "project_members"/);
+  assert.match(sql, /INSERT INTO "project_members"/);
+  assert.match(sql, /ON CONFLICT \("project_id", "user_id"\) DO NOTHING/);
+  assert.match(sql, /CREATE TABLE "chat_messages"/);
+  assert.match(sql, /chats_direct_pair_unique/);
+  assert.match(sql, /chat_messages_sequence_unique/);
+  assert.doesNotMatch(sql, /chats_creator_user_project_fk/);
 });
 
 test("CLI credentials can be user-scoped after the authorization migration", async () => {
