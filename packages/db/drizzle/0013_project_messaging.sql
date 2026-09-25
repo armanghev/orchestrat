@@ -95,4 +95,10 @@ CREATE INDEX "chats_project_updated_idx" ON "chats" USING btree ("project_id","u
 CREATE INDEX "chat_participants_project_chat_idx" ON "chat_participants" USING btree ("project_id","chat_id");--> statement-breakpoint
 CREATE INDEX "chat_participants_user_idx" ON "chat_participants" USING btree ("user_id");--> statement-breakpoint
 CREATE INDEX "chat_participants_agent_idx" ON "chat_participants" USING btree ("agent_id");--> statement-breakpoint
-CREATE INDEX "chat_messages_project_chat_sequence_idx" ON "chat_messages" USING btree ("project_id","chat_id","sequence");
+CREATE INDEX "chat_messages_project_chat_sequence_idx" ON "chat_messages" USING btree ("project_id","chat_id","sequence");--> statement-breakpoint
+ALTER TABLE "document_folders" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "project_members" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "project_invitations" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "chats" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "chat_participants" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "chat_messages" ENABLE ROW LEVEL SECURITY;

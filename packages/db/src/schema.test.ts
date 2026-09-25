@@ -13,6 +13,7 @@ import {
   chatParticipants,
   chats,
   documentAttachmentUploads,
+  documentFolders,
   documentRevisions,
   documents,
   projectEvents,
@@ -70,6 +71,15 @@ test("project messaging schema preserves access, authorship, and ordering", asyn
   assert.equal(chatParticipants.lastReadSequence.hasDefault, true);
   assert.equal(chatMessages.bodyMarkdown.notNull, true);
   assert.equal(chatMessages.sequence.notNull, true);
+  for (const table of [
+    documentFolders,
+    projectMembers,
+    projectInvitations,
+    chats,
+    chatParticipants,
+    chatMessages
+  ])
+    assert.equal(getTableConfig(table).enableRLS, true);
 
   const chatConfig = getTableConfig(chats);
   assert.ok(
@@ -100,6 +110,18 @@ test("project messaging schema preserves access, authorship, and ordering", asyn
   assert.match(sql, /CREATE TABLE "chat_messages"/);
   assert.match(sql, /chats_direct_pair_unique/);
   assert.match(sql, /chat_messages_sequence_unique/);
+  for (const table of [
+    "document_folders",
+    "project_members",
+    "project_invitations",
+    "chats",
+    "chat_participants",
+    "chat_messages"
+  ])
+    assert.match(
+      sql,
+      new RegExp(`ALTER TABLE "${table}" ENABLE ROW LEVEL SECURITY`)
+    );
   assert.doesNotMatch(sql, /chats_creator_user_project_fk/);
 });
 

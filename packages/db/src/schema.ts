@@ -720,7 +720,7 @@ export const documentFolders = pgTable(
     ),
     check("document_folders_path_not_blank", sql`btrim(${table.path}) <> ''`)
   ]
-);
+).enableRLS();
 
 export const documentRevisions = pgTable(
   "document_revisions",
@@ -899,7 +899,7 @@ export const projectMembers = pgTable(
     primaryKey({ columns: [table.projectId, table.userId] }),
     index("project_members_user_idx").on(table.userId)
   ]
-);
+).enableRLS();
 
 export const projectInvitations = pgTable(
   "project_invitations",
@@ -934,7 +934,7 @@ export const projectInvitations = pgTable(
       sql`(${table.acceptedAt} is null and ${table.acceptedBy} is null) or (${table.acceptedAt} is not null and ${table.acceptedBy} is not null)`
     )
   ]
-);
+).enableRLS();
 
 export const chats = pgTable(
   "chats",
@@ -977,7 +977,7 @@ export const chats = pgTable(
     ),
     check("chats_last_sequence_nonnegative", sql`${table.lastSequence} >= 0`)
   ]
-);
+).enableRLS();
 
 export const chatParticipants = pgTable(
   "chat_participants",
@@ -1025,7 +1025,7 @@ export const chatParticipants = pgTable(
       sql`${table.lastReadSequence} >= 0`
     )
   ]
-);
+).enableRLS();
 
 export const chatMessages = pgTable(
   "chat_messages",
@@ -1080,4 +1080,4 @@ export const chatMessages = pgTable(
     ),
     check("chat_messages_sequence_positive", sql`${table.sequence} > 0`)
   ]
-);
+).enableRLS();
