@@ -808,6 +808,13 @@ test("compact shell collapses and restores sidebar without horizontal overflow",
   await expect(
     page.getByRole("button", { name: "Restore sidebar" })
   ).toBeVisible();
+  await expect(
+    page.getByRole("complementary", { name: "Project navigation" })
+      .locator('[data-slot="sidebar"]')
+      .first()
+  ).toHaveCSS("width", "48px");
+  await expect(page.getByRole("button", { name: "Overview" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /E2E User/ })).toBeVisible();
   await page.getByRole("button", { name: "Restore sidebar" }).click();
   expect(
     await main.evaluate((element) => element.scrollWidth <= element.clientWidth)

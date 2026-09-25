@@ -123,7 +123,10 @@ export function TopToolbar({
       data-slot="top-toolbar"
       className={cn(
         "relative flex h-14 shrink-0 select-none items-center gap-3 border-b px-4 sm:px-6",
-        desktop && "md:h-12 md:bg-sidebar"
+        desktop && "md:h-12 md:bg-sidebar",
+        desktop &&
+          collapsed &&
+          "md:-ml-12 md:w-[calc(100%+3rem)] md:pl-18"
       )}
       onMouseDown={(event) => {
         if (
@@ -160,7 +163,7 @@ export function TopToolbar({
       <div
         className={cn(
           "relative z-10 flex min-w-0 flex-1 items-center gap-2 transition-[padding-left] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none",
-          desktop && collapsed && "md:pl-28"
+          desktop && collapsed && "md:pl-16"
         )}
       >
         <div className="flex min-w-0 items-center">
