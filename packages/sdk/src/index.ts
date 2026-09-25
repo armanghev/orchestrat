@@ -31,7 +31,20 @@ import {
   updateDocumentResponseSchema,
   agentLifecycleHookResponseSchema,
   agentLifecycleHookRequestSchema,
-  projectSchema
+  projectSchema,
+  idParamsSchema,
+  messageCandidatesResponseSchema,
+  chatsResponseSchema,
+  chatSchema,
+  chatMessageSchema,
+  createChatRequestSchema,
+  manageChatMembersRequestSchema,
+  sendMessageRequestSchema,
+  chatMessagesQuerySchema,
+  chatMessagesResponseSchema,
+  acknowledgeMessagesRequestSchema,
+  acknowledgeMessagesResponseSchema,
+  inboxSummarySchema
 } from "@orchestrat/protocol";
 import type {
   ClaimTaskRequest,
@@ -47,7 +60,11 @@ import type {
   CreateDocumentRequest,
   DocumentListQuery,
   UpdateDocumentRequest,
-  AgentLifecycleHookRequest
+  AgentLifecycleHookRequest,
+  CreateChatRequest,
+  ManageChatMembersRequest,
+  SendMessageRequest,
+  ChatMessagesQuery
 } from "@orchestrat/protocol";
 import {
   parseAttachmentParts,
@@ -72,6 +89,8 @@ export * from "./documents.js";
 type Fetch = typeof globalThis.fetch;
 type Sleep = (milliseconds: number) => Promise<void>;
 type Schema<T> = { parse(value: unknown): T };
+type SendMessageInput = Omit<SendMessageRequest, "mentions" | "document_ids"> &
+  Partial<Pick<SendMessageRequest, "mentions" | "document_ids">>;
 
 export class AgentApiError extends Error {
   constructor(
@@ -156,6 +175,100 @@ export class AgentApiClient {
 
   getProject() {
     return this.request("GET", "/project", projectSchema, undefined, true);
+  }
+
+  listMessageCandidates() {
+    return this.request(
+      "GET",
+      "/message-candidates",
+      messageCandidatesResponseSchema,
+      undefined,
+      true
+    );
+  }
+
+  listChats() {
+    return this.request("GET", "/chats", chatsResponseSchema, undefined, true);
+  }
+
+  getChat(chatId: string) {
+    const id = idParamsSchema.parse({ id: chatId }).id;
+    return this.request(
+      "GET",
+      `/chats/${encodeURIComponent(id)}`,
+      chatSchema,
+      undefined,
+      true
+    );
+  }
+
+  createChat(input: CreateChatRequest, idempotencyKey: string) {
+    return this.request(
+      "POST",
+      "/chats",
+      chatSchema,
+      createChatRequestSchema.parse(input),
+      false,
+      { "idempotency-key": idempotencyKey }
+    );
+  }
+
+  manageChatMembers(chatId: string, input: ManageChatMembersRequest) {
+    const id = idParamsSchema.parse({ id: chatId }).id;
+    return this.request(
+      "POST",
+      `/chats/${encodeURIComponent(id)}/members`,
+      chatSchema,
+      manageChatMembersRequestSchema.parse(input)
+    );
+  }
+
+  listChatMessages(chatId: string, query: Partial<ChatMessagesQuery> = {}) {
+    const id = idParamsSchema.parse({ id: chatId }).id;
+    const parsed = chatMessagesQuerySchema.parse({ limit: 50, ...query });
+    return this.request(
+      "GET",
+      `/chats/${encodeURIComponent(id)}/messages${queryString(parsed)}`,
+      chatMessagesResponseSchema,
+      undefined,
+      true
+    );
+  }
+
+  sendMessage(chatId: string, input: SendMessageInput, idempotencyKey: string) {
+    const id = idParamsSchema.parse({ id: chatId }).id;
+    return this.request(
+      "POST",
+      `/chats/${encodeURIComponent(id)}/messages`,
+      chatMessageSchema,
+      sendMessageRequestSchema.parse(input),
+      false,
+      { "idempotency-key": idempotencyKey }
+    );
+  }
+
+  acknowledgeMessages(chatId: string, throughMessageId: string) {
+    const id = idParamsSchema.parse({ id: chatId }).id;
+    return this.request(
+      "POST",
+      `/chats/${encodeURIComponent(id)}/read`,
+      acknowledgeMessagesResponseSchema,
+      acknowledgeMessagesRequestSchema.parse({
+        through_message_id: throughMessageId
+      })
+    );
+  }
+
+  getInbox(signal?: AbortSignal) {
+    return this.request(
+      "GET",
+      "/inbox",
+      inboxSummarySchema,
+      undefined,
+      true,
+      {},
+      signal
+    );
   }
 
   listTasks(query: Partial<TaskListQuery> = {}) {
@@ -555,7 +668,8 @@ export class AgentApiClient {
     schema: Schema<T>,
     input?: unknown,
     retryable = false,
-    extraHeaders: Record<string, string> = {}
+    extraHeaders: Record<string, string> = {},
+    signal?: AbortSignal
   ): Promise<T> {
     const body = input === undefined ? undefined : JSON.stringify(input);
     for (let attempt = 0; ; attempt += 1) {
@@ -568,10 +682,11 @@ export class AgentApiClient {
             ...extraHeaders,
             ...(body ? { "content-type": "application/json" } : {})
           },
+          signal,
           body
         });
       } catch {
-        if (!retryable || attempt > 0)
+        if (!retryable || attempt > 0 || signal?.aborted)
           throw new AgentApiError(
             0,
             "NETWORK_ERROR",

@@ -10,7 +10,10 @@ import {
   editDocumentRequestSchema,
   agentCreateTaskRequestSchema,
   updateTaskRequestSchema,
-  createTaskCommentRequestSchema
+  createTaskCommentRequestSchema,
+  createChatRequestSchema,
+  manageChatMembersRequestSchema,
+  sendMessageRequestSchema
 } from "@orchestrat/protocol";
 import { z } from "zod";
 import { cliSetupIntegrationSchema } from "@orchestrat/protocol";
@@ -41,6 +44,15 @@ type Client = Pick<
   | "editDocument"
   | "listDocumentRevisions"
   | "readDocumentRevision"
+  | "listMessageCandidates"
+  | "listChats"
+  | "getChat"
+  | "createChat"
+  | "manageChatMembers"
+  | "listChatMessages"
+  | "sendMessage"
+  | "acknowledgeMessages"
+  | "getInbox"
 >;
 export type BridgeOptions = {
   client?: Client;
@@ -48,6 +60,7 @@ export type BridgeOptions = {
   integration: z.infer<typeof cliSetupIntegrationSchema>;
   runtime?: string;
   heartbeatMs?: number;
+  inboxTimeoutMs?: number;
 };
 type Claim = { task_id: string; [key: string]: unknown };
 
@@ -201,11 +214,13 @@ export class McpBridge {
           inputSchema: {}
         },
         async () =>
-          success(
-            this.options.projects!.map(({ id, name }) => ({
-              project_id: id,
-              name
-            }))
+          this.call(() =>
+            Promise.resolve(
+              this.options.projects!.map(({ id, name }) => ({
+                project_id: id,
+                name
+              }))
+            )
           )
       );
       this.server.registerTool(
@@ -216,7 +231,12 @@ export class McpBridge {
           inputSchema: { project_id: z.string().uuid() }
         },
         async ({ project_id }) =>
-          this.call(() => this.selectProject(project_id))
+          this.call(() => this.selectProject(project_id), {
+            inboxClient:
+              this.options.projects?.find(
+                (project) => project.id === project_id
+              )?.client ?? null
+          })
       );
     }
     this.server.registerTool(
@@ -505,6 +525,120 @@ export class McpBridge {
           this.activeClient().readDocumentRevision(document_id, revision)
         )
     );
+    this.server.registerTool(
+      "list_message_candidates",
+      {
+        description:
+          "List humans and agents eligible to participate in project chats.",
+        inputSchema: {}
+      },
+      async () => this.call(() => this.activeClient().listMessageCandidates())
+    );
+    this.server.registerTool(
+      "list_chats",
+      {
+        description:
+          "List chats visible to this authenticated agent, including unread counts.",
+        inputSchema: {}
+      },
+      async () => this.call(() => this.activeClient().listChats())
+    );
+    this.server.registerTool(
+      "create_chat",
+      {
+        description:
+          "Create a direct or named group chat. Supply a stable idempotency_key and reuse it with the same request after an ambiguous response.",
+        inputSchema: {
+          ...createChatRequestSchema.shape,
+          idempotency_key: z.string().trim().min(1).max(128)
+        }
+      },
+      async ({ idempotency_key, ...input }) =>
+        this.call(() =>
+          this.activeClient().createChat(
+            createChatRequestSchema.parse(input),
+            idempotency_key
+          )
+        )
+    );
+    this.server.registerTool(
+      "manage_chat_members",
+      {
+        description:
+          "Add or remove one participant from a group chat. Direct chat membership is fixed.",
+        inputSchema: {
+          chat_id: z.string().uuid(),
+          ...manageChatMembersRequestSchema.shape
+        }
+      },
+      async ({ chat_id, ...input }) =>
+        this.call(() =>
+          this.activeClient().manageChatMembers(
+            chat_id,
+            manageChatMembersRequestSchema.parse(input)
+          )
+        )
+    );
+    this.server.registerTool(
+      "send_message",
+      {
+        description:
+          "Send an immutable Markdown message to a chat. Supply a stable idempotency_key and reuse it with the same request after an ambiguous response.",
+        inputSchema: {
+          chat_id: z.string().uuid(),
+          ...sendMessageRequestSchema.shape,
+          idempotency_key: z.string().trim().min(1).max(128)
+        }
+      },
+      async ({ chat_id, idempotency_key, ...input }) =>
+        this.call(() =>
+          this.activeClient().sendMessage(
+            chat_id,
+            sendMessageRequestSchema.parse(input),
+            idempotency_key
+          )
+        )
+    );
+    this.server.registerTool(
+      "check_messages",
+      {
+        description:
+          "Read chat messages without marking them read. With no cursor, returns the oldest unread page.",
+        inputSchema: {
+          chat_id: z.string().uuid(),
+          after: z.number().int().nonnegative().optional(),
+          before: z.number().int().positive().optional(),
+          unread_only: z.boolean().optional(),
+          limit: z.number().int().min(1).max(100).optional()
+        }
+      },
+      async ({ chat_id, ...input }) =>
+        this.call(() =>
+          this.activeClient().listChatMessages(chat_id, {
+            ...input,
+            ...(input.after === undefined &&
+            input.before === undefined &&
+            input.unread_only === undefined
+              ? { unread_only: true }
+              : {})
+          })
+        )
+    );
+    this.server.registerTool(
+      "acknowledge_messages",
+      {
+        description:
+          "Advance this agent's read position through one received message. Newer messages remain unread.",
+        inputSchema: {
+          chat_id: z.string().uuid(),
+          through_message_id: z.string().uuid()
+        }
+      },
+      async ({ chat_id, through_message_id }) =>
+        this.call(() =>
+          this.activeClient().acknowledgeMessages(chat_id, through_message_id)
+        )
+    );
   }
   private requireSession() {
     if (!this.sessionId)
@@ -548,11 +682,55 @@ export class McpBridge {
     this.startHeartbeat();
     return { project_id: project.id, name: project.name };
   }
-  private async call<T>(operation: () => Promise<T>) {
+  private async call<T>(
+    operation: () => Promise<T>,
+    options: { notifyInbox?: boolean; inboxClient?: Client | null } = {}
+  ) {
+    const operationClient = this.client;
+    const inboxClient =
+      "inboxClient" in options ? options.inboxClient : operationClient;
+    let operationSucceeded = false;
+    let response: ReturnType<typeof success> | ReturnType<typeof mapMcpError>;
     try {
-      return success(await operation());
+      response = success(await operation());
+      operationSucceeded = true;
     } catch (error) {
-      return mapMcpError(error);
+      response = mapMcpError(error);
+    }
+    const noticeClient = operationSucceeded ? inboxClient : operationClient;
+    if (options.notifyInbox !== false && noticeClient) {
+      const inbox = await this.readInbox(noticeClient);
+      if (inbox && inbox.unread_chats.length > 0)
+        response.content.push({
+          type: "text",
+          text: JSON.stringify({
+            notice: { type: "unread_chats", unread_chats: inbox.unread_chats }
+          })
+        });
+    }
+    return response;
+  }
+  private async readInbox(client: Client) {
+    if (typeof client.getInbox !== "function") return undefined;
+    const controller = new AbortController();
+    let timedOut = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<undefined>((resolve) => {
+      timer = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+        resolve(undefined);
+      }, this.options.inboxTimeoutMs ?? 1_000);
+      timer.unref?.();
+    });
+    try {
+      return await Promise.race([
+        client.getInbox(controller.signal).catch(() => undefined),
+        timeout
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+      if (timedOut) controller.abort();
     }
   }
 }

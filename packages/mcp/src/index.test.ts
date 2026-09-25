@@ -435,3 +435,264 @@ test("global Cursor requires a selected project before project tools run", async
   assert.deepEqual(calls, ["open:first", "tasks:first"]);
   await clientTransport.close();
 });
+
+test("registers messaging tools and appends an independent inbox notice", async () => {
+  let inboxCalls = 0;
+  const client = {
+    async openSession() {
+      return { session: { id } };
+    },
+    async heartbeat() {
+      return {};
+    },
+    async closeSession() {
+      return {};
+    },
+    async listChats() {
+      return { chats: [] };
+    },
+    async listMessageCandidates() {
+      return { candidates: [] };
+    },
+    async createChat() {
+      return {};
+    },
+    async manageChatMembers() {
+      return {};
+    },
+    async listChatMessages() {
+      return {
+        messages: [],
+        has_more: false,
+        next_after: null,
+        next_before: null
+      };
+    },
+    async sendMessage() {
+      return {};
+    },
+    async acknowledgeMessages() {
+      return { last_read_sequence: 0 };
+    },
+    async getInbox() {
+      inboxCalls += 1;
+      return {
+        unread_chats:
+          inboxCalls === 1
+            ? [{ chat_id: id, unread_count: 2, mention_count: 1 }]
+            : []
+      };
+    },
+    async getProject() {
+      throw new AgentApiError(403, "FORBIDDEN", "No project access.");
+    }
+  };
+  const bridge = new McpBridge({
+    client: client as never,
+    integration: "codex"
+  });
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
+  await bridge.start();
+  await bridge.server.connect(serverTransport);
+  await clientTransport.start();
+  const pending = new Map<number, (response: Record<string, any>) => void>();
+  clientTransport.onmessage = (response) => {
+    if ("id" in response) pending.get(Number(response.id))?.(response as never);
+  };
+  const request = (
+    idNumber: number,
+    name: string,
+    args: Record<string, unknown> = {}
+  ) =>
+    new Promise<Record<string, any>>((resolve) => {
+      pending.set(idNumber, resolve);
+      void clientTransport.send({
+        jsonrpc: "2.0",
+        id: idNumber,
+        method: "tools/call",
+        params: { name, arguments: args }
+      } as never);
+    });
+  await clientTransport.send({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
+    params: {
+      protocolVersion: LATEST_PROTOCOL_VERSION,
+      capabilities: {},
+      clientInfo: { name: "test", version: "1" }
+    }
+  } as never);
+  await clientTransport.send({
+    jsonrpc: "2.0",
+    method: "notifications/initialized"
+  } as never);
+  const listed = await request(2, "list_chats");
+  assert.equal(listed.result.isError, undefined);
+  assert.equal(listed.result.content.length, 2);
+  assert.deepEqual(JSON.parse(listed.result.content[1].text), {
+    notice: {
+      type: "unread_chats",
+      unread_chats: [{ chat_id: id, unread_count: 2, mention_count: 1 }]
+    }
+  });
+  const candidates = await request(3, "list_message_candidates");
+  assert.equal(candidates.result.content.length, 1);
+  const failed = await request(4, "get_project");
+  assert.equal(failed.result.isError, true);
+  assert.equal(failed.result.content.length, 1);
+  await clientTransport.close();
+});
+
+test("bounds inbox checks, aborts the request, and preserves tool errors", async () => {
+  let aborted = false;
+  const client = {
+    async openSession() {
+      return { session: { id } };
+    },
+    async heartbeat() {
+      return {};
+    },
+    async closeSession() {
+      return {};
+    },
+    async getProject() {
+      throw new AgentApiError(500, "BROKEN", "Main operation failed.");
+    },
+    getInbox(signal: AbortSignal) {
+      return new Promise<never>((_, reject) => {
+        signal.addEventListener("abort", () => {
+          aborted = true;
+          reject(new Error("aborted"));
+        });
+      });
+    }
+  };
+  const bridge = new McpBridge({
+    client: client as never,
+    integration: "codex",
+    inboxTimeoutMs: 5
+  });
+  const started = Date.now();
+  const internals = bridge as unknown as {
+    call: (operation: () => Promise<unknown>) => Promise<{ isError?: boolean }>;
+    activeClient: () => { getProject: () => Promise<unknown> };
+  };
+  const result = await internals.call(() =>
+    internals.activeClient().getProject()
+  );
+  assert.equal(result.isError, true);
+  assert.equal(aborted, true);
+  assert.ok(Date.now() - started < 500);
+  await bridge.stop();
+});
+
+test("keeps inbox notices bound to the project used by an in-flight tool", async () => {
+  const firstProject = "00000000-0000-4000-8000-000000000011";
+  const secondProject = "00000000-0000-4000-8000-000000000012";
+  let releaseFirstList: (() => void) | undefined;
+  const makeClient = (name: "first" | "second") => ({
+    async openSession() {
+      return { session: { id: `${name}-session` } };
+    },
+    async heartbeat() {
+      return {};
+    },
+    async closeSession() {
+      return {};
+    },
+    async listChats() {
+      if (name === "first")
+        await new Promise<void>((resolve) => {
+          releaseFirstList = resolve;
+        });
+      return { chats: [] };
+    },
+    async getInbox() {
+      return {
+        unread_chats: [
+          {
+            chat_id: id,
+            unread_count: name === "first" ? 1 : 2,
+            mention_count: 0
+          }
+        ]
+      };
+    }
+  });
+  const bridge = new McpBridge({
+    integration: "cursor",
+    projects: [
+      { id: firstProject, name: "First", client: makeClient("first") as never },
+      {
+        id: secondProject,
+        name: "Second",
+        client: makeClient("second") as never
+      }
+    ]
+  });
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
+  await bridge.start();
+  await bridge.server.connect(serverTransport);
+  await clientTransport.start();
+  const pending = new Map<number, (response: Record<string, any>) => void>();
+  clientTransport.onmessage = (response) => {
+    if ("id" in response) pending.get(Number(response.id))?.(response as never);
+  };
+  const request = (
+    idNumber: number,
+    name: string,
+    args: Record<string, unknown> = {}
+  ) =>
+    new Promise<Record<string, any>>((resolve) => {
+      pending.set(idNumber, resolve);
+      void clientTransport.send({
+        jsonrpc: "2.0",
+        id: idNumber,
+        method: "tools/call",
+        params: { name, arguments: args }
+      } as never);
+    });
+  await clientTransport.send({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
+    params: {
+      protocolVersion: LATEST_PROTOCOL_VERSION,
+      capabilities: {},
+      clientInfo: { name: "test", version: "1" }
+    }
+  } as never);
+  await clientTransport.send({
+    jsonrpc: "2.0",
+    method: "notifications/initialized"
+  } as never);
+  const firstSelected = await request(2, "select_project", {
+    project_id: firstProject
+  });
+  assert.equal(
+    JSON.parse(firstSelected.result.content[1].text).notice.unread_chats[0]
+      .unread_count,
+    1
+  );
+  const firstList = request(3, "list_chats");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const secondSelected = await request(4, "select_project", {
+    project_id: secondProject
+  });
+  assert.equal(
+    JSON.parse(secondSelected.result.content[1].text).notice.unread_chats[0]
+      .unread_count,
+    2
+  );
+  releaseFirstList?.();
+  const firstResult = await firstList;
+  assert.equal(
+    JSON.parse(firstResult.result.content[1].text).notice.unread_chats[0]
+      .unread_count,
+    1
+  );
+  await clientTransport.close();
+});

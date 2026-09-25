@@ -499,3 +499,111 @@ test("resolves relative attachment download tickets against the API base", async
     download_url: "https://api.test/api/v1/attachments/download?ticket=ticket"
   });
 });
+
+test("maps agent messaging routes and preserves idempotency keys", async () => {
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const other = "00000000-0000-4000-8000-000000000002";
+  const chat = {
+    id,
+    project_id: id,
+    kind: "group" as const,
+    name: "Build room",
+    has_human: false,
+    creator: { type: "agent" as const, id },
+    participants: [
+      { type: "agent" as const, id, name: "Builder", avatar_url: null }
+    ],
+    is_participant: true,
+    can_manage: true,
+    can_join: false,
+    last_sequence: 1,
+    last_read_sequence: 0,
+    unread_count: 1,
+    mention_count: 1,
+    created_at: timestamp,
+    updated_at: timestamp
+  };
+  const message = {
+    id: other,
+    chat_id: id,
+    project_id: id,
+    sequence: 1,
+    author: { type: "agent" as const, id, name: "Builder" },
+    body_markdown: "Build started",
+    mentions: [],
+    documents: [],
+    created_at: timestamp
+  };
+  const client = new AgentApiClient({
+    baseUrl: "https://api.test",
+    token,
+    fetch: async (url, init) => {
+      calls.push({ url: String(url), init });
+      const parsed = new URL(String(url));
+      if (parsed.pathname.endsWith("/message-candidates"))
+        return new Response(JSON.stringify({ candidates: chat.participants }));
+      if (parsed.pathname.endsWith("/inbox"))
+        return new Response(
+          JSON.stringify({
+            unread_chats: [{ chat_id: id, unread_count: 1, mention_count: 1 }]
+          })
+        );
+      if (parsed.pathname.endsWith("/messages") && init?.method === "GET")
+        return new Response(
+          JSON.stringify({
+            messages: [message],
+            has_more: false,
+            next_after: null,
+            next_before: null
+          })
+        );
+      if (parsed.pathname.endsWith("/messages"))
+        return new Response(JSON.stringify(message));
+      if (parsed.pathname.endsWith("/read"))
+        return new Response(JSON.stringify({ last_read_sequence: 1 }));
+      if (parsed.pathname.endsWith("/chats"))
+        return new Response(
+          JSON.stringify(init?.method === "GET" ? { chats: [chat] } : chat)
+        );
+      return new Response(JSON.stringify(chat));
+    }
+  });
+  assert.deepEqual((await client.listMessageCandidates()).candidates.length, 1);
+  assert.deepEqual((await client.listChats()).chats[0]?.id, id);
+  assert.equal((await client.getChat(id)).id, id);
+  await client.createChat(
+    {
+      kind: "group",
+      name: "Build room",
+      participants: [{ type: "agent", id }]
+    },
+    "chat-key"
+  );
+  await client.manageChatMembers(id, {
+    action: "add",
+    participant: { type: "agent", id: other }
+  });
+  await client.listChatMessages(id);
+  await client.sendMessage(
+    id,
+    { body_markdown: "Build started" },
+    "message-key"
+  );
+  await client.acknowledgeMessages(id, other);
+  const inbox = await client.getInbox();
+  assert.equal(inbox.unread_chats[0]?.mention_count, 1);
+  assert.deepEqual(
+    calls
+      .filter(({ init }) => init?.headers)
+      .map(
+        ({ init }) =>
+          (init!.headers as Record<string, string>)["idempotency-key"]
+      )
+      .filter(Boolean),
+    ["chat-key", "message-key"]
+  );
+  assert.match(
+    calls.find(({ url }) => url.includes("/messages?"))!.url,
+    /limit=50/
+  );
+});
