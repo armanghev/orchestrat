@@ -39,7 +39,8 @@ export function HeroSection() {
             src={dashboard}
             alt="Orchestrat for macOS showing the Acme project overview, task progress, three working agents, and recent project activity."
             priority
-            unoptimized
+            quality={90}
+            sizes="(min-width: 1440px) 1392px, 100vw"
             className="h-auto w-full"
           />
         </div>
