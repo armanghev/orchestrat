@@ -6,6 +6,7 @@ import { DataType, newDb } from "pg-mem";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../app.js";
 import type { DocumentStorageConfig } from "../services/document-service.js";
+import { isPgMemMigrationStatementSupported } from "./pg-mem-migrations.js";
 
 export async function fixture(
   options: {
@@ -86,14 +87,8 @@ export async function fixture(
     .sort()) {
     const migration = await readFile(new URL(name, migrations), "utf8");
     for (const statement of migration.split("--> statement-breakpoint")) {
-      if (
-        statement.includes("projects_task_key_prefix_format") ||
-        statement.includes(
-          "0005 coordination migration requires task_claims to be empty"
-        )
-      )
-        continue;
-      if (statement.trim()) await pool.query(statement);
+      if (isPgMemMigrationStatementSupported(statement))
+        await pool.query(statement);
     }
   }
   const auth: HumanAuth = {

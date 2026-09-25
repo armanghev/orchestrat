@@ -7,6 +7,7 @@ import { createDatabase, users } from "@orchestrat/db";
 import { and, eq } from "drizzle-orm";
 import { DataType, newDb } from "pg-mem";
 import { IdentityService } from "../services/identity-service.js";
+import { isPgMemMigrationStatementSupported } from "../test/pg-mem-migrations.js";
 
 async function testDatabase() {
   const memory = newDb();
@@ -75,14 +76,8 @@ async function testDatabase() {
     .sort()) {
     const migration = await readFile(new URL(name, directory), "utf8");
     for (const statement of migration.split("--> statement-breakpoint")) {
-      if (statement.includes("projects_task_key_prefix_format")) continue;
-      if (
-        statement.includes(
-          "0005 coordination migration requires task_claims to be empty"
-        )
-      )
-        continue;
-      if (statement.trim()) await pool.query(statement);
+      if (isPgMemMigrationStatementSupported(statement))
+        await pool.query(statement);
     }
   }
 

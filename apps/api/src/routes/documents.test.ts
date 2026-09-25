@@ -11,6 +11,7 @@ import {
 import { eq } from "drizzle-orm";
 import { DataType, newDb } from "pg-mem";
 import { buildApp } from "../app.js";
+import { isPgMemMigrationStatementSupported } from "../test/pg-mem-migrations.js";
 
 const bearer = (value: string) => ({ authorization: `Bearer ${value}` });
 
@@ -80,14 +81,8 @@ async function fixture() {
     .sort()) {
     const migration = await readFile(new URL(name, migrations), "utf8");
     for (const statement of migration.split("--> statement-breakpoint")) {
-      if (
-        statement.includes("projects_task_key_prefix_format") ||
-        statement.includes(
-          "0005 coordination migration requires task_claims to be empty"
-        )
-      )
-        continue;
-      if (statement.trim()) await pool.query(statement);
+      if (isPgMemMigrationStatementSupported(statement))
+        await pool.query(statement);
     }
   }
   const subjects = {
