@@ -25,6 +25,7 @@ import {
   SidebarContent,
   useSidebar,
   SidebarFooter,
+  SidebarHeader,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -106,7 +107,32 @@ export function ContextSidebar({
         <div className="absolute inset-x-0 top-0 hidden h-12 border-b bg-sidebar md:block">
           <WindowDragRegion />
         </div>
-      ) : null}
+      ) : (
+        <SidebarHeader className="h-14 justify-center border-b px-5 py-0">
+          <div className="flex items-center gap-2.5">
+            <svg
+              viewBox="0 0 32 32"
+              fill="none"
+              aria-hidden="true"
+              className="size-7 shrink-0 text-brand"
+            >
+              <circle
+                cx="16"
+                cy="16"
+                r="12"
+                stroke="currentColor"
+                strokeWidth="2.8"
+                strokeLinecap="round"
+                strokeDasharray="0.1 6.18"
+              />
+              <circle cx="16" cy="16" r="4" fill="currentColor" />
+            </svg>
+            <span className="text-lg font-semibold tracking-tight">
+              Orchestrat
+            </span>
+          </div>
+        </SidebarHeader>
+      )}
       <SidebarContent className="gap-2 px-3 py-2">
         {routeGroups.map((group) => (
           <SidebarGroup className="px-0 py-0" key={group.label}>
