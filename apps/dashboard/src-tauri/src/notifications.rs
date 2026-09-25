@@ -48,6 +48,12 @@ pub enum NotificationDestination {
         #[serde(rename = "projectId")]
         project_id: String,
     },
+    Chat {
+        #[serde(rename = "projectId")]
+        project_id: String,
+        #[serde(rename = "chatId")]
+        chat_id: String,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -84,14 +90,18 @@ fn is_uuid(value: &str) -> bool {
 fn validate_notification(notification: &NativeNotification) -> Result<(), String> {
     validate_text("title", &notification.title, MAX_TITLE_CHARACTERS)?;
     validate_text("body", &notification.body, MAX_BODY_CHARACTERS)?;
-    let (project_id, task_id) = match &notification.destination {
+    let (project_id, resource_id) = match &notification.destination {
         NotificationDestination::Task {
             project_id,
             task_id,
         } => (project_id, Some(task_id)),
         NotificationDestination::Activity { project_id } => (project_id, None),
+        NotificationDestination::Chat {
+            project_id,
+            chat_id,
+        } => (project_id, Some(chat_id)),
     };
-    if !is_uuid(project_id) || task_id.is_some_and(|value| !is_uuid(value)) {
+    if !is_uuid(project_id) || resource_id.is_some_and(|value| !is_uuid(value)) {
         return Err("Notification destination is invalid.".to_string());
     }
     Ok(())
@@ -213,6 +223,18 @@ mod tests {
                 "kind": "task",
                 "projectId": "11111111-1111-4111-8111-111111111111",
                 "taskId": "22222222-2222-4222-8222-222222222222"
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(NotificationDestination::Chat {
+                project_id: "11111111-1111-4111-8111-111111111111".to_string(),
+                chat_id: "33333333-3333-4333-8333-333333333333".to_string(),
+            })
+            .unwrap(),
+            serde_json::json!({
+                "kind": "chat",
+                "projectId": "11111111-1111-4111-8111-111111111111",
+                "chatId": "33333333-3333-4333-8333-333333333333"
             })
         );
     }

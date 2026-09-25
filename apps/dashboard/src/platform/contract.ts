@@ -36,6 +36,11 @@ export const nativeNotificationDestinationSchema = z.discriminatedUnion(
     z.object({
       kind: z.literal("activity"),
       projectId: z.string().uuid()
+    }),
+    z.object({
+      kind: z.literal("chat"),
+      projectId: z.string().uuid(),
+      chatId: z.string().uuid()
     })
   ]
 );
