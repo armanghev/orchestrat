@@ -341,6 +341,62 @@ test(
       }
       const [a, b] = workers;
       await t.test(
+        "concurrent direct chat creation returns one canonical conversation",
+        async () => {
+          const createWorker = async (name: string) => {
+            const agent = (
+              await request("POST", `/projects/${project.id}/agents`, {
+                name
+              })
+            ).json();
+            const credential = (
+              await request(
+                "POST",
+                `/projects/${project.id}/agents/${agent.id}/credentials`
+              )
+            ).json();
+            return { agent, token: credential.token as string };
+          };
+          const [left, right] = await Promise.all([
+            createWorker("Concurrent left"),
+            createWorker("Concurrent right")
+          ]);
+          const replies = await Promise.all([
+            request(
+              "POST",
+              "/agent/chats",
+              {
+                kind: "direct",
+                participants: [{ type: "agent", id: right.agent.id }]
+              },
+              left.token,
+              "postgres-concurrent-direct-left"
+            ),
+            request(
+              "POST",
+              "/agent/chats",
+              {
+                kind: "direct",
+                participants: [{ type: "agent", id: left.agent.id }]
+              },
+              right.token,
+              "postgres-concurrent-direct-right"
+            )
+          ]);
+          assert.deepEqual(
+            replies.map((reply) => reply.statusCode).sort(),
+            [200, 201]
+          );
+          const first = replies[0].json();
+          assert.equal(replies[1].json().id, first.id);
+          const rows = await pool.query(
+            "SELECT count(*)::int AS count FROM chats WHERE project_id=$1 AND id=$2",
+            [project.id, first.id]
+          );
+          assert.equal(rows.rows[0]?.count, 1);
+        }
+      );
+      await t.test(
         "concurrent chat sends stay ordered, retries deduplicate, and reads advance monotonically",
         async () => {
           const created = await request(
