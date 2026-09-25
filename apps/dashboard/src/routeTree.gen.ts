@@ -18,6 +18,7 @@ import { Route as AuthenticatedSetupRouteImport } from './routes/_authenticated.
 import { Route as AuthCallbackRouteImport } from './routes/auth.callback'
 import { Route as AuthDesktopRouteImport } from './routes/auth.desktop'
 import { Route as CliAuthorizeRouteImport } from './routes/cli.authorize'
+import { Route as ProjectInvitationsJoinRouteImport } from './routes/project-invitations.join'
 import { Route as AuthenticatedProjectsProjectIdRouteImport } from './routes/_authenticated.projects.$projectId'
 import { Route as AuthDesktopCallbackRouteImport } from './routes/auth.desktop_.callback'
 import { Route as AuthenticatedOrganizationsOrganizationIdSettingsRouteImport } from './routes/_authenticated.organizations.$organizationId.settings'
@@ -74,6 +75,11 @@ const AuthDesktopRoute = AuthDesktopRouteImport.update({
 const CliAuthorizeRoute = CliAuthorizeRouteImport.update({
   id: '/cli/authorize',
   path: '/cli/authorize',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ProjectInvitationsJoinRoute = ProjectInvitationsJoinRouteImport.update({
+  id: '/project-invitations/join',
+  path: '/project-invitations/join',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthenticatedProjectsProjectIdRoute =
@@ -157,6 +163,7 @@ export interface FileRoutesByFullPath {
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/desktop': typeof AuthDesktopRoute
   '/cli/authorize': typeof CliAuthorizeRoute
+  '/project-invitations/join': typeof ProjectInvitationsJoinRoute
   '/projects/$projectId': typeof AuthenticatedProjectsProjectIdRouteWithChildren
   '/auth/desktop/callback': typeof AuthDesktopCallbackRoute
   '/organizations/$organizationId/settings': typeof AuthenticatedOrganizationsOrganizationIdSettingsRoute
@@ -179,6 +186,7 @@ export interface FileRoutesByTo {
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/desktop': typeof AuthDesktopRoute
   '/cli/authorize': typeof CliAuthorizeRoute
+  '/project-invitations/join': typeof ProjectInvitationsJoinRoute
   '/auth/desktop/callback': typeof AuthDesktopCallbackRoute
   '/organizations/$organizationId/settings': typeof AuthenticatedOrganizationsOrganizationIdSettingsRoute
   '/projects/$projectId/activity': typeof AuthenticatedProjectsProjectIdActivityRoute
@@ -202,6 +210,7 @@ export interface FileRoutesById {
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/desktop': typeof AuthDesktopRoute
   '/cli/authorize': typeof CliAuthorizeRoute
+  '/project-invitations/join': typeof ProjectInvitationsJoinRoute
   '/_authenticated/projects/$projectId': typeof AuthenticatedProjectsProjectIdRouteWithChildren
   '/auth/desktop_/callback': typeof AuthDesktopCallbackRoute
   '/_authenticated/organizations/$organizationId/settings': typeof AuthenticatedOrganizationsOrganizationIdSettingsRoute
@@ -226,6 +235,7 @@ export interface FileRouteTypes {
     | '/auth/callback'
     | '/auth/desktop'
     | '/cli/authorize'
+    | '/project-invitations/join'
     | '/projects/$projectId'
     | '/auth/desktop/callback'
     | '/organizations/$organizationId/settings'
@@ -248,6 +258,7 @@ export interface FileRouteTypes {
     | '/auth/callback'
     | '/auth/desktop'
     | '/cli/authorize'
+    | '/project-invitations/join'
     | '/auth/desktop/callback'
     | '/organizations/$organizationId/settings'
     | '/projects/$projectId/activity'
@@ -270,6 +281,7 @@ export interface FileRouteTypes {
     | '/auth/callback'
     | '/auth/desktop'
     | '/cli/authorize'
+    | '/project-invitations/join'
     | '/_authenticated/projects/$projectId'
     | '/auth/desktop_/callback'
     | '/_authenticated/organizations/$organizationId/settings'
@@ -290,6 +302,7 @@ export interface RootRouteChildren {
   AuthCallbackRoute: typeof AuthCallbackRoute
   AuthDesktopRoute: typeof AuthDesktopRoute
   CliAuthorizeRoute: typeof CliAuthorizeRoute
+  ProjectInvitationsJoinRoute: typeof ProjectInvitationsJoinRoute
   AuthDesktopCallbackRoute: typeof AuthDesktopCallbackRoute
 }
 
@@ -356,6 +369,13 @@ declare module '@tanstack/react-router' {
       path: '/cli/authorize'
       fullPath: '/cli/authorize'
       preLoaderRoute: typeof CliAuthorizeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/project-invitations/join': {
+      id: '/project-invitations/join'
+      path: '/project-invitations/join'
+      fullPath: '/project-invitations/join'
+      preLoaderRoute: typeof ProjectInvitationsJoinRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated/projects/$projectId': {
@@ -514,6 +534,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthCallbackRoute: AuthCallbackRoute,
   AuthDesktopRoute: AuthDesktopRoute,
   CliAuthorizeRoute: CliAuthorizeRoute,
+  ProjectInvitationsJoinRoute: ProjectInvitationsJoinRoute,
   AuthDesktopCallbackRoute: AuthDesktopCallbackRoute,
 }
 export const routeTree = rootRouteImport

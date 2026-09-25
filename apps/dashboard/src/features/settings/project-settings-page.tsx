@@ -15,6 +15,7 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
 import { ConfirmDeleteDialog } from "./confirm-delete-dialog";
 import { LocalIntegrationStatusSection } from "./local-integration-status";
+import { ProjectMembersSection } from "./project-members-section";
 import type { ProjectContext } from "@/features/hierarchy/catalog";
 import type { ApiClient } from "@/lib/api/client";
 
@@ -25,15 +26,17 @@ export function ProjectSettingsPage({
   context,
   api,
   onUpdated,
-  onDeleted
+  onDeleted,
+  onMembershipChanged
 }: {
   context: ProjectContext;
   api: ApiClient;
   onUpdated: (project: Project) => void;
   onDeleted: () => void;
+  onMembershipChanged: () => Promise<void> | void;
 }) {
   const { organization, project } = context;
-  const canEdit = organization.role !== "member";
+  const canEdit = project.role === "owner" || project.role === "admin";
   const [name, setName] = useState(project.name);
   const [slug, setSlug] = useState(project.slug);
   const [description, setDescription] = useState(project.description ?? "");
@@ -208,6 +211,12 @@ export function ProjectSettingsPage({
           </CardContent>
         </Card>
       </div>
+      <ProjectMembersSection
+        project={project}
+        organization={organization}
+        api={api}
+        onMembershipChanged={onMembershipChanged}
+      />
       <LocalIntegrationStatusSection projectId={project.id} />
       {canEdit ? (
         <Card>
@@ -234,7 +243,7 @@ export function ProjectSettingsPage({
           </CardContent>
         </Card>
       ) : null}
-      {organization.role === "owner" ? (
+      {project.role === "owner" ? (
         <Card>
           <CardHeader>
             <CardTitle>

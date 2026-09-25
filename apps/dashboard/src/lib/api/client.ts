@@ -68,7 +68,28 @@ import {
   realtimeTicketResponseSchema,
   type RealtimeTicketResponse,
   cliAuthorizationPollResponseSchema,
-  type CliAuthorizationPollResponse
+  type CliAuthorizationPollResponse,
+  messageCandidatesResponseSchema,
+  chatsResponseSchema,
+  chatSchema,
+  chatMessagesResponseSchema,
+  inboxSummarySchema,
+  projectMembersResponseSchema,
+  projectInvitationsResponseSchema,
+  createProjectInvitationResponseSchema,
+  revokeProjectInvitationResponseSchema,
+  acceptProjectInvitationResponseSchema,
+  type MessageCandidate,
+  type Chat,
+  type ChatMessage,
+  type CreateChatRequest,
+  type ManageChatMembersRequest,
+  type SendMessageRequest,
+  type ChatMessagesQuery,
+  type InboxSummary,
+  type ProjectMember,
+  type ProjectInvitation,
+  type AcceptProjectInvitationResponse
 } from "@orchestrat/protocol";
 import { z, type ZodType } from "zod";
 
@@ -276,6 +297,185 @@ export class ApiClient {
       `/api/v1/projects/${encodeURIComponent(projectId)}`,
       { method: "GET" },
       projectSchema
+    );
+  }
+
+  listProjectMembers(projectId: string): Promise<{ members: ProjectMember[] }> {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/members`,
+      { method: "GET" },
+      projectMembersResponseSchema
+    );
+  }
+
+  addProjectMember(
+    projectId: string,
+    input: { user_id: string; role?: ProjectMember["role"] }
+  ): Promise<ProjectMember> {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/members`,
+      { method: "POST", body: input },
+      projectMembersResponseSchema.shape.members.element
+    );
+  }
+
+  updateProjectMember(
+    projectId: string,
+    userId: string,
+    role: ProjectMember["role"]
+  ): Promise<ProjectMember> {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(userId)}`,
+      { method: "PATCH", body: { role } },
+      projectMembersResponseSchema.shape.members.element
+    );
+  }
+
+  removeProjectMember(projectId: string, userId: string) {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(userId)}`,
+      { method: "DELETE" },
+      deleteResourceResponseSchema
+    );
+  }
+
+  listProjectInvitations(
+    projectId: string
+  ): Promise<{ invitations: ProjectInvitation[] }> {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/invitations`,
+      { method: "GET" },
+      projectInvitationsResponseSchema
+    );
+  }
+
+  createProjectInvitation(projectId: string) {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/invitations`,
+      { method: "POST", body: {} },
+      createProjectInvitationResponseSchema
+    );
+  }
+
+  revokeProjectInvitation(projectId: string, invitationId: string) {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/invitations/${encodeURIComponent(invitationId)}/revoke`,
+      { method: "POST", body: {} },
+      revokeProjectInvitationResponseSchema
+    );
+  }
+
+  acceptProjectInvitation(
+    token: string
+  ): Promise<AcceptProjectInvitationResponse> {
+    return this.request(
+      "/api/v1/project-invitations/accept",
+      { method: "POST", body: { token } },
+      acceptProjectInvitationResponseSchema
+    );
+  }
+
+  listMessageCandidates(
+    projectId: string
+  ): Promise<{ candidates: MessageCandidate[] }> {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/message-candidates`,
+      { method: "GET" },
+      messageCandidatesResponseSchema
+    );
+  }
+
+  listChats(projectId: string): Promise<{ chats: Chat[] }> {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/chats`,
+      { method: "GET" },
+      chatsResponseSchema
+    );
+  }
+
+  getProjectInbox(projectId: string): Promise<InboxSummary> {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/inbox`,
+      { method: "GET" },
+      inboxSummarySchema
+    );
+  }
+
+  getChat(chatId: string): Promise<Chat> {
+    return this.request(
+      `/api/v1/chats/${encodeURIComponent(chatId)}`,
+      { method: "GET" },
+      chatSchema
+    );
+  }
+
+  createChat(
+    projectId: string,
+    input: CreateChatRequest,
+    idempotencyKey: string
+  ): Promise<Chat> {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/chats`,
+      {
+        method: "POST",
+        body: input,
+        headers: { "Idempotency-Key": idempotencyKey }
+      },
+      chatSchema
+    );
+  }
+
+  manageChatMembers(
+    chatId: string,
+    input: ManageChatMembersRequest
+  ): Promise<Chat> {
+    return this.request(
+      `/api/v1/chats/${encodeURIComponent(chatId)}/members`,
+      { method: "POST", body: input },
+      chatSchema
+    );
+  }
+
+  joinChat(chatId: string): Promise<Chat> {
+    return this.request(
+      `/api/v1/chats/${encodeURIComponent(chatId)}/join`,
+      { method: "POST", body: {} },
+      chatSchema
+    );
+  }
+
+  listChatMessages(
+    chatId: string,
+    query: Partial<ChatMessagesQuery> = {}
+  ): Promise<z.infer<typeof chatMessagesResponseSchema>> {
+    return this.request(
+      `/api/v1/chats/${encodeURIComponent(chatId)}/messages${queryString(query)}`,
+      { method: "GET" },
+      chatMessagesResponseSchema
+    );
+  }
+
+  sendChatMessage(
+    chatId: string,
+    input: SendMessageRequest,
+    idempotencyKey: string
+  ): Promise<ChatMessage> {
+    return this.request(
+      `/api/v1/chats/${encodeURIComponent(chatId)}/messages`,
+      {
+        method: "POST",
+        body: input,
+        headers: { "Idempotency-Key": idempotencyKey }
+      },
+      chatMessagesResponseSchema.shape.messages.element
+    );
+  }
+
+  acknowledgeChatMessages(chatId: string, throughMessageId: string) {
+    return this.request(
+      `/api/v1/chats/${encodeURIComponent(chatId)}/read`,
+      { method: "POST", body: { through_message_id: throughMessageId } },
+      z.object({ last_read_sequence: z.number().int().nonnegative() })
     );
   }
 

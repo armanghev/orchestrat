@@ -1,6 +1,11 @@
-import { createFileRoute, useNavigate, useRouter } from "@tanstack/react-router";
+import {
+  createFileRoute,
+  useNavigate,
+  useRouter
+} from "@tanstack/react-router";
 import { ProjectSettingsPage } from "@/features/settings/project-settings-page";
 import { hierarchyKeys } from "@/features/hierarchy/query-options";
+import { messagingKeys } from "@/features/messaging/query-options";
 import { Route as ProjectRoute } from "./_authenticated.projects.$projectId";
 function SettingsRoute() {
   const { project } = ProjectRoute.useRouteContext();
@@ -10,6 +15,15 @@ function SettingsRoute() {
   if (!project) return null;
   const refresh = async () => {
     await queryClient.invalidateQueries({ queryKey: hierarchyKeys.all });
+    await router.invalidate();
+  };
+  const refreshMembership = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: hierarchyKeys.all }),
+      queryClient.invalidateQueries({
+        queryKey: messagingKeys.candidates(project.project.id)
+      })
+    ]);
     await router.invalidate();
   };
   const leaveProject = async () => {
@@ -22,6 +36,7 @@ function SettingsRoute() {
       api={api}
       onUpdated={() => void refresh()}
       onDeleted={() => void leaveProject()}
+      onMembershipChanged={refreshMembership}
     />
   );
 }

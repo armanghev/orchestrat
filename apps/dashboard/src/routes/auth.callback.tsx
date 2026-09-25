@@ -7,6 +7,10 @@ import {
 import { z } from "zod";
 import { useAuthClient } from "@/features/auth/auth-context";
 import { AuthCallbackScreen } from "@/features/auth/auth-callback-screen";
+import {
+  PROJECT_INVITATION_TOKEN_KEY,
+  projectInvitationTokenPattern
+} from "@/features/settings/project-invitation-token";
 import { CLI_ATTEMPT_KEY, attemptPattern } from "./cli.authorize";
 
 const callbackSearchSchema = z.looseObject({
@@ -39,6 +43,20 @@ function AuthCallbackRoute() {
       void navigate({
         to: "/cli/authorize",
         search: { attempt: pending },
+        replace: true
+      });
+      return;
+    }
+    const invitationToken = window.sessionStorage.getItem(
+      PROJECT_INVITATION_TOKEN_KEY
+    );
+    if (
+      invitationToken &&
+      projectInvitationTokenPattern.test(invitationToken)
+    ) {
+      void navigate({
+        to: "/project-invitations/join",
+        hash: `token=${encodeURIComponent(invitationToken)}`,
         replace: true
       });
       return;
