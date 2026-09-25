@@ -6,6 +6,7 @@ import type { HumanAuth } from "@orchestrat/auth";
 import {
   createDatabase,
   organizationMembers,
+  projectMembers,
   taskComments,
   users
 } from "@orchestrat/db";
@@ -159,6 +160,11 @@ async function workspace(prefix?: string) {
       }
     })
   ).json();
+  await db.insert(projectMembers).values({
+    projectId: project.id,
+    userId: subjects.bob,
+    role: "member"
+  });
   return { ...state, organization, project };
 }
 
@@ -231,6 +237,11 @@ test("tasks API supports Kanban lifecycle, idempotency, comments, dependencies, 
         payload: { name: "Kanban", task_key_prefix: "KB" }
       })
     ).json();
+    await db.insert(projectMembers).values({
+      projectId: project.id,
+      userId: subjects.bob,
+      role: "member"
+    });
     const firstResponse = await app.inject({
       method: "POST",
       url: `/api/v1/projects/${project.id}/tasks`,
@@ -725,6 +736,11 @@ test("dependencies reject self, cross-project, multi-edge cycles, and stale dele
         payload: { name: `Other ${randomUUID()}`, task_key_prefix: "OUT" }
       })
     ).json();
+    await left.db.insert(projectMembers).values({
+      projectId: outsideProject.id,
+      userId: left.subjects.bob,
+      role: "member"
+    });
     const outside = await createTask(
       left.app,
       outsideProject.id,

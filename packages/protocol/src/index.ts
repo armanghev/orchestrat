@@ -782,7 +782,18 @@ export const realtimeEventEnvelopeSchema = z
     sequence: z.number().int().positive(),
     event_type: eventTypeSchema,
     entity_type: realtimeEntityTypeSchema,
-    entity_id: idSchema.nullable()
+    entity_id: idSchema.nullable(),
+    actor: z
+      .object({ type: z.enum(["human", "agent"]), id: idSchema })
+      .nullable()
+      .optional(),
+    message_id: idSchema.optional(),
+    mentions: z
+      .array(z.object({ type: z.enum(["human", "agent"]), id: idSchema }))
+      .optional(),
+    affected_participant: z
+      .object({ type: z.enum(["human", "agent"]), id: idSchema })
+      .optional()
   })
   .refine(
     ({ event_type, entity_type }) => event_type.startsWith(`${entity_type}.`),
@@ -1241,9 +1252,15 @@ export const addProjectMemberRequestSchema = z.object({
   user_id: idSchema,
   role: organizationRoleSchema.optional()
 });
+export type AddProjectMemberRequest = z.infer<
+  typeof addProjectMemberRequestSchema
+>;
 export const updateProjectMemberRequestSchema = z.object({
   role: organizationRoleSchema
 });
+export type UpdateProjectMemberRequest = z.infer<
+  typeof updateProjectMemberRequestSchema
+>;
 export const projectInvitationSchema = z.object({
   id: idSchema,
   project_id: idSchema,
@@ -1257,16 +1274,28 @@ export type ProjectInvitation = z.infer<typeof projectInvitationSchema>;
 export const projectInvitationsResponseSchema = z.object({
   invitations: z.array(projectInvitationSchema)
 });
+export const revokeProjectInvitationResponseSchema = z.object({
+  invitation: projectInvitationSchema
+});
+export type RevokeProjectInvitationResponse = z.infer<
+  typeof revokeProjectInvitationResponseSchema
+>;
 export const createProjectInvitationResponseSchema = z.object({
   invitation: projectInvitationSchema,
   token: z.string().regex(/^[A-Za-z0-9_-]{43}$/)
 });
+export type CreateProjectInvitationResponse = z.infer<
+  typeof createProjectInvitationResponseSchema
+>;
 export const acceptProjectInvitationRequestSchema = z.object({
   token: z.string().regex(/^[A-Za-z0-9_-]{43}$/)
 });
 export const acceptProjectInvitationResponseSchema = z.object({
   project: projectSchema
 });
+export type AcceptProjectInvitationResponse = z.infer<
+  typeof acceptProjectInvitationResponseSchema
+>;
 
 export const projectChatParamsSchema = z.object({ projectId: idSchema });
 export const chatParamsSchema = z.object({ id: idSchema });

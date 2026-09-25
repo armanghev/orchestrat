@@ -1,6 +1,7 @@
 import {
   organizationMembers,
   organizations,
+  projectMembers,
   projects,
   type Database
 } from "@orchestrat/db";
@@ -63,7 +64,8 @@ export class PermissionService {
       .select({
         id: projects.id,
         name: projects.name,
-        organizationName: organizations.name
+        organizationName: organizations.name,
+        role: projectMembers.role
       })
       .from(projects)
       .innerJoin(organizations, eq(organizations.id, projects.organizationId))
@@ -74,18 +76,32 @@ export class PermissionService {
           eq(organizationMembers.userId, userId)
         )
       )
+      .innerJoin(
+        projectMembers,
+        and(
+          eq(projectMembers.projectId, projects.id),
+          eq(projectMembers.userId, userId)
+        )
+      )
       .orderBy(asc(organizations.name), asc(projects.name));
   }
 
   async projectAccess(userId: string, projectId: string) {
     const [record] = await this.db
-      .select({ project: projects, role: organizationMembers.role })
+      .select({ project: projects, role: projectMembers.role })
       .from(projects)
       .innerJoin(
         organizationMembers,
         and(
           eq(organizationMembers.organizationId, projects.organizationId),
           eq(organizationMembers.userId, userId)
+        )
+      )
+      .innerJoin(
+        projectMembers,
+        and(
+          eq(projectMembers.projectId, projects.id),
+          eq(projectMembers.userId, userId)
         )
       )
       .where(eq(projects.id, projectId))
@@ -105,7 +121,7 @@ export class PermissionService {
       throw new ApiError(
         403,
         "PERMISSION_DENIED",
-        "Only organization owners and admins can edit this project."
+        "Only project owners and admins can edit this project."
       );
     return record;
   }
@@ -116,7 +132,7 @@ export class PermissionService {
       throw new ApiError(
         403,
         "PERMISSION_DENIED",
-        "Only organization owners can perform this action."
+        "Only project owners can perform this action."
       );
     return record;
   }

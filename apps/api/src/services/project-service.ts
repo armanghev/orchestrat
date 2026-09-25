@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   organizationMembers,
   organizations,
+  projectMembers,
   projects,
   users,
   type Database
@@ -17,9 +18,11 @@ import type {
   UpdateOrganizationRequest,
   UpdateProjectRequest
 } from "@orchestrat/protocol";
-import { and, asc, count, eq } from "drizzle-orm";
+import { and, asc, count, eq, inArray } from "drizzle-orm";
 import { ApiError } from "./api-error.js";
 import { PermissionService } from "./permission-service.js";
+
+type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 
 const slugify = (value: string) =>
   value
@@ -43,7 +46,11 @@ const organizationJson = (
   updated_at: organization.updatedAt.toISOString()
 });
 
-const projectJson = (project: typeof projects.$inferSelect): Project => ({
+const projectJson = (
+  project: typeof projects.$inferSelect,
+  role: Project["role"]
+): Project => ({
+  role,
   id: project.id,
   organization_id: project.organizationId,
   name: project.name,
@@ -73,6 +80,11 @@ export class ProjectService {
 
   constructor(
     private readonly db: Database,
+    private readonly assertProjectMemberRemovable: (
+      tx: Transaction,
+      projectId: string,
+      userId: string
+    ) => Promise<void>,
     private readonly cleanupProjectStorage?: (
       projectId: string
     ) => Promise<void>
@@ -184,110 +196,129 @@ export class ProjectService {
     memberId: string,
     input: UpdateOrganizationMemberRequest
   ) {
-    const actor = await this.permissions.organizationEditor(
-      userId,
-      organizationId
-    );
-    const [target] = await this.db
-      .select({ membership: organizationMembers })
-      .from(organizationMembers)
-      .where(
-        and(
-          eq(organizationMembers.organizationId, organizationId),
-          eq(organizationMembers.userId, memberId)
+    await this.permissions.organizationEditor(userId, organizationId);
+    return this.db.transaction(async (tx) => {
+      await this.lockOrganization(tx, organizationId);
+      const actor = await this.organizationMember(tx, organizationId, userId);
+      if (!actor || actor.role === "member")
+        throw new ApiError(
+          403,
+          "PERMISSION_DENIED",
+          "Only organization owners and admins can edit this organization."
+        );
+      const target = await this.organizationMember(
+        tx,
+        organizationId,
+        memberId
+      );
+      if (!target)
+        throw new ApiError(404, "NOT_FOUND", "Organization member not found.");
+      if (target.role === "owner" && actor.role !== "owner")
+        throw new ApiError(
+          403,
+          "PERMISSION_DENIED",
+          "Admins cannot modify owners."
+        );
+      if (input.role === "owner" && actor.role !== "owner")
+        throw new ApiError(
+          403,
+          "PERMISSION_DENIED",
+          "Admins cannot assign owner role."
+        );
+      if (target.role === "owner" && input.role !== "owner")
+        await this.assertAnotherOwner(tx, organizationId);
+      const [membership] = await tx
+        .update(organizationMembers)
+        .set({ role: input.role })
+        .where(
+          and(
+            eq(organizationMembers.organizationId, organizationId),
+            eq(organizationMembers.userId, memberId)
+          )
         )
-      )
-      .limit(1);
-    if (!target)
-      throw new ApiError(404, "NOT_FOUND", "Organization member not found.");
-    if (target.membership.role === "owner" && actor.role !== "owner")
-      throw new ApiError(
-        403,
-        "PERMISSION_DENIED",
-        "Admins cannot modify owners."
-      );
-    if (input.role === "owner" && actor.role !== "owner")
-      throw new ApiError(
-        403,
-        "PERMISSION_DENIED",
-        "Admins cannot assign owner role."
-      );
-    if (
-      memberId === userId &&
-      target.membership.role === "owner" &&
-      input.role !== "owner"
-    )
-      await this.assertAnotherOwner(organizationId);
-
-    await this.db
-      .update(organizationMembers)
-      .set({ role: input.role })
-      .where(
-        and(
-          eq(organizationMembers.organizationId, organizationId),
-          eq(organizationMembers.userId, memberId)
-        )
-      );
-    const members = await this.listMembers(userId, organizationId);
-    return members.members.find((member) => member.user_id === memberId)!;
+        .returning();
+      const [user] = await tx
+        .select()
+        .from(users)
+        .where(eq(users.id, memberId))
+        .limit(1);
+      if (!membership || !user)
+        throw new ApiError(404, "NOT_FOUND", "Organization member not found.");
+      return memberJson({ user, membership });
+    });
   }
 
   async removeMember(userId: string, organizationId: string, memberId: string) {
-    const actor = await this.permissions.organizationEditor(
-      userId,
-      organizationId
-    );
-    const [target] = await this.db
-      .select({ membership: organizationMembers })
-      .from(organizationMembers)
-      .where(
-        and(
-          eq(organizationMembers.organizationId, organizationId),
-          eq(organizationMembers.userId, memberId)
-        )
-      )
-      .limit(1);
-    if (!target)
-      throw new ApiError(404, "NOT_FOUND", "Organization member not found.");
-    if (target.membership.role === "owner" && actor.role !== "owner")
-      throw new ApiError(
-        403,
-        "PERMISSION_DENIED",
-        "Admins cannot remove owners."
+    await this.permissions.organizationEditor(userId, organizationId);
+    return this.db.transaction(async (tx) => {
+      await this.lockOrganization(tx, organizationId);
+      const actor = await this.organizationMember(tx, organizationId, userId);
+      if (!actor || actor.role === "member")
+        throw new ApiError(
+          403,
+          "PERMISSION_DENIED",
+          "Only organization owners and admins can edit this organization."
+        );
+      const target = await this.organizationMember(
+        tx,
+        organizationId,
+        memberId
       );
-    if (memberId === userId && target.membership.role === "owner")
-      await this.assertAnotherOwner(organizationId);
-    await this.db
-      .delete(organizationMembers)
-      .where(
-        and(
-          eq(organizationMembers.organizationId, organizationId),
-          eq(organizationMembers.userId, memberId)
-        )
-      );
-    return { deleted: true as const };
+      if (!target)
+        throw new ApiError(404, "NOT_FOUND", "Organization member not found.");
+      if (target.role === "owner" && actor.role !== "owner")
+        throw new ApiError(
+          403,
+          "PERMISSION_DENIED",
+          "Admins cannot remove owners."
+        );
+      if (target.role === "owner")
+        await this.assertAnotherOwner(tx, organizationId);
+      await this.removeFromProjects(tx, organizationId, memberId);
+      await tx
+        .delete(organizationMembers)
+        .where(
+          and(
+            eq(organizationMembers.organizationId, organizationId),
+            eq(organizationMembers.userId, memberId)
+          )
+        );
+      return { deleted: true as const };
+    });
   }
 
   async leaveOrganization(userId: string, organizationId: string) {
-    const membership = await this.permissions.organization(
-      userId,
-      organizationId
-    );
-    if (membership.role === "owner")
-      await this.assertAnotherOwner(organizationId);
-    await this.db
-      .delete(organizationMembers)
-      .where(
-        and(
-          eq(organizationMembers.organizationId, organizationId),
-          eq(organizationMembers.userId, userId)
-        )
+    await this.permissions.organization(userId, organizationId);
+    return this.db.transaction(async (tx) => {
+      await this.lockOrganization(tx, organizationId);
+      const membership = await this.organizationMember(
+        tx,
+        organizationId,
+        userId
       );
-    return { deleted: true as const };
+      if (!membership)
+        throw new ApiError(
+          403,
+          "PERMISSION_DENIED",
+          "You do not have access to this organization."
+        );
+      if (membership.role === "owner")
+        await this.assertAnotherOwner(tx, organizationId);
+      await this.removeFromProjects(tx, organizationId, userId);
+      await tx
+        .delete(organizationMembers)
+        .where(
+          and(
+            eq(organizationMembers.organizationId, organizationId),
+            eq(organizationMembers.userId, userId)
+          )
+        );
+      return { deleted: true as const };
+    });
   }
 
-  private async assertAnotherOwner(organizationId: string) {
-    const [{ ownerCount }] = await this.db
+  private async assertAnotherOwner(tx: Transaction, organizationId: string) {
+    const [{ ownerCount }] = await tx
       .select({ ownerCount: count() })
       .from(organizationMembers)
       .where(
@@ -304,13 +335,112 @@ export class ProjectService {
       );
   }
 
+  private async lockOrganization(tx: Transaction, organizationId: string) {
+    const [organization] = await tx
+      .select({ id: organizations.id })
+      .from(organizations)
+      .where(eq(organizations.id, organizationId))
+      .for("update");
+    if (!organization)
+      throw new ApiError(404, "NOT_FOUND", "Organization not found.");
+  }
+
+  private async organizationMember(
+    tx: Transaction,
+    organizationId: string,
+    userId: string
+  ) {
+    const [membership] = await tx
+      .select({ role: organizationMembers.role })
+      .from(organizationMembers)
+      .where(
+        and(
+          eq(organizationMembers.organizationId, organizationId),
+          eq(organizationMembers.userId, userId)
+        )
+      )
+      .limit(1);
+    return membership;
+  }
+
+  private async removeFromProjects(
+    tx: Transaction,
+    organizationId: string,
+    userId: string
+  ) {
+    const rows = await tx
+      .select({ id: projects.id })
+      .from(projects)
+      .where(eq(projects.organizationId, organizationId))
+      .orderBy(asc(projects.id))
+      .for("update");
+    const projectIds = rows.map((row) => row.id);
+    if (projectIds.length === 0) return;
+
+    const memberships = await tx
+      .select({
+        projectId: projectMembers.projectId,
+        role: projectMembers.role
+      })
+      .from(projectMembers)
+      .where(
+        and(
+          eq(projectMembers.userId, userId),
+          inArray(projectMembers.projectId, projectIds)
+        )
+      );
+    const ownerProjectIds = memberships
+      .filter((membership) => membership.role === "owner")
+      .map((membership) => membership.projectId);
+    if (ownerProjectIds.length > 0) {
+      const ownerCounts = await tx
+        .select({
+          projectId: projectMembers.projectId,
+          ownerCount: count()
+        })
+        .from(projectMembers)
+        .where(
+          and(
+            eq(projectMembers.role, "owner"),
+            inArray(projectMembers.projectId, ownerProjectIds)
+          )
+        )
+        .groupBy(projectMembers.projectId);
+      if (ownerCounts.some((row) => Number(row.ownerCount) <= 1))
+        throw new ApiError(
+          409,
+          "CONFLICT",
+          "The sole project owner cannot leave or lose project access."
+        );
+    }
+
+    for (const membership of memberships)
+      await this.assertProjectMemberRemovable(tx, membership.projectId, userId);
+    await tx
+      .delete(projectMembers)
+      .where(
+        and(
+          eq(projectMembers.userId, userId),
+          inArray(projectMembers.projectId, projectIds)
+        )
+      );
+  }
+
   async listProjects(userId: string, organizationId: string) {
     await this.permissions.organization(userId, organizationId);
-    const rows = await this.db.query.projects.findMany({
-      orderBy: asc(projects.name),
-      where: eq(projects.organizationId, organizationId)
-    });
-    return { projects: rows.map(projectJson) };
+    const rows = await this.db
+      .select({ project: projects, role: projectMembers.role })
+      .from(projects)
+      .innerJoin(
+        projectMembers,
+        and(
+          eq(projectMembers.projectId, projects.id),
+          eq(projectMembers.userId, userId)
+        )
+      )
+      .where(eq(projects.organizationId, organizationId))
+      .orderBy(asc(projects.name));
+    return { projects: rows.map((row) => projectJson(row.project, row.role)) };
   }
 
   async createProject(
@@ -318,32 +448,46 @@ export class ProjectService {
     organizationId: string,
     input: CreateProjectRequest
   ) {
-    await this.permissions.organization(userId, organizationId);
-    const [project] = await this.db
-      .insert(projects)
-      .values({
-        id: randomUUID(),
-        organizationId,
-        name: input.name,
-        slug: input.slug ?? slugify(input.name),
-        description: input.description ?? null,
-        taskKeyPrefix:
-          input.task_key_prefix ??
-          ((input.slug ?? slugify(input.name))
-            .replace(/[^a-z0-9]/gi, "")
-            .slice(0, 3).length >= 2
-            ? (input.slug ?? slugify(input.name))
-                .replace(/[^a-z0-9]/gi, "")
-                .slice(0, 3)
-                .toUpperCase()
-            : "PRJ")
-      })
-      .returning();
-    return projectJson(project);
+    return this.db.transaction(async (tx) => {
+      await this.lockOrganization(tx, organizationId);
+      if (!(await this.organizationMember(tx, organizationId, userId)))
+        throw new ApiError(
+          403,
+          "PERMISSION_DENIED",
+          "You do not have access to this organization."
+        );
+      const [project] = await tx
+        .insert(projects)
+        .values({
+          id: randomUUID(),
+          organizationId,
+          name: input.name,
+          slug: input.slug ?? slugify(input.name),
+          description: input.description ?? null,
+          taskKeyPrefix:
+            input.task_key_prefix ??
+            ((input.slug ?? slugify(input.name))
+              .replace(/[^a-z0-9]/gi, "")
+              .slice(0, 3).length >= 2
+              ? (input.slug ?? slugify(input.name))
+                  .replace(/[^a-z0-9]/gi, "")
+                  .slice(0, 3)
+                  .toUpperCase()
+              : "PRJ")
+        })
+        .returning();
+      await tx.insert(projectMembers).values({
+        projectId: project.id,
+        userId,
+        role: "owner"
+      });
+      return projectJson(project, "owner");
+    });
   }
 
   async getProject(userId: string, projectId: string) {
-    return projectJson(await this.permissions.project(userId, projectId));
+    const record = await this.permissions.projectAccess(userId, projectId);
+    return projectJson(record.project, record.role);
   }
 
   async updateProject(
@@ -351,22 +495,20 @@ export class ProjectService {
     projectId: string,
     input: UpdateProjectRequest
   ) {
-    await this.permissions.projectEditor(userId, projectId);
+    const current = await this.permissions.projectEditor(userId, projectId);
     const [project] = await this.db
       .update(projects)
       .set({ ...input, updatedAt: new Date() })
       .where(eq(projects.id, projectId))
       .returning();
     if (!project) throw new ApiError(404, "NOT_FOUND", "Project not found.");
-    return projectJson(project);
+    return projectJson(project, current.role);
   }
 
   async archiveProject(userId: string, projectId: string) {
-    const { project: current } = await this.permissions.projectEditor(
-      userId,
-      projectId
-    );
-    if (current.status === "archived") return projectJson(current);
+    const access = await this.permissions.projectEditor(userId, projectId);
+    const current = access.project;
+    if (current.status === "archived") return projectJson(current, access.role);
     const now = new Date();
     const [project] = await this.db
       .update(projects)
@@ -375,15 +517,13 @@ export class ProjectService {
       .returning();
     if (!project)
       throw new ApiError(409, "CONFLICT", "Project could not be archived.");
-    return projectJson(project);
+    return projectJson(project, access.role);
   }
 
   async reactivateProject(userId: string, projectId: string) {
-    const { project: current } = await this.permissions.projectEditor(
-      userId,
-      projectId
-    );
-    if (current.status === "active") return projectJson(current);
+    const access = await this.permissions.projectEditor(userId, projectId);
+    const current = access.project;
+    if (current.status === "active") return projectJson(current, access.role);
     const [project] = await this.db
       .update(projects)
       .set({ archivedAt: null, status: "active", updatedAt: new Date() })
@@ -391,7 +531,7 @@ export class ProjectService {
       .returning();
     if (!project)
       throw new ApiError(409, "CONFLICT", "Project could not be reactivated.");
-    return projectJson(project);
+    return projectJson(project, access.role);
   }
 
   async deleteProject(

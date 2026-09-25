@@ -6,6 +6,7 @@ import {
   agentCredentials,
   agents,
   cliCredentials,
+  organizationMembers,
   users
 } from "@orchestrat/db";
 import { eq } from "drizzle-orm";
@@ -274,6 +275,38 @@ test("CLI setup enforces token and project scope and issues distinct agent crede
     );
     assert.equal((await db.query.cliCredentials.findMany()).length, 1);
     assert.equal((await db.query.agentCredentials.findMany()).length, 3);
+    await app.inject({
+      method: "GET",
+      url: "/api/v1/profile",
+      headers: { authorization: "Bearer bob" }
+    });
+    const bob = (
+      await db.select().from(users).where(eq(users.email, "bob@example.com"))
+    )[0]!;
+    await db.insert(organizationMembers).values({
+      organizationId: org.id,
+      userId: bob.id,
+      role: "member"
+    });
+    const addedOwner = await app.inject({
+      method: "POST",
+      url: `/api/v1/projects/${project.id}/members`,
+      headers: { authorization: "Bearer alice" },
+      payload: { user_id: bob.id, role: "owner" }
+    });
+    assert.equal(addedOwner.statusCode, 201);
+    const removedAlice = await app.inject({
+      method: "DELETE",
+      url: `/api/v1/projects/${project.id}/members/${user.id}`,
+      headers: { authorization: "Bearer bob" }
+    });
+    assert.equal(removedAlice.statusCode, 200);
+    const removedProject = await app.inject({
+      method: "GET",
+      url: "/api/v1/cli/setup/project",
+      headers: { authorization: `Bearer ${token}` }
+    });
+    assert.equal(removedProject.statusCode, 403);
     await db.update(cliCredentials).set({ revokedAt: new Date() });
     const revokedProject = await app.inject({
       method: "GET",

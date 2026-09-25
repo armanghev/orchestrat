@@ -11,6 +11,7 @@ import {
   RealtimeRegistry,
   RealtimeTicketStore,
   recordProjectEvent,
+  recordRealtimeNotice,
   withRealtimePublisher
 } from "../realtime/realtime.js";
 import { realtimeSocketRoutes, realtimeTicketRoutes } from "./realtime.js";
@@ -148,6 +149,84 @@ test("committed project events publish once, rollback publishes zero, and failur
   assert.equal(published[2]?.entity_type, "run");
 });
 
+test("targeted notices and project events publish in persisted sequence order", async () => {
+  const projectId = "550e8400-e29b-41d4-a716-446655440000";
+  const tx = {};
+  const db = {
+    async transaction(callback: (value: typeof tx) => Promise<unknown>) {
+      return callback(tx);
+    }
+  };
+  const delivered: Array<{
+    sequence: number;
+    targets: string[] | undefined;
+  }> = [];
+  const wrapped = withRealtimePublisher(db as never, (event, audience) => {
+    delivered.push({
+      sequence: event.sequence,
+      targets: audience?.targetUserIds
+    });
+  });
+
+  await wrapped.transaction(async (value) => {
+    recordProjectEvent(value, {
+      id: 12,
+      projectId,
+      type: "chat.member_added",
+      actorAgentId: null,
+      actorUserId: "550e8400-e29b-41d4-a716-446655440001",
+      entityId: "550e8400-e29b-41d4-a716-446655440002",
+      payload: {},
+      occurredAt: new Date()
+    });
+    recordRealtimeNotice(
+      value,
+      {
+        project_id: projectId,
+        sequence: 11,
+        event_type: "chat.access_invalidated",
+        entity_type: "chat",
+        entity_id: "550e8400-e29b-41d4-a716-446655440002"
+      },
+      { targetUserIds: ["550e8400-e29b-41d4-a716-446655440003"] }
+    );
+  });
+
+  assert.deepEqual(delivered, [
+    {
+      sequence: 11,
+      targets: ["550e8400-e29b-41d4-a716-446655440003"]
+    },
+    { sequence: 12, targets: undefined }
+  ]);
+});
+
+test("targeted realtime delivery reaches only the requested current project member", async (t) => {
+  const registry = new RealtimeRegistry(async () => {});
+  const formerObserver = new FakeSocket();
+  const currentParticipant = new FakeSocket();
+  registry.add("project-a", "former-observer", formerObserver as never);
+  registry.add("project-a", "current-participant", currentParticipant as never);
+  t.after(() => {
+    formerObserver.emit("close");
+    currentParticipant.emit("close");
+  });
+
+  await registry.publish(
+    {
+      project_id: "project-a",
+      sequence: 3,
+      event_type: "chat.access_invalidated",
+      entity_type: "chat",
+      entity_id: "550e8400-e29b-41d4-a716-446655440000"
+    },
+    { targetUserIds: ["former-observer"] }
+  );
+
+  assert.equal(formerObserver.sent.length, 1);
+  assert.equal(currentParticipant.sent.length, 0);
+});
+
 test("registry pings and terminates sockets that miss the next pong", async () => {
   const registry = new RealtimeRegistry(async () => {}, 10);
   const socket = new FakeSocket();
@@ -266,7 +345,8 @@ test("membership removal and leave reject preissued tickets and established subs
   const { PermissionService } =
     await import("../services/permission-service.js");
   const { ProjectService } = await import("../services/project-service.js");
-  const { organizationMembers, users } = await import("@orchestrat/db");
+  const { organizationMembers, projectMembers, users } =
+    await import("@orchestrat/db");
   const { app, db } = await fixture();
   t.after(() => app.close());
   const organization = (
@@ -295,7 +375,7 @@ test("membership removal and leave reject preissued tickets and established subs
     email: "bob@example.com"
   });
   const permissions = new PermissionService(db);
-  const projects = new ProjectService(db);
+  const projects = new ProjectService(db, async () => undefined);
   const tickets = new RealtimeTicketStore();
   const registry = new RealtimeRegistry((userId, projectId) =>
     permissions.projectAccess(userId, projectId)
@@ -310,6 +390,9 @@ test("membership removal and leave reject preissued tickets and established subs
     await db
       .insert(organizationMembers)
       .values({ organizationId: organization.id, userId: bob, role: "member" });
+    await db
+      .insert(projectMembers)
+      .values({ projectId: project.id, userId: bob, role: "member" });
     const pending = tickets.issue(project.id, bob).ticket;
     const live = await wsApp.injectWS(
       `/projects/${project.id}?ticket=${tickets.issue(project.id, bob).ticket}`

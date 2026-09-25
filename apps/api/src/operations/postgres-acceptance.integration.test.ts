@@ -12,6 +12,7 @@ import { buildApp } from "../app.js";
 import { readDocumentStorageConfig } from "../document-storage-config.js";
 import { createStorageClient, backfill } from "./storage-operations.js";
 import { DocumentService } from "../services/document-service.js";
+import { ChatService } from "../services/chat-service.js";
 
 // Opt in with a local/CI PostgreSQL role allowed to create databases. Every run
 // creates and drops its own database; never migrates the supplied database.
@@ -45,19 +46,19 @@ test(
       documentStorage: storageConfig,
       auth: {
         async authenticate(request) {
-          if (
-            [...(request.headers as Iterable<[string, string]>)].find(
-              ([key]) => key.toLowerCase() === "authorization"
-            )?.[1] !== "Bearer alice"
-          )
+          const token = [...(request.headers as Iterable<[string, string]>)]
+            .find(([key]) => key.toLowerCase() === "authorization")?.[1]
+            ?.replace(/^Bearer\s+/, "");
+          if (token !== "alice" && token !== "bob" && token !== "carol")
             return null;
           return {
-            authSubject: "postgres-alice",
+            authSubject: `postgres-${token}`,
             avatarUrl: null,
-            email: "alice@example.com",
-            name: "Alice",
+            email: `${token}@example.com`,
+            name:
+              token === "alice" ? "Alice" : token === "bob" ? "Bob" : "Carol",
             provider: "supabase",
-            username: "alice"
+            username: token
           };
         }
       }
@@ -72,6 +73,8 @@ test(
         .sort();
       const legacy = {
         user: randomUUID(),
+        admin: randomUUID(),
+        member: randomUUID(),
         org: randomUUID(),
         project: randomUUID(),
         task: randomUUID()
@@ -98,6 +101,26 @@ test(
             "INSERT INTO task_comments (task_id,author_user_id,body_markdown) VALUES ($1,$2,'Preserved comment')",
             [legacy.task, legacy.user]
           );
+        }
+        if (file.startsWith("0013_")) {
+          for (const [id, role] of [
+            [legacy.admin, "admin"],
+            [legacy.member, "member"]
+          ]) {
+            await pool.query(
+              "INSERT INTO users (id,auth_subject,auth_provider,name,email) VALUES ($1,$2,'supabase',$3,$4)",
+              [id, `legacy-${role}`, role, `${role}@legacy.example.com`]
+            );
+          }
+          for (const [userId, role] of [
+            [legacy.user, "owner"],
+            [legacy.admin, "admin"],
+            [legacy.member, "member"]
+          ])
+            await pool.query(
+              "INSERT INTO organization_members (organization_id,user_id,role) VALUES ($1,$2,$3)",
+              [legacy.org, userId, role]
+            );
         }
         await pool.query(await readFile(new URL(file, migrations), "utf8"));
       }
@@ -126,6 +149,29 @@ test(
             author_type: "human",
             author_name: "Original author"
           });
+          const memberships = await pool.query(
+            "SELECT user_id,role FROM project_members WHERE project_id=$1 ORDER BY role",
+            [legacy.project]
+          );
+          assert.deepEqual(memberships.rows, [
+            { user_id: legacy.user, role: "owner" },
+            { user_id: legacy.admin, role: "admin" },
+            { user_id: legacy.member, role: "member" }
+          ]);
+          const futureMember = randomUUID();
+          await pool.query(
+            "INSERT INTO users (id,auth_subject,auth_provider,name,email) VALUES ($1,'future-member','supabase','Future','future@example.com')",
+            [futureMember]
+          );
+          await pool.query(
+            "INSERT INTO organization_members (organization_id,user_id,role) VALUES ($1,$2,'member')",
+            [legacy.org, futureMember]
+          );
+          const futureProjectMembership = await pool.query(
+            "SELECT 1 FROM project_members WHERE project_id=$1 AND user_id=$2",
+            [legacy.project, futureMember]
+          );
+          assert.equal(futureProjectMembership.rowCount, 0);
         }
       );
       const request = async (
@@ -154,6 +200,113 @@ test(
       );
       assert.equal(projectResponse.statusCode, 201, projectResponse.body);
       const project = projectResponse.json();
+      await t.test(
+        "concurrent redeemers consume an invitation once",
+        async () => {
+          const invitation = (
+            await request("POST", `/projects/${project.id}/invitations`)
+          ).json();
+          const replies = await Promise.all(
+            ["bob", "carol"].map((token) =>
+              request(
+                "POST",
+                "/project-invitations/accept",
+                { token: invitation.token },
+                token
+              )
+            )
+          );
+          assert.deepEqual(
+            replies.map((reply) => reply.statusCode).sort(),
+            [200, 409]
+          );
+          const membership = await pool.query(
+            "SELECT count(*)::int AS count FROM project_members pm INNER JOIN users u ON u.id=pm.user_id WHERE pm.project_id=$1 AND u.auth_subject IN ('postgres-bob','postgres-carol')",
+            [project.id]
+          );
+          assert.equal(membership.rows[0]?.count, 1);
+        }
+      );
+      const bob = (
+        await pool.query(
+          "SELECT id FROM users WHERE auth_subject='postgres-bob' AND auth_provider='supabase'"
+        )
+      ).rows[0] as { id: string };
+      const alice = (
+        await pool.query(
+          "SELECT id FROM users WHERE auth_subject='postgres-alice' AND auth_provider='supabase'"
+        )
+      ).rows[0] as { id: string };
+      await t.test(
+        "chat reads reuse their transaction connection with a one-connection pool",
+        async () => {
+          const limited = createDatabase({
+            connectionString: url.toString(),
+            max: 1
+          });
+          try {
+            const chats = new ChatService(limited.db);
+            const reads = Promise.all([
+              chats.listHuman(alice.id, project.id),
+              chats.listHuman(alice.id, project.id)
+            ]);
+            const result = await Promise.race([
+              reads,
+              new Promise<never>((_, reject) =>
+                setTimeout(
+                  () => reject(new Error("chat reads deadlocked")),
+                  2_000
+                )
+              )
+            ]);
+            assert.equal(result.length, 2);
+          } finally {
+            await limited.pool.end();
+          }
+        }
+      );
+      await pool.query(
+        "INSERT INTO organization_members (organization_id,user_id,role) VALUES ($1,$2,'member') ON CONFLICT DO NOTHING",
+        [org.id, bob.id]
+      );
+      const raceProject = (
+        await request("POST", `/organizations/${org.id}/projects`, {
+          name: "Owner race"
+        })
+      ).json();
+      const addedOwner = await request(
+        "POST",
+        `/projects/${raceProject.id}/members`,
+        { user_id: bob.id, role: "owner" }
+      );
+      assert.equal(addedOwner.statusCode, 201, addedOwner.body);
+      await t.test(
+        "last project owner survives concurrent demotion and removal",
+        async () => {
+          const replies = await Promise.all([
+            request(
+              "PATCH",
+              `/projects/${raceProject.id}/members/${alice.id}`,
+              { role: "member" }
+            ),
+            request(
+              "DELETE",
+              `/projects/${raceProject.id}/members/${bob.id}`,
+              undefined,
+              "bob"
+            )
+          ]);
+          assert.deepEqual(
+            replies.map((reply) => reply.statusCode).sort(),
+            [200, 409]
+          );
+          const owners = await pool.query(
+            "SELECT count(*)::int AS count FROM project_members WHERE project_id=$1 AND role='owner'",
+            [raceProject.id]
+          );
+          assert.equal(owners.rows[0]?.count, 1);
+        }
+      );
       const other = (
         await request("POST", `/organizations/${org.id}/projects`, {
           name: "Other"
@@ -187,6 +340,87 @@ test(
         workers.push({ agent, token, session });
       }
       const [a, b] = workers;
+      await t.test(
+        "concurrent chat sends stay ordered, retries deduplicate, and reads advance monotonically",
+        async () => {
+          const created = await request(
+            "POST",
+            "/agent/chats",
+            {
+              kind: "direct",
+              participants: [{ type: "agent", id: b.agent.id }]
+            },
+            a.token,
+            "postgres-chat-create"
+          );
+          assert.equal(created.statusCode, 201, created.body);
+          const chat = created.json();
+
+          const sent = await Promise.all(
+            ["First", "Second"].map((body, index) =>
+              request(
+                "POST",
+                `/agent/chats/${chat.id}/messages`,
+                { body_markdown: body },
+                a.token,
+                `postgres-chat-send-${index}`
+              )
+            )
+          );
+          for (const response of sent)
+            assert.equal(response.statusCode, 201, response.body);
+          assert.deepEqual(
+            sent.map((response) => response.json().sequence).sort(),
+            [1, 2]
+          );
+
+          const retried = await Promise.all(
+            [1, 2].map(() =>
+              request(
+                "POST",
+                `/agent/chats/${chat.id}/messages`,
+                { body_markdown: "Retried once" },
+                a.token,
+                "postgres-chat-retry"
+              )
+            )
+          );
+          for (const response of retried)
+            assert.equal(response.statusCode, 201, response.body);
+          assert.equal(retried[0].json().id, retried[1].json().id);
+          assert.equal(retried[0].json().sequence, 3);
+          const stored = await pool.query(
+            "SELECT sequence FROM chat_messages WHERE chat_id=$1 ORDER BY sequence",
+            [chat.id]
+          );
+          assert.deepEqual(stored.rows, [
+            { sequence: 1 },
+            { sequence: 2 },
+            { sequence: 3 }
+          ]);
+
+          const newest = retried[0].json().id as string;
+          const oldest = sent
+            .find((response) => response.json().sequence === 1)!
+            .json().id as string;
+          const newestAck = await request(
+            "POST",
+            `/agent/chats/${chat.id}/read`,
+            { through_message_id: newest },
+            b.token
+          );
+          assert.equal(newestAck.statusCode, 200, newestAck.body);
+          assert.equal(newestAck.json().last_read_sequence, 3);
+          const staleAck = await request(
+            "POST",
+            `/agent/chats/${chat.id}/read`,
+            { through_message_id: oldest },
+            b.token
+          );
+          assert.equal(staleAck.statusCode, 200, staleAck.body);
+          assert.equal(staleAck.json().last_read_sequence, 3);
+        }
+      );
       let authored: { id: string };
       await t.test(
         "concurrent retries create one task and one agent comment",

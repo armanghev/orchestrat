@@ -34,6 +34,11 @@ export class CliSetupService {
   }
   async project(token: string) {
     const credential = await this.credential(token);
+    if (credential.projectId)
+      await this.permissions.projectAccess(
+        credential.userId,
+        credential.projectId
+      );
     return { project_id: credential.projectId };
   }
   async projects(token: string) {
@@ -48,7 +53,11 @@ export class CliSetupService {
       );
       const organizationName = record?.organizationName;
       if (!organizationName)
-        throw new ApiError(403, "PERMISSION_DENIED", "CLI credential is not authorized for this project.");
+        throw new ApiError(
+          403,
+          "PERMISSION_DENIED",
+          "CLI credential is not authorized for this project."
+        );
       return {
         projects: [
           {

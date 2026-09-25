@@ -7,6 +7,14 @@ type Clock = () => number;
 type Random = (size: number) => Buffer;
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 type ProjectEvent = typeof projectEvents.$inferSelect;
+export type RealtimeAudience = {
+  targetUserIds?: string[];
+  excludeUserIds?: string[];
+};
+type RealtimeNotice = {
+  envelope: RealtimeEventEnvelope;
+  audience: RealtimeAudience;
+};
 
 const entityTypes = new Set([
   "task",
@@ -16,9 +24,11 @@ const entityTypes = new Set([
   "session",
   "document",
   "hook",
-  "run"
+  "run",
+  "chat"
 ]);
 const pendingEvents = new WeakMap<object, ProjectEvent[]>();
+const pendingNotices = new WeakMap<object, RealtimeNotice[]>();
 
 export function recordProjectEvent(tx: Transaction, event: ProjectEvent) {
   const events = pendingEvents.get(tx) ?? [];
@@ -26,9 +36,62 @@ export function recordProjectEvent(tx: Transaction, event: ProjectEvent) {
   pendingEvents.set(tx, events);
 }
 
+export function recordRealtimeNotice(
+  tx: Transaction,
+  envelope: RealtimeEventEnvelope,
+  audience: RealtimeAudience
+) {
+  const notices = pendingNotices.get(tx) ?? [];
+  notices.push({ envelope, audience });
+  pendingNotices.set(tx, notices);
+}
+
+const eventEnvelope = (event: ProjectEvent): RealtimeEventEnvelope | null => {
+  const [entityType] = event.type.split(".");
+  if (!entityTypes.has(entityType)) return null;
+  const actor = event.actorUserId
+    ? { type: "human" as const, id: event.actorUserId }
+    : event.actorAgentId
+      ? { type: "agent" as const, id: event.actorAgentId }
+      : null;
+  const messageId =
+    typeof event.payload.message_id === "string"
+      ? event.payload.message_id
+      : undefined;
+  const mentions = Array.isArray(event.payload.mentions)
+    ? (event.payload.mentions as {
+        type: "human" | "agent";
+        id: string;
+      }[])
+    : undefined;
+  const affectedParticipant =
+    event.payload.participant && typeof event.payload.participant === "object"
+      ? (event.payload.participant as {
+          type: "human" | "agent";
+          id: string;
+        })
+      : undefined;
+  return {
+    project_id: event.projectId,
+    sequence: event.id,
+    event_type: event.type,
+    entity_type: entityType as RealtimeEventEnvelope["entity_type"],
+    entity_id: event.entityId,
+    actor,
+    ...(messageId ? { message_id: messageId } : {}),
+    ...(mentions ? { mentions } : {}),
+    ...(affectedParticipant
+      ? { affected_participant: affectedParticipant }
+      : {})
+  };
+};
+
 export function withRealtimePublisher(
   db: Database,
-  publish: (envelope: RealtimeEventEnvelope) => void | Promise<void>
+  publish: (
+    envelope: RealtimeEventEnvelope,
+    audience?: RealtimeAudience
+  ) => void | Promise<void>
 ): Database {
   return new Proxy(db, {
     get(target, property, receiver) {
@@ -36,23 +99,25 @@ export function withRealtimePublisher(
         return Reflect.get(target, property, receiver);
       return async (callback: (tx: Transaction) => Promise<unknown>) => {
         let events: ProjectEvent[] = [];
+        let notices: RealtimeNotice[] = [];
         const result = await target.transaction(async (tx) => {
           events = [];
+          notices = [];
           pendingEvents.set(tx, events);
+          pendingNotices.set(tx, notices);
           return await callback(tx);
         });
-        for (const event of events) {
-          const [entityType] = event.type.split(".");
-          if (!entityTypes.has(entityType)) continue;
+        const deliveries = [
+          ...events.flatMap((event) => {
+            const envelope = eventEnvelope(event);
+            return envelope ? [{ envelope, audience: undefined }] : [];
+          }),
+          ...notices
+        ].sort((a, b) => a.envelope.sequence - b.envelope.sequence);
+        for (const delivery of deliveries) {
           try {
             void Promise.resolve(
-              publish({
-                project_id: event.projectId,
-                sequence: event.id,
-                event_type: event.type,
-                entity_type: entityType as RealtimeEventEnvelope["entity_type"],
-                entity_id: event.entityId
-              })
+              publish(delivery.envelope, delivery.audience)
             ).catch(() => {
               // Authorization and delivery must not delay or reject a committed mutation.
             });
@@ -174,7 +239,11 @@ export class RealtimeRegistry {
 
   constructor(
     readonly authorize: (userId: string, projectId: string) => Promise<unknown>,
-    private readonly heartbeatMs = 30_000
+    private readonly heartbeatMs = 30_000,
+    private readonly authorizeEvent?: (
+      userId: string,
+      envelope: RealtimeEventEnvelope
+    ) => Promise<boolean>
   ) {}
 
   add(projectId: string, userId: string, socket: WebSocket) {
@@ -248,18 +317,26 @@ export class RealtimeRegistry {
     }
   }
 
-  async publish(envelope: RealtimeEventEnvelope) {
+  async publish(
+    envelope: RealtimeEventEnvelope,
+    audience: RealtimeAudience = {}
+  ) {
     await Promise.all(
       [...(this.connections.get(envelope.project_id) ?? [])].map(
         ([socket, connection]) => {
           // Serialize each socket's checks so asynchronous authorization cannot reorder events.
           connection.pending = connection.pending.then(async () => {
             if (
-              await this.checkAccess(
+              (await this.checkAccess(
                 envelope.project_id,
                 connection.userId,
                 socket
-              )
+              )) &&
+              (!audience.targetUserIds ||
+                audience.targetUserIds.includes(connection.userId)) &&
+              !audience.excludeUserIds?.includes(connection.userId) &&
+              (!this.authorizeEvent ||
+                (await this.authorizeEvent(connection.userId, envelope)))
             ) {
               try {
                 socket.send(JSON.stringify(envelope));

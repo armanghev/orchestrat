@@ -12,6 +12,8 @@ import { agentActionRoutes } from "./routes/agent-actions.js";
 import { agentManagementRoutes } from "./routes/agents.js";
 import { agentDocumentRoutes } from "./routes/agent-documents.js";
 import { documentRoutes } from "./routes/documents.js";
+import { agentChatRoutes, humanChatRoutes } from "./routes/chats.js";
+import { projectMemberRoutes } from "./routes/project-members.js";
 import { v1Routes } from "./routes/v1.js";
 import { ApiError } from "./services/api-error.js";
 import { AgentService } from "./services/agent-service.js";
@@ -48,6 +50,8 @@ import {
   cliAuthorizationPublicRoutes
 } from "./routes/cli-authorization.js";
 import { FixedWindowRateLimit, rateLimitHook } from "./services/rate-limit.js";
+import { ChatService } from "./services/chat-service.js";
+import { ProjectMembershipService } from "./services/project-membership-service.js";
 
 type AppOptions = {
   allowedOrigins: string[];
@@ -91,20 +95,33 @@ export function buildApp(options: AppOptions) {
   const realtimeTickets = new RealtimeTicketStore();
   const attachmentDownloadTickets = new AttachmentDownloadTicketStore();
   const permissions = new PermissionService(options.db);
-  const realtimeRegistry = new RealtimeRegistry((userId, projectId) =>
-    permissions.projectAccess(userId, projectId)
+  const realtimeRegistry = new RealtimeRegistry(
+    (userId, projectId) => permissions.projectAccess(userId, projectId),
+    30_000,
+    async (userId, event) =>
+      event.entity_type !== "chat" ||
+      event.event_type === "chat.access_invalidated" ||
+      (event.entity_id !== null &&
+        (await chats.canHumanViewChat(userId, event.entity_id)))
   );
-  const db = withRealtimePublisher(options.db, (event) =>
-    realtimeRegistry.publish(event)
+  const db = withRealtimePublisher(options.db, (event, audience) =>
+    realtimeRegistry.publish(event, audience)
   );
+  const chats = new ChatService(db);
   const identities = new IdentityService(db);
   const profiles = new ProfileService(db, options.avatarStorage);
   const tasks = new TaskService(db);
   const agents = new AgentService(db);
   const claims = new TaskClaimService(db);
   const documents = new DocumentService(db, options.documentStorage);
-  const projects = new ProjectService(db, (projectId) =>
-    documents.deleteProjectStorage(projectId)
+  const projects = new ProjectService(
+    db,
+    chats.assertHumanMayLeaveProject.bind(chats),
+    (projectId) => documents.deleteProjectStorage(projectId)
+  );
+  const memberships = new ProjectMembershipService(
+    db,
+    chats.assertHumanMayLeaveProject.bind(chats)
   );
   const attachments = new AttachmentService(
     db,
@@ -282,6 +299,8 @@ export function buildApp(options: AppOptions) {
         expensiveRateLimit
       });
       api.register(agentManagementRoutes, { agents });
+      api.register(humanChatRoutes, { chats });
+      api.register(projectMemberRoutes, { memberships });
       api.register(cliAuthorizationHumanRoutes, {
         authorization: cliAuthorization
       });
@@ -317,6 +336,7 @@ export function buildApp(options: AppOptions) {
         request.agentPrincipal = await agents.authenticate(match[1]);
       });
       api.register(agentActionRoutes, { agents, tasks, claims });
+      api.register(agentChatRoutes, { chats });
       api.register(agentDocumentRoutes, {
         documents,
         attachments,

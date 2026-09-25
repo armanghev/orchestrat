@@ -4,6 +4,8 @@ import {
   agentLifecycleEvents,
   agentSessions,
   agents,
+  chatParticipants,
+  chats,
   projects,
   projectEvents,
   taskClaims,
@@ -22,7 +24,19 @@ import type {
   Project
 } from "@orchestrat/protocol";
 import { agentCredentialTokenSchema } from "@orchestrat/protocol";
-import { and, asc, desc, eq, gt, inArray, isNull } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNotNull,
+  isNull,
+  ne,
+  notLike,
+  or
+} from "drizzle-orm";
 import { ApiError } from "./api-error.js";
 import { PermissionService } from "./permission-service.js";
 import { recordProjectEvent } from "../realtime/realtime.js";
@@ -86,6 +100,7 @@ export async function insertProjectEvent(
     actorUserId?: string | null;
     entityId?: string | null;
     payload?: Record<string, unknown>;
+    publish?: boolean;
   }
 ) {
   const [event] = await tx
@@ -99,7 +114,7 @@ export async function insertProjectEvent(
       payload: value.payload ?? {}
     })
     .returning();
-  recordProjectEvent(tx, event);
+  if (value.publish !== false) recordProjectEvent(tx, event);
   return event;
 }
 
@@ -863,14 +878,21 @@ export class AgentService {
     query: PaginationQuery
   ): Promise<ProjectEventsResponse> {
     await this.permissions.projectAccess(userId, projectId);
-    return this.listEvents(projectId, query);
+    return this.listEvents(projectId, query, { type: "human", id: userId });
   }
 
   async listEventsAgent(principal: AgentPrincipal, query: PaginationQuery) {
-    return this.listEvents(principal.projectId, query);
+    return this.listEvents(principal.projectId, query, {
+      type: "agent",
+      id: principal.agentId
+    });
   }
 
-  private async listEvents(projectId: string, query: PaginationQuery) {
+  private async listEvents(
+    projectId: string,
+    query: PaginationQuery,
+    viewer: { type: "human" | "agent"; id: string }
+  ) {
     const after = query.after ? Number(query.after) : 0;
     if (!Number.isSafeInteger(after) || after < 0)
       throw new ApiError(
@@ -879,14 +901,39 @@ export class AgentService {
         "The event cursor is invalid."
       );
     const rows = await this.db
-      .select()
+      .select({ event: projectEvents })
       .from(projectEvents)
+      .leftJoin(
+        chats,
+        and(
+          eq(chats.id, projectEvents.entityId),
+          eq(chats.projectId, projectEvents.projectId)
+        )
+      )
+      .leftJoin(
+        chatParticipants,
+        and(
+          eq(chatParticipants.chatId, chats.id),
+          viewer.type === "human"
+            ? eq(chatParticipants.userId, viewer.id)
+            : eq(chatParticipants.agentId, viewer.id)
+        )
+      )
       .where(
-        and(eq(projectEvents.projectId, projectId), gt(projectEvents.id, after))
+        and(
+          eq(projectEvents.projectId, projectId),
+          gt(projectEvents.id, after),
+          ne(projectEvents.type, "chat.access_invalidated"),
+          or(
+            notLike(projectEvents.type, "chat.%"),
+            isNotNull(chatParticipants.id),
+            viewer.type === "human" ? eq(chats.hasHuman, false) : undefined
+          )
+        )
       )
       .orderBy(asc(projectEvents.id))
       .limit(query.limit + 1);
-    const page = rows.slice(0, query.limit);
+    const page = rows.slice(0, query.limit).map((row) => row.event);
     return {
       events: page.map((event) => ({
         id: event.id,
