@@ -1,12 +1,13 @@
 # Project messaging acceptance and alpha rollout readiness
 
-Date: 2026-09-25 UTC
+Date: 2026-09-28 UTC
 
-Status: **backend implemented and locally verified; dashboard integration in
-progress; hosted rollout not run**. This record contains read-only hosted
-observations and local disposable recovery checks. It does not claim that
-migrations `0012` or `0013`, the messaging API, the dashboard, or a
-messaging-capable CLI have been deployed to alpha.
+Status: **feature source locally verified; the alpha database is migrated
+through `0013` and its post-migration gates passed; messaging API and dashboard
+deployment plus hosted end-to-end acceptance remain pending**. The additive
+messaging schema and project-membership backfill are live in alpha. The hosted
+API and dashboard remain on their prior sources, and the installed CLI does not
+expose the messaging feature.
 
 ## Local acceptance
 
@@ -24,16 +25,25 @@ The local messaging acceptance checks cover:
 
 Checks run locally:
 
-- `pnpm --filter @orchestrat/api lint`
-- `pnpm --filter @orchestrat/api typecheck`
-- `pnpm --filter @orchestrat/api build`
-- `node --test apps/api/dist/routes/chats-adversarial.test.js` — 1 pass
-- `node --test apps/api/dist/routes/chats.test.js` — 1 pass
-- `pnpm --filter @orchestrat/api test:postgres` against a disposable local
-  PostgreSQL instance — 14 pass and 1 existing R2 opt-in skip
-- Full API suite — 82 pass and 2 existing opt-in skips
+- API build, lint, and typecheck passed. The full API suite against the
+  disposable PostgreSQL instance passed 96 tests with 2 existing opt-in skips.
+- The database schema and RLS suite passed 15 tests, including the synthetic
+  direct-access role denial check on a real PostgreSQL instance.
+- Native notification destination tests passed 69 tests.
+- CLI tests passed 74 tests. A packed `alpha.3` artifact also passed the local
+  artifact verification path.
+- SDK and MCP messaging checks passed 11 and 8 tests respectively.
+- The dashboard build, lint, and typecheck passed. Its unit suite passed 336
+  tests in 46 files, and the full committed-source browser integration suite
+  exited `0` with 69 passes and 6 expected skips (2 phone-only cases outside
+  the phone project, 2 waitlist cases, and 2 R2-dependent cases).
 
-## Read-only hosted alpha observations
+The dashboard messaging UI, realtime notification provider, project membership
+controls, native chat destinations, SDK, MCP tools, and CLI contracts are
+implemented in reviewed source. Commit `4fa07b7` contains the dashboard
+workspace; it has not yet been deployed to alpha.
+
+## Hosted alpha observations
 
 - Railway project `orchestrat-api` uses project
   `fb1f935a-d229-4581-ae26-3e4d188c6329`, production environment
@@ -54,11 +64,14 @@ Checks run locally:
   bundle points to the alpha API and auth callback but does not contain the
   messaging contract. This pinned alias is a useful release gate.
 - Railway and the dashboard use the same healthy Supabase alpha project. The
-  hosted Drizzle journal contains 12 migrations through `0011`; repository
-  migrations `0012_document_folders` and `0013_project_messaging` are pending.
+  2026-09-28 migration preflight found 13 journal rows through
+  `0012_document_folders`. The scoped rollout then applied only
+  `0013_project_messaging`, bringing the journal to 14 rows.
 
-No remote resource, environment value, deployment, alias, database row, or
-migration was changed during this assessment.
+The only hosted mutation in this rollout phase was the additive `0013`
+migration and its insert into the newly created `project_members` table. No
+environment value, deployment, alias, credential, agent, pre-existing table
+row, or R2 object was changed.
 
 ### Supabase direct-access privacy gate
 
@@ -69,21 +82,42 @@ Database metadata showed that `anon` and `authenticated` have `USAGE` on the
 current public tables. The `postgres` default ACL grants those same table
 privileges to both roles for newly created public tables.
 
-All 20 existing public tables have row-level security enabled. They have no
-policies, do not force RLS, and are owned by `postgres`; the `postgres` API
-connection therefore retains owner access while direct Data API roles see no
-rows and cannot write. The original pending `0012` and `0013` SQL did not
-enable RLS, which would have exposed the six new tables through inherited
-Supabase grants and bypassed API conversation authorization.
+The original `0012` and `0013` SQL did not enable RLS, which would have exposed
+the six new tables through inherited Supabase grants and bypassed API
+conversation authorization.
 
-The pending `0013` migration now enables RLS, without policies or `FORCE`, on
+The applied `0013` migration enables RLS, without policies or `FORCE`, on
 `document_folders`, `project_members`, `project_invitations`, `chats`,
 `chat_participants`, and `chat_messages`. Keeping the safeguard in `0013`
 protects databases that may already have applied `0012` without rewriting
 published migration history. A disposable PostgreSQL test grants a synthetic
 direct-access role full table privileges and proves that it sees no rows,
 cannot insert, update, or delete, while the owner retains read and write
-access. No hosted schema was changed by this verification.
+access. Post-migration metadata confirmed that all six rollout-gated tables are
+owned by `postgres`, have RLS enabled, have no policies, and do not force RLS.
+
+### Database rollout evidence — 2026-09-28
+
+- Immediately before migration, the hosted journal contained 13 rows through
+  `0012`; neither `project_members` nor `chats` existed.
+- The source aggregate contained 6 expected project memberships across 6
+  projects, with 0 projects lacking a member and 0 lacking an owner.
+- The normal repository migrator ran once through Railway with the explicit
+  production project, environment, and service identifiers shown below and
+  reported `migrations applied successfully!`.
+- The postcheck found 14 journal rows through `0013`, 6 expected and 6 actual
+  `project_members` rows, 0 missing rows, 0 extra rows, 0 role mismatches, and
+  0 projects without an owner.
+- `document_folders`, `project_members`, `project_invitations`, `chats`,
+  `chat_participants`, and `chat_messages` all passed the owner and RLS metadata
+  gate described above.
+- Railway remained on successful deployment
+  `2b63e9dc-67cb-46cb-a7c5-830ceb0ba1c6` from source `f70b998`, with no staged
+  deployment. `/health` and `/ready` both returned `200` after migration.
+
+No application deployment was triggered. The messaging API and dashboard
+remain pending until the reviewed commits are pushed and provider deployments
+are verified.
 
 ## Recovery evidence
 
@@ -104,7 +138,10 @@ Drizzle migrator then applied `0012` and `0013` successfully and created
 `project_members`, `project_invitations`, `chats`, `chat_participants`, and
 `chat_messages`.
 
-A fresh read-only hosted check still showed 12 migrations through `0011`.
+A 2026-09-25 read-only hosted check showed 12 migrations through `0011`. The
+2026-09-28 rollout preflight showed 13 migrations through `0012`, so `0012` had
+been applied between those checks. The scoped rollout therefore applied only
+`0013`.
 The disposable database, archive, and temporary directory were removed after
 the aggregate checks. This proves schema compatibility for these migrations;
 it does **not** prove recovery of hosted row data. A PostgreSQL 17 restore
@@ -113,7 +150,7 @@ compatibility filtering is needed.
 
 ### Migration blast radius and minimum rollback scope
 
-Both pending migrations are additive:
+Both migrations are additive:
 
 - `0012` creates `document_folders`, its foreign key, and its unique index.
 - `0013` creates the project-membership, invitation, chat, participant, and
@@ -140,7 +177,7 @@ expected backfill should be recorded; afterward, the journal and backfilled
 row counts should match those aggregates.
 
 The runbook's R2 backup requirement applies before a document-storage cutover.
-Neither pending migration changes R2 or existing document bodies, so an R2
+Neither migration changes R2 or existing document bodies, so an R2
 backup is not a gate for this messaging rollout.
 
 ### Data-recovery drill requiring explicit approval
@@ -176,20 +213,29 @@ plan, so provider daily backups and PITR are not available for this project.
 
 ## Hosted acceptance prerequisites
 
-Read-only aggregate checks found two signed-in Supabase accounts, two linked
-application users, and two organization-member humans. There are five
-projects and enough active agents for a two-agent test, but no project
-currently has both signed-in humans. After migration, the second existing
-signed-in account must be explicitly invited or added to the selected project.
-No identities, credentials, or tokens were retained in this record.
+The two accounts selected out of band for hosted acceptance both exist in
+Supabase Auth, are confirmed, and are linked to application users. One uses its
+existing linked GitHub identity; the other uses its existing email identity
+with a magic link. They do not currently share an organization or project, so
+the acceptance flow must use a new isolated organization and project followed
+by a project invitation. The existing active CLI credential must remain
+untouched; acceptance uses a newly authorized, disposable CLI credential and
+two newly created agents.
+
+Normal sign-in must use two separate browser profiles on
+`https://app.orchestrat.dev`. Each callback or magic link must return in the
+same profile that started sign-in so the origin-scoped PKCE and continuation
+state remains available. No account email, credential, auth token, or session
+value is stored in this record.
 
 ## Safe rollout sequence
 
-1. Finish dashboard work and re-run the complete local package, API,
-   PostgreSQL, dashboard, MCP, CLI, and native checks against the exact reviewed
-   commits.
-2. Record pre-migration aggregate counts. Before pushing `main`, run the
-   separate migration job against alpha:
+1. **Completed 2026-09-28:** the full local dashboard build, lint, typecheck,
+   unit, and browser integration gates passed against reviewed commit
+   `4fa07b7`.
+2. **Completed 2026-09-28:** the pre-migration aggregates were recorded and the
+   authorized additive migration ran against alpha before any application
+   deployment:
 
    ```sh
    railway run --no-local \
@@ -199,27 +245,36 @@ No identities, credentials, or tokens were retained in this record.
      pnpm --filter @orchestrat/db migrate
    ```
 
-3. Verify 14 migration-history rows, the new tables and constraints, the
-   project-membership backfill aggregates, and `/ready` before deploying
-   application code.
+3. **Completed 2026-09-28:** the journal contained 14 rows through `0013`; the
+   new tables, RLS metadata, project-membership backfill aggregates, `/health`,
+   and `/ready` passed their postchecks.
 4. Push the reviewed `main` commits. Wait for Railway to report the exact
    source SHA and recheck `/health` and `/ready`; then exercise human and agent
    REST, MCP inbox notices, authorization, and realtime reconnect behavior.
-5. Build and verify the unique Vercel deployment URL. Move
-   `app.orchestrat.dev` only after that artifact passes authenticated messaging
-   checks:
+5. Build the unique Vercel deployment and verify its source SHA, static bundle,
+   public configuration, API destination, routes, and messaging assets. Do not
+   claim normal authenticated acceptance on the unique preview: the build uses
+   `VITE_WEB_AUTH_CALLBACK_URL=https://app.orchestrat.dev/auth/callback`, and
+   PKCE plus invitation and CLI continuation state are origin-scoped.
+6. After the static artifact and configuration checks pass, promote it to the
+   canonical alias:
 
    ```sh
    vercel alias set <verified-deployment-url> app.orchestrat.dev
    ```
 
-6. Publish or install a messaging-capable CLI artifact only after its packed
-   bundle passes the local and hosted API contract checks. The currently
+7. Run normal authenticated PKCE and invitation acceptance only on the
+   canonical `app.orchestrat.dev` origin, using the two separate browser
+   profiles described above.
+8. Install the verified packed messaging-capable CLI artifact and authorize a
+   fresh disposable credential through the canonical dashboard. The currently
    deployed `f70b998` source and existing dashboard bundle do not contain this
    feature.
-7. Add the second signed-in human to the acceptance project and run the full
-   two-human/two-agent flow, including cross-project notifications, live and
-   replay deduplication, membership revocation, agent credential revocation,
-   and notification-click navigation.
+9. Run the full isolated two-human/two-agent flow, including cross-project
+   notifications, live and replay deduplication, membership revocation, agent
+   credential revocation, and notification-click navigation. Revoke only the
+   newly created credential and agents during cleanup.
 
-Until these steps are recorded, hosted project messaging remains unverified.
+The database rollout is verified. Hosted project messaging remains unverified
+until the API and dashboard deployments and the end-to-end acceptance steps
+above are completed.
