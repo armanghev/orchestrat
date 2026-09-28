@@ -343,18 +343,14 @@ describe("project messages route", () => {
     expect(
       await screen.findByText("No matching project members.")
     ).toBeVisible();
-    await user.click(
-      screen.getByRole("button", { name: "Close new message" })
-    );
+    await user.click(screen.getByRole("button", { name: "Close new message" }));
 
     projectCandidates = [alice];
     await user.click(screen.getByRole("button", { name: "New message" }));
     expect(
       await screen.findByRole("button", { name: /Alice.*Human/ })
     ).toBeVisible();
-    await user.click(
-      screen.getByRole("button", { name: "Close new message" })
-    );
+    await user.click(screen.getByRole("button", { name: "Close new message" }));
 
     projectCandidates = [charlie];
     await user.click(screen.getByRole("button", { name: "Members, 2" }));

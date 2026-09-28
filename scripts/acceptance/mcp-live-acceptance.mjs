@@ -12,6 +12,7 @@ const cli = process.env.ORCHESTRAT_CLI ?? "orchestrat";
 const cwd = required("ORCHESTRAT_ACCEPTANCE_CWD");
 const projectId = required("ORCHESTRAT_ACCEPTANCE_PROJECT_ID");
 const apiUrl = required("ORCHESTRAT_API_URL");
+const useGlobalMcp = process.env.ORCHESTRAT_ACCEPTANCE_MCP_GLOBAL === "1";
 const timeoutMs = 15_000;
 const children = new Map();
 
@@ -48,9 +49,12 @@ function validateInputs() {
 }
 
 function spawnMcp(integration) {
+  const args = ["mcp", "--integration", integration];
+  if (useGlobalMcp) args.push("--global");
+  else args.push("--cwd", cwd);
   const child = spawn(
     cli,
-    ["mcp", "--integration", integration, "--cwd", cwd],
+    args,
     // Deliberately inherit HOME and CODEX_HOME: the disposable mapping and
     // existing Keychain credentials are the acceptance boundary under test.
     {
@@ -65,6 +69,7 @@ function spawnMcp(integration) {
   let spawnError;
   const exit = new Promise((resolve) => (exitResolve = resolve));
   const pending = new Map();
+  let toolNames = new Set();
   child.stdout.setEncoding("utf8");
   child.stdin.on("error", () => {
     // The exit handler or request deadline reports a redacted failure.
@@ -198,6 +203,7 @@ function spawnMcp(integration) {
     assert.equal(response.result?.serverInfo?.name, "orchestrat");
     notify("notifications/initialized");
     const listed = await request("tools/list");
+    toolNames = new Set((listed.result?.tools ?? []).map((tool) => tool.name));
     assert.ok(listed.result?.tools?.some((tool) => tool.name === "heartbeat"));
   };
   children.set(child, stop);
@@ -208,6 +214,7 @@ function spawnMcp(integration) {
     expectedError,
     initialize,
     request,
+    hasTool: (name) => toolNames.has(name),
     stop
   };
 }
@@ -219,6 +226,19 @@ async function findAgentId(client, sessionId) {
   return match.agent_id;
 }
 
+function unreadNotice(response) {
+  return response.result?.content
+    ?.filter((item) => item.type === "text")
+    .map((item) => {
+      try {
+        return JSON.parse(item.text);
+      } catch {
+        return undefined;
+      }
+    })
+    .find((item) => item?.notice?.type === "unread_chats")?.notice;
+}
+
 async function main() {
   validateInputs();
   const codex = spawnMcp("codex");
@@ -226,6 +246,14 @@ async function main() {
   let reconnect;
   try {
     await Promise.all([codex.initialize(), claude.initialize()]);
+    if (useGlobalMcp) {
+      assert.ok(codex.hasTool("select_project"));
+      assert.ok(claude.hasTool("select_project"));
+      await Promise.all([
+        codex.success("select_project", { project_id: projectId }),
+        claude.success("select_project", { project_id: projectId })
+      ]);
+    }
     const [codexProject, claudeProject] = await Promise.all([
       codex.success("get_project"),
       claude.success("get_project")
@@ -244,8 +272,307 @@ async function main() {
     ]);
     assert.notEqual(codexAgentId, claudeAgentId);
     note("project", projectId);
+    note("MCP scope", useGlobalMcp ? "global (selected project)" : "project");
     note("live sessions", `${codexSessionId}, ${claudeSessionId}`);
     note("agent identities", `${codexAgentId}, ${claudeAgentId}`);
+
+    const existingGroupId = process.env.ORCHESTRAT_ACCEPTANCE_EXISTING_GROUP_ID;
+    if (existingGroupId) {
+      assert.match(
+        existingGroupId,
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+        "ORCHESTRAT_ACCEPTANCE_EXISTING_GROUP_ID must be a UUID"
+      );
+      const existingChats = await claude.success("list_chats");
+      const existingGroup = existingChats.chats.find(
+        (chat) => chat.id === existingGroupId
+      );
+      assert.ok(existingGroup, "Claude cannot see the existing human group");
+      assert.ok(
+        existingGroup.mention_count >= 1,
+        "Claude inbox has no unread mention for the existing human group"
+      );
+      const existingMessages = await claude.success("check_messages", {
+        chat_id: existingGroupId,
+        unread_only: true,
+        limit: 20
+      });
+      const humanMention = existingMessages.messages.find(
+        (message) =>
+          message.author.type === "human" &&
+          message.mentions.some(
+            (mention) =>
+              mention.type === "agent" && mention.id === claudeAgentId
+          )
+      );
+      assert.ok(
+        humanMention,
+        "Claude did not receive a human-authored message with a typed mention"
+      );
+      note(
+        "existing human group",
+        existingGroupId + " (unread mention " + humanMention.id + ")"
+      );
+    }
+
+    // Exercise the complete seven-tool messaging contract between the two
+    // disposable agents. The human candidate proves that the project also
+    // exposes the dashboard member needed for the manual human evidence.
+    const candidates = await codex.success("list_message_candidates");
+    const requestedHumanId = process.env.ORCHESTRAT_ACCEPTANCE_HUMAN_ID;
+    const humanCandidate = candidates.candidates.find(
+      (candidate) =>
+        candidate.type === "human" &&
+        (!requestedHumanId || candidate.id === requestedHumanId)
+    );
+    assert.ok(humanCandidate, "project has no human messaging candidate");
+    assert.ok(
+      candidates.candidates.some(
+        (candidate) =>
+          candidate.type === "agent" && candidate.id === claudeAgentId
+      )
+    );
+    assert.equal(
+      candidates.candidates.some(
+        (candidate) =>
+          candidate.type === "agent" && candidate.id === codexAgentId
+      ),
+      false,
+      "message candidates must exclude the authenticated agent"
+    );
+    note("human messaging candidate", humanCandidate.id);
+
+    const directInput = {
+      kind: "direct",
+      participants: [{ type: "agent", id: claudeAgentId }]
+    };
+    const directKey = `mcp-live-direct-${Date.now()}`;
+    const directChat = await codex.success("create_chat", {
+      ...directInput,
+      idempotency_key: directKey
+    });
+    const directReplay = await codex.success("create_chat", {
+      ...directInput,
+      idempotency_key: directKey
+    });
+    assert.equal(directReplay.id, directChat.id);
+    assert.equal(directChat.kind, "direct");
+    assert.ok(
+      directChat.participants.some(
+        (participant) =>
+          participant.type === "agent" && participant.id === codexAgentId
+      )
+    );
+    assert.ok(
+      directChat.participants.some(
+        (participant) =>
+          participant.type === "agent" && participant.id === claudeAgentId
+      )
+    );
+    const directChatId = directChat.id;
+
+    const listedChats = await claude.call("list_chats");
+    assert.ok(
+      listedChats.payload.chats.some((chat) => chat.id === directChatId),
+      "direct chat is not visible to the second agent"
+    );
+
+    const groupChat = await codex.success("create_chat", {
+      kind: "group",
+      name: `MCP acceptance group ${Date.now()}`,
+      participants: [{ type: "agent", id: claudeAgentId }],
+      idempotency_key: `mcp-live-group-${Date.now()}`
+    });
+    assert.equal(groupChat.kind, "group");
+    await codex.success("manage_chat_members", {
+      chat_id: groupChat.id,
+      action: "add",
+      participant: { type: "human", id: humanCandidate.id }
+    });
+    const removedHumanGroup = await codex.success("manage_chat_members", {
+      chat_id: groupChat.id,
+      action: "remove",
+      participant: { type: "human", id: humanCandidate.id }
+    });
+    assert.equal(removedHumanGroup.has_human, true);
+    assert.equal(
+      removedHumanGroup.participants.some(
+        (participant) =>
+          participant.type === "human" && participant.id === humanCandidate.id
+      ),
+      false
+    );
+    note("sticky-private group", groupChat.id + " (human removed)");
+
+    const agentOnlyGroup = await codex.success("create_chat", {
+      kind: "group",
+      name: "MCP agent-only acceptance " + Date.now(),
+      participants: [{ type: "agent", id: claudeAgentId }],
+      idempotency_key: "mcp-live-agent-only-group-" + Date.now()
+    });
+    assert.equal(agentOnlyGroup.kind, "group");
+    assert.equal(agentOnlyGroup.has_human, false);
+    const agentOnlyGroupMessage = await codex.success("send_message", {
+      chat_id: agentOnlyGroup.id,
+      body_markdown: "MCP agent-only group acceptance message.",
+      idempotency_key: "mcp-live-agent-only-message-" + Date.now()
+    });
+    assert.equal(agentOnlyGroupMessage.chat_id, agentOnlyGroup.id);
+    note(
+      "agent-only group",
+      agentOnlyGroup.id + " (human-observable/joinable)"
+    );
+
+    const humanChat = await codex.success("create_chat", {
+      kind: "direct",
+      participants: [{ type: "human", id: humanCandidate.id }],
+      idempotency_key: "mcp-live-human-chat-" + Date.now()
+    });
+    assert.equal(humanChat.kind, "direct");
+    assert.equal(humanChat.has_human, true);
+    const humanGreeting = await codex.success("send_message", {
+      chat_id: humanChat.id,
+      body_markdown:
+        "MCP human acceptance greeting — please reply from the dashboard if available.",
+      idempotency_key: "mcp-live-human-greeting-" + Date.now()
+    });
+    assert.equal(humanGreeting.chat_id, humanChat.id);
+    note(
+      "human evidence chat",
+      humanChat.id + " (message " + humanGreeting.id + ")"
+    );
+    if (process.env.ORCHESTRAT_ACCEPTANCE_WAIT_FOR_HUMAN_REPLY === "1") {
+      const expectedHumanReply = `Dashboard reply to ${humanGreeting.id}`;
+      note("human reply expected", expectedHumanReply);
+      const deadline = Date.now() + 120_000;
+      let humanReply;
+      while (!humanReply && Date.now() < deadline) {
+        const pending = await codex.success("check_messages", {
+          chat_id: humanChat.id,
+          limit: 20
+        });
+        humanReply = pending.messages.find(
+          (message) =>
+            message.author.type === "human" &&
+            message.author.id === humanCandidate.id &&
+            message.sequence > humanGreeting.sequence &&
+            message.body_markdown === expectedHumanReply
+        );
+        if (!humanReply) await sleep(2_000);
+      }
+      assert.ok(humanReply, "human reply checkpoint expired after 120 seconds");
+      await codex.success("acknowledge_messages", {
+        chat_id: humanChat.id,
+        through_message_id: humanReply.id
+      });
+      note("human reply", humanReply.id);
+    }
+
+    const messageInput = {
+      chat_id: directChatId,
+      body_markdown: "MCP messaging acceptance."
+    };
+    const messageKey = `mcp-live-message-${Date.now()}`;
+    const sentMessage = await codex.success("send_message", {
+      ...messageInput,
+      idempotency_key: messageKey
+    });
+    const replayedMessage = await codex.success("send_message", {
+      ...messageInput,
+      idempotency_key: messageKey
+    });
+    assert.equal(replayedMessage.id, sentMessage.id);
+    assert.equal(sentMessage.chat_id, directChatId);
+    assert.equal(sentMessage.author.id, codexAgentId);
+
+    const receivedMessages = await claude.success("check_messages", {
+      chat_id: directChatId,
+      limit: 20
+    });
+    const receivedMessage = receivedMessages.messages.find(
+      (message) => message.id === sentMessage.id
+    );
+    assert.ok(receivedMessage, "second agent did not receive the sent message");
+    assert.equal(receivedMessage.author.id, codexAgentId);
+
+    const inboxListed = await claude.call("list_chats");
+    assert.ok(
+      inboxListed.payload.chats.some((chat) => chat.id === directChatId),
+      "list_chats omitted the direct chat after delivery"
+    );
+    const inboxProject = await claude.call("get_project");
+    assert.equal(inboxProject.payload.id, projectId);
+    const notice = unreadNotice(inboxProject);
+    assert.ok(notice, "get_project did not return an unread chat notice");
+    const unreadChat = notice.unread_chats.find(
+      (chat) => chat.chat_id === directChatId
+    );
+    assert.ok(unreadChat, "unread notice omitted the direct chat");
+    assert.ok(unreadChat.unread_count >= 1);
+
+    await claude.success("acknowledge_messages", {
+      chat_id: directChatId,
+      through_message_id: sentMessage.id
+    });
+    const afterAcknowledge = await claude.success("check_messages", {
+      chat_id: directChatId,
+      limit: 20
+    });
+    assert.equal(
+      afterAcknowledge.messages.some(
+        (message) => message.id === sentMessage.id
+      ),
+      false
+    );
+
+    const reply = await claude.success("send_message", {
+      chat_id: directChatId,
+      body_markdown: "MCP reverse agent reply acceptance.",
+      idempotency_key: "mcp-live-reply-" + Date.now()
+    });
+    assert.equal(reply.author.id, claudeAgentId);
+    const replyNotice = unreadNotice(await codex.call("list_chats"));
+    const replyUnreadChat = replyNotice?.unread_chats.find(
+      (chat) => chat.chat_id === directChatId
+    );
+    assert.ok(
+      replyUnreadChat,
+      "reverse agent reply did not create an unread notice"
+    );
+    const codexMessages = await codex.success("check_messages", {
+      chat_id: directChatId,
+      limit: 20
+    });
+    const receivedReply = codexMessages.messages.find(
+      (message) => message.id === reply.id
+    );
+    assert.ok(receivedReply, "first agent did not receive the reverse reply");
+    assert.equal(receivedReply.author.id, claudeAgentId);
+    await codex.success("acknowledge_messages", {
+      chat_id: directChatId,
+      through_message_id: reply.id
+    });
+    const afterReplyAcknowledge = await codex.success("check_messages", {
+      chat_id: directChatId,
+      limit: 20
+    });
+    assert.equal(
+      afterReplyAcknowledge.messages.some((message) => message.id === reply.id),
+      false
+    );
+    note(
+      "messaging",
+      `PASS: seven tools, two agents, direct idempotency, group member management, inbox notice, and acknowledgement (chat ${directChatId})`
+    );
+    note(
+      "messaging evidence",
+      "reverse reply, human chat " +
+        humanChat.id +
+        ", agent-only group " +
+        agentOnlyGroup.id +
+        ", sticky-private group " +
+        groupChat.id
+    );
 
     const task = await codex.success("create_task", {
       title: `MCP live acceptance ${Date.now()}`,
@@ -363,6 +690,10 @@ async function main() {
     await loser.stop();
     reconnect = spawnMcp(winnerIntegration);
     await reconnect.initialize();
+    if (useGlobalMcp) {
+      assert.ok(reconnect.hasTool("select_project"));
+      await reconnect.success("select_project", { project_id: projectId });
+    }
     const reconnectedProject = await reconnect.success("get_project");
     assert.equal(reconnectedProject.id, projectId);
     const durableTask = await reconnect.success("get_task", {
