@@ -17,7 +17,8 @@ import {
   useState
 } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { z } from "zod";
 import type { MDXEditorMethods } from "@mdxeditor/editor";
 import type { Document as ProjectDocument } from "@orchestrat/protocol";
 import {
@@ -71,7 +72,10 @@ const MarkdownEditor = lazy(() =>
 
 export const Route = createFileRoute(
   "/_authenticated/projects/$projectId/documents"
-)({ component: DocumentsRoute });
+)({
+  validateSearch: z.object({ document: z.string().uuid().optional() }),
+  component: DocumentsRoute
+});
 
 type RemoteRevision = { revision: number; content: string; actor: string };
 type DocumentTreeFolder = {
@@ -446,21 +450,46 @@ function DocumentTreeItem({
 
 function DocumentsRoute() {
   const { projectId } = Route.useParams();
+  const { document: documentId } = Route.useSearch();
   const { api, project } = Route.useRouteContext();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(
+    documentId ?? null
+  );
   const [showArchived, setShowArchived] = useState(false);
   const [newFileParent, setNewFileParent] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [newFolderPath, setNewFolderPath] = useState("");
   const [creatingFolder, setCreatingFolder] = useState(false);
   const documents = useQuery(documentsQueryOptions(api, projectId));
+  useEffect(() => {
+    if (!documentId || !documents.data) return;
+    const linkedDocument = documents.data.documents.find(
+      ({ id }) => id === documentId
+    );
+    setSelectedId(documentId);
+    setShowArchived(Boolean(linkedDocument?.archived_at));
+  }, [documentId, documents.data]);
+  const selectDocument = (id: string) => {
+    setSelectedId(id);
+    const linkedDocument = documents.data?.documents.find(
+      (item) => item.id === id
+    );
+    if (linkedDocument) setShowArchived(Boolean(linkedDocument.archived_at));
+    if (documentId)
+      void navigate({
+        to: "/projects/$projectId/documents",
+        params: { projectId },
+        search: { document: id }
+      });
+  };
   const create = useMutation({
     mutationFn: (path: string) =>
       api.createDocument(projectId, { path, content: "" }),
     onSuccess: async (result) => {
       setNewFileParent(null);
-      setSelectedId(result.document.id);
+      selectDocument(result.document.id);
       await queryClient.invalidateQueries({
         queryKey: coordinationKeys.documents(projectId)
       });
@@ -509,7 +538,7 @@ function DocumentsRoute() {
     create.reset();
     renameDocument.reset();
     setNewFileParent(null);
-    setSelectedId(document.id);
+    selectDocument(document.id);
     setRenamingId(document.id);
   };
 
@@ -535,8 +564,12 @@ function DocumentsRoute() {
     (item) => "archived_at" in item && Boolean(item.archived_at)
   );
   const visible = showArchived ? archived : active;
-  const selected =
-    visible.find((item) => item.id === selectedId) ?? visible[0] ?? null;
+  const linkedDocument = documentId
+    ? documents.data.documents.find((item) => item.id === documentId)
+    : undefined;
+  const selected = documentId
+    ? (visible.find((item) => item.id === documentId) ?? null)
+    : (visible.find((item) => item.id === selectedId) ?? visible[0] ?? null);
   const projectArchived = project?.project.status === "archived";
   const treeError = create.error ?? renameDocument.error;
   const treeErrorMessage =
@@ -561,6 +594,12 @@ function DocumentsRoute() {
               value={showArchived ? "archived" : "active"}
               onValueChange={(value) => {
                 setShowArchived(value === "archived");
+                if (documentId)
+                  void navigate({
+                    to: "/projects/$projectId/documents",
+                    params: { projectId },
+                    search: {}
+                  });
                 setCreatingFolder(false);
                 setNewFileParent(null);
                 setRenamingId(null);
@@ -667,7 +706,7 @@ function DocumentsRoute() {
                         : documents.data.folders.map((folder) => folder.path)
                     }
                     selectedId={selected?.id}
-                    onSelect={setSelectedId}
+                    onSelect={selectDocument}
                     newFileParent={newFileParent}
                     renamingId={renamingId}
                     pending={create.isPending || renameDocument.isPending}
@@ -714,6 +753,19 @@ function DocumentsRoute() {
               projectArchived={projectArchived}
               queryClient={queryClient}
             />
+          ) : documentId && !linkedDocument ? (
+            <Empty className="min-h-80">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <FileText />
+                </EmptyMedia>
+                <EmptyTitle>Document unavailable</EmptyTitle>
+                <EmptyDescription>
+                  This project document may have been removed or you may no
+                  longer have access.
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           ) : (
             <Empty className="min-h-80">
               <EmptyHeader>

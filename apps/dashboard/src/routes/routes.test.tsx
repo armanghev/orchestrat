@@ -245,9 +245,7 @@ describe("dashboard routes", () => {
     expect(screen.getByRole("button", { name: "Documents" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Activity" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Settings" })).toBeVisible();
-    expect(
-      screen.queryByRole("button", { name: "Messages" })
-    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Messages" })).toBeVisible();
     expect(
       screen.queryByRole("button", { name: "Integrations" })
     ).not.toBeInTheDocument();

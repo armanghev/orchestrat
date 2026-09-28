@@ -138,6 +138,10 @@ async function mockDocuments(
       });
     if (pathname === `/api/v1/projects/${ids.project}/presence`)
       return route.fulfill({ json: { agents: [] } });
+    if (pathname === `/api/v1/projects/${ids.project}/chats`)
+      return route.fulfill({ json: { chats: [] } });
+    if (pathname === `/api/v1/projects/${ids.project}/inbox`)
+      return route.fulfill({ json: { unread_chats: [] } });
     if (pathname === `/api/v1/projects/${ids.project}/events`)
       return route.fulfill({ json: { events: [], next_cursor: null } });
     if (pathname === "/api/v1/realtime/tickets")

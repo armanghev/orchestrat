@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type WebSocketRoute } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
 const ids = {
@@ -20,6 +20,9 @@ type HierarchyState = {
   agents?: Array<Record<string, unknown>>;
   documents?: Array<Record<string, unknown>>;
   events?: Array<Record<string, unknown>>;
+  chats?: Array<Record<string, unknown>>;
+  messageCandidates?: Array<Record<string, unknown>>;
+  messages?: Record<string, Array<Record<string, unknown>>>;
   failingOrganizationId?: string;
   abortOrganizations?: boolean;
   unauthorized?: "once" | "always";
@@ -66,6 +69,28 @@ function populatedState(): HierarchyState {
 
 async function mockHierarchy(page: Page, state: HierarchyState) {
   let rejectedOnce = false;
+  let lastCreatedChat:
+    | {
+        kind: "direct" | "group";
+        name?: string;
+        participants: Array<{ type: "human" | "agent"; id: string }>;
+      }
+    | undefined;
+  let lastSentMessage:
+    | {
+        body_markdown: string;
+        mentions: Array<{ type: "human" | "agent"; id: string }>;
+        document_ids: string[];
+      }
+    | undefined;
+  const sockets = new Map<string, WebSocketRoute>();
+  await page.routeWebSocket(
+    "wss://api.orchestrat.test/api/v1/realtime/**",
+    (ws) => {
+      const projectId = new URL(ws.url()).pathname.split("/").at(-1);
+      if (projectId) sockets.set(projectId, ws);
+    }
+  );
   await page.route("https://api.orchestrat.test/api/v1/**", async (route) => {
     expect([
       "Bearer e2e-session-token",
@@ -147,6 +172,24 @@ async function mockHierarchy(page: Page, state: HierarchyState) {
           ]
         }
       });
+    if (/^\/api\/v1\/projects\/[^/]+\/members$/.test(path))
+      return route.fulfill({
+        json: {
+          members: [
+            {
+              user_id: ids.user,
+              username: "e2e_user",
+              full_name: "E2E User",
+              email: "e2e@example.com",
+              avatar_url: null,
+              role: "owner",
+              created_at: now
+            }
+          ]
+        }
+      });
+    if (/^\/api\/v1\/projects\/[^/]+\/invitations$/.test(path))
+      return route.fulfill({ json: { invitations: [] } });
     if (/^\/api\/v1\/projects\/[^/]+\/tasks$/.test(path))
       return route.fulfill({
         json: {
@@ -165,6 +208,169 @@ async function mockHierarchy(page: Page, state: HierarchyState) {
           next_cursor: null
         }
       });
+    const projectChats = path.match(/^\/api\/v1\/projects\/([^/]+)\/chats$/);
+    if (projectChats) {
+      if (method === "GET")
+        return route.fulfill({
+          json: {
+            chats: (state.chats ?? []).filter(
+              (chat) => chat.project_id === projectChats[1]
+            )
+          }
+        });
+      const body = route.request().postDataJSON() as {
+        kind: "direct" | "group";
+        name?: string;
+        participants: Array<{ type: "human" | "agent"; id: string }>;
+      };
+      lastCreatedChat = body;
+      const candidates = [
+        {
+          type: "human",
+          id: ids.user,
+          name: "E2E User",
+          avatar_url: null
+        },
+        ...(state.messageCandidates ?? [])
+      ];
+      const created = {
+        id: "00000000-0000-4000-8000-000000000030",
+        project_id: projectChats[1],
+        kind: body.kind,
+        name: body.kind === "group" ? (body.name ?? null) : null,
+        has_human: true,
+        creator: { type: "human", id: ids.user },
+        participants: [
+          candidates[0],
+          ...body.participants.map(
+            (participant) =>
+              candidates.find(
+                (candidate) =>
+                  candidate.type === participant.type &&
+                  candidate.id === participant.id
+              ) ?? participant
+          )
+        ],
+        is_participant: true,
+        can_manage: true,
+        can_join: false,
+        last_sequence: 0,
+        last_read_sequence: 0,
+        unread_count: 0,
+        mention_count: 0,
+        created_at: now,
+        updated_at: now
+      };
+      state.chats ??= [];
+      state.chats.push(created);
+      state.messages ??= {};
+      state.messages[created.id] = [];
+      return route.fulfill({ status: 201, json: created });
+    }
+    if (/^\/api\/v1\/projects\/[^/]+\/message-candidates$/.test(path))
+      return route.fulfill({
+        json: { candidates: state.messageCandidates ?? [] }
+      });
+    if (/^\/api\/v1\/projects\/[^/]+\/inbox$/.test(path))
+      return route.fulfill({ json: { unread_chats: [] } });
+    const chat = path.match(/^\/api\/v1\/chats\/([^/]+)$/);
+    if (chat && method === "GET") {
+      const value = state.chats?.find(({ id }) => id === chat[1]);
+      return value
+        ? route.fulfill({ json: value })
+        : route.fulfill({
+            status: 404,
+            json: { error: { code: "NOT_FOUND" } }
+          });
+    }
+    const chatJoin = path.match(/^\/api\/v1\/chats\/([^/]+)\/join$/);
+    if (chatJoin && method === "POST") {
+      const current = state.chats?.find(({ id }) => id === chatJoin[1]);
+      if (!current)
+        return route.fulfill({
+          status: 404,
+          json: { error: { code: "NOT_FOUND" } }
+        });
+      const participants = Array.isArray(current.participants)
+        ? current.participants
+        : [];
+      const joined = {
+        ...current,
+        has_human: true,
+        participants: [
+          ...participants,
+          { type: "human", id: ids.user, name: "E2E User", avatar_url: null }
+        ],
+        is_participant: true,
+        can_join: false,
+        updated_at: now
+      };
+      state.chats = state.chats?.map((chat) =>
+        chat.id === chatJoin[1] ? joined : chat
+      );
+      return route.fulfill({ json: joined });
+    }
+    const chatMessages = path.match(/^\/api\/v1\/chats\/([^/]+)\/messages$/);
+    if (chatMessages) {
+      const chatId = chatMessages[1];
+      if (method === "GET")
+        return route.fulfill({
+          json: {
+            messages: state.messages?.[chatId] ?? [],
+            has_more: false,
+            next_after: null,
+            next_before: null
+          }
+        });
+      const body = route.request().postDataJSON() as {
+        body_markdown: string;
+        mentions: Array<{ type: "human" | "agent"; id: string }>;
+        document_ids: string[];
+      };
+      lastSentMessage = body;
+      const participants = [
+        {
+          type: "human",
+          id: ids.user,
+          name: "E2E User",
+          avatar_url: null
+        },
+        ...(state.messageCandidates ?? [])
+      ];
+      const created = {
+        id: "00000000-0000-4000-8000-000000000031",
+        chat_id: chatId,
+        project_id: ids.alpha,
+        sequence: (state.messages?.[chatId]?.length ?? 0) + 1,
+        author: { type: "human", id: ids.user, name: "E2E User" },
+        body_markdown: body.body_markdown,
+        mentions: body.mentions.map((mention) => {
+          const participant = participants.find(
+            (candidate) =>
+              candidate.type === mention.type && candidate.id === mention.id
+          );
+          return {
+            type: mention.type,
+            id: mention.id,
+            name: participant?.name ?? "Participant"
+          };
+        }),
+        documents: body.document_ids.flatMap((id) => {
+          const document = state.documents?.find(
+            (candidate) => candidate.id === id
+          );
+          return document && typeof document.path === "string"
+            ? [{ id, path: document.path }]
+            : [];
+        }),
+        created_at: now
+      };
+      state.messages ??= {};
+      (state.messages[chatId] ??= []).push(created);
+      return route.fulfill({ json: created });
+    }
+    if (/^\/api\/v1\/chats\/[^/]+\/read$/.test(path))
+      return route.fulfill({ json: { last_read_sequence: 0 } });
     if (/^\/api\/v1\/projects\/[^/]+\/presence$/.test(path))
       return route.fulfill({ json: { agents: [] } });
     if (/^\/api\/v1\/projects\/[^/]+\/events$/.test(path))
@@ -173,10 +379,16 @@ async function mockHierarchy(page: Page, state: HierarchyState) {
       });
     if (path === "/api/v1/realtime/tickets")
       return route.fulfill({
-        json: { ticket: "e2e-realtime-ticket", expires_at: now }
+        json: { ticket: "e".repeat(32), expires_at: now }
       });
     throw new Error(`Unexpected API request: ${method} ${path}`);
   });
+  return {
+    getChat: (chatId: string) => state.chats?.find(({ id }) => id === chatId),
+    getLastCreatedChat: () => lastCreatedChat,
+    getLastSentMessage: () => lastSentMessage,
+    getSocket: (projectId: string) => sockets.get(projectId)
+  };
 }
 
 async function seed(
@@ -809,7 +1021,8 @@ test("compact shell collapses and restores sidebar without horizontal overflow",
     page.getByRole("button", { name: "Restore sidebar" })
   ).toBeVisible();
   await expect(
-    page.getByRole("complementary", { name: "Project navigation" })
+    page
+      .getByRole("complementary", { name: "Project navigation" })
       .locator('[data-slot="sidebar"]')
       .first()
   ).toHaveCSS("width", "48px");
@@ -896,4 +1109,395 @@ test("mobile navigation opens, changes pages, and closes without overflow", asyn
     ).toBe(true);
   }
   await expectNoAxe(page);
+});
+
+test("messaging creates typed groups, sends Markdown references, protects observers, and opens cross-project notifications", async ({
+  page
+}, testInfo) => {
+  const errors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
+  const directChat = {
+    id: "00000000-0000-4000-8000-000000000026",
+    project_id: ids.alpha,
+    kind: "direct",
+    name: null,
+    has_human: true,
+    creator: { type: "human", id: ids.user },
+    participants: [
+      { type: "human", id: ids.user, name: "E2E User", avatar_url: null },
+      {
+        type: "human",
+        id: "00000000-0000-4000-8000-000000000027",
+        name: "Alice",
+        avatar_url: null
+      }
+    ],
+    is_participant: true,
+    can_manage: false,
+    can_join: false,
+    last_sequence: 1,
+    last_read_sequence: 1,
+    unread_count: 0,
+    mention_count: 0,
+    created_at: now,
+    updated_at: now
+  };
+  const observerChat = {
+    id: "00000000-0000-4000-8000-000000000028",
+    project_id: ids.alpha,
+    kind: "direct",
+    name: null,
+    has_human: false,
+    creator: { type: "agent", id: ids.agent },
+    participants: [
+      { type: "agent", id: ids.agent, name: "Build Agent", avatar_url: null },
+      {
+        type: "agent",
+        id: "00000000-0000-4000-8000-000000000010",
+        name: "Review Agent",
+        avatar_url: null
+      }
+    ],
+    is_participant: false,
+    can_manage: false,
+    can_join: false,
+    last_sequence: 1,
+    last_read_sequence: 0,
+    unread_count: 0,
+    mention_count: 0,
+    created_at: now,
+    updated_at: now
+  };
+  const joinableGroup = {
+    id: "00000000-0000-4000-8000-000000000036",
+    project_id: ids.alpha,
+    kind: "group",
+    name: "Agent deployment",
+    has_human: false,
+    creator: { type: "agent", id: ids.agent },
+    participants: [
+      { type: "agent", id: ids.agent, name: "Build Agent", avatar_url: null },
+      {
+        type: "agent",
+        id: "00000000-0000-4000-8000-000000000010",
+        name: "Review Agent",
+        avatar_url: null
+      }
+    ],
+    is_participant: false,
+    can_manage: false,
+    can_join: true,
+    last_sequence: 1,
+    last_read_sequence: 0,
+    unread_count: 0,
+    mention_count: 0,
+    created_at: now,
+    updated_at: now
+  };
+  const betaChat = {
+    id: "00000000-0000-4000-8000-000000000038",
+    project_id: ids.beta,
+    kind: "direct",
+    name: null,
+    has_human: true,
+    creator: { type: "human", id: ids.user },
+    participants: [
+      { type: "human", id: ids.user, name: "E2E User", avatar_url: null },
+      { type: "agent", id: ids.agent, name: "Build Agent", avatar_url: null }
+    ],
+    is_participant: true,
+    can_manage: false,
+    can_join: false,
+    last_sequence: 1,
+    last_read_sequence: 1,
+    unread_count: 0,
+    mention_count: 0,
+    created_at: now,
+    updated_at: now
+  };
+  await seed(page);
+  const state = await mockHierarchy(page, {
+    ...populatedState(),
+    chats: [directChat, observerChat, joinableGroup, betaChat],
+    messageCandidates: [
+      directChat.participants[1],
+      { type: "agent", id: ids.agent, name: "Build Agent", avatar_url: null }
+    ],
+    documents: [
+      {
+        id: "00000000-0000-4000-8000-000000000029",
+        project_id: ids.alpha,
+        path: "release-notes.md",
+        current_revision: 1,
+        archived_at: null,
+        created_by: { type: "human", id: ids.user },
+        created_at: now,
+        updated_at: now
+      }
+    ],
+    messages: {
+      [directChat.id]: [
+        {
+          id: "00000000-0000-4000-8000-000000000032",
+          chat_id: directChat.id,
+          project_id: ids.alpha,
+          sequence: 1,
+          author: {
+            type: "human",
+            id: directChat.participants[1].id,
+            name: "Alice"
+          },
+          body_markdown: "Existing direct message",
+          mentions: [],
+          documents: [],
+          created_at: now
+        }
+      ],
+      [observerChat.id]: [
+        {
+          id: "00000000-0000-4000-8000-000000000033",
+          chat_id: observerChat.id,
+          project_id: ids.alpha,
+          sequence: 1,
+          author: { type: "agent", id: ids.agent, name: "Build Agent" },
+          body_markdown: "Observer history",
+          mentions: [],
+          documents: [],
+          created_at: now
+        }
+      ],
+      [joinableGroup.id]: [
+        {
+          id: "00000000-0000-4000-8000-000000000037",
+          chat_id: joinableGroup.id,
+          project_id: ids.alpha,
+          sequence: 1,
+          author: { type: "agent", id: ids.agent, name: "Build Agent" },
+          body_markdown: "Joinable agent group",
+          mentions: [],
+          documents: [],
+          created_at: now
+        }
+      ],
+      [betaChat.id]: [
+        {
+          id: "00000000-0000-4000-8000-000000000039",
+          chat_id: betaChat.id,
+          project_id: ids.beta,
+          sequence: 1,
+          author: { type: "agent", id: ids.agent, name: "Build Agent" },
+          body_markdown: "Cross-project update",
+          mentions: [{ type: "human", id: ids.user, name: "E2E User" }],
+          documents: [],
+          created_at: now
+        }
+      ]
+    }
+  });
+  await page.goto(`/projects/${ids.alpha}/messages`);
+  await page.getByRole("button", { name: "New message" }).click();
+  await page.getByRole("button", { name: /Alice.*Human/ }).click();
+  await page.getByRole("button", { name: /Build Agent.*Agent/ }).click();
+  await page.getByRole("textbox", { name: "Group name" }).fill("Release team");
+  await page.getByRole("button", { name: "Create group" }).click();
+  await expect(page).toHaveURL(/chat=00000000-0000-4000-8000-000000000030/);
+  expect(state.getLastCreatedChat()).toEqual({
+    kind: "group",
+    name: "Release team",
+    participants: [
+      { type: "human", id: directChat.participants[1].id },
+      { type: "agent", id: ids.agent }
+    ]
+  });
+
+  await page
+    .getByRole("textbox", { name: "Write a message" })
+    .fill("**Release ready**");
+  await page.getByRole("button", { name: "Mention" }).click();
+  await page
+    .getByText("Mention a participant")
+    .locator("..")
+    .getByRole("button", { name: /Build Agent.*Agent/ })
+    .click();
+  await page.getByRole("button", { name: "Attach document" }).click();
+  await page
+    .getByRole("button", { name: "release-notes.md", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByText("Release ready", { exact: true })).toBeVisible();
+  await expect(page.getByText("@Build Agent", { exact: true })).toBeVisible();
+  await expect(
+    page
+      .getByLabel("Message history")
+      .getByText("release-notes.md", { exact: true })
+  ).toBeVisible();
+  expect(state.getLastSentMessage()).toEqual({
+    body_markdown: "**Release ready** @Build_Agent ",
+    mentions: [{ type: "agent", id: ids.agent }],
+    document_ids: ["00000000-0000-4000-8000-000000000029"]
+  });
+  if (testInfo.project.name === "macos-default")
+    await page.screenshot({
+      path: "/private/tmp/orchestrat-messaging-group.png",
+      animations: "disabled"
+    });
+
+  await page
+    .getByLabel("Conversations")
+    .getByText("Build Agent", { exact: true })
+    .click();
+  await expect(page.getByText("Read-only observer")).toBeVisible();
+  await expect(
+    page.getByRole("textbox", { name: "Write a message" })
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Join conversation" })
+  ).toHaveCount(0);
+  if (testInfo.project.name === "macos-default")
+    await page.screenshot({
+      path: "/private/tmp/orchestrat-messaging-observer.png",
+      animations: "disabled"
+    });
+  await page
+    .getByLabel("Conversations")
+    .getByRole("button", { name: /Agent deployment/ })
+    .click();
+  await page.getByRole("button", { name: "Join conversation" }).click();
+  await expect(
+    page.getByRole("textbox", { name: "Write a message" })
+  ).toBeVisible();
+  await expect(
+    page
+      .getByLabel("Conversations")
+      .getByRole("button", { name: /Agent deployment/ })
+  ).toBeVisible();
+  expect(state.getChat(joinableGroup.id)).toMatchObject({
+    has_human: true,
+    is_participant: true,
+    can_join: false
+  });
+  await expect.poll(() => Boolean(state.getSocket(ids.beta))).toBe(true);
+  state.getSocket(ids.beta)!.send(
+    JSON.stringify({
+      project_id: ids.beta,
+      sequence: 1,
+      event_type: "chat.message_created",
+      entity_type: "chat",
+      entity_id: betaChat.id,
+      actor: { type: "agent", id: ids.agent },
+      mentions: [{ type: "human", id: ids.user }]
+    })
+  );
+  await expect(page.getByLabel("New message notifications")).toContainText(
+    "Mentioned you"
+  );
+  await page.getByRole("button", { name: "Open chat" }).click();
+  await expect(page).toHaveURL(
+    new RegExp(`/projects/${ids.beta}/messages\\?chat=${betaChat.id}$`)
+  );
+  await expect(
+    page.getByRole("textbox", { name: "Write a message" })
+  ).toBeVisible();
+  await expect(page.getByText("Cross-project update")).toBeVisible();
+  await expect(
+    page.getByText(
+      "Some messages could not be synchronized. Retry to load the complete conversation."
+    )
+  ).toHaveCount(0);
+  expect(
+    await page
+      .locator("#main-content")
+      .evaluate((element) => element.scrollWidth <= element.clientWidth)
+  ).toBe(true);
+  if (testInfo.project.name === "macos-default")
+    await page.screenshot({
+      path: "/private/tmp/orchestrat-messaging-desktop.png",
+      animations: "disabled"
+    });
+  expect(errors).toEqual([]);
+});
+
+test("@phone messaging switches between the conversation list and chat pane without overflow", async ({
+  page
+}, testInfo) => {
+  test.skip(
+    testInfo.project.name !== "phone-project",
+    "The chat-pane back control is phone-only."
+  );
+  const errors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
+  const chat = {
+    id: "00000000-0000-4000-8000-000000000034",
+    project_id: ids.alpha,
+    kind: "direct",
+    name: null,
+    has_human: true,
+    creator: { type: "human", id: ids.user },
+    participants: [
+      { type: "human", id: ids.user, name: "E2E User", avatar_url: null },
+      {
+        type: "human",
+        id: "00000000-0000-4000-8000-000000000027",
+        name: "Alice",
+        avatar_url: null
+      }
+    ],
+    is_participant: true,
+    can_manage: false,
+    can_join: false,
+    last_sequence: 1,
+    last_read_sequence: 1,
+    unread_count: 0,
+    mention_count: 0,
+    created_at: now,
+    updated_at: now
+  };
+  await seed(page);
+  await mockHierarchy(page, {
+    ...populatedState(),
+    chats: [chat],
+    messages: {
+      [chat.id]: [
+        {
+          id: "00000000-0000-4000-8000-000000000035",
+          chat_id: chat.id,
+          project_id: ids.alpha,
+          sequence: 1,
+          author: { type: "human", id: chat.participants[1].id, name: "Alice" },
+          body_markdown: "Mobile history",
+          mentions: [],
+          documents: [],
+          created_at: now
+        }
+      ]
+    }
+  });
+  await page.goto(`/projects/${ids.alpha}/messages?chat=${chat.id}`);
+  await expect(
+    page.getByRole("textbox", { name: "Write a message" })
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Back to chats" }).click();
+  await expect(page).toHaveURL(new RegExp(`/projects/${ids.alpha}/messages$`));
+  await page
+    .getByLabel("Conversations")
+    .getByRole("button", { name: /Alice/ })
+    .click();
+  await expect(page).toHaveURL(new RegExp(`chat=${chat.id}$`));
+  await expect(
+    page.getByRole("textbox", { name: "Write a message" })
+  ).toBeVisible();
+  expect(
+    await page
+      .locator("#main-content")
+      .evaluate((element) => element.scrollWidth <= element.clientWidth)
+  ).toBe(true);
+  await page.screenshot({
+    path: "/private/tmp/orchestrat-messaging-phone.png",
+    animations: "disabled"
+  });
+  expect(errors).toEqual([]);
 });
