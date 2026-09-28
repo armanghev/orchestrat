@@ -721,7 +721,6 @@ export class McpBridge {
         controller.abort();
         resolve(undefined);
       }, this.options.inboxTimeoutMs ?? 1_000);
-      timer.unref?.();
     });
     try {
       return await Promise.race([
