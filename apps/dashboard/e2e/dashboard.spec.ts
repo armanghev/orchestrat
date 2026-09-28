@@ -1340,7 +1340,7 @@ test("messaging creates typed groups, sends Markdown references, protects observ
   });
   if (testInfo.project.name === "macos-default")
     await page.screenshot({
-      path: "/private/tmp/orchestrat-messaging-group.png",
+      path: testInfo.outputPath("orchestrat-messaging-group.png"),
       animations: "disabled"
     });
 
@@ -1357,7 +1357,7 @@ test("messaging creates typed groups, sends Markdown references, protects observ
   ).toHaveCount(0);
   if (testInfo.project.name === "macos-default")
     await page.screenshot({
-      path: "/private/tmp/orchestrat-messaging-observer.png",
+      path: testInfo.outputPath("orchestrat-messaging-observer.png"),
       animations: "disabled"
     });
   await page
@@ -1413,7 +1413,7 @@ test("messaging creates typed groups, sends Markdown references, protects observ
   ).toBe(true);
   if (testInfo.project.name === "macos-default")
     await page.screenshot({
-      path: "/private/tmp/orchestrat-messaging-desktop.png",
+      path: testInfo.outputPath("orchestrat-messaging-desktop.png"),
       animations: "disabled"
     });
   expect(errors).toEqual([]);
@@ -1496,7 +1496,7 @@ test("@phone messaging switches between the conversation list and chat pane with
       .evaluate((element) => element.scrollWidth <= element.clientWidth)
   ).toBe(true);
   await page.screenshot({
-    path: "/private/tmp/orchestrat-messaging-phone.png",
+    path: testInfo.outputPath("orchestrat-messaging-phone.png"),
     animations: "disabled"
   });
   expect(errors).toEqual([]);
