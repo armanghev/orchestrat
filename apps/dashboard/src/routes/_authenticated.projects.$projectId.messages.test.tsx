@@ -140,7 +140,7 @@ function routeHandlers({
 }: {
   chats: Chat[];
   messages: (chatId: string, request: Request) => Response | Promise<Response>;
-  candidates?: MessageCandidate[];
+  candidates?: MessageCandidate[] | (() => MessageCandidate[]);
   extra?: RequestHandler[];
 }) {
   return [
@@ -158,7 +158,9 @@ function routeHandlers({
       HttpResponse.json({ chats })
     ),
     http.get(`${apiUrl}/projects/${projectId}/message-candidates`, () =>
-      HttpResponse.json({ candidates })
+      HttpResponse.json({
+        candidates: typeof candidates === "function" ? candidates() : candidates
+      })
     ),
     http.get(`${apiUrl}/projects/${projectId}/inbox`, () =>
       HttpResponse.json({ unread_chats: [] })
@@ -183,7 +185,7 @@ async function renderMessages({
 }: {
   chats: Chat[];
   messages: (chatId: string, request: Request) => Response | Promise<Response>;
-  candidates?: MessageCandidate[];
+  candidates?: MessageCandidate[] | (() => MessageCandidate[]);
   extra?: RequestHandler[];
   selectedChatId?: string;
 }) {
@@ -315,6 +317,56 @@ describe("project messages route", () => {
         participants: [{ type: "agent", id: agent.id }]
       })
     );
+  });
+
+  it("refreshes creation and member pickers after project membership changes", async () => {
+    const charlie = candidate({
+      id: "00000000-0000-4000-8000-000000000013",
+      name: "Charlie"
+    });
+    const group = chat({
+      kind: "group",
+      name: "Release planning",
+      participants: [self, bob],
+      can_manage: true
+    });
+    let projectCandidates: MessageCandidate[] = [];
+    await renderMessages({
+      chats: [group],
+      candidates: () => projectCandidates,
+      selectedChatId: group.id,
+      messages: () => HttpResponse.json(page([]))
+    });
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "New message" }));
+    expect(
+      await screen.findByText("No matching project members.")
+    ).toBeVisible();
+    await user.click(
+      screen.getByRole("button", { name: "Close new message" })
+    );
+
+    projectCandidates = [alice];
+    await user.click(screen.getByRole("button", { name: "New message" }));
+    expect(
+      await screen.findByRole("button", { name: /Alice.*Human/ })
+    ).toBeVisible();
+    await user.click(
+      screen.getByRole("button", { name: "Close new message" })
+    );
+
+    projectCandidates = [charlie];
+    await user.click(screen.getByRole("button", { name: "Members, 2" }));
+    await user.type(
+      await screen.findByRole("textbox", {
+        name: "Find project member to add"
+      }),
+      "Charlie"
+    );
+    expect(
+      await screen.findByRole("button", { name: "Add Charlie" })
+    ).toBeVisible();
   });
 
   it("sends typed group mentions for current members only", async () => {

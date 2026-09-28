@@ -1159,6 +1159,15 @@ function MessagesWorkspace({
     setCreateError(null);
     setCreateAttempt(null);
     setCreateOpen(true);
+    void candidatesQuery.refetch();
+  };
+  const openMemberPicker = () => {
+    setDetailsOpen(true);
+    if (canManageMembers) void candidatesQuery.refetch();
+  };
+  const toggleDetails = () => {
+    if (detailsOpen) setDetailsOpen(false);
+    else openMemberPicker();
   };
   const createPeople = filteredCandidates.filter(
     ({ type }) => type === "human"
@@ -1403,7 +1412,7 @@ function MessagesWorkspace({
                 <Button
                   variant="outline"
                   aria-label={`Members, ${chatMembers.length}`}
-                  onClick={() => setDetailsOpen(true)}
+                  onClick={openMemberPicker}
                 >
                   <Users data-icon="inline-start" aria-hidden="true" />
                   {chatMembers.length}
@@ -1413,7 +1422,7 @@ function MessagesWorkspace({
                   size="icon"
                   aria-label="Conversation details"
                   aria-pressed={detailsOpen}
-                  onClick={() => setDetailsOpen(!detailsOpen)}
+                  onClick={toggleDetails}
                 >
                   <Info aria-hidden="true" className="opacity-50" />
                 </Button>
