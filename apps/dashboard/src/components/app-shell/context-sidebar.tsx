@@ -8,6 +8,7 @@ import {
   FolderKanban,
   Gauge,
   LogOut,
+  MessagesSquare,
   Search,
   Settings
 } from "lucide-react";
@@ -51,11 +52,12 @@ const routeIcons: Record<NavigationDestination, LucideIcon> = {
   tasks: FolderKanban,
   agents: Bot,
   documents: FileText,
+  messages: MessagesSquare,
   activity: Activity,
   settings: Settings
 };
 const routeGroups: { label: string; routes: NavigationDestination[] }[] = [
-  { label: "Workspace", routes: ["overview", "tasks", "agents"] },
+  { label: "Workspace", routes: ["overview", "tasks", "agents", "messages"] },
   { label: "Knowledge", routes: ["documents", "activity"] },
   { label: "Administration", routes: ["settings"] }
 ];
@@ -85,7 +87,8 @@ export function ContextSidebar({
   onOpenCommands,
   onOpenPreferences,
   onSignOut,
-  profile
+  profile,
+  messageCounts
 }: {
   activeRoute?: NavigationDestination;
   onNavigate: (route: NavigationDestination) => void;
@@ -93,6 +96,7 @@ export function ContextSidebar({
   onOpenPreferences: () => void;
   onSignOut: () => void;
   profile?: Profile;
+  messageCounts?: { unread: number; mentions: number };
 }) {
   const desktop = usePlatform().kind === "desktop";
   const { setOpenMobile, state } = useSidebar();
@@ -119,10 +123,7 @@ export function ContextSidebar({
       setDesktopHeaderVisible(true);
       return;
     }
-    const timer = window.setTimeout(
-      () => setDesktopHeaderVisible(false),
-      300
-    );
+    const timer = window.setTimeout(() => setDesktopHeaderVisible(false), 300);
     return () => window.clearTimeout(timer);
   }, [state]);
 
@@ -212,6 +213,21 @@ export function ContextSidebar({
                         >
                           <Icon />
                           <span>{route[0].toUpperCase() + route.slice(1)}</span>
+                          {route === "messages" && messageCounts?.unread ? (
+                            <span
+                              className="ml-auto flex items-center gap-1.5 text-[10px] font-medium"
+                              aria-label={`${messageCounts.unread} unread messages${messageCounts.mentions ? `, ${messageCounts.mentions} mentions` : ""}`}
+                            >
+                              <span className="rounded-full bg-primary px-1.5 leading-5 text-primary-foreground">
+                                {messageCounts.unread}
+                              </span>
+                              {messageCounts.mentions ? (
+                                <span className="text-brand">
+                                  @{messageCounts.mentions}
+                                </span>
+                              ) : null}
+                            </span>
+                          ) : null}
                         </button>
                       </SidebarMenuButton>
                     </SidebarMenuItem>

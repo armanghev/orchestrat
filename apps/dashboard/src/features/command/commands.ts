@@ -15,6 +15,7 @@ export const navigationDestinations = [
   "tasks",
   "agents",
   "documents",
+  "messages",
   "activity",
   "settings"
 ] as const;
@@ -51,12 +52,7 @@ export function buildCommands({
       id: `project:${project.id}`,
       group: "Projects" as const,
       label: `Open ${project.name}`,
-      keywords: [
-        "project",
-        "organization",
-        project.name,
-        organization.name
-      ],
+      keywords: ["project", "organization", project.name, organization.name],
       run: () => navigateToProject(project.id)
     })),
     ...navigationDestinations.map((route) => ({

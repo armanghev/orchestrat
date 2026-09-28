@@ -55,6 +55,11 @@ type NotificationNavigation =
   | {
       to: "/projects/$projectId/activity";
       params: { projectId: string };
+    }
+  | {
+      to: "/projects/$projectId/messages";
+      params: { projectId: string };
+      search: { chat: string };
     };
 
 export function watchNotificationActions(
@@ -74,10 +79,18 @@ export function watchNotificationActions(
           search: { task: destination.taskId }
         });
       } else {
-        void router.navigate({
-          to: "/projects/$projectId/activity",
-          params: { projectId: destination.projectId }
-        });
+        if (destination.kind === "chat") {
+          void router.navigate({
+            to: "/projects/$projectId/messages",
+            params: { projectId: destination.projectId },
+            search: { chat: destination.chatId }
+          });
+        } else {
+          void router.navigate({
+            to: "/projects/$projectId/activity",
+            params: { projectId: destination.projectId }
+          });
+        }
       }
     })
     .then((stop) => {

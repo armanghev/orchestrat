@@ -18,8 +18,6 @@ import {
 import { orderProjects } from "@/features/hierarchy/project-order";
 import { usePreferences } from "@/platform/preferences-provider";
 import { DashboardApiError } from "@/lib/api/client";
-import { ProjectRealtimeProvider } from "@/realtime/project-realtime";
-import { usePlatform } from "@/platform/provider";
 
 export const Route = createFileRoute("/_authenticated/projects/$projectId")({
   beforeLoad: async ({ context, params }) => {
@@ -195,13 +193,20 @@ function ProjectAccessUnavailable({
 }
 
 function ProjectLayout() {
-  const { catalog, project } = Route.useRouteContext();
+  const { catalog: initialCatalog } = Route.useRouteContext();
   const { projectId } = Route.useParams();
   const { preferences, update } = usePreferences();
   const navigate = useNavigate();
   const router = useRouter();
   const { api } = router.options.context;
-  const platform = usePlatform();
+  const catalogQuery = useQuery({
+    ...projectCatalogQueryOptions(api),
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true
+  });
+  const catalog = catalogQuery.data ?? initialCatalog;
+  const project =
+    catalog.projects.find(({ project: item }) => item.id === projectId) ?? null;
   const profileQuery = useQuery({
     queryKey: ["profile"],
     queryFn: () => api.getProfile()
@@ -253,25 +258,19 @@ function ProjectLayout() {
     id = project.project.id
   ) => navigate({ to: `/projects/${id}/${destination}` as never });
   return (
-    <ProjectRealtimeProvider
-      api={router.options.context.api}
-      queryClient={router.options.context.queryClient}
-      projectId={project.project.id}
-      platform={platform}
+    <AppShell
+      api={api}
+      catalog={catalog}
+      activeProjectId={project.project.id}
+      activeRoute={route}
+      navigateToProject={navigateToProject}
+      navigateToRoute={navigateToRoute}
+      openPreferences={() => navigate({ to: "/profile" as never })}
+      signOut={() => router.options.context.auth.signOut()}
+      profile={profileQuery.data}
+      retryCatalog={() => reloadHierarchy(router)}
     >
-      <AppShell
-        catalog={catalog}
-        activeProjectId={project.project.id}
-        activeRoute={route}
-        navigateToProject={navigateToProject}
-        navigateToRoute={navigateToRoute}
-        openPreferences={() => navigate({ to: "/profile" as never })}
-        signOut={() => router.options.context.auth.signOut()}
-        profile={profileQuery.data}
-        retryCatalog={() => reloadHierarchy(router)}
-      >
-        <Outlet />
-      </AppShell>
-    </ProjectRealtimeProvider>
+      <Outlet />
+    </AppShell>
   );
 }

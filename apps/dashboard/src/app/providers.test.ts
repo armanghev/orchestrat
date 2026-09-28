@@ -70,6 +70,7 @@ describe("watchNotificationActions", () => {
           destination:
             | { kind: "task"; projectId: string; taskId: string }
             | { kind: "activity"; projectId: string }
+            | { kind: "chat"; projectId: string; chatId: string }
         ) => void)
       | undefined;
     const unlisten = vi.fn();
@@ -92,6 +93,11 @@ describe("watchNotificationActions", () => {
       kind: "activity",
       projectId: "33333333-3333-4333-8333-333333333333"
     });
+    handle?.({
+      kind: "chat",
+      projectId: "44444444-4444-4444-8444-444444444444",
+      chatId: "55555555-5555-4555-8555-555555555555"
+    });
 
     expect(navigate.mock.calls).toEqual([
       [
@@ -105,6 +111,13 @@ describe("watchNotificationActions", () => {
         {
           to: "/projects/$projectId/activity",
           params: { projectId: "33333333-3333-4333-8333-333333333333" }
+        }
+      ],
+      [
+        {
+          to: "/projects/$projectId/messages",
+          params: { projectId: "44444444-4444-4444-8444-444444444444" },
+          search: { chat: "55555555-5555-4555-8555-555555555555" }
         }
       ]
     ]);

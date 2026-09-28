@@ -33,6 +33,7 @@ export function project(overrides: Partial<Project> = {}): Project {
     slug: "dashboard",
     description: null,
     status: "active",
+    role: "owner",
     created_at: timestamp,
     updated_at: timestamp,
     archived_at: null,

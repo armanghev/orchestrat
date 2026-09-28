@@ -1,8 +1,11 @@
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
+  useRef,
+  useState,
   useSyncExternalStore,
   type ReactNode
 } from "react";
@@ -12,14 +15,24 @@ import {
   type RealtimeEventEnvelope,
   type Task
 } from "@orchestrat/protocol";
+import type { Chat } from "@orchestrat/protocol";
 import type { ApiClient } from "@/lib/api/client";
+import { DashboardApiError } from "@/lib/api/client";
 import {
   invalidateCoordinationQueries,
   invalidateRealtimeEvent
 } from "@/features/coordination/query-options";
+import { coordinationKeys } from "@/features/coordination/query-options";
+import { messagingKeys } from "@/features/messaging/query-options";
+import { hierarchyKeys } from "@/features/hierarchy/query-options";
 import type { NativeNotification, Platform } from "@/platform/contract";
 
 export type RealtimeStatus = "connecting" | "connected" | "disconnected";
+type ReplayedChatMessage = {
+  eventId: number;
+  chatId: string;
+  actorUserId: string | null;
+};
 export type SocketLike = Pick<WebSocket, "close" | "send"> & {
   readyState: number;
   onopen: ((event: Event) => void) | null;
@@ -37,6 +50,51 @@ const notificationEventTypes = new Set([
   "claim.expired",
   "task.moved"
 ]);
+
+function evictProjectMessagingCaches(
+  queryClient: QueryClient,
+  projectId: string
+) {
+  const cached = queryClient.getQueryData<{ chats: Chat[] }>(
+    messagingKeys.chats(projectId)
+  );
+  for (const chat of cached?.chats ?? []) {
+    queryClient.removeQueries({ queryKey: messagingKeys.chat(chat.id) });
+    queryClient.removeQueries({ queryKey: messagingKeys.messages(chat.id) });
+  }
+  queryClient.removeQueries({ queryKey: messagingKeys.chats(projectId) });
+  queryClient.removeQueries({ queryKey: messagingKeys.candidates(projectId) });
+  queryClient.removeQueries({ queryKey: messagingKeys.inbox(projectId) });
+}
+
+function evictChatCache(
+  queryClient: QueryClient,
+  projectId: string,
+  chatId: string
+) {
+  queryClient.removeQueries({ queryKey: messagingKeys.chat(chatId) });
+  queryClient.removeQueries({ queryKey: messagingKeys.messages(chatId) });
+  queryClient.setQueryData<{ chats: Chat[] }>(
+    messagingKeys.chats(projectId),
+    (current) =>
+      current && {
+        ...current,
+        chats: current.chats.filter((chat) => chat.id !== chatId)
+      }
+  );
+  void queryClient.invalidateQueries({
+    queryKey: messagingKeys.inbox(projectId)
+  });
+}
+
+type ChatNotice = {
+  id: string;
+  projectId: string;
+  chatId: string;
+  title: string;
+  body: string;
+  mentioned: boolean;
+};
 
 function notificationBody(value: string) {
   const normalized = value
@@ -116,6 +174,8 @@ export class ProjectRealtimeController {
   private buffered: RealtimeEventEnvelope[] = [];
   private lastNotifiedSequence = 0;
   private notificationQueue = Promise.resolve();
+  private connectedBefore = false;
+  private lifecycleToken = 0;
   private status: RealtimeStatus = "disconnected";
   private readonly listeners = new Set<() => void>();
 
@@ -126,6 +186,7 @@ export class ProjectRealtimeController {
       | "realtimeSocketUrl"
       | "listProjectEvents"
       | "getTask"
+      | "listChats"
     >,
     private readonly queryClient: QueryClient,
     private readonly projectId: string,
@@ -139,7 +200,15 @@ export class ProjectRealtimeController {
       this.platform?.isBackgrounded?.() ??
       Promise.resolve(
         typeof document !== "undefined" && document.visibilityState === "hidden"
-      )
+      ),
+    private readonly onChatEvent?: (
+      event: RealtimeEventEnvelope,
+      isCurrent: () => boolean
+    ) => void | Promise<void>,
+    private readonly onReconnectSummary?: (
+      missedMessages: ReplayedChatMessage[],
+      isCurrent: () => boolean
+    ) => void | Promise<void>
   ) {}
 
   getStatus = () => this.status;
@@ -155,6 +224,7 @@ export class ProjectRealtimeController {
   }
 
   stop() {
+    this.lifecycleToken += 1;
     this.stopped = true;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
@@ -198,7 +268,11 @@ export class ProjectRealtimeController {
         this.setStatus("disconnected");
         this.scheduleReconnect();
       };
-    } catch {
+    } catch (error) {
+      if (error instanceof DashboardApiError && error.status === 403) {
+        this.revokeProjectAccess();
+        return;
+      }
       this.setStatus("disconnected");
       this.scheduleReconnect();
     }
@@ -207,21 +281,60 @@ export class ProjectRealtimeController {
   private async catchUp(socket: SocketLike) {
     if (this.socket !== socket || this.catchUpSocket !== socket) return;
     let succeeded = false;
+    const missedChatMessages: ReplayedChatMessage[] = [];
     try {
       let after = this.lastSequence ? String(this.lastSequence) : undefined;
       let nextSequence = this.lastSequence;
       let events;
       do {
         events = await this.api.listProjectEvents(this.projectId, { after });
-        for (const event of events.events)
+        for (const event of events.events) {
           nextSequence = Math.max(nextSequence, event.id);
+          if (event.type === "chat.message_created" && event.entity_id)
+            missedChatMessages.push({
+              eventId: event.id,
+              chatId: event.entity_id,
+              actorUserId: event.actor_user_id
+            });
+        }
         after = events.next_cursor ?? undefined;
       } while (events.next_cursor !== null);
       if (this.socket !== socket || this.catchUpSocket !== socket) return;
-      this.lastSequence = nextSequence;
+      if (!(await this.refreshMessageAccess(socket))) return;
+      const participantChatIds = new Set(
+        (
+          this.queryClient.getQueryData<{ chats: Chat[] }>(
+            messagingKeys.chats(this.projectId)
+          )?.chats ?? []
+        )
+          .filter((chat) => chat.is_participant)
+          .map((chat) => chat.id)
+      );
+      const authorizedMissedChatMessages = missedChatMessages.filter(
+        ({ chatId }) => participantChatIds.has(chatId)
+      );
       await invalidateCoordinationQueries(this.queryClient, this.projectId);
+      if (
+        this.socket !== socket ||
+        this.catchUpSocket !== socket ||
+        this.stopped
+      )
+        return;
+      this.lastSequence = nextSequence;
+      if (this.connectedBefore && authorizedMissedChatMessages.length > 0)
+        void Promise.resolve(
+          this.onReconnectSummary?.(
+            authorizedMissedChatMessages,
+            () => this.socket === socket && !this.stopped
+          )
+        ).catch(() => undefined);
+      this.connectedBefore = true;
       succeeded = true;
-    } catch {
+    } catch (error) {
+      if (error instanceof DashboardApiError && error.status === 403) {
+        this.revokeProjectAccess();
+        return;
+      }
       if (this.socket === socket && this.catchUpSocket === socket)
         await invalidateCoordinationQueries(this.queryClient, this.projectId);
     } finally {
@@ -261,9 +374,60 @@ export class ProjectRealtimeController {
     if (event.sequence <= this.lastSequence) return;
     this.lastSequence = event.sequence;
     void invalidateRealtimeEvent(this.queryClient, this.projectId, event);
+    if (event.entity_type === "chat") {
+      const lifecycleToken = this.lifecycleToken;
+      void Promise.resolve(
+        this.onChatEvent?.(
+          event,
+          () => !this.stopped && this.lifecycleToken === lifecycleToken
+        )
+      ).catch(() => undefined);
+      return;
+    }
     if (!notificationEventTypes.has(event.event_type)) return;
     this.notificationQueue = this.notificationQueue.then(() =>
       this.notifyForEvent(event)
+    );
+  }
+
+  private revokeProjectAccess() {
+    this.stop();
+    evictProjectMessagingCaches(this.queryClient, this.projectId);
+    this.queryClient.removeQueries({
+      queryKey: coordinationKeys.all,
+      predicate: ({ queryKey }) => queryKey.includes(this.projectId)
+    });
+    void this.queryClient.invalidateQueries({
+      queryKey: hierarchyKeys.catalog()
+    });
+  }
+
+  private async refreshMessageAccess(socket: SocketLike) {
+    if (this.socket !== socket || this.catchUpSocket !== socket || this.stopped)
+      return false;
+    const chatsKey = messagingKeys.chats(this.projectId);
+    const previous = this.queryClient.getQueryData<{ chats: Chat[] }>(chatsKey);
+    const refreshed = await this.api.listChats(this.projectId);
+    if (this.socket !== socket || this.catchUpSocket !== socket || this.stopped)
+      return false;
+    this.queryClient.setQueryData(chatsKey, refreshed);
+    const visible = new Set(refreshed.chats.map(({ id }) => id));
+    for (const chat of previous?.chats ?? []) {
+      if (visible.has(chat.id)) continue;
+      this.queryClient.removeQueries({ queryKey: messagingKeys.chat(chat.id) });
+      this.queryClient.removeQueries({
+        queryKey: messagingKeys.messages(chat.id)
+      });
+    }
+    await Promise.all(
+      refreshed.chats.map(({ id }) =>
+        this.queryClient.invalidateQueries({
+          queryKey: messagingKeys.messages(id)
+        })
+      )
+    );
+    return (
+      this.socket === socket && this.catchUpSocket === socket && !this.stopped
     );
   }
 
@@ -352,40 +516,426 @@ export function useProjectRealtimeStatus() {
   return useContext(RealtimeContext);
 }
 
+async function currentChatIsVisible(chatId: string, platform: Platform) {
+  if (typeof window === "undefined" || document.visibilityState !== "visible")
+    return false;
+  const url = new URL(window.location.href);
+  if (
+    !url.pathname.endsWith("/messages") ||
+    url.searchParams.get("chat") !== chatId
+  )
+    return false;
+  if (platform.kind === "desktop" && platform.isBackgrounded)
+    return !(await platform.isBackgrounded());
+  return true;
+}
+
+function realtimeChatTitle(
+  chat: Awaited<ReturnType<ApiClient["getChat"]>>,
+  userId: string
+) {
+  if (chat.kind === "group") return chat.name ?? "Group chat";
+  return (
+    chat.participants.find(
+      (participant) => participant.type !== "human" || participant.id !== userId
+    )?.name ?? "direct message"
+  );
+}
+
 export function ProjectRealtimeProvider({
   api,
   queryClient,
-  projectId,
+  projectIds,
+  activeProjectId,
+  currentUserId,
   platform,
+  navigateToChat,
   children
 }: {
   api: ApiClient;
   queryClient: QueryClient;
-  projectId: string;
+  projectIds: string[];
+  activeProjectId: string;
+  currentUserId?: string;
   platform: Platform;
+  navigateToChat: (projectId: string, chatId: string) => void | Promise<void>;
   children: ReactNode;
 }) {
-  const controller = useMemo(
-    () =>
-      new ProjectRealtimeController(
-        api,
-        queryClient,
-        projectId,
-        undefined,
-        Math.random,
-        platform
-      ),
-    [api, platform, projectId, queryClient]
+  const [notices, setNotices] = useState<ChatNotice[]>([]);
+  const mountedRef = useRef(false);
+  const currentUserRef = useRef(currentUserId);
+  const projectIdsRef = useRef(projectIds);
+  const chatAccessGenerationRef = useRef(new Map<string, number>());
+  currentUserRef.current = currentUserId;
+  projectIdsRef.current = projectIds;
+  const dismissNotice = useCallback((id: string) => {
+    setNotices((current) => current.filter((notice) => notice.id !== id));
+  }, []);
+  const addNotice = useCallback((notice: ChatNotice) => {
+    setNotices((current) => {
+      if (current.some(({ id }) => id === notice.id)) return current;
+      return [...current, notice].slice(-6);
+    });
+  }, []);
+  const notifyChatEvent = useCallback(
+    async (
+      event: RealtimeEventEnvelope,
+      isControllerCurrent: () => boolean
+    ) => {
+      const userId = currentUserRef.current;
+      if (
+        !mountedRef.current ||
+        !isControllerCurrent() ||
+        !userId ||
+        !projectIdsRef.current.includes(event.project_id) ||
+        !event.entity_id
+      )
+        return;
+      const accessKey = `${event.project_id}:${event.entity_id}`;
+      const getAccessGeneration = () =>
+        chatAccessGenerationRef.current.get(accessKey) ?? 0;
+      if (
+        event.event_type === "chat.access_invalidated" ||
+        (event.event_type === "chat.member_removed" &&
+          event.affected_participant?.type === "human" &&
+          event.affected_participant.id === userId)
+      ) {
+        chatAccessGenerationRef.current.set(
+          accessKey,
+          getAccessGeneration() + 1
+        );
+        evictChatCache(queryClient, event.project_id, event.entity_id);
+        setNotices((current) =>
+          current.filter(
+            (notice) =>
+              notice.chatId !== event.entity_id ||
+              notice.projectId !== event.project_id
+          )
+        );
+        return;
+      }
+      const isMessage = event.event_type === "chat.message_created";
+      const isCreated = event.event_type === "chat.created";
+      const isAdded =
+        event.event_type === "chat.member_added" &&
+        event.affected_participant?.type === "human" &&
+        event.affected_participant.id === userId;
+      if (!isMessage && !isCreated && !isAdded) return;
+      if (
+        event.actor?.type === "human" &&
+        event.actor.id === userId &&
+        (isMessage || isCreated || isAdded)
+      )
+        return;
+      const accessGeneration = getAccessGeneration();
+      const chat = await api.getChat(event.entity_id);
+      if (
+        !mountedRef.current ||
+        !isControllerCurrent() ||
+        getAccessGeneration() !== accessGeneration
+      )
+        return;
+      const visible = await currentChatIsVisible(chat.id, platform);
+      if (
+        !mountedRef.current ||
+        !isControllerCurrent() ||
+        getAccessGeneration() !== accessGeneration ||
+        currentUserRef.current !== userId ||
+        !projectIdsRef.current.includes(event.project_id) ||
+        !chat.is_participant ||
+        visible
+      )
+        return;
+      const name = realtimeChatTitle(chat, userId);
+      const actor = event.actor
+        ? chat.participants.find(
+            (participant) =>
+              participant.type === event.actor?.type &&
+              participant.id === event.actor.id
+          )
+        : undefined;
+      const mentioned = Boolean(
+        isMessage &&
+        event.mentions?.some(
+          (participant) =>
+            participant.type === "human" && participant.id === userId
+        )
+      );
+      const title = isAdded
+        ? `Added to ${name}`
+        : isCreated
+          ? `New chat from ${actor?.name ?? "an agent"}`
+          : mentioned
+            ? `Mentioned in ${name}`
+            : `New message in ${name}`;
+      const body = isAdded
+        ? "You can open the chat to see the full conversation."
+        : isCreated
+          ? "A new conversation is ready."
+          : mentioned
+            ? `${actor?.name ?? "A participant"} mentioned you.`
+            : `${actor?.name ?? "A participant"} sent a message.`;
+      const notice: ChatNotice = {
+        id: `${event.project_id}:${event.sequence}`,
+        projectId: event.project_id,
+        chatId: chat.id,
+        title,
+        body,
+        mentioned
+      };
+      addNotice(notice);
+      try {
+        if (
+          !mountedRef.current ||
+          !isControllerCurrent() ||
+          currentUserRef.current !== userId
+        )
+          return;
+        if (
+          platform.kind === "desktop" &&
+          platform.notify &&
+          (await platform.isBackgrounded?.())
+        ) {
+          if (
+            !mountedRef.current ||
+            !isControllerCurrent() ||
+            currentUserRef.current !== userId ||
+            !projectIdsRef.current.includes(event.project_id) ||
+            getAccessGeneration() !== accessGeneration
+          )
+            return;
+          await platform.notify({
+            title: mentioned ? "You were mentioned" : title,
+            body,
+            destination: {
+              kind: "chat",
+              projectId: event.project_id,
+              chatId: chat.id
+            }
+          });
+        }
+      } catch {
+        // A notification permission or native service failure never interrupts chat delivery.
+      }
+    },
+    [addNotice, api, platform, queryClient]
   );
-  useEffect(() => controller.start(), [controller]);
+  const summarizeReconnect = useCallback(
+    (
+      projectId: string,
+      missedMessages: ReplayedChatMessage[],
+      isControllerCurrent: () => boolean
+    ) => {
+      const userId = currentUserRef.current;
+      const relevantMessages = missedMessages.filter(
+        ({ actorUserId }) => actorUserId !== userId
+      );
+      if (
+        !mountedRef.current ||
+        !isControllerCurrent() ||
+        !userId ||
+        relevantMessages.length < 1 ||
+        !projectIdsRef.current.includes(projectId)
+      )
+        return;
+      const replayedChatIds = new Set(
+        relevantMessages.map(({ chatId }) => chatId)
+      );
+      const accessGenerations = new Map(
+        [...replayedChatIds].map((chatId) => [
+          chatId,
+          chatAccessGenerationRef.current.get(`${projectId}:${chatId}`) ?? 0
+        ])
+      );
+      const stillHasAccess = (chatId: string) =>
+        (chatAccessGenerationRef.current.get(`${projectId}:${chatId}`) ?? 0) ===
+        accessGenerations.get(chatId);
+      void api
+        .getProjectInbox(projectId)
+        .then(async (inbox) => {
+          if (
+            !mountedRef.current ||
+            !isControllerCurrent() ||
+            currentUserRef.current !== userId ||
+            !projectIdsRef.current.includes(projectId)
+          )
+            return;
+          const unread = inbox.unread_chats.filter(
+            ({ chat_id }) =>
+              replayedChatIds.has(chat_id) && stillHasAccess(chat_id)
+          );
+          if (!unread.length) return;
+          await Promise.all(
+            unread.map(async (item) => ({
+              item,
+              visible: await currentChatIsVisible(item.chat_id, platform)
+            }))
+          ).then(async (visibility) => {
+            if (
+              !mountedRef.current ||
+              !isControllerCurrent() ||
+              currentUserRef.current !== userId ||
+              !projectIdsRef.current.includes(projectId)
+            )
+              return;
+            const notVisible = visibility
+              .filter(
+                ({ item, visible }) => !visible && stillHasAccess(item.chat_id)
+              )
+              .map(({ item }) => item);
+            const first = notVisible[0];
+            if (!first) return;
+            const total = notVisible.reduce(
+              (sum, chat) => sum + chat.unread_count,
+              0
+            );
+            const notice = {
+              id: `${projectId}:reconnect:${Math.max(...relevantMessages.map(({ eventId }) => eventId))}`,
+              projectId,
+              chatId: first.chat_id,
+              title: "Messages arrived while you were away",
+              body: `${total || relevantMessages.length} unread message${(total || relevantMessages.length) === 1 ? "" : "s"} across ${notVisible.length} chat${notVisible.length === 1 ? "" : "s"}.`,
+              mentioned: notVisible.some((chat) => chat.mention_count > 0)
+            };
+            addNotice(notice);
+            try {
+              if (
+                platform.kind === "desktop" &&
+                platform.notify &&
+                (await platform.isBackgrounded?.()) &&
+                mountedRef.current &&
+                isControllerCurrent() &&
+                currentUserRef.current === userId &&
+                projectIdsRef.current.includes(projectId) &&
+                notVisible.every(({ chat_id }) => stillHasAccess(chat_id))
+              ) {
+                await platform.notify({
+                  title: notice.mentioned ? "Unread mentions" : notice.title,
+                  body: notice.body,
+                  destination: {
+                    kind: "chat",
+                    projectId,
+                    chatId: first.chat_id
+                  }
+                });
+              }
+            } catch {
+              // Native reconnect summaries are best effort.
+            }
+          });
+        })
+        .catch(() => undefined);
+    },
+    [addNotice, api, platform]
+  );
+  const projectIdsKey = [...new Set(projectIds)].sort().join("\0");
+  const controllers = useMemo(
+    () =>
+      projectIdsKey
+        .split("\0")
+        .filter(Boolean)
+        .map(
+          (projectId) =>
+            new ProjectRealtimeController(
+              api,
+              queryClient,
+              projectId,
+              undefined,
+              Math.random,
+              platform,
+              undefined,
+              (event, isCurrent) => notifyChatEvent(event, isCurrent),
+              (missedMessages, isCurrent) =>
+                summarizeReconnect(projectId, missedMessages, isCurrent)
+            )
+        ),
+    [
+      api,
+      notifyChatEvent,
+      platform,
+      projectIdsKey,
+      queryClient,
+      summarizeReconnect
+    ]
+  );
+  const orderedProjectIds = projectIdsKey.split("\0").filter(Boolean);
+  const previousProjectIdsRef = useRef<string[]>([]);
+  useEffect(() => {
+    mountedRef.current = true;
+    const nextIds = new Set(orderedProjectIds);
+    for (const previousId of previousProjectIdsRef.current) {
+      if (nextIds.has(previousId)) continue;
+      evictProjectMessagingCaches(queryClient, previousId);
+      queryClient.removeQueries({
+        queryKey: coordinationKeys.all,
+        predicate: ({ queryKey }) => queryKey.includes(previousId)
+      });
+      setNotices((current) =>
+        current.filter((notice) => notice.projectId !== previousId)
+      );
+    }
+    previousProjectIdsRef.current = orderedProjectIds;
+    const stops = controllers.map((controller) => controller.start());
+    return () => {
+      mountedRef.current = false;
+      stops.forEach((stop) => stop());
+    };
+  }, [controllers, projectIdsKey, queryClient]);
+  const controller =
+    controllers[orderedProjectIds.indexOf(activeProjectId)] ?? controllers[0];
   const status = useSyncExternalStore(
-    controller.subscribe,
-    controller.getStatus,
-    controller.getStatus
+    controller?.subscribe ?? (() => () => undefined),
+    controller?.getStatus ?? (() => "disconnected" as RealtimeStatus),
+    controller?.getStatus ?? (() => "disconnected" as RealtimeStatus)
   );
   return (
-    <RealtimeContext.Provider value={status}>
-      {children}
-    </RealtimeContext.Provider>
+    <>
+      <RealtimeContext.Provider value={status}>
+        {children}
+      </RealtimeContext.Provider>
+      {notices.length ? (
+        <div
+          className="fixed right-4 top-4 z-[100] flex w-[min(24rem,calc(100vw-2rem))] flex-col gap-2"
+          aria-live="polite"
+          aria-label="New message notifications"
+        >
+          {notices.slice(-3).map((notice) => (
+            <div
+              key={notice.id}
+              className="rounded-lg border bg-popover p-3 text-popover-foreground shadow-lg"
+              role="status"
+            >
+              <div className="flex items-start gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium">
+                    {notice.mentioned ? "Mentioned you" : notice.title}
+                  </p>
+                  <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
+                    {notice.body}
+                  </p>
+                  <button
+                    type="button"
+                    className="mt-2 text-xs font-medium underline"
+                    onClick={() =>
+                      void navigateToChat(notice.projectId, notice.chatId)
+                    }
+                  >
+                    Open chat
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Dismiss notification"
+                  className="rounded p-1 text-muted-foreground hover:bg-muted"
+                  onClick={() => dismissNotice(notice.id)}
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </>
   );
 }

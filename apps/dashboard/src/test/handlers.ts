@@ -89,6 +89,32 @@ export const handlers = [
     assertBodylessRequest(request);
     return HttpResponse.json({ documents: [], next_cursor: null });
   }),
+  http.get(
+    `${apiUrl}/projects/:projectId/message-candidates`,
+    ({ request }) => {
+      assertAuthorization(request);
+      assertBodylessRequest(request);
+      return HttpResponse.json({ candidates: [] });
+    }
+  ),
+  http.get(`${apiUrl}/projects/:projectId/chats`, ({ request }) => {
+    assertAuthorization(request);
+    assertBodylessRequest(request);
+    return HttpResponse.json({ chats: [] });
+  }),
+  http.get(`${apiUrl}/projects/:projectId/inbox`, ({ request }) => {
+    assertAuthorization(request);
+    assertBodylessRequest(request);
+    return HttpResponse.json({ unread_chats: [] });
+  }),
+  http.post(`${apiUrl}/realtime/tickets`, ({ request }) => {
+    assertAuthorization(request);
+    assertJsonRequest(request);
+    return HttpResponse.json({
+      ticket: "a".repeat(32),
+      expires_at: "2026-09-24T00:00:00.000Z"
+    });
+  }),
   http.get(`${apiUrl}/documents/:documentId/attachments`, ({ request }) => {
     assertAuthorization(request);
     assertBodylessRequest(request);

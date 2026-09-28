@@ -1,6 +1,7 @@
 import { queryOptions, type QueryClient } from "@tanstack/react-query";
 import type { RealtimeEventEnvelope } from "@orchestrat/protocol";
 import type { ApiClient } from "@/lib/api/client";
+import { messagingKeys } from "@/features/messaging/query-options";
 
 const knownRealtimeEventTypes = new Set([
   "task.created",
@@ -25,6 +26,11 @@ const knownRealtimeEventTypes = new Set([
   "session.heartbeat",
   "document.created",
   "document.updated",
+  "chat.created",
+  "chat.member_added",
+  "chat.member_removed",
+  "chat.message_created",
+  "chat.access_invalidated",
   "hook.triggered",
   "run.failed"
 ]);
@@ -160,6 +166,12 @@ export function invalidateCoordinationQueries(
     }),
     queryClient.invalidateQueries({
       queryKey: coordinationKeys.documents(projectId)
+    }),
+    queryClient.invalidateQueries({
+      queryKey: messagingKeys.chats(projectId)
+    }),
+    queryClient.invalidateQueries({
+      queryKey: messagingKeys.inbox(projectId)
     })
   ]);
 }
@@ -169,6 +181,34 @@ export function invalidateRealtimeEvent(
   projectId: string,
   event: RealtimeEventEnvelope
 ) {
+  if (event.entity_type === "chat" && event.entity_id) {
+    const chatId = event.entity_id;
+    const invalidations = [
+      queryClient.invalidateQueries({
+        queryKey: messagingKeys.chats(projectId)
+      }),
+      queryClient.invalidateQueries({
+        queryKey: messagingKeys.inbox(projectId)
+      }),
+      queryClient.invalidateQueries({ queryKey: messagingKeys.chat(chatId) }),
+      queryClient.invalidateQueries({
+        queryKey: messagingKeys.messages(chatId)
+      })
+    ];
+    if (event.event_type === "chat.access_invalidated") {
+      queryClient.removeQueries({ queryKey: messagingKeys.chat(chatId) });
+      queryClient.removeQueries({ queryKey: messagingKeys.messages(chatId) });
+      queryClient.setQueryData<{ chats: Array<{ id: string }> }>(
+        messagingKeys.chats(projectId),
+        (current) =>
+          current && {
+            ...current,
+            chats: current.chats.filter((chat) => chat.id !== chatId)
+          }
+      );
+    }
+    return Promise.all(invalidations);
+  }
   if (event.entity_type === "document") {
     const keys = [
       coordinationKeys.documents(projectId),

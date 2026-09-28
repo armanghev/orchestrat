@@ -8,6 +8,7 @@ import {
   useState,
   type ReactNode
 } from "react";
+import { useQueries } from "@tanstack/react-query";
 import type { ProjectCatalog } from "@/features/hierarchy/catalog";
 import {
   buildCommands,
@@ -24,6 +25,8 @@ import { usePlatform } from "@/platform/provider";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ConnectivityBanner } from "@/features/connectivity/connectivity-banner";
 import { WindowDragRegion } from "./top-toolbar";
+import type { ApiClient } from "@/lib/api/client";
+import { inboxQueryOptions } from "@/features/messaging/query-options";
 
 const TopToolbarActionsContext = createContext<
   ((actions: ReactNode | null) => void) | null
@@ -40,6 +43,7 @@ export function TopToolbarActions({ children }: { children: ReactNode }) {
 
 export type AppShellProps = {
   catalog: ProjectCatalog;
+  api: ApiClient;
   activeProjectId?: string;
   activeRoute?: NavigationDestination;
   navigateToProject: (projectId: string) => void | Promise<void>;
@@ -61,6 +65,7 @@ export type AppShellProps = {
 
 export function AppShell({
   catalog,
+  api,
   activeProjectId,
   activeRoute = "overview",
   navigateToProject,
@@ -89,6 +94,24 @@ export function AppShell({
   const current = catalog.projects.find(
     ({ project }) => project.id === activeProjectId
   );
+  const inboxQueries = useQueries({
+    queries: catalog.projects.map(({ project }) =>
+      inboxQueryOptions(api, project.id)
+    )
+  });
+  const currentInbox =
+    inboxQueries[
+      catalog.projects.findIndex(
+        ({ project }) => project.id === activeProjectId
+      )
+    ]?.data;
+  const messageCounts = currentInbox?.unread_chats.reduce(
+    (counts, chat) => ({
+      unread: counts.unread + chat.unread_count,
+      mentions: counts.mentions + chat.mention_count
+    }),
+    { unread: 0, mentions: 0 }
+  ) ?? { unread: 0, mentions: 0 };
   const projectIds = catalog.projects.map(({ project }) => project.id);
   const selectProject = (id: string) => {
     const ordered = orderProjects(projectIds, {
@@ -179,6 +202,7 @@ export function AppShell({
           onOpenPreferences={openPreferences}
           onSignOut={signOut}
           profile={profile}
+          messageCounts={messageCounts}
         />
       </aside>
       <div className="flex w-full min-w-0 flex-1 flex-col">

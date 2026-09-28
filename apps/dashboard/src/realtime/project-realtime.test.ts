@@ -56,18 +56,25 @@ function setup(
     })),
     getTask: vi.fn(async () => ({ status: "done", title: "Task" }) as never),
     realtimeSocketUrl: vi.fn(() => "wss://api.example/realtime"),
+    listChats: vi.fn(async () => ({ chats: [] })),
     listProjectEvents
+  };
+  const queryClient = {
+    invalidateQueries,
+    getQueryData: vi.fn(() => undefined),
+    setQueryData: vi.fn(),
+    removeQueries: vi.fn()
   };
   const controller = new ProjectRealtimeController(
     api,
-    { invalidateQueries } as never,
+    queryClient as never,
     projectId,
     socketFactory ?? (() => socket),
     () => 0,
     platform,
     isBackgrounded
   );
-  return { api, controller, invalidateQueries, socket };
+  return { api, controller, invalidateQueries, queryClient, socket };
 }
 
 describe("ProjectRealtimeController", () => {
@@ -365,6 +372,30 @@ describe("ProjectRealtimeController", () => {
     await new Promise((done) => setTimeout(done, 0));
     expect(f.controller.getStatus()).toBe("connected");
     expect(f.invalidateQueries).toHaveBeenCalled();
+  });
+
+  it("does not cache refreshed chats after the controller stops", async () => {
+    const f = setup();
+    let resolveChats!: (
+      value: Awaited<ReturnType<typeof f.api.listChats>>
+    ) => void;
+    f.api.listChats.mockReturnValueOnce(
+      new Promise((done) => {
+        resolveChats = done;
+      })
+    );
+    f.controller.start();
+    await new Promise((done) => setTimeout(done, 0));
+    f.socket.onopen?.(new Event("open"));
+    await new Promise((done) => setTimeout(done, 0));
+    expect(f.api.listChats).toHaveBeenCalledOnce();
+
+    f.controller.stop();
+    resolveChats({ chats: [] });
+    await new Promise((done) => setTimeout(done, 0));
+
+    expect(f.queryClient.setQueryData).not.toHaveBeenCalled();
+    expect(f.controller.getStatus()).toBe("disconnected");
   });
 
   it("closes and reconnects when durable catch-up fails", async () => {
