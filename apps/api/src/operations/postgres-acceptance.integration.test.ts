@@ -237,6 +237,58 @@ test(
           "SELECT id FROM users WHERE auth_subject='postgres-alice' AND auth_provider='supabase'"
         )
       ).rows[0] as { id: string };
+      await pool.query(
+        "INSERT INTO organization_members (organization_id,user_id,role) VALUES ($1,$2,'member') ON CONFLICT DO NOTHING",
+        [org.id, bob.id]
+      );
+      await pool.query(
+        "INSERT INTO project_members (project_id,user_id,role) VALUES ($1,$2,'member') ON CONFLICT DO NOTHING",
+        [project.id, bob.id]
+      );
+      await t.test("PostgreSQL inbox aggregates unread mentions", async () => {
+        const created = await request(
+          "POST",
+          `/projects/${project.id}/chats`,
+          {
+            kind: "group",
+            name: "Inbox aggregate",
+            participants: [{ type: "human", id: bob.id }]
+          },
+          "alice",
+          "postgres-inbox-chat"
+        );
+        assert.equal(created.statusCode, 201, created.body);
+        const chat = created.json();
+        const sent = await request(
+          "POST",
+          `/chats/${chat.id}/messages`,
+          {
+            body_markdown: "Unread mention",
+            mentions: [{ type: "human", id: bob.id }]
+          },
+          "alice",
+          "postgres-inbox-mention"
+        );
+        assert.equal(sent.statusCode, 201, sent.body);
+        const ownReply = await request(
+          "POST",
+          `/chats/${chat.id}/messages`,
+          { body_markdown: "Own message" },
+          "bob",
+          "postgres-inbox-own-message"
+        );
+        assert.equal(ownReply.statusCode, 201, ownReply.body);
+        const inbox = await request(
+          "GET",
+          `/projects/${project.id}/inbox`,
+          undefined,
+          "bob"
+        );
+        assert.equal(inbox.statusCode, 200, inbox.body);
+        assert.deepEqual(inbox.json().unread_chats, [
+          { chat_id: chat.id, unread_count: 1, mention_count: 1 }
+        ]);
+      });
       await t.test(
         "chat reads reuse their transaction connection with a one-connection pool",
         async () => {

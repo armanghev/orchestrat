@@ -396,3 +396,230 @@ test("humans and offline agents exchange immutable project-scoped messages", asy
   assert.equal(restoredDirect.statusCode, 200, restoredDirect.body);
   assert.equal(restoredDirect.json().id, direct.id);
 });
+
+test("inbox aggregates unread counts across many participant chats", async (t) => {
+  const { app, db } = await fixture();
+  t.after(() => app.close());
+  const organization = (
+    await app.inject({
+      method: "POST",
+      url: "/api/v1/organizations",
+      headers: human("alice"),
+      payload: { name: "Inbox org" }
+    })
+  ).json();
+  const createProject = async (name: string) =>
+    (
+      await app.inject({
+        method: "POST",
+        url: `/api/v1/organizations/${organization.id}/projects`,
+        headers: human("alice"),
+        payload: { name }
+      })
+    ).json();
+  const project = await createProject("Inbox project");
+  const otherProject = await createProject("Other inbox project");
+  await app.inject({
+    method: "GET",
+    url: "/api/v1/profile",
+    headers: human("bob")
+  });
+  const [bob] = await db
+    .select()
+    .from(users)
+    .where(eq(users.email, "bob@example.com"));
+  assert.ok(bob);
+  await db.insert(organizationMembers).values({
+    organizationId: organization.id,
+    userId: bob.id,
+    role: "member"
+  });
+  for (const currentProject of [project, otherProject])
+    assert.equal(
+      (
+        await app.inject({
+          method: "POST",
+          url: `/api/v1/projects/${currentProject.id}/members`,
+          headers: human("alice"),
+          payload: { user_id: bob.id }
+        })
+      ).statusCode,
+      201
+    );
+
+  const createGroup = async (
+    currentProject: { id: string },
+    name: string,
+    key: string
+  ) =>
+    (
+      await app.inject({
+        method: "POST",
+        url: `/api/v1/projects/${currentProject.id}/chats`,
+        headers: idempotent("alice", key),
+        payload: {
+          kind: "group",
+          name,
+          participants: [{ type: "human", id: bob.id }]
+        }
+      })
+    ).json();
+  const sendHumanMessage = async (
+    chatId: string,
+    actor: "alice" | "bob",
+    key: string,
+    mentions: { type: "human"; id: string }[] = []
+  ) =>
+    app.inject({
+      method: "POST",
+      url: `/api/v1/chats/${chatId}/messages`,
+      headers: idempotent(actor, key),
+      payload: { body_markdown: key, mentions }
+    });
+
+  const chats = await Promise.all(
+    Array.from({ length: 2 }, (_, index) =>
+      createGroup(project, `Inbox ${index}`, `inbox-chat-${index}`)
+    )
+  );
+  const first = await sendHumanMessage(chats[0].id, "alice", "first-mention", [
+    { type: "human", id: bob.id }
+  ]);
+  const ownReply = await sendHumanMessage(chats[0].id, "bob", "own-reply");
+  assert.equal(first.statusCode, 201, first.body);
+  assert.equal(ownReply.statusCode, 201, ownReply.body);
+  const unreadAfterRead = await sendHumanMessage(
+    chats[0].id,
+    "alice",
+    "unread-after-read",
+    [{ type: "human", id: bob.id }]
+  );
+  await app.inject({
+    method: "POST",
+    url: `/api/v1/chats/${chats[0].id}/read`,
+    headers: human("bob"),
+    payload: { through_message_id: first.json().id }
+  });
+  assert.equal(unreadAfterRead.statusCode, 201, unreadAfterRead.body);
+  await sendHumanMessage(chats[1].id, "alice", "second-mention", [
+    { type: "human", id: bob.id }
+  ]);
+  await sendHumanMessage(chats[1].id, "alice", "second-unread");
+
+  const measureInbox = async () => {
+    let selectCount = 0;
+    const pool = db.$client as unknown as {
+      query: (...args: unknown[]) => Promise<unknown>;
+    };
+    const originalQueryMethod = pool.query;
+    const originalQuery = pool.query.bind(db.$client);
+    pool.query = async (...args: unknown[]) => {
+      const config = args[0] as unknown;
+      const statement =
+        typeof config === "string"
+          ? config
+          : config && typeof config === "object" && "text" in config
+            ? String(config.text)
+            : "";
+      if (/^\s*select\b/i.test(statement)) selectCount++;
+      return originalQuery(...args);
+    };
+    try {
+      const response = await app.inject({
+        method: "GET",
+        url: `/api/v1/projects/${project.id}/inbox`,
+        headers: human("bob")
+      });
+      return { response, selectCount };
+    } finally {
+      pool.query = originalQueryMethod;
+    }
+  };
+  const baseline = await measureInbox();
+  assert.equal(baseline.response.statusCode, 200, baseline.response.body);
+
+  const additionalChats = await Promise.all(
+    Array.from({ length: 10 }, (_, index) =>
+      createGroup(project, `Inbox ${index + 2}`, `inbox-chat-${index + 2}`)
+    )
+  );
+  chats.push(...additionalChats);
+  for (const chat of additionalChats)
+    await sendHumanMessage(chat.id, "alice", `message-${chat.id}`);
+
+  const betaChat = await createGroup(
+    otherProject,
+    "Other project chat",
+    "other-project-chat"
+  );
+  await sendHumanMessage(betaChat.id, "alice", "other-project-message");
+
+  const createAgent = async (name: string) => {
+    const agent = (
+      await app.inject({
+        method: "POST",
+        url: `/api/v1/projects/${project.id}/agents`,
+        headers: human("alice"),
+        payload: { name }
+      })
+    ).json();
+    const credential = (
+      await app.inject({
+        method: "POST",
+        url: `/api/v1/projects/${project.id}/agents/${agent.id}/credentials`,
+        headers: human("alice")
+      })
+    ).json();
+    return { agent, token: credential.token as string };
+  };
+  const agentA = await createAgent("inbox-agent-a");
+  const agentB = await createAgent("inbox-agent-b");
+  const agentOnlyChat = (
+    await app.inject({
+      method: "POST",
+      url: "/api/v1/agent/chats",
+      headers: {
+        authorization: `Bearer ${agentA.token}`,
+        "idempotency-key": "agent-only-inbox-chat"
+      },
+      payload: {
+        kind: "group",
+        name: "Agent only inbox chat",
+        participants: [{ type: "agent", id: agentB.agent.id }]
+      }
+    })
+  ).json();
+  await app.inject({
+    method: "POST",
+    url: `/api/v1/agent/chats/${agentOnlyChat.id}/messages`,
+    headers: {
+      authorization: `Bearer ${agentA.token}`,
+      "idempotency-key": "agent-only-inbox-message"
+    },
+    payload: { body_markdown: "Visible in project, not a participant" }
+  });
+
+  const expanded = await measureInbox();
+  const inbox = expanded.response;
+  assert.equal(inbox.statusCode, 200, inbox.body);
+  assert.equal(baseline.selectCount, 3);
+  assert.equal(expanded.selectCount, baseline.selectCount);
+  const expected = [
+    { chat_id: chats[0].id, unread_count: 1, mention_count: 1 },
+    { chat_id: chats[1].id, unread_count: 2, mention_count: 1 },
+    ...chats.slice(2).map((chat: { id: string }) => ({
+      chat_id: chat.id,
+      unread_count: 1,
+      mention_count: 0
+    }))
+  ].sort((left, right) => left.chat_id.localeCompare(right.chat_id));
+  assert.deepEqual(
+    inbox
+      .json()
+      .unread_chats.sort(
+        (left: { chat_id: string }, right: { chat_id: string }) =>
+          left.chat_id.localeCompare(right.chat_id)
+      ),
+    expected
+  );
+});

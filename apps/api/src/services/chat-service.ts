@@ -24,6 +24,7 @@ import {
 import {
   and,
   asc,
+  count,
   desc,
   eq,
   gt,
@@ -31,7 +32,8 @@ import {
   isNull,
   lt,
   ne,
-  or
+  or,
+  sql
 } from "drizzle-orm";
 import {
   recordRealtimeNotice,
@@ -1524,15 +1526,51 @@ export class ChatService {
   }
 
   private async inboxAs(executor: Database, actor: Actor, projectId: string) {
-    const listed = await this.listAs(executor, actor, projectId);
+    const unreadChats = await executor
+      .select({
+        chatId: chatParticipants.chatId,
+        unreadCount: count(chatMessages.id),
+        mentionCount:
+          sql<number>`sum(case when ${chatMessages.mentions} @> ${JSON.stringify(
+            [{ type: actor.type, id: actor.id }]
+          )}::jsonb then 1 else 0 end)`.mapWith(Number)
+      })
+      .from(chatParticipants)
+      .innerJoin(
+        chats,
+        and(
+          eq(chats.id, chatParticipants.chatId),
+          eq(chats.projectId, projectId)
+        )
+      )
+      .innerJoin(
+        chatMessages,
+        and(
+          eq(chatMessages.chatId, chatParticipants.chatId),
+          eq(chatMessages.projectId, projectId),
+          gt(chatMessages.sequence, chatParticipants.lastReadSequence),
+          actor.type === "human"
+            ? or(
+                ne(chatMessages.authorType, "human"),
+                ne(chatMessages.authorUserId, actor.id)
+              )
+            : or(
+                ne(chatMessages.authorType, "agent"),
+                ne(chatMessages.authorAgentId, actor.id)
+              )
+        )
+      )
+      .where(
+        and(eq(chatParticipants.projectId, projectId), participantClause(actor))
+      )
+      .groupBy(chatParticipants.chatId, chats.updatedAt, chats.id)
+      .orderBy(desc(chats.updatedAt), desc(chats.id));
     return {
-      unread_chats: listed.chats
-        .filter((chat) => chat.is_participant && chat.unread_count > 0)
-        .map((chat) => ({
-          chat_id: chat.id,
-          unread_count: chat.unread_count,
-          mention_count: chat.mention_count
-        }))
+      unread_chats: unreadChats.map((chat) => ({
+        chat_id: chat.chatId,
+        unread_count: chat.unreadCount,
+        mention_count: chat.mentionCount
+      }))
     };
   }
 
