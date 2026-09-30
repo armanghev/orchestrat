@@ -38,7 +38,7 @@ import {
   or
 } from "drizzle-orm";
 import { ApiError } from "./api-error.js";
-import { defaultBranchId } from "./branch-context.js";
+import { defaultBranchId, type BranchSelector } from "./branch-context.js";
 import { PermissionService } from "./permission-service.js";
 import { recordProjectEvent } from "../realtime/realtime.js";
 import { resetsToReadyOnClaimEnd } from "./task-block-hooks.js";
@@ -47,6 +47,8 @@ export type AgentPrincipal = {
   agentId: string;
   projectId: string;
   credentialId: string;
+  /** Branch headers of the current request (docs/project-branches.md §6.1). */
+  branch?: BranchSelector;
 };
 
 export type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
@@ -103,12 +105,15 @@ export async function insertProjectEvent(
     entityId?: string | null;
     payload?: Record<string, unknown>;
     publish?: boolean;
+    /** The event's branch; omit for project-wide events (agents, branches). */
+    branchId?: string | null;
   }
 ) {
   const [event] = await tx
     .insert(projectEvents)
     .values({
       projectId: value.projectId,
+      branchId: value.branchId ?? null,
       type: value.type,
       actorAgentId: value.actorAgentId ?? null,
       actorUserId: value.actorUserId ?? null,
@@ -135,6 +140,7 @@ export class AgentService {
       .limit(1);
     if (!project) throw new ApiError(404, "NOT_FOUND", "Project not found.");
     return {
+      default_branch_id: await defaultBranchId(this.db, project.id),
       id: project.id,
       organization_id: project.organizationId,
       name: project.name,
@@ -763,6 +769,37 @@ export class AgentService {
       );
       return { session: sessionJson(updated) };
     });
+  }
+
+  /**
+   * Closes every active session on a branch that is being archived; their
+   * claims are revoked like any session close (spec §6.2).
+   */
+  async closeBranchSessions(
+    tx: Transaction,
+    projectId: string,
+    branchId: string,
+    now = new Date()
+  ) {
+    const sessions = await tx
+      .select()
+      .from(agentSessions)
+      .where(
+        and(
+          eq(agentSessions.projectId, projectId),
+          eq(agentSessions.branchId, branchId),
+          eq(agentSessions.status, "active")
+        )
+      )
+      .for("update");
+    for (const session of sessions)
+      await this.closeSessionInTransaction(
+        tx,
+        { agentId: session.agentId, projectId, credentialId: "" },
+        session,
+        now
+      );
+    return sessions.length;
   }
 
   private async closeSessionInTransaction(

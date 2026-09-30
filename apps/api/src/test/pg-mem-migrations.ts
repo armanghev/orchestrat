@@ -39,5 +39,19 @@ export function isPgMemMigrationStatementSupported(statement: string): boolean {
   )
     return false;
 
+  // Same pg-mem limitation for 0016: a lookup such as "branches of project X"
+  // would be answered from project_branches_one_default and return only the
+  // default. The services check these invariants themselves; the real
+  // PostgreSQL suites enforce the indexes.
+  if (
+    /^\s*CREATE UNIQUE INDEX "[a-z_]+" ON "[a-z_]+" USING btree \([^)]*\) WHERE /.test(
+      statement
+    ) &&
+    /"(project_branches|branch_merge_runs|branch_merge_decisions|repository_connections|repository_connection_attempts|repository_refs)_|_branch_origin_unique"/.test(
+      statement
+    )
+  )
+    return false;
+
   return true;
 }

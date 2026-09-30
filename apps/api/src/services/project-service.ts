@@ -21,7 +21,10 @@ import type {
 } from "@orchestrat/protocol";
 import { and, asc, count, eq, inArray } from "drizzle-orm";
 import { ApiError } from "./api-error.js";
-import { FALLBACK_DEFAULT_BRANCH_NAME } from "./branch-context.js";
+import {
+  defaultBranchId,
+  FALLBACK_DEFAULT_BRANCH_NAME
+} from "./branch-context.js";
 import { PermissionService } from "./permission-service.js";
 
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
@@ -50,9 +53,11 @@ const organizationJson = (
 
 const projectJson = (
   project: typeof projects.$inferSelect,
-  role: Project["role"]
+  role: Project["role"],
+  defaultBranchId?: string
 ): Project => ({
   role,
+  ...(defaultBranchId ? { default_branch_id: defaultBranchId } : {}),
   id: project.id,
   organization_id: project.organizationId,
   name: project.name,
@@ -442,7 +447,14 @@ export class ProjectService {
       )
       .where(eq(projects.organizationId, organizationId))
       .orderBy(asc(projects.name));
-    return { projects: rows.map((row) => projectJson(row.project, row.role)) };
+    const defaults = await this.defaultBranchIds(
+      rows.map((row) => row.project.id)
+    );
+    return {
+      projects: rows.map((row) =>
+        projectJson(row.project, row.role, defaults.get(row.project.id))
+      )
+    };
   }
 
   async createProject(
@@ -485,24 +497,45 @@ export class ProjectService {
       });
       // Every project starts with its default branch (docs/project-branches.md
       // §5.3); Git names it later (§8.7).
-      await tx.insert(projectBranches).values({
-        projectId: project.id,
-        name: FALLBACK_DEFAULT_BRANCH_NAME,
-        isDefault: true,
-        nameSource: "fallback",
-        createdVia: "dashboard",
-        createdByType: "human",
-        createdByUserId: userId,
-        onboardingState: "completed",
-        onboardingCompletedAt: new Date()
-      });
-      return projectJson(project, "owner");
+      const [branch] = await tx
+        .insert(projectBranches)
+        .values({
+          projectId: project.id,
+          name: FALLBACK_DEFAULT_BRANCH_NAME,
+          isDefault: true,
+          nameSource: "fallback",
+          createdVia: "dashboard",
+          createdByType: "human",
+          createdByUserId: userId,
+          onboardingState: "completed",
+          onboardingCompletedAt: new Date()
+        })
+        .returning();
+      return projectJson(project, "owner", branch!.id);
     });
+  }
+
+  private async defaultBranchIds(projectIds: string[]) {
+    if (!projectIds.length) return new Map<string, string>();
+    const rows = await this.db
+      .select({ projectId: projectBranches.projectId, id: projectBranches.id })
+      .from(projectBranches)
+      .where(
+        and(
+          inArray(projectBranches.projectId, projectIds),
+          eq(projectBranches.isDefault, true)
+        )
+      );
+    return new Map(rows.map((row) => [row.projectId, row.id]));
   }
 
   async getProject(userId: string, projectId: string) {
     const record = await this.permissions.projectAccess(userId, projectId);
-    return projectJson(record.project, record.role);
+    return projectJson(
+      record.project,
+      record.role,
+      await defaultBranchId(this.db, projectId)
+    );
   }
 
   async updateProject(

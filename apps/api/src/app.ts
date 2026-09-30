@@ -17,6 +17,9 @@ import { projectMemberRoutes } from "./routes/project-members.js";
 import { v1Routes } from "./routes/v1.js";
 import { ApiError } from "./services/api-error.js";
 import { AgentService } from "./services/agent-service.js";
+import { agentBranchSelector } from "./services/branch-context.js";
+import { BranchService } from "./services/branch-service.js";
+import { agentBranchRoutes, humanBranchRoutes } from "./routes/branches.js";
 import { TaskClaimService } from "./services/task-claim-service.js";
 import { IdentityService } from "./services/identity-service.js";
 import { PermissionService } from "./services/permission-service.js";
@@ -123,6 +126,7 @@ export function buildApp(options: AppOptions) {
   const profiles = new ProfileService(db, options.avatarStorage);
   const tasks = new TaskService(db);
   const agents = new AgentService(db);
+  const branches = new BranchService(db, agents);
   const claims = new TaskClaimService(db);
   const attention = new AttentionService(db, chats);
   const waits = new AttentionWaitHub(attention, db);
@@ -314,6 +318,7 @@ export function buildApp(options: AppOptions) {
         expensiveRateLimit
       });
       api.register(agentManagementRoutes, { agents });
+      api.register(humanBranchRoutes, { branches });
       api.register(humanChatRoutes, { chats });
       api.register(projectMemberRoutes, { memberships });
       api.register(humanAttentionRoutes, {
@@ -354,9 +359,13 @@ export function buildApp(options: AppOptions) {
             "Agent credential is invalid."
           );
         }
-        request.agentPrincipal = await agents.authenticate(match[1]);
+        request.agentPrincipal = {
+          ...(await agents.authenticate(match[1])),
+          branch: agentBranchSelector(request.headers)
+        };
       });
       api.register(agentActionRoutes, { agents, tasks, claims });
+      api.register(agentBranchRoutes, { branches });
       api.register(agentChatRoutes, { chats });
       api.register(agentAttentionRoutes, {
         attention,
