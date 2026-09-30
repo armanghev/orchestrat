@@ -1,8 +1,18 @@
 import {
+  agentAttentionSchema,
+  taskBlockSchema,
+  attentionSummarySchema,
+  taskAttentionOverlaySchema,
+  taskCommentSchema,
   organizationSchema,
   projectSchema,
   taskCardSchema,
   documentDetailSchema,
+  type AgentAttention,
+  type TaskBlock,
+  type AttentionSummary,
+  type TaskAttentionOverlay,
+  type TaskComment,
   type Organization,
   type Project,
   type TaskCard,
@@ -94,6 +104,111 @@ export function documentDetail(
       author: document.created_by,
       created_at: timestamp
     },
+    ...overrides
+  });
+}
+
+export function taskComment(
+  overrides: Partial<TaskComment> & { sequence: number }
+): TaskComment {
+  const userId = "00000000-0000-4000-8000-000000000004";
+  return taskCommentSchema.parse({
+    id: `00000000-0000-4000-8000-${String(100 + overrides.sequence).padStart(12, "0")}`,
+    task_id: taskCard().id,
+    author: {
+      type: "human",
+      id: userId,
+      user_id: userId,
+      agent_id: null,
+      username: "tester",
+      full_name: "Test User",
+      avatar_url: null
+    },
+    body_markdown: `Comment ${overrides.sequence}`,
+    mentions: [],
+    created_at: timestamp,
+    ...overrides
+  });
+}
+
+export function attentionSummary(
+  overrides: Partial<AttentionSummary> = {}
+): AttentionSummary {
+  return attentionSummarySchema.parse({
+    cursor: "0",
+    branch_id: null,
+    unread_chats: [],
+    tasks: [],
+    handoffs: [],
+    blockers_resolved: [],
+    truncated: false,
+    ...overrides
+  });
+}
+
+export function attentionTaskItem(
+  overrides: Partial<AttentionSummary["tasks"][number]> = {}
+): AttentionSummary["tasks"][number] {
+  const task = taskCard();
+  return attentionSummarySchema.shape.tasks.element.parse({
+    task_id: task.id,
+    key: task.key,
+    title: task.title,
+    status: task.status,
+    watching: true,
+    claimed_by_you: false,
+    unread_count: 0,
+    mention_count: 0,
+    blocking_unread_count: 0,
+    last_read_sequence: 0,
+    latest_sequence: 0,
+    unread: [],
+    ...overrides
+  });
+}
+
+export function taskAttentionOverlay(
+  overrides: Partial<TaskAttentionOverlay> = {}
+): TaskAttentionOverlay {
+  return taskAttentionOverlaySchema.parse({
+    task_id: taskCard().id,
+    watching: true,
+    unread_count: 0,
+    mention_count: 0,
+    claim: null,
+    block: null,
+    ...overrides
+  });
+}
+
+export function taskBlock(overrides: Partial<TaskBlock> = {}): TaskBlock {
+  return taskBlockSchema.parse({
+    id: "00000000-0000-4000-8000-000000000040",
+    task_id: taskCard().id,
+    reason: "Waiting for the API contract.",
+    blocking_task: null,
+    blocked_on: null,
+    created_by: {
+      type: "agent",
+      id: "00000000-0000-4000-8000-000000000020",
+      name: "claude-code"
+    },
+    created_at: timestamp,
+    resolved_at: null,
+    resolution: null,
+    ...overrides
+  });
+}
+
+export function agentAttention(
+  overrides: Partial<AgentAttention> = {}
+): AgentAttention {
+  return agentAttentionSchema.parse({
+    agent_id: "00000000-0000-4000-8000-000000000020",
+    waiting_since: null,
+    pending_directed_count: 0,
+    open_block: null,
+    current_task: null,
     ...overrides
   });
 }

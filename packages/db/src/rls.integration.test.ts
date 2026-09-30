@@ -11,11 +11,14 @@ const protectedTables = [
   "project_invitations",
   "chats",
   "chat_participants",
-  "chat_messages"
+  "chat_messages",
+  "task_watches",
+  "task_blocks",
+  "handoffs"
 ] as const;
 
 test(
-  "new project and messaging tables deny direct roles while preserving owner access",
+  "new project, messaging and attention tables deny direct roles while preserving owner access",
   { skip: !postgresUrl },
   async () => {
     const admin = createDatabase({ connectionString: postgresUrl, max: 1 });
@@ -47,6 +50,8 @@ test(
       const organizationId = randomUUID();
       const projectId = randomUUID();
       const chatId = randomUUID();
+      const taskId = randomUUID();
+      const secondTaskId = randomUUID();
       await pool.query(
         `INSERT INTO users (id, auth_subject, auth_provider, name, email)
          VALUES ($1, $2, 'supabase', 'Owner', 'owner@example.com'),
@@ -95,12 +100,40 @@ test(
          VALUES ($1, $2, $3)`,
         [projectId, chatId, userId]
       );
-      await pool.query(
+      const message = await pool.query<{ id: string }>(
         `INSERT INTO chat_messages
            (project_id, chat_id, sequence, author_type, author_user_id,
             author_name, body_markdown)
-         VALUES ($1, $2, 1, 'human', $3, 'Owner', 'private message')`,
+         VALUES ($1, $2, 1, 'human', $3, 'Owner', 'private message')
+         RETURNING id`,
         [projectId, chatId, userId]
+      );
+      await pool.query(
+        `INSERT INTO tasks
+           (id, project_id, task_key, task_number, title, created_by_type,
+            created_by_user_id)
+         VALUES ($1, $3, 'PRJ-1', 1, 'Private task', 'human', $4),
+                ($2, $3, 'PRJ-2', 2, 'Second task', 'human', $4)`,
+        [taskId, secondTaskId, projectId, userId]
+      );
+      await pool.query(
+        `INSERT INTO task_watches (project_id, task_id, user_id, reason)
+         VALUES ($1, $2, $3, 'created')`,
+        [projectId, taskId, userId]
+      );
+      await pool.query(
+        `INSERT INTO task_blocks
+           (project_id, task_id, created_by_type, created_by_user_id, reason,
+            blocking_task_id)
+         VALUES ($1, $2, 'human', $3, 'Waiting on PRJ-2', $4)`,
+        [projectId, taskId, userId, secondTaskId]
+      );
+      await pool.query(
+        `INSERT INTO handoffs
+           (project_id, chat_id, message_id, message_sequence, from_user_id,
+            to_user_id, task_id, chain_id)
+         VALUES ($1, $2, $3, 1, $4, $5, $6, gen_random_uuid())`,
+        [projectId, chatId, message.rows[0]!.id, userId, secondUserId, taskId]
       );
 
       const rls = await pool.query<{
@@ -192,6 +225,21 @@ test(
             table: "chat_messages",
             sql: `INSERT INTO chat_messages (project_id, chat_id, sequence, author_type, author_user_id, author_name, body_markdown) VALUES ($1, $2, 2, 'human', $3, 'Owner', 'blocked')`,
             values: [projectId, chatId, userId]
+          },
+          {
+            table: "task_watches",
+            sql: `INSERT INTO task_watches (project_id, task_id, user_id, reason) VALUES ($1, $2, $3, 'explicit')`,
+            values: [projectId, secondTaskId, secondUserId]
+          },
+          {
+            table: "task_blocks",
+            sql: `INSERT INTO task_blocks (project_id, task_id, created_by_type, created_by_user_id, reason) VALUES ($1, $2, 'human', $3, 'blocked')`,
+            values: [projectId, secondTaskId, userId]
+          },
+          {
+            table: "handoffs",
+            sql: `INSERT INTO handoffs (project_id, chat_id, message_id, message_sequence, from_user_id, to_user_id, chain_id) VALUES ($1, $2, gen_random_uuid(), 1, $3, $4, gen_random_uuid())`,
+            values: [projectId, chatId, userId, secondUserId]
           }
         ];
         for (const insertion of inserts)

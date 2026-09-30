@@ -31,6 +31,13 @@ import {
   validateApiUrl
 } from "./config.js";
 import { hookCwd, readBoundedStdin, runHook } from "./hooks.js";
+import {
+  decideStop,
+  renderStopDecision,
+  watchForRewake,
+  type StopOutput
+} from "./stop-hooks.js";
+import { runWakerCommand } from "./waker.js";
 import { runDocumentCommand } from "./documents.js";
 import { disconnectLocal, runDoctor, runStatus } from "./diagnostics.js";
 import {
@@ -58,8 +65,14 @@ export function parseInvocationArgs(argv: string[]): {
     | "doctor"
     | "disconnect"
     | "document"
+    | "waker"
     | "version";
   integration?: ConfigurableIntegration | "all";
+  waitBudgetSeconds?: number;
+  watch?: boolean;
+  autoContinue?: boolean;
+  rewake?: boolean;
+  wakerArgs?: string[];
   cwd?: string;
   global?: boolean;
   local?: boolean;
@@ -96,7 +109,13 @@ export function parseInvocationArgs(argv: string[]): {
       cursor: { type: "string" },
       "base-revision": { type: "string" },
       resume: { type: "string" },
-      "include-archived": { type: "boolean" }
+      "include-archived": { type: "boolean" },
+      "wait-budget-seconds": { type: "string" },
+      watch: { type: "boolean", default: false },
+      "auto-continue": { type: "boolean", default: false },
+      rewake: { type: "boolean", default: false },
+      once: { type: "boolean", default: false },
+      "dry-run": { type: "boolean", default: false }
     },
     allowPositionals: true,
     strict: true
@@ -108,7 +127,9 @@ export function parseInvocationArgs(argv: string[]): {
       positionals.length !== 1 &&
       !(
         positionals.length === 2 &&
-        (positionals[0] === "hook" || positionals[0] === "disconnect")
+        (positionals[0] === "hook" ||
+          positionals[0] === "disconnect" ||
+          positionals[0] === "waker")
       )) ||
     (documentCommand && (positionals.length < 2 || positionals.length > 5)) ||
     (positionals[0] !== "status" &&
@@ -117,6 +138,7 @@ export function parseInvocationArgs(argv: string[]): {
       positionals[0] !== "hook" &&
       positionals[0] !== "mcp" &&
       positionals[0] !== "setup" &&
+      positionals[0] !== "waker" &&
       positionals[0] !== "document" &&
       positionals[0] !== "documents")
   )
@@ -127,6 +149,13 @@ export function parseInvocationArgs(argv: string[]): {
   if (values.cwd !== undefined && positionals[0] !== "mcp") usage();
   if (values.global && positionals[0] !== "mcp") usage();
   if (values.global && values.cwd !== undefined) usage();
+  if (values["wait-budget-seconds"] !== undefined && positionals[0] !== "mcp")
+    usage();
+  if (values.watch && positionals[0] !== "hook") usage();
+  if ((values["auto-continue"] || values.rewake) && positionals[0] !== "setup")
+    usage();
+  if (values.rewake && !values["auto-continue"]) usage();
+  if ((values.once || values["dry-run"]) && positionals[0] !== "waker") usage();
   if (
     typeof integration !== "undefined" &&
     !isConfigurableIntegration(integration)
@@ -224,28 +253,47 @@ export function parseInvocationArgs(argv: string[]): {
       ...(values["include-archived"] ? { includeArchived: true } : {})
     };
   }
-  if (positionals[0] === "setup") return { command: "setup" };
+  if (positionals[0] === "setup")
+    return {
+      command: "setup",
+      ...(values["auto-continue"] ? { autoContinue: true } : {}),
+      ...(values.rewake ? { rewake: true } : {})
+    };
+  if (positionals[0] === "waker") {
+    if (!["enable", "disable", "status", "run"].includes(positionals[1] ?? ""))
+      usage();
+    const index = argv.indexOf("waker");
+    return {
+      command: "waker",
+      wakerArgs: argv.filter((_, position) => position !== index)
+    };
+  }
   if (positionals[0] === "hook") {
     const hookIntegration = positionals[1];
     if (
       positionals.length !== 2 ||
       !isConfigurableIntegration(hookIntegration) ||
-      hookIntegration === "opencode" ||
+      // OpenCode has no hooks; its plugin calls only the idle continuation.
+      (hookIntegration === "opencode" && values.event !== "idle") ||
       (hookIntegration === "antigravity" &&
         !["PreInvocation", "Stop"].includes(values.event ?? "")) ||
       (hookIntegration === "cursor" &&
         values.event !== undefined &&
-        !["sessionStart", "sessionEnd", "postToolUseFailure"].includes(
+        !["sessionStart", "sessionEnd", "postToolUseFailure", "stop"].includes(
           values.event
         )) ||
       ((hookIntegration === "codex" || hookIntegration === "claude-code") &&
-        values.event !== undefined)
+        values.event !== undefined &&
+        values.event !== "Stop") ||
+      (values.watch &&
+        (hookIntegration !== "claude-code" || values.event !== "Stop"))
     )
       usage();
     return {
       command: "hook",
       integration: hookIntegration,
-      event: values.event
+      event: values.event,
+      ...(values.watch ? { watch: true } : {})
     };
   }
   if (positionals[0] === "doctor") return { command: "doctor" };
@@ -259,19 +307,32 @@ export function parseInvocationArgs(argv: string[]): {
     };
   }
   if (positionals[0] === "mcp" && integration === undefined) usage();
+  const waitBudget =
+    values["wait-budget-seconds"] === undefined
+      ? undefined
+      : Number(values["wait-budget-seconds"]);
+  if (
+    waitBudget !== undefined &&
+    (!/^[0-9]+$/.test(values["wait-budget-seconds"]!) ||
+      !Number.isInteger(waitBudget) ||
+      waitBudget < 1 ||
+      waitBudget > 3600)
+  )
+    usage();
   return integration === undefined
     ? { command: positionals[0] as "status" }
     : {
         command: positionals[0] as "mcp",
         integration,
         ...(values.cwd === undefined ? {} : { cwd: values.cwd }),
-        ...(values.global ? { global: true } : {})
+        ...(values.global ? { global: true } : {}),
+        ...(waitBudget === undefined ? {} : { waitBudgetSeconds: waitBudget })
       };
 }
 
 function usage(): never {
   throw new Error(
-    "Usage: orchestrat setup | status | doctor | hook <integration> [--event <event>] | disconnect <integration|all> | mcp --integration <integration> [--cwd <project>] [--global] | document(s) <list|read|create|write|patch|history|upload|download> --integration <integration>"
+    "Usage: orchestrat setup [--auto-continue [--rewake]] | status | doctor | hook <integration> [--event <event>] | hook <claude-code|codex> --event Stop [--watch] | hook opencode --event idle | disconnect <integration|all> | mcp --integration <integration> [--cwd <project>] [--global] [--wait-budget-seconds <n>] | waker <enable|disable|status|run> [--once] [--dry-run] | document(s) <list|read|create|write|patch|history|upload|download> --integration <integration>"
   );
 }
 
@@ -291,13 +352,31 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     cursor,
     baseRevision,
     resume,
-    includeArchived
+    includeArchived,
+    waitBudgetSeconds,
+    watch,
+    autoContinue,
+    rewake,
+    wakerArgs
   } = parseInvocationArgs(argv);
   if (command === "version") {
     process.stdout.write(`${packageVersion}\n`);
     return;
   }
   const home = process.env.HOME ?? process.cwd();
+  if (
+    command === "hook" &&
+    integration !== undefined &&
+    integration !== "all" &&
+    ((event === "Stop" &&
+      (integration === "claude-code" || integration === "codex")) ||
+      (integration === "opencode" && event === "idle"))
+  ) {
+    writeStopOutput(
+      await runStopCommand({ integration, home, watch: watch === true })
+    );
+    return;
+  }
   const interactive = isInteractive(process);
   const hookPayload = command === "hook" ? await readBoundedStdin() : undefined;
   const payloadCwd =
@@ -340,6 +419,15 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     process.stdout.write(`${JSON.stringify(result)}\n`);
     return;
   }
+  if (command === "waker") {
+    process.exitCode = await runWakerCommand(wakerArgs ?? [], {
+      home,
+      cwd: process.cwd(),
+      api,
+      credentials: new KeychainCredentialReader()
+    });
+    return;
+  }
   if (command === "hook") {
     if (!integration || integration === "all") usage();
     await runHook({
@@ -351,6 +439,31 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       event,
       api
     });
+    // Cursor `stop` and Antigravity `Stop` keep their lifecycle ingest and
+    // add the opt-in continuation output in the same process (spec §11.2).
+    const eventName =
+      hookPayload && typeof hookPayload === "object"
+        ? (hookPayload as Record<string, unknown>).hook_event_name
+        : undefined;
+    if (
+      (integration === "cursor" &&
+        (event === "stop" || eventName === "stop")) ||
+      (integration === "antigravity" && event === "Stop")
+    )
+      writeStopOutput(
+        renderStopDecision(
+          integration,
+          await decideStop({
+            integration,
+            payload: hookPayload,
+            cwd: process.cwd(),
+            home,
+            api,
+            credentials: new KeychainCredentialReader(),
+            read: async () => config
+          })
+        )
+      );
     return;
   }
   if (command === "doctor") {
@@ -486,6 +599,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
           mcpScope: mcpScope?.value,
           globalProjects: globalProjects?.values,
           sourceCommand: resolve(process.argv[1] ?? "orchestrat"),
+          ...(autoContinue ? { autoContinue: true } : {}),
+          ...(rewake ? { rewake: true } : {}),
           reportPreview: async (previews) => {
             if (interactive)
               renderPreview(
@@ -509,6 +624,9 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         hooksConfigured: item.hooksSupported
       }))
     };
+    if (interactive)
+      for (const note of setupResult.notes ?? [])
+        process.stdout.write(`${note}\n`);
     if (interactive) {
       renderSetupResult(presentedResult, (text) => process.stdout.write(text));
       finishSetup("Setup complete", { interactive });
@@ -539,6 +657,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       });
       const { bridge } = await startStdioBridge({
         integration,
+        ...(waitBudgetSeconds === undefined ? {} : { waitBudgetSeconds }),
         projects: projects.map((project) => ({
           id: project.projectId,
           name: `${project.organizationName} / ${project.name}`,
@@ -580,7 +699,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     });
     const { bridge } = await startStdioBridge({
       client,
-      integration: publicResult.integration as ConfigurableIntegration
+      integration: publicResult.integration as ConfigurableIntegration,
+      ...(waitBudgetSeconds === undefined ? {} : { waitBudgetSeconds })
     });
     const shutdown = async () => {
       try {
@@ -595,6 +715,48 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     process.once("SIGINT", shutdown);
     process.once("SIGTERM", shutdown);
   }
+}
+
+// Stop continuation must never break the harness: any failure, including a
+// malformed payload or config, renders as "allow the stop".
+async function runStopCommand(input: {
+  integration: ConfigurableIntegration;
+  home: string;
+  watch: boolean;
+}): Promise<StopOutput> {
+  try {
+    const payload = await readBoundedStdin();
+    const payloadCwd = hookCwd(input.integration, payload, process.cwd());
+    const config = await readConfig(input.home);
+    const api =
+      validateApiUrl(process.env.ORCHESTRAT_API_URL) ??
+      findProject(config, payloadCwd)?.apiUrl ??
+      "https://api.orchestrat.dev";
+    const options = {
+      integration: input.integration,
+      payload,
+      cwd: process.cwd(),
+      home: input.home,
+      api,
+      credentials: new KeychainCredentialReader(),
+      read: async () => config
+    };
+    return renderStopDecision(
+      input.integration,
+      input.watch ? await watchForRewake(options) : await decideStop(options)
+    );
+  } catch {
+    return renderStopDecision(input.integration, {
+      continue: false,
+      why: "failed open"
+    });
+  }
+}
+
+function writeStopOutput(output: StopOutput) {
+  if (output.stdout) process.stdout.write(output.stdout);
+  if (output.stderr) process.stderr.write(output.stderr);
+  if (output.exitCode) process.exitCode = output.exitCode;
 }
 
 if (

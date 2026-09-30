@@ -2,15 +2,19 @@ import { queryOptions, type QueryClient } from "@tanstack/react-query";
 import type { RealtimeEventEnvelope } from "@orchestrat/protocol";
 import type { ApiClient } from "@/lib/api/client";
 import { messagingKeys } from "@/features/messaging/query-options";
+import { attentionKeys } from "@/features/attention/query-options";
 
 const knownRealtimeEventTypes = new Set([
   "task.created",
   "task.updated",
   "task.moved",
   "task.comment_created",
+  "task.status_changed",
+  "task.block_resolved",
   "task.dependency_added",
   "task.dependency_removed",
   "claim.created",
+  "claim.released",
   "claim.completed",
   "claim.expired",
   "claim.revoked",
@@ -31,8 +35,10 @@ const knownRealtimeEventTypes = new Set([
   "chat.member_removed",
   "chat.message_created",
   "chat.access_invalidated",
+  "chat.handoff_created",
   "hook.triggered",
-  "run.failed"
+  "run.failed",
+  "run.woken"
 ]);
 
 export const coordinationKeys = {
@@ -172,6 +178,9 @@ export function invalidateCoordinationQueries(
     }),
     queryClient.invalidateQueries({
       queryKey: messagingKeys.inbox(projectId)
+    }),
+    queryClient.invalidateQueries({
+      queryKey: attentionKeys.project(projectId)
     })
   ]);
 }
@@ -195,6 +204,13 @@ export function invalidateRealtimeEvent(
         queryKey: messagingKeys.messages(chatId)
       })
     ];
+    // A handoff changes the recipient's pending items and blockers.
+    if (event.event_type === "chat.handoff_created")
+      invalidations.push(
+        queryClient.invalidateQueries({
+          queryKey: attentionKeys.project(projectId)
+        })
+      );
     if (event.event_type === "chat.access_invalidated") {
       queryClient.removeQueries({ queryKey: messagingKeys.chat(chatId) });
       queryClient.removeQueries({ queryKey: messagingKeys.messages(chatId) });
@@ -230,8 +246,24 @@ export function invalidateRealtimeEvent(
   if (!knownRealtimeEventTypes.has(event.event_type))
     return invalidateCoordinationQueries(queryClient, projectId);
   const entity = event.entity_type;
+  // A wake only changes activity and the agent's attention line.
+  if (event.event_type === "run.woken")
+    return Promise.all([
+      queryClient.invalidateQueries({
+        queryKey: coordinationKeys.events(projectId)
+      }),
+      queryClient.invalidateQueries({
+        queryKey: attentionKeys.project(projectId)
+      })
+    ]);
   if (["run", "hook"].includes(entity))
     return invalidateCoordinationQueries(queryClient, projectId);
+  // Task and claim events can change the viewer's unread counts, watches or
+  // the claim overlay, none of which realtime payloads carry.
+  const attention =
+    entity === "task" || entity === "claim"
+      ? [attentionKeys.project(projectId)]
+      : [];
   const keys =
     entity === "claim"
       ? [
@@ -264,7 +296,9 @@ export function invalidateRealtimeEvent(
             ]
           : [];
   return Promise.all([
-    ...keys.map((queryKey) => queryClient.invalidateQueries({ queryKey })),
+    ...[...keys, ...attention].map((queryKey) =>
+      queryClient.invalidateQueries({ queryKey })
+    ),
     queryClient.invalidateQueries({
       queryKey: coordinationKeys.events(projectId)
     })

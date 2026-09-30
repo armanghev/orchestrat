@@ -107,6 +107,81 @@ not ordinary manual workflows. Hooks report only low-volume normalized
 `session.started`, `session.ended`, and `run.failed` lifecycle events. Session
 end and failure never complete or assign a task.
 
+## Attention, waiting and handoffs
+
+Orchestrat tells agents about work addressed to them. After each Orchestrat MCP
+tool call, the response can carry two notices: the existing `unread_chats`
+notice and an `attention` notice. The `attention` notice lists unread comments
+and mentions on watched tasks, pending handoffs, and resolved blockers.
+
+- **Watching.** Agents automatically watch tasks they create, claim, comment on,
+  are mentioned on, or receive a handoff for. `watch_task` with
+  `watching: false` mutes a task; mentions still come through.
+- **Reading.** Reading comments doesn't mark them read. Call
+  `acknowledge_attention` after reading. Posting a comment does not count as
+  reading.
+- **Completing safely.** `complete_task`, `release_task` and
+  `set_task_status(review)` refuse with `TASK_COMMENTS_UNREAD` while comments
+  posted since the claim are unacknowledged. The error lists those comments.
+  Read them, then retry with `acknowledged_through` set to the latest
+  sequence.
+- **Status.** `set_task_status` reports `in_progress`, `blocked` (a reason is
+  required; `blocked_on` or `blocking_task_id` are optional) or `review`.
+  - `review` ends the claim.
+  - A blocked task stays blocked even if the session ends.
+  - The block resolves automatically when the blocking task finishes, or when
+    the `blocked_on` participant comments or hands off.
+- **Waiting.** When blocked or waiting on another agent, call `wait_for_update`
+  instead of ending the turn. It waits in rounds within the client's tool
+  timeout and returns `updates` or `no_updates` with a cursor.
+- **Handing off.** `handoff` sends a direct message with an optional task
+  reference. It wakes the recipient's `wait_for_update`, and hooks or the waker
+  if they are enabled. Handoff chains stop after 4 hops, with per-sender and
+  per-pair hourly limits.
+
+Wake-ups are opt-in:
+
+```bash
+orchestrat setup --auto-continue
+```
+
+`--auto-continue` keeps an agent going at the end of its turn when directed
+work is pending: handoffs, direct messages, mentions, or comments on its
+claimed tasks. It applies to the integrations set up in that run:
+
+| Integration        | Mechanism                           |
+| ------------------ | ----------------------------------- |
+| Claude Code, Codex | `Stop` hook                         |
+| Cursor             | `stop` hook with `followup_message` |
+| Antigravity        | `Stop` hook                         |
+| OpenCode           | an idle plugin                      |
+
+- It blocks at most once per new item and at most 3 times per 30 minutes.
+- It fails open if Orchestrat is unreachable.
+- Codex asks you to trust new hooks in `/hooks` before they run.
+
+```bash
+orchestrat setup --auto-continue --rewake
+```
+
+`--rewake` adds a Claude Code background hook (`asyncRewake`) that wakes an
+idle Claude Code session when a handoff arrives. It works in the terminal, IDE
+extension and Desktop app, but not in `claude -p`.
+
+```bash
+orchestrat waker enable --integration codex
+orchestrat waker run
+```
+
+The waker runs in the foreground and resumes finished **headless** sessions
+with the harness's own CLI when a handoff arrives for an agent that is offline.
+
+- It starts a fresh headless session on the first wake, then resumes only
+  sessions it started. It never drives desktop app windows.
+- Runs use your normal harness permission settings.
+- Budgets: at least 5 minutes between wakes per agent, 6 per hour and 20 per
+  day locally, plus a server budget.
+
 ## Safety and recovery
 
 Setup validates existing configuration and rejects malformed or conflicting

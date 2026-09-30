@@ -85,12 +85,16 @@ import {
   type RenameDocumentRequest
 } from "./documents.js";
 export * from "./documents.js";
+import { AttentionApi } from "./attention.js";
+export * from "./attention.js";
 
 type Fetch = typeof globalThis.fetch;
 type Sleep = (milliseconds: number) => Promise<void>;
 type Schema<T> = { parse(value: unknown): T };
 type SendMessageInput = Omit<SendMessageRequest, "mentions" | "document_ids"> &
   Partial<Pick<SendMessageRequest, "mentions" | "document_ids">>;
+type TaskCommentInput = Omit<CreateTaskCommentRequest, "mentions"> &
+  Partial<Pick<CreateTaskCommentRequest, "mentions">>;
 
 export class AgentApiError extends Error {
   constructor(
@@ -140,12 +144,14 @@ export class AgentApiClient {
   private readonly token: string;
   private readonly fetch: Fetch;
   private readonly sleep: Sleep;
+  readonly attention: AttentionApi;
 
   constructor(options: AgentApiClientOptions) {
     this.baseUrl = validateAgentApiBaseUrl(options.baseUrl);
     this.token = options.token;
     this.fetch = options.fetch ?? globalThis.fetch;
     this.sleep = options.sleep ?? defaultSleep;
+    this.attention = new AttentionApi(this.request.bind(this));
   }
 
   openSession(input: OpenAgentSessionRequest) {
@@ -325,7 +331,7 @@ export class AgentApiClient {
 
   addTaskComment(
     taskId: string,
-    input: CreateTaskCommentRequest,
+    input: TaskCommentInput,
     idempotencyKey: string
   ) {
     return this.request(

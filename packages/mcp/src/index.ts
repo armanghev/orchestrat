@@ -13,10 +13,17 @@ import {
   createTaskCommentRequestSchema,
   createChatRequestSchema,
   manageChatMembersRequestSchema,
-  sendMessageRequestSchema
+  sendMessageRequestSchema,
+  unreadCommentsErrorDetailsSchema,
+  type AttentionSummary
 } from "@orchestrat/protocol";
 import { z } from "zod";
 import { cliSetupIntegrationSchema } from "@orchestrat/protocol";
+import {
+  attentionNotice,
+  registerAttentionTools,
+  type AttentionToolHost
+} from "./attention-tools.js";
 
 export const mcpPackage = "@orchestrat/mcp";
 
@@ -53,6 +60,7 @@ type Client = Pick<
   | "sendMessage"
   | "acknowledgeMessages"
   | "getInbox"
+  | "attention"
 >;
 export type BridgeOptions = {
   client?: Client;
@@ -61,6 +69,7 @@ export type BridgeOptions = {
   runtime?: string;
   heartbeatMs?: number;
   inboxTimeoutMs?: number;
+  waitBudgetSeconds?: number;
 };
 type Claim = { task_id: string; [key: string]: unknown };
 
@@ -94,7 +103,9 @@ export function mapMcpError(error: unknown) {
           ? z
               .object({ current_version: z.number().int().min(1) })
               .safeParse(error.details)
-          : undefined;
+          : known && error.code === "TASK_COMMENTS_UNREAD"
+            ? unreadCommentsErrorDetailsSchema.safeParse(error.details)
+            : undefined;
   const details = parsedDetails?.success ? parsedDetails.data : undefined;
   return {
     isError: true,
@@ -142,6 +153,7 @@ export class McpBridge {
   private heartbeatTimer?: ReturnType<typeof setInterval>;
   private stopping?: Promise<void>;
   private client?: Client;
+  private attentionUnsupported = false;
   constructor(private readonly options: BridgeOptions) {
     this.client = options.client;
     this.server = new McpServer({ name: "orchestrat", version: "0.1.0" });
@@ -372,10 +384,13 @@ export class McpBridge {
       this.server.registerTool(
         name,
         {
-          description: `${name === "release_task" ? "Release" : "Complete"} a task claim owned by this active session; claim token is process-local.`,
-          inputSchema: taskIdInput
+          description: `${name === "release_task" ? "Release" : "Complete"} a task claim owned by this active session; claim token is process-local. On TASK_COMMENTS_UNREAD, read the returned comments and retry with acknowledged_through set to details.latest_sequence.`,
+          inputSchema: {
+            ...taskIdInput,
+            acknowledged_through: z.number().int().nonnegative().optional()
+          }
         },
-        async ({ task_id }) =>
+        async ({ task_id, acknowledged_through }) =>
           this.call(async () => {
             const token = this.claims.get(task_id);
             if (!token)
@@ -387,9 +402,14 @@ export class McpBridge {
             const result = await this.activeClient()[action](
               this.requireSession(),
               {
-                claim_token: token
+                claim_token: token,
+                ...(acknowledged_through === undefined
+                  ? {}
+                  : { acknowledged_through })
               }
             );
+            // Only a successful mutation ends the claim; on 409 the agent
+            // still holds it and retries with the same local token.
             this.claims.take(task_id);
             return result;
           })
@@ -639,6 +659,18 @@ export class McpBridge {
           this.activeClient().acknowledgeMessages(chat_id, through_message_id)
         )
     );
+    registerAttentionTools(this.attentionHost());
+  }
+  private attentionHost(): AttentionToolHost {
+    return {
+      server: this.server,
+      call: (operation, options) => this.call(operation, options),
+      client: () => this.activeClient(),
+      requireSession: () => this.requireSession(),
+      claims: this.claims,
+      integration: this.options.integration,
+      waitBudgetSeconds: this.options.waitBudgetSeconds
+    };
   }
   private requireSession() {
     if (!this.sessionId)
@@ -699,19 +731,26 @@ export class McpBridge {
     }
     const noticeClient = operationSucceeded ? inboxClient : operationClient;
     if (options.notifyInbox !== false && noticeClient) {
-      const inbox = await this.readInbox(noticeClient);
-      if (inbox && inbox.unread_chats.length > 0)
+      const attention = await this.readAttention(noticeClient);
+      if (attention && attention.unread_chats.length > 0)
         response.content.push({
           type: "text",
           text: JSON.stringify({
-            notice: { type: "unread_chats", unread_chats: inbox.unread_chats }
+            notice: {
+              type: "unread_chats",
+              unread_chats: attention.unread_chats
+            }
           })
         });
+      const notice = attention?.summary && attentionNotice(attention.summary);
+      if (notice)
+        response.content.push({ type: "text", text: JSON.stringify(notice) });
     }
     return response;
   }
-  private async readInbox(client: Client) {
-    if (typeof client.getInbox !== "function") return undefined;
+  // One notice read per tool call, bounded by inboxTimeoutMs overall (the
+  // 404 fallback shares the same budget) and aborted when it runs out.
+  private async readAttention(client: Client) {
     const controller = new AbortController();
     let timedOut = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -724,13 +763,41 @@ export class McpBridge {
     });
     try {
       return await Promise.race([
-        client.getInbox(controller.signal).catch(() => undefined),
+        this.fetchAttention(client, controller.signal).catch(() => undefined),
         timeout
       ]);
     } finally {
       if (timer) clearTimeout(timer);
       if (timedOut) controller.abort();
     }
+  }
+  private async fetchAttention(
+    client: Client,
+    signal: AbortSignal
+  ): Promise<
+    | {
+        unread_chats: AttentionSummary["unread_chats"];
+        summary?: AttentionSummary;
+      }
+    | undefined
+  > {
+    if (
+      !this.attentionUnsupported &&
+      typeof client.attention?.summary === "function"
+    ) {
+      try {
+        const summary = await client.attention.summary(signal);
+        return { unread_chats: summary.unread_chats, summary };
+      } catch (error) {
+        if (!(error instanceof AgentApiError && error.status === 404))
+          return undefined;
+        // An API without the attention routes: use the chat inbox from now on.
+        this.attentionUnsupported = true;
+      }
+    }
+    if (typeof client.getInbox !== "function" || signal.aborted)
+      return undefined;
+    return client.getInbox(signal);
   }
 }
 

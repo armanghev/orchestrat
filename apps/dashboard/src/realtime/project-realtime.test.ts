@@ -8,7 +8,11 @@ import {
   ProjectRealtimeController,
   type SocketLike
 } from "./project-realtime";
-import { coordinationKeys } from "@/features/coordination/query-options";
+import {
+  coordinationKeys,
+  invalidateRealtimeEvent
+} from "@/features/coordination/query-options";
+import { attentionKeys } from "@/features/attention/query-options";
 
 const projectId = "11111111-1111-4111-8111-111111111111";
 const taskId = "22222222-2222-4222-8222-222222222222";
@@ -192,6 +196,239 @@ describe("ProjectRealtimeController", () => {
     expect(normalized?.body).not.toContain("\n");
     expect(normalized?.body).not.toContain(String.fromCharCode(0));
     expect([...(normalized?.body ?? "")]).toHaveLength(240);
+  });
+
+  it("notifies a mentioned human about a task comment and opens its task", async () => {
+    const userId = "33333333-3333-4333-8333-333333333333";
+    const notify = vi.fn(async () => undefined);
+    const f = setup(
+      new FakeSocket(),
+      undefined,
+      { kind: "desktop", notify },
+      () => true
+    );
+    const controller = new ProjectRealtimeController(
+      f.api,
+      f.queryClient as never,
+      projectId,
+      () => f.socket,
+      () => 0,
+      { kind: "desktop", notify },
+      () => true,
+      undefined,
+      undefined,
+      () => userId
+    );
+    controller.start();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    f.socket.onopen?.(new Event("open"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    f.api.listProjectEvents.mockClear();
+    f.api.listProjectEvents.mockResolvedValueOnce({
+      events: [
+        {
+          id: 2,
+          type: "task.comment_created",
+          payload: { task_id: taskId }
+        } as never
+      ],
+      next_cursor: null
+    });
+    const comment = (
+      sequence: number,
+      mentions: RealtimeEventEnvelope["mentions"],
+      actor: RealtimeEventEnvelope["actor"] = {
+        type: "agent",
+        id: "44444444-4444-4444-8444-444444444444"
+      }
+    ) => ({
+      ...event(sequence, "task.comment_created"),
+      entity_id: "55555555-5555-4555-8555-555555555555",
+      actor,
+      mentions
+    });
+    f.socket.onmessage?.({
+      data: JSON.stringify(
+        comment(1, [
+          { type: "agent", id: "44444444-4444-4444-8444-444444444444" }
+        ])
+      )
+    } as MessageEvent);
+    f.socket.onmessage?.({
+      data: JSON.stringify(comment(2, [{ type: "human", id: userId }]))
+    } as MessageEvent);
+    f.socket.onmessage?.({
+      data: JSON.stringify(
+        comment(3, [{ type: "human", id: userId }], {
+          type: "human",
+          id: userId
+        })
+      )
+    } as MessageEvent);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(f.api.listProjectEvents).toHaveBeenCalledOnce();
+    expect(notify.mock.calls).toEqual([
+      [
+        {
+          title: "You were mentioned",
+          body: "An agent mentioned you in a task comment.",
+          destination: { kind: "task", projectId, taskId }
+        }
+      ]
+    ]);
+    controller.stop();
+  });
+
+  it("invalidates the viewer's attention on task and claim events only", async () => {
+    const invalidated = (type: string) => {
+      const invalidateQueries = vi.fn<
+        (options: { queryKey: readonly unknown[] }) => Promise<void>
+      >(async () => undefined);
+      void invalidateRealtimeEvent(
+        { invalidateQueries } as never,
+        projectId,
+        event(1, type)
+      );
+      return invalidateQueries.mock.calls.map(([options]) => options.queryKey);
+    };
+    for (const type of [
+      "task.comment_created",
+      "task.status_changed",
+      "task.moved",
+      "claim.created",
+      "claim.released"
+    ])
+      expect(invalidated(type)).toContainEqual(
+        attentionKeys.project(projectId)
+      );
+    expect(invalidated("agent.created")).not.toContainEqual(
+      attentionKeys.project(projectId)
+    );
+  });
+
+  it("notifies when an agent is blocked or submits for review, and stays quiet otherwise", async () => {
+    const userId = "33333333-3333-4333-8333-333333333333";
+    const agentId = "44444444-4444-4444-8444-444444444444";
+    const notify = vi.fn(async () => undefined);
+    const f = setup(new FakeSocket());
+    const getTask = vi.fn(
+      async () =>
+        ({ key: "DASH-7", title: "Wire it", status: "blocked" }) as never
+    );
+    const listAgents = vi.fn(async () => ({
+      agents: [{ id: agentId, name: "claude-code" }] as never
+    }));
+    const controller = new ProjectRealtimeController(
+      { ...f.api, getTask, listAgents },
+      f.queryClient as never,
+      projectId,
+      () => f.socket,
+      () => 0,
+      { kind: "desktop", notify },
+      () => true,
+      undefined,
+      undefined,
+      () => userId
+    );
+    controller.start();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    f.socket.onopen?.(new Event("open"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    f.api.listProjectEvents.mockClear();
+    const durable = (id: number, to_status: string) => ({
+      events: [
+        {
+          id,
+          type: "task.status_changed",
+          actor_agent_id: agentId,
+          payload: { from_status: "in_progress", to_status, claim_id: null }
+        } as never
+      ],
+      next_cursor: null
+    });
+    f.api.listProjectEvents
+      .mockResolvedValueOnce(durable(1, "blocked"))
+      .mockResolvedValueOnce(durable(2, "review"))
+      .mockResolvedValueOnce(durable(3, "in_progress"));
+    const statusChanged = (
+      sequence: number,
+      actor: RealtimeEventEnvelope["actor"] = { type: "agent", id: agentId }
+    ) => ({ ...event(sequence, "task.status_changed"), actor });
+    for (const sequence of [1, 2, 3])
+      f.socket.onmessage?.({
+        data: JSON.stringify(statusChanged(sequence))
+      } as MessageEvent);
+    // The viewer's own change never notifies and needs no lookup.
+    f.socket.onmessage?.({
+      data: JSON.stringify(statusChanged(4, { type: "human", id: userId }))
+    } as MessageEvent);
+    await vi.waitFor(() => expect(notify).toHaveBeenCalledTimes(2));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(notify.mock.calls).toEqual([
+      [
+        {
+          title: "Agent blocked",
+          body: "claude-code is blocked on DASH-7",
+          destination: { kind: "task", projectId, taskId }
+        }
+      ],
+      [
+        {
+          title: "Ready for review",
+          body: "DASH-7 is ready for review",
+          destination: { kind: "task", projectId, taskId }
+        }
+      ]
+    ]);
+    expect(f.api.listProjectEvents).toHaveBeenCalledTimes(3);
+    expect(getTask).toHaveBeenCalledTimes(2);
+    expect(listAgents).toHaveBeenCalledWith(projectId);
+    controller.stop();
+    expect(
+      notificationForRealtimeEvent(
+        event(9, "task.status_changed"),
+        undefined,
+        undefined,
+        undefined,
+        { toStatus: "blocked", taskId, taskKey: "DASH-7" }
+      )?.body
+    ).toBe("An agent is blocked on DASH-7");
+    expect(
+      notificationForRealtimeEvent(event(10, "task.status_changed"))
+    ).toBeNull();
+  });
+
+  it("invalidates attention for status, blocker, handoff, and wake events", async () => {
+    const invalidated = (type: string, entity_type = type.split(".")[0]) => {
+      const invalidateQueries = vi.fn<
+        (options: { queryKey: readonly unknown[] }) => Promise<void>
+      >(async () => undefined);
+      void invalidateRealtimeEvent({ invalidateQueries } as never, projectId, {
+        ...event(1, type),
+        entity_type
+      } as RealtimeEventEnvelope);
+      return invalidateQueries.mock.calls.map(([options]) => options.queryKey);
+    };
+    for (const type of [
+      "task.status_changed",
+      "task.block_resolved",
+      "chat.handoff_created",
+      "run.woken"
+    ])
+      expect(invalidated(type)).toContainEqual(
+        attentionKeys.project(projectId)
+      );
+    expect(invalidated("task.block_resolved")).toContainEqual(
+      coordinationKeys.task(taskId)
+    );
+    expect(invalidated("chat.message_created")).not.toContainEqual(
+      attentionKeys.project(projectId)
+    );
+    // A wake refreshes activity and attention without refetching the project.
+    expect(invalidated("run.woken")).toEqual([
+      coordinationKeys.events(projectId),
+      attentionKeys.project(projectId)
+    ]);
   });
 
   it("falls back to activity when a claim event has no valid task destination", async () => {

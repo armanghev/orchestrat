@@ -19,6 +19,9 @@ export type HarnessRecord = {
   configurable: boolean;
   supportsMcp: boolean;
   supportsHooks: boolean;
+  // How opt-in stop continuation is delivered (spec §11.3). OpenCode has no
+  // lifecycle hooks, so `supportsHooks` stays false and a plugin does it.
+  continuation?: "stop-hook" | "plugin";
 };
 
 export const HARNESSES: readonly HarnessRecord[] = [
@@ -29,7 +32,8 @@ export const HARNESSES: readonly HarnessRecord[] = [
     applications: ["Codex.app"],
     configurable: true,
     supportsMcp: true,
-    supportsHooks: true
+    supportsHooks: true,
+    continuation: "stop-hook"
   },
   {
     id: "claude-code",
@@ -37,7 +41,8 @@ export const HARNESSES: readonly HarnessRecord[] = [
     command: "claude",
     configurable: true,
     supportsMcp: true,
-    supportsHooks: true
+    supportsHooks: true,
+    continuation: "stop-hook"
   },
   {
     id: "cursor",
@@ -47,7 +52,8 @@ export const HARNESSES: readonly HarnessRecord[] = [
     applications: ["Cursor.app"],
     configurable: true,
     supportsMcp: true,
-    supportsHooks: true
+    supportsHooks: true,
+    continuation: "stop-hook"
   },
   {
     id: "antigravity",
@@ -56,7 +62,8 @@ export const HARNESSES: readonly HarnessRecord[] = [
     applications: ["Antigravity.app", "Antigravity IDE.app"],
     configurable: true,
     supportsMcp: true,
-    supportsHooks: true
+    supportsHooks: true,
+    continuation: "stop-hook"
   },
   {
     id: "opencode",
@@ -65,7 +72,8 @@ export const HARNESSES: readonly HarnessRecord[] = [
     applications: ["OpenCode.app"],
     configurable: true,
     supportsMcp: true,
-    supportsHooks: false
+    supportsHooks: false,
+    continuation: "plugin"
   },
   {
     id: "pi",

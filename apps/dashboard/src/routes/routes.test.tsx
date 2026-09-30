@@ -4,7 +4,14 @@ import { forwardRef, useImperativeHandle, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { http, HttpResponse } from "msw";
 import type { AuthClient, AuthSnapshot } from "@/features/auth/auth-client";
-import { documentDetail, project, taskCard } from "@/test/factories";
+import {
+  attentionSummary,
+  attentionTaskItem,
+  documentDetail,
+  project,
+  taskAttentionOverlay,
+  taskCard
+} from "@/test/factories";
 import { renderDashboardRoute } from "@/test/render";
 import { handlers } from "@/test/handlers";
 import { coordinationKeys } from "@/features/coordination/query-options";
@@ -455,6 +462,100 @@ describe("dashboard routes", () => {
 
     expect(await screen.findByDisplayValue(task.title)).toBeVisible();
     expect(view.router.state.location.search).toEqual({ task: task.id });
+  });
+
+  it("shows task attention in the sidebar and board and locks overlay claims", async () => {
+    const expectedProject = project();
+    const task = taskCard({
+      project_id: expectedProject.id,
+      status: "in_progress"
+    });
+    const taskHandlers = [
+      http.get(
+        `http://localhost:8801/api/v1/projects/${expectedProject.id}/tasks`,
+        () => HttpResponse.json({ tasks: [task], total: 1, next_cursor: null })
+      ),
+      http.get(
+        `http://localhost:8801/api/v1/projects/${expectedProject.id}/attention`,
+        () =>
+          HttpResponse.json(
+            attentionSummary({
+              tasks: [
+                attentionTaskItem({
+                  task_id: task.id,
+                  unread_count: 3,
+                  mention_count: 1,
+                  last_read_sequence: 0,
+                  latest_sequence: 3
+                })
+              ]
+            })
+          )
+      ),
+      http.get(
+        `http://localhost:8801/api/v1/projects/${expectedProject.id}/attention/tasks`,
+        () =>
+          HttpResponse.json({
+            tasks: [
+              taskAttentionOverlay({
+                task_id: task.id,
+                unread_count: 3,
+                mention_count: 1,
+                claim: {
+                  agent_id: "00000000-0000-4000-8000-000000000020",
+                  agent_name: "claude-code",
+                  status: "active",
+                  lease_expires_at: new Date(
+                    Date.now() + 4 * 60_000
+                  ).toISOString()
+                }
+              })
+            ]
+          })
+      ),
+      http.get(`http://localhost:8801/api/v1/tasks/${task.id}`, () =>
+        HttpResponse.json(task)
+      ),
+      http.get(`http://localhost:8801/api/v1/tasks/${task.id}/comments`, () =>
+        HttpResponse.json({ comments: [], next_cursor: null })
+      ),
+      http.get(
+        `http://localhost:8801/api/v1/tasks/${task.id}/dependencies`,
+        () => HttpResponse.json({ depends_on: [], blocks: [] })
+      ),
+      ...handlers
+    ];
+    const view = await renderDashboardRoute({
+      path: `/projects/${expectedProject.id}/tasks`,
+      auth: new FakeAuthClient({
+        status: "signedIn",
+        identityKey: "test-user"
+      }),
+      platform: platform(),
+      handlers: taskHandlers
+    });
+    expect(
+      await screen.findByRole("img", {
+        name: "3 unread task comments, 1 mention"
+      })
+    ).toBeVisible();
+    expect(
+      await screen.findByRole("img", { name: "3 unread comments, 1 mention" })
+    ).toBeVisible();
+    await act(() =>
+      view.router.navigate({
+        to: "/projects/$projectId/tasks",
+        params: { projectId: expectedProject.id },
+        search: { task: task.id }
+      })
+    );
+    expect(
+      (await screen.findByText(/Claimed by/)).textContent?.replace(/\s+/gu, " ")
+    ).toBe("Claimed by claude-code · in progress · lease 4 min");
+    expect(screen.getByLabelText("Title")).toBeDisabled();
+    expect(
+      screen.queryByRole("combobox", { name: "Move task status" })
+    ).not.toBeInTheDocument();
   });
 
   it("rejects a task deep link from another project", async () => {

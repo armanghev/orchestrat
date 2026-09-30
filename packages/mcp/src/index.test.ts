@@ -696,3 +696,437 @@ test("keeps inbox notices bound to the project used by an in-flight tool", async
   );
   await clientTransport.close();
 });
+
+const connect = async (bridge: McpBridge) => {
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
+  await bridge.start();
+  await bridge.server.connect(serverTransport);
+  await clientTransport.start();
+  const pending = new Map<number, (response: Record<string, any>) => void>();
+  clientTransport.onmessage = (response) => {
+    if ("id" in response) pending.get(Number(response.id))?.(response as never);
+  };
+  let nextId = 100;
+  const request = (name: string, args: Record<string, unknown> = {}) =>
+    new Promise<Record<string, any>>((resolve) => {
+      const idNumber = nextId++;
+      pending.set(idNumber, resolve);
+      void clientTransport.send({
+        jsonrpc: "2.0",
+        id: idNumber,
+        method: "tools/call",
+        params: { name, arguments: args }
+      } as never);
+    });
+  await clientTransport.send({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
+    params: {
+      protocolVersion: LATEST_PROTOCOL_VERSION,
+      capabilities: {},
+      clientInfo: { name: "test", version: "1" }
+    }
+  } as never);
+  await clientTransport.send({
+    jsonrpc: "2.0",
+    method: "notifications/initialized"
+  } as never);
+  return { request, close: () => clientTransport.close() };
+};
+
+const uuid = (n: number) =>
+  `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+const actor = { type: "agent" as const, id: uuid(900), name: "codex" };
+const emptySummary = {
+  cursor: "0",
+  branch_id: null,
+  unread_chats: [],
+  tasks: [],
+  handoffs: [],
+  blockers_resolved: [],
+  truncated: false
+};
+const taskItem = (n: number) => ({
+  task_id: uuid(n),
+  key: `ORC-${n}`,
+  title: `Task ${n}`,
+  status: "in_progress",
+  watching: true,
+  claimed_by_you: n === 1,
+  unread_count: n,
+  mention_count: n % 2,
+  blocking_unread_count: n,
+  last_read_sequence: 0,
+  latest_sequence: n + 10,
+  unread: []
+});
+const handoffItem = (n: number) => ({
+  handoff_id: uuid(200 + n),
+  from: actor,
+  chat_id: uuid(300),
+  message_id: uuid(400 + n),
+  sequence: n,
+  task: n === 1 ? null : { id: uuid(n), key: `ORC-${n}`, title: "T" },
+  excerpt: "please take over",
+  created_at: "2026-09-28T00:00:00.000Z",
+  hop: 0
+});
+const blockerItem = (n: number) => ({
+  block_id: uuid(500 + n),
+  task: { id: uuid(n), key: `ORC-${n}`, title: "T" },
+  resolution: "blocking_task_done",
+  resolved_at: "2026-09-28T00:00:00.000Z"
+});
+const range = (count: number) =>
+  Array.from({ length: count }, (_, index) => index + 1);
+const baseClient = () => ({
+  async openSession() {
+    return { session: { id } };
+  },
+  async heartbeat() {
+    return {};
+  },
+  async closeSession() {
+    return {};
+  },
+  async listChats() {
+    return { chats: [] };
+  }
+});
+
+test("appends the attention notice after the unchanged unread_chats notice, capped at 5", async () => {
+  const summaries = [
+    {
+      ...emptySummary,
+      unread_chats: [{ chat_id: id, unread_count: 2, mention_count: 1 }],
+      tasks: range(7).map(taskItem),
+      handoffs: range(6).map(handoffItem),
+      blockers_resolved: range(6).map(blockerItem),
+      truncated: true
+    },
+    { ...emptySummary, blockers_resolved: [blockerItem(1)] },
+    {
+      ...emptySummary,
+      unread_chats: [{ chat_id: id, unread_count: 1, mention_count: 0 }]
+    },
+    emptySummary
+  ];
+  let inboxCalls = 0;
+  const client = {
+    ...baseClient(),
+    attention: {
+      async summary() {
+        return summaries.shift();
+      }
+    },
+    async getInbox() {
+      inboxCalls += 1;
+      return { unread_chats: [] };
+    }
+  };
+  const bridge = new McpBridge({
+    client: client as never,
+    integration: "codex"
+  });
+  const { request, close } = await connect(bridge);
+  const full = (await request("list_chats")).result;
+  assert.equal(full.content.length, 3);
+  assert.deepEqual(JSON.parse(full.content[1].text), {
+    notice: {
+      type: "unread_chats",
+      unread_chats: [{ chat_id: id, unread_count: 2, mention_count: 1 }]
+    }
+  });
+  const notice = JSON.parse(full.content[2].text).notice;
+  assert.equal(notice.type, "attention");
+  assert.equal(notice.tasks.length, 5);
+  assert.equal(notice.handoffs.length, 5);
+  assert.equal(notice.blockers_resolved.length, 5);
+  assert.deepEqual(notice.tasks[0], {
+    task_id: uuid(1),
+    key: "ORC-1",
+    unread_comments: 1,
+    mentions: 1,
+    claimed_by_you: true,
+    latest_sequence: 11
+  });
+  assert.deepEqual(notice.handoffs[0], {
+    handoff_id: uuid(201),
+    from: { type: "agent", name: "codex" },
+    task_key: null
+  });
+  assert.equal(notice.handoffs[1].task_key, "ORC-2");
+  assert.deepEqual(notice.blockers_resolved[0], {
+    block_id: uuid(501),
+    task_key: "ORC-1",
+    resolution: "blocking_task_done"
+  });
+  assert.equal(
+    notice.hint,
+    "Read with get_attention; acknowledge with acknowledge_attention."
+  );
+  assert.equal(notice.branch_id, null);
+  const attentionOnly = (await request("list_chats")).result;
+  assert.equal(attentionOnly.content.length, 2);
+  assert.equal(
+    JSON.parse(attentionOnly.content[1].text).notice.type,
+    "attention"
+  );
+  const chatsOnly = (await request("list_chats")).result;
+  assert.equal(chatsOnly.content.length, 2);
+  assert.equal(
+    JSON.parse(chatsOnly.content[1].text).notice.type,
+    "unread_chats"
+  );
+  const quiet = (await request("list_chats")).result;
+  assert.equal(quiet.content.length, 1);
+  assert.equal(inboxCalls, 0);
+  await close();
+});
+
+test("falls back to the chat inbox once the attention route 404s and remembers it", async () => {
+  let summaryCalls = 0;
+  let inboxCalls = 0;
+  const client = {
+    ...baseClient(),
+    attention: {
+      async summary() {
+        summaryCalls += 1;
+        throw new AgentApiError(404, "NOT_FOUND", "Route not found.");
+      }
+    },
+    async getInbox() {
+      inboxCalls += 1;
+      return {
+        unread_chats: [{ chat_id: id, unread_count: 3, mention_count: 0 }]
+      };
+    }
+  };
+  const bridge = new McpBridge({
+    client: client as never,
+    integration: "codex"
+  });
+  const { request, close } = await connect(bridge);
+  for (let call = 0; call < 3; call += 1) {
+    const result = (await request("list_chats")).result;
+    assert.equal(result.content.length, 2);
+    assert.deepEqual(JSON.parse(result.content[1].text), {
+      notice: {
+        type: "unread_chats",
+        unread_chats: [{ chat_id: id, unread_count: 3, mention_count: 0 }]
+      }
+    });
+  }
+  assert.equal(summaryCalls, 1);
+  assert.equal(inboxCalls, 3);
+  await close();
+});
+
+test("other attention failures drop the notice without falling back", async () => {
+  let summaryCalls = 0;
+  let inboxCalls = 0;
+  const client = {
+    ...baseClient(),
+    attention: {
+      async summary() {
+        summaryCalls += 1;
+        throw new AgentApiError(500, "INTERNAL_ERROR", "Broken.");
+      }
+    },
+    async getInbox() {
+      inboxCalls += 1;
+      return { unread_chats: [] };
+    }
+  };
+  const bridge = new McpBridge({
+    client: client as never,
+    integration: "codex"
+  });
+  const { request, close } = await connect(bridge);
+  const first = (await request("list_chats")).result;
+  const second = (await request("list_chats")).result;
+  assert.equal(first.content.length, 1);
+  assert.equal(second.content.length, 1);
+  assert.equal(summaryCalls, 2);
+  assert.equal(inboxCalls, 0);
+  await close();
+});
+
+test("bounds the attention read, aborts it, and preserves tool errors", async () => {
+  let aborted = false;
+  const client = {
+    ...baseClient(),
+    async getProject() {
+      throw new AgentApiError(500, "BROKEN", "Main operation failed.");
+    },
+    attention: {
+      summary(signal: AbortSignal) {
+        return new Promise<never>((_, reject) => {
+          signal.addEventListener("abort", () => {
+            aborted = true;
+            reject(new Error("aborted"));
+          });
+        });
+      }
+    }
+  };
+  const bridge = new McpBridge({
+    client: client as never,
+    integration: "codex",
+    inboxTimeoutMs: 5
+  });
+  const started = Date.now();
+  const internals = bridge as unknown as {
+    call: (
+      operation: () => Promise<unknown>
+    ) => Promise<{ isError?: boolean; content: { text: string }[] }>;
+    activeClient: () => { getProject: () => Promise<unknown> };
+  };
+  const result = await internals.call(() =>
+    internals.activeClient().getProject()
+  );
+  assert.equal(result.isError, true);
+  assert.equal(result.content.length, 1);
+  assert.match(result.content[0]!.text, /BROKEN/);
+  assert.equal(aborted, true);
+  assert.ok(Date.now() - started < 500);
+  await bridge.stop();
+});
+
+test("keeps attention notices bound to the project used by an in-flight tool", async () => {
+  const firstProject = "00000000-0000-4000-8000-000000000011";
+  const secondProject = "00000000-0000-4000-8000-000000000012";
+  let releaseFirstList: (() => void) | undefined;
+  const makeClient = (name: "first" | "second") => ({
+    ...baseClient(),
+    async listChats() {
+      if (name === "first")
+        await new Promise<void>((resolve) => {
+          releaseFirstList = resolve;
+        });
+      return { chats: [] };
+    },
+    attention: {
+      async summary() {
+        return {
+          ...emptySummary,
+          tasks: [taskItem(name === "first" ? 1 : 2)]
+        };
+      }
+    }
+  });
+  const bridge = new McpBridge({
+    integration: "cursor",
+    projects: [
+      { id: firstProject, name: "First", client: makeClient("first") as never },
+      {
+        id: secondProject,
+        name: "Second",
+        client: makeClient("second") as never
+      }
+    ]
+  });
+  const { request, close } = await connect(bridge);
+  const taskKey = (result: Record<string, any>) =>
+    JSON.parse(result.result.content[1].text).notice.tasks[0].key;
+  assert.equal(
+    taskKey(await request("select_project", { project_id: firstProject })),
+    "ORC-1"
+  );
+  const firstList = request("list_chats");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(
+    taskKey(await request("select_project", { project_id: secondProject })),
+    "ORC-2"
+  );
+  releaseFirstList?.();
+  assert.equal(taskKey(await firstList), "ORC-1");
+  await close();
+});
+
+for (const [tool, method] of [
+  ["complete_task", "completeClaim"],
+  ["release_task", "releaseClaim"]
+] as const)
+  test(`${tool} passes acknowledged_through and keeps the local token on TASK_COMMENTS_UNREAD`, async () => {
+    const token = "c".repeat(40);
+    const mutations: unknown[] = [];
+    const details = {
+      task_id: id,
+      latest_sequence: 7,
+      total_unread: 1,
+      unread: [
+        {
+          sequence: 7,
+          author: actor,
+          excerpt: "wait, the schema changed",
+          created_at: "2026-09-28T00:00:00.000Z"
+        }
+      ]
+    };
+    const client = {
+      ...baseClient(),
+      async claimTask() {
+        return { claim: { task_id: id }, claim_token: token };
+      },
+      async [method](sessionId: string, input: Record<string, unknown>) {
+        mutations.push({ sessionId, ...input });
+        if (input.acknowledged_through === undefined)
+          throw new AgentApiError(
+            409,
+            "TASK_COMMENTS_UNREAD",
+            "Read the new comments first.",
+            details,
+            "req_unread"
+          );
+        return { claim: { task_id: id, status: "done" } };
+      }
+    };
+    const bridge = new McpBridge({
+      client: client as never,
+      integration: "codex"
+    });
+    const { request, close } = await connect(bridge);
+    assert.equal(
+      (await request("claim_task", { task_id: id })).result.isError,
+      undefined
+    );
+    const refused = (await request(tool, { task_id: id })).result;
+    assert.equal(refused.isError, true);
+    assert.deepEqual(JSON.parse(refused.content[0].text), {
+      error: {
+        code: "TASK_COMMENTS_UNREAD",
+        message: "Read the new comments first.",
+        details,
+        request_id: "req_unread"
+      }
+    });
+    assert.equal(bridge.claims.get(id), token);
+    const invalid = (
+      await request(tool, { task_id: id, acknowledged_through: -1 })
+    ).result;
+    assert.equal(invalid.isError, true);
+    assert.equal(mutations.length, 1);
+    const done = (await request(tool, { task_id: id, acknowledged_through: 7 }))
+      .result;
+    assert.equal(done.isError, undefined);
+    assert.deepEqual(mutations, [
+      { sessionId: id, claim_token: token },
+      { sessionId: id, claim_token: token, acknowledged_through: 7 }
+    ]);
+    assert.equal(bridge.claims.get(id), undefined);
+    await close();
+  });
+
+test("drops malformed TASK_COMMENTS_UNREAD details", () => {
+  const result = mapMcpError(
+    new AgentApiError(409, "TASK_COMMENTS_UNREAD", "Unread.", {
+      task_id: "not-a-uuid"
+    })
+  );
+  assert.deepEqual(JSON.parse(result.content[0]!.text), {
+    error: { code: "TASK_COMMENTS_UNREAD", message: "Unread." }
+  });
+});

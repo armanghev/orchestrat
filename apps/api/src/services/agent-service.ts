@@ -40,6 +40,7 @@ import {
 import { ApiError } from "./api-error.js";
 import { PermissionService } from "./permission-service.js";
 import { recordProjectEvent } from "../realtime/realtime.js";
+import { resetsToReadyOnClaimEnd } from "./task-block-hooks.js";
 
 export type AgentPrincipal = {
   agentId: string;
@@ -313,7 +314,7 @@ export class AgentService {
             releaseReason: "agent_revoked"
           })
           .where(eq(taskClaims.id, claim.id));
-        if (task?.status === "claimed")
+        if (task && resetsToReadyOnClaimEnd(task.status))
           await tx
             .update(tasks)
             .set({
@@ -794,7 +795,7 @@ export class AgentService {
           releaseReason: "session_closed"
         })
         .where(eq(taskClaims.id, claim.id));
-      if (task?.status === "claimed")
+      if (task && resetsToReadyOnClaimEnd(task.status))
         await tx
           .update(tasks)
           .set({ status: "ready", updatedAt: now, version: task.version + 1 })

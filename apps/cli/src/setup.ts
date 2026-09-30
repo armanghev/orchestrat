@@ -41,12 +41,18 @@ const applicationAvailable = async (name: string) => {
   return false;
 };
 const noApplication = async () => false;
-import { atomicWrite, readOptional, removeHarnessMcp } from "./safe-files.js";
+import {
+  atomicWrite,
+  readOptional,
+  removeHarnessMcp,
+  writeManaged
+} from "./safe-files.js";
 import { agentAccount, cliAccount, type CredentialStore } from "./keychain.js";
 import {
   readConfig,
   configPath,
   canonicalizeCwd,
+  type AttentionConfig,
   type Integration,
   type McpScope,
   type OrchestratConfig,
@@ -57,7 +63,11 @@ import {
   isConfigurableIntegration,
   type HarnessRecord
 } from "./harnesses.js";
-import { harnessConfigPlan, previewHarnessConfig } from "./harness-config.js";
+import {
+  attentionPlanOptions,
+  harnessConfigPlan,
+  previewHarnessConfig
+} from "./harness-config.js";
 import type { ProjectChoice } from "./ui.js";
 
 export type SetupTransport = {
@@ -338,7 +348,8 @@ export async function previewSetup(
   integrations: Integration[],
   command: string,
   projectRoot = home,
-  mcpScopes: Partial<Record<Integration, McpScope>> = {}
+  mcpScopes: Partial<Record<Integration, McpScope>> = {},
+  attention?: AttentionConfig
 ) {
   if (!command.startsWith("/"))
     throw new Error("Persistent CLI command must be absolute");
@@ -351,14 +362,17 @@ export async function previewSetup(
         integration,
         command,
         projectRoot,
-        mcpScope
+        mcpScope,
+        attentionPlanOptions(attention, integration)
       );
       for (const [capability, item] of [
         ["mcp", plan.mcp],
-        ["hooks", plan.hooks]
+        ["hooks", plan.hooks],
+        ["hooks", plan.plugin]
       ] as const) {
         if (!item) continue;
         const source = await readOptional(item.path);
+        if (item === plan.plugin && source === item.merge(source)) continue;
         const migrated =
           capability === "mcp"
             ? removeLegacyMcp(source, integration, command, projectRoot, item)
@@ -379,7 +393,8 @@ export async function previewSetup(
         integration,
         command,
         projectRoot,
-        mcpScope
+        mcpScope,
+        attentionPlanOptions(attention, integration)
       ))
     );
   }
@@ -414,6 +429,10 @@ export type SetupRunOptions = SetupTransport & {
   mcpScope?: McpScope;
   globalProjects?: ProjectChoice[];
   pathEnv?: string;
+  // Opt-in stop continuation for the selected integrations (spec §11.3);
+  // `rewake` adds Claude Code's async idle wake. Both only ever add.
+  autoContinue?: boolean;
+  rewake?: boolean;
   reportPreview?: (previews: SetupPreview[]) => Promise<void> | void;
 };
 export async function runSetup(options: SetupRunOptions) {
@@ -439,12 +458,25 @@ export async function runSetup(options: SetupRunOptions) {
   for (const integration of options.integrations)
     mcpScopes[integration] =
       options.mcpScope ?? mcpScopes[integration] ?? "project";
+  const attention: AttentionConfig | undefined = options.autoContinue
+    ? {
+        ...config.attention,
+        continue_on_stop: [
+          ...new Set([
+            ...(config.attention?.continue_on_stop ?? []),
+            ...options.integrations
+          ])
+        ],
+        ...(options.rewake || config.attention?.rewake ? { rewake: true } : {})
+      }
+    : config.attention;
   const configPreviews = await previewSetup(
     options.home,
     options.integrations,
     command,
     key,
-    mcpScopes
+    mcpScopes,
+    attention
   );
   const previews: SetupPreview[] = [
     {
@@ -499,7 +531,9 @@ export async function runSetup(options: SetupRunOptions) {
       },
       ...(Object.keys(globalMappings).length
         ? { globalProjects: globalMappings }
-        : {})
+        : {}),
+      ...(attention ? { attention } : {}),
+      ...(config.waker ? { waker: config.waker } : {})
     } as OrchestratConfig;
     await atomicWrite(
       configPath(options.home),
@@ -578,15 +612,16 @@ export async function runSetup(options: SetupRunOptions) {
       integration,
       command,
       key,
-      mcpScopes[integration]
+      mcpScopes[integration],
+      attentionPlanOptions(attention, integration)
     );
-    for (const item of [plan.mcp, plan.hooks]) {
+    for (const item of [plan.mcp, plan.hooks, plan.plugin]) {
       if (!item) continue;
       let source = await readOptional(item.path);
       if (mcpScopes[integration] === "global" && item === plan.mcp) {
-        source = removeLegacyMcp(source, integration, command, key, item);
+        source = removeLegacyMcp(source, integration, command, key, plan.mcp);
       }
-      await atomicWrite(item.path, item.merge(source));
+      await writeManaged(item.path, item.merge(source));
     }
   }
   if (
@@ -607,9 +642,10 @@ export async function runSetup(options: SetupRunOptions) {
       integration,
       command,
       key,
-      mcpScopes[integration]
+      mcpScopes[integration],
+      attentionPlanOptions(attention, integration)
     );
-    for (const item of [plan.mcp, plan.hooks]) {
+    for (const item of [plan.mcp, plan.hooks, plan.plugin]) {
       if (item) item.merge(await readOptional(item.path));
     }
   }
@@ -618,5 +654,16 @@ export async function runSetup(options: SetupRunOptions) {
   const pathFix = pathEntries.includes(localBin)
     ? undefined
     : `export PATH="${localBin}:$PATH"`;
-  return { projectId, integrations, pathFix };
+  const notes =
+    options.autoContinue && options.integrations.includes("codex")
+      ? [
+          "Codex: open /hooks in Codex and trust the new Orchestrat Stop hook; Codex does not run new or changed hooks until you do."
+        ]
+      : [];
+  return {
+    projectId,
+    integrations,
+    pathFix,
+    ...(notes.length ? { notes } : {})
+  };
 }

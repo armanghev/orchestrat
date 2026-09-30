@@ -324,6 +324,51 @@ describe("project chat realtime notifications", () => {
     expect(screen.getByText("Mentioned you")).toBeVisible();
   });
 
+  it("replaces the message notice with a handoff notice for the human recipient", async () => {
+    const chat = makeChat(chatOneId, projectOne);
+    const notify = vi.fn(async () => undefined);
+    const platform = desktopPlatform({
+      notify,
+      isBackgrounded: vi.fn(async () => true)
+    });
+    await connectedHarness({
+      chatsByProject: { [projectOne]: [chat] },
+      platform
+    });
+    const socket = TestSocket.instances[0]!;
+    await act(async () => {
+      socket.emit(event(projectOne, 1, chatOneId));
+    });
+    await screen.findByText("New message in Build updates");
+    // Handoffs to someone else never notify this viewer.
+    await act(async () => {
+      socket.emit({
+        ...event(projectOne, 2, chatOneId, "chat.handoff_created"),
+        affected_participant: { type: "agent", id: secondAgentId }
+      });
+    });
+    await act(async () => {
+      socket.emit({
+        ...event(projectOne, 3, chatOneId, "chat.handoff_created"),
+        affected_participant: { type: "human", id: userId }
+      });
+    });
+    expect(await screen.findByText("Handoff from Builder")).toBeVisible();
+    expect(screen.getByText("Builder handed work to you.")).toBeVisible();
+    expect(
+      screen.queryByText("New message in Build updates")
+    ).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Open chat" })).toHaveLength(
+      1
+    );
+    await waitFor(() => expect(notify).toHaveBeenCalledTimes(2));
+    expect(notify).toHaveBeenLastCalledWith({
+      title: "Handoff from Builder",
+      body: "Builder handed work to you.",
+      destination: { kind: "chat", projectId: projectOne, chatId: chatOneId }
+    });
+  });
+
   it("does not re-notify a pending message when access is invalidated", async () => {
     const chat = makeChat(chatOneId, projectOne);
     let resolveChat!: (value: Chat) => void;

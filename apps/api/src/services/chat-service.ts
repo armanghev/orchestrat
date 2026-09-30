@@ -1317,12 +1317,6 @@ export class ChatService {
           "PERMISSION_DENIED",
           "You cannot send to this chat."
         );
-      if (chat.kind === "direct" && input.mentions.length > 0)
-        throw new ApiError(
-          400,
-          "VALIDATION_ERROR",
-          "Mentions are only supported in group chats."
-        );
       const idempotency = await this.reserveIdempotency(
         tx,
         actor,

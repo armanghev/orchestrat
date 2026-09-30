@@ -38,6 +38,7 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { usePlatform } from "@/platform/provider";
 import { cn } from "@/lib/cn";
+import { unreadCommentsLabel } from "@/features/attention/query-options";
 import { WindowDragRegion } from "./top-toolbar";
 
 type Profile = {
@@ -88,7 +89,8 @@ export function ContextSidebar({
   onOpenPreferences,
   onSignOut,
   profile,
-  messageCounts
+  messageCounts,
+  taskCounts
 }: {
   activeRoute?: NavigationDestination;
   onNavigate: (route: NavigationDestination) => void;
@@ -97,6 +99,7 @@ export function ContextSidebar({
   onSignOut: () => void;
   profile?: Profile;
   messageCounts?: { unread: number; mentions: number };
+  taskCounts?: { unread: number; mentions: number };
 }) {
   const desktop = usePlatform().kind === "desktop";
   const { setOpenMobile, state } = useSidebar();
@@ -224,6 +227,26 @@ export function ContextSidebar({
                               {messageCounts.mentions ? (
                                 <span className="text-brand">
                                   @{messageCounts.mentions}
+                                </span>
+                              ) : null}
+                            </span>
+                          ) : null}
+                          {route === "tasks" && taskCounts?.unread ? (
+                            <span
+                              role="img"
+                              className="ml-auto flex items-center gap-1.5 text-[10px] font-medium"
+                              aria-label={unreadCommentsLabel(
+                                taskCounts.unread,
+                                taskCounts.mentions,
+                                "unread task comment"
+                              )}
+                            >
+                              <span className="rounded-full bg-primary px-1.5 leading-5 text-primary-foreground">
+                                {taskCounts.unread}
+                              </span>
+                              {taskCounts.mentions ? (
+                                <span className="text-primary-text">
+                                  @{taskCounts.mentions}
                                 </span>
                               ) : null}
                             </span>

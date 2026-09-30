@@ -1,5 +1,5 @@
 import { AgentApiClient } from "@orchestrat/sdk";
-import { atomicWrite, readOptional } from "./safe-files.js";
+import { readOptional, writeManaged } from "./safe-files.js";
 import {
   apiOrigin,
   DEFAULT_API_URL,
@@ -10,7 +10,7 @@ import {
   type Integration,
   type OrchestratConfig
 } from "./config.js";
-import { harnessConfigPlan } from "./harness-config.js";
+import { attentionPlanOptions, harnessConfigPlan } from "./harness-config.js";
 import { agentAccount, cliAccount, type CredentialStore } from "./keychain.js";
 import { inspectLauncher } from "./setup.js";
 import { access, lstat, rm } from "node:fs/promises";
@@ -223,10 +223,11 @@ export async function runDoctor(input: {
           integration,
           command,
           project?.cwd ?? input.cwd,
-          connection.scope
+          connection.scope,
+          attentionPlanOptions(config?.attention, integration)
         );
         let current = true;
-        for (const item of [plan.mcp, plan.hooks]) {
+        for (const item of [plan.mcp, plan.hooks, plan.plugin]) {
           if (!item) continue;
           const source = await readOptional(item.path);
           const merged = item.merge(source);
@@ -235,6 +236,7 @@ export async function runDoctor(input: {
             (source === merged ||
               (item.path.endsWith(".json") &&
                 source !== undefined &&
+                merged !== undefined &&
                 isDeepStrictEqual(JSON.parse(source), JSON.parse(merged))));
         }
         checks[`config.${integration}`] = redacted(
@@ -309,7 +311,13 @@ export async function disconnectLocal(input: {
       "Disconnect API differs from the project mapping; use its API or --local"
     );
   const command = join(input.home, ".local", "bin", "orchestrat");
-  const writes: { path: string; entries: string[]; content: string }[] = [];
+  // `content: undefined` deletes a whole managed file (the OpenCode plugin).
+  const writes: {
+    path: string;
+    entries: string[];
+    content: string | undefined;
+  }[] = [];
+  const hooksRemoved = new Set<Integration>();
   for (const name of mapped) {
     const otherProjectUses = Object.entries(config.projects).some(
       ([cwd, value]) => cwd !== project.cwd && Boolean(value.integrations[name])
@@ -328,22 +336,24 @@ export async function disconnectLocal(input: {
       name,
       command,
       project.cwd,
-      mcpScope
+      mcpScope,
+      attentionPlanOptions(config.attention, name)
     );
-    for (const item of [plan.mcp, plan.hooks]) {
+    for (const item of [plan.mcp, plan.hooks, plan.plugin]) {
       if (!item) continue;
       if (
         (otherProjectUses || globalProjectsRemain) &&
         (item !== plan.mcp || name !== "cursor" || mcpScope === "global")
       )
         continue;
+      if (item !== plan.mcp) hooksRemoved.add(name);
       const source = await readOptional(item.path);
       const next = item.remove(source);
       if (next !== source)
         writes.push({
           path: item.path,
           entries: item.entries,
-          content: next ?? ""
+          content: item === plan.plugin ? next : (next ?? "")
         });
     }
   }
@@ -366,6 +376,16 @@ export async function disconnectLocal(input: {
     delete nextConfig.globalProjects;
   if (!Object.keys(nextProject.integrations).length)
     delete nextConfig.projects[project.cwd];
+  // Once its Stop entries are gone, the integration is no longer opted in.
+  if (nextConfig.attention?.continue_on_stop) {
+    nextConfig.attention.continue_on_stop =
+      nextConfig.attention.continue_on_stop.filter(
+        (name) => !hooksRemoved.has(name)
+      );
+    if (!nextConfig.attention.continue_on_stop.length)
+      delete nextConfig.attention.continue_on_stop;
+    if (!Object.keys(nextConfig.attention).length) delete nextConfig.attention;
+  }
   writes.push({
     path: configPath(input.home),
     entries: mapped.map((name) => `mapping:${name}`),
@@ -432,7 +452,7 @@ export async function disconnectLocal(input: {
     if (!response.ok) throw new Error("Backend disconnect failed");
   }
   for (const write of writes)
-    await atomicWrite(write.path, write.content, false);
+    await writeManaged(write.path, write.content, false);
   if (launcherPath) {
     await rm(launcherPath, { force: true });
     await rm(join(input.home, ".orchestrat", "runtimes"), {

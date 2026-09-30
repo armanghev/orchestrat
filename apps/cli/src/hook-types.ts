@@ -18,3 +18,22 @@ export const deterministicSessionId = (
     .digest("hex");
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-${((parseInt(hex.slice(16, 18), 16) & 0x3f) | 0x80).toString(16).padStart(2, "0")}${hex.slice(18, 20)}-${hex.slice(20, 32)}`;
 };
+
+// The harness's own session id, read the same way the lifecycle normalizers
+// read it: Claude/Codex/OpenCode `session_id`, Cursor `conversation_id`,
+// Antigravity `conversationId`.
+export function externalSessionId(
+  integration: string,
+  value: unknown
+): string | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const input = value as Record<string, unknown>;
+  const raw =
+    integration === "cursor"
+      ? input.conversation_id
+      : integration === "antigravity"
+        ? input.conversationId
+        : input.session_id;
+  const external = typeof raw === "string" ? raw.trim() : "";
+  return external ? external.slice(0, 256) : undefined;
+}

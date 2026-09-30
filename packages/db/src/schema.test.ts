@@ -16,13 +16,16 @@ import {
   documentFolders,
   documentRevisions,
   documents,
+  handoffs,
   projectEvents,
   projectInvitations,
   projectMembers,
   projects,
+  taskBlocks,
   taskClaims,
   taskComments,
   taskDependencies,
+  taskWatches,
   tasks,
   users
 } from "./schema.js";
@@ -60,7 +63,70 @@ test("agent lifecycle idempotency is project/agent scoped and hash-only", async 
       "utf8"
     )
   ) as { entries: { tag: string }[] };
-  assert.equal(journal.entries.at(-1)?.tag, "0013_project_messaging");
+  assert.equal(journal.entries.at(-1)?.tag, "0015_agent_attention");
+});
+
+test("agent attention schema matches the 0015 migration", async () => {
+  assert.equal(taskComments.sequence.notNull, true);
+  assert.equal(taskComments.mentions.notNull, true);
+  assert.equal(taskComments.mentions.hasDefault, true);
+  const commentConfig = getTableConfig(taskComments);
+  assert.ok(
+    commentConfig.indexes.find(
+      (index) => index.config.name === "task_comments_task_sequence_unique"
+    )?.config.unique
+  );
+  assert.ok(
+    commentConfig.checks.find(
+      (check) => check.name === "task_comments_sequence_positive"
+    )
+  );
+
+  for (const table of [taskWatches, taskBlocks, handoffs])
+    assert.equal(getTableConfig(table).enableRLS, true);
+  assert.equal(taskWatches.state.hasDefault, true);
+  assert.equal(taskWatches.lastReadSequence.hasDefault, true);
+  assert.equal(taskWatches.claimBaselineSequence.notNull, false);
+  const openBlock = getTableConfig(taskBlocks).indexes.find(
+    (index) => index.config.name === "task_blocks_one_open_per_task"
+  );
+  assert.ok(openBlock?.config.unique);
+  assert.ok(openBlock?.config.where);
+  assert.equal(handoffs.hop.hasDefault, true);
+
+  const sql = await readFile(
+    new URL("../drizzle/0015_agent_attention.sql", import.meta.url),
+    "utf8"
+  );
+  const constraintNames = (table: Parameters<typeof getTableConfig>[0]) => {
+    const config = getTableConfig(table);
+    return [
+      ...config.foreignKeys.map((foreignKey) => foreignKey.getName()),
+      ...config.checks.map((check) => check.name),
+      ...config.uniqueConstraints.map((unique) => unique.getName()),
+      ...config.indexes.map((index) => index.config.name!)
+    ];
+  };
+  for (const table of [taskWatches, taskBlocks, handoffs]) {
+    const name = getTableConfig(table).name;
+    assert.match(sql, new RegExp(`CREATE TABLE "${name}"`));
+    assert.match(
+      sql,
+      new RegExp(`ALTER TABLE "${name}" ENABLE ROW LEVEL SECURITY`)
+    );
+    for (const constraint of constraintNames(table))
+      assert.match(sql, new RegExp(`"${constraint}"`), constraint);
+  }
+  for (const constraint of [
+    "task_comments_sequence_positive",
+    "task_comments_task_sequence_unique"
+  ])
+    assert.match(sql, new RegExp(`"${constraint}"`));
+  assert.match(sql, /row_number\(\) OVER \(PARTITION BY "task_id"/);
+  assert.match(sql, /ALTER COLUMN "sequence" SET NOT NULL/);
+  for (const reason of ["claimed", "created", "commented"])
+    assert.match(sql, new RegExp(`'${reason}'`));
+  assert.doesNotMatch(sql, /branch/i);
 });
 
 test("project messaging schema preserves access, authorship, and ordering", async () => {

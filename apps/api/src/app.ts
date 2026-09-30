@@ -52,6 +52,14 @@ import {
 import { FixedWindowRateLimit, rateLimitHook } from "./services/rate-limit.js";
 import { ChatService } from "./services/chat-service.js";
 import { ProjectMembershipService } from "./services/project-membership-service.js";
+import { AttentionService } from "./services/attention-service.js";
+import { AttentionWaitHub } from "./services/attention-wait-hub.js";
+import { HandoffService } from "./services/handoff-service.js";
+import { TaskStatusService } from "./services/task-status-service.js";
+import {
+  agentAttentionRoutes,
+  humanAttentionRoutes
+} from "./routes/attention.js";
 
 type AppOptions = {
   allowedOrigins: string[];
@@ -104,15 +112,22 @@ export function buildApp(options: AppOptions) {
       (event.entity_id !== null &&
         (await chats.canHumanViewChat(userId, event.entity_id)))
   );
-  const db = withRealtimePublisher(options.db, (event, audience) =>
-    realtimeRegistry.publish(event, audience)
-  );
+  // The publisher runs after commit; waits is assigned below, before any
+  // request can open a transaction (the same pattern as chats above).
+  const db = withRealtimePublisher(options.db, (event, audience) => {
+    waits.notify(event);
+    return realtimeRegistry.publish(event, audience);
+  });
   const chats = new ChatService(db);
   const identities = new IdentityService(db);
   const profiles = new ProfileService(db, options.avatarStorage);
   const tasks = new TaskService(db);
   const agents = new AgentService(db);
   const claims = new TaskClaimService(db);
+  const attention = new AttentionService(db, chats);
+  const waits = new AttentionWaitHub(attention, db);
+  const statuses = new TaskStatusService(db, claims);
+  const handoffs = new HandoffService(db, chats);
   const documents = new DocumentService(db, options.documentStorage);
   const projects = new ProjectService(
     db,
@@ -301,6 +316,12 @@ export function buildApp(options: AppOptions) {
       api.register(agentManagementRoutes, { agents });
       api.register(humanChatRoutes, { chats });
       api.register(projectMemberRoutes, { memberships });
+      api.register(humanAttentionRoutes, {
+        attention,
+        waits,
+        statuses,
+        handoffs
+      });
       api.register(cliAuthorizationHumanRoutes, {
         authorization: cliAuthorization
       });
@@ -337,6 +358,12 @@ export function buildApp(options: AppOptions) {
       });
       api.register(agentActionRoutes, { agents, tasks, claims });
       api.register(agentChatRoutes, { chats });
+      api.register(agentAttentionRoutes, {
+        attention,
+        waits,
+        statuses,
+        handoffs
+      });
       api.register(agentDocumentRoutes, {
         documents,
         attachments,

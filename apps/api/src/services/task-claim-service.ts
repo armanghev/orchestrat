@@ -15,11 +15,14 @@ import type {
 } from "@orchestrat/protocol";
 import { and, eq, lte, sql } from "drizzle-orm";
 import { ApiError } from "./api-error.js";
+import { assertCommentsAcknowledged } from "./attention-guard.js";
+import { onTaskClaimed } from "./attention-hooks.js";
 import {
   agentSessionFreshnessMs,
   type AgentPrincipal,
   insertProjectEvent
 } from "./agent-service.js";
+import { onClaimEnded, resetsToReadyOnClaimEnd } from "./task-block-hooks.js";
 
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 const hash = (value: string) =>
@@ -139,6 +142,11 @@ export class TaskClaimService {
             lease_expires_at: claim.leaseExpiresAt.toISOString()
           }
         });
+        await onTaskClaimed(tx, {
+          projectId: project.id,
+          taskId: task.id,
+          agentId: principal.agentId
+        });
         return { claim: claimJson(claim), claim_token: token };
       });
     } catch (error) {
@@ -164,7 +172,13 @@ export class TaskClaimService {
     sessionId: string,
     input: ReleaseClaimRequest
   ) {
-    return this.mutate(principal, sessionId, input.claim_token, "released");
+    return this.mutate(
+      principal,
+      sessionId,
+      input.claim_token,
+      "released",
+      input.acknowledged_through
+    );
   }
 
   async complete(
@@ -172,7 +186,13 @@ export class TaskClaimService {
     sessionId: string,
     input: CompleteClaimRequest
   ) {
-    return this.mutate(principal, sessionId, input.claim_token, "completed");
+    return this.mutate(
+      principal,
+      sessionId,
+      input.claim_token,
+      "completed",
+      input.acknowledged_through
+    );
   }
 
   async reconcileExpired(projectId: string, taskId?: string) {
@@ -185,46 +205,30 @@ export class TaskClaimService {
     principal: AgentPrincipal,
     sessionId: string,
     token: string,
-    status: "released" | "completed"
+    status: "released" | "completed",
+    acknowledgedThrough?: number
   ) {
     const result = await this.db.transaction(async (tx) => {
-      await this.lockProject(tx, principal.projectId);
-      await this.activeAgent(tx, principal);
-      await this.activeSession(tx, principal, sessionId);
-      const [claim] = await tx
-        .select()
-        .from(taskClaims)
-        .where(eq(taskClaims.tokenHash, hash(token)))
-        .for("update");
-      if (!claim)
-        throw new ApiError(404, "CLAIM_NOT_FOUND", "Claim not found.");
-      if (
-        claim.projectId !== principal.projectId ||
-        claim.agentId !== principal.agentId ||
-        claim.sessionId !== sessionId
-      )
-        throw new ApiError(
-          403,
-          "CLAIM_NOT_OWNER",
-          "The claim belongs to another agent."
-        );
-      if (claim.status !== "active")
-        throw new ApiError(
-          409,
-          "CLAIM_NOT_FOUND",
-          "Claim is no longer active."
-        );
-      const now = new Date();
-      if (claim.leaseExpiresAt <= now) {
-        await this.expireClaim(tx, claim, now);
-        return { expired: true as const };
-      }
+      const owned = await this.ownedActiveClaim(
+        tx,
+        principal,
+        sessionId,
+        token
+      );
+      if (!owned) return { expired: true as const };
+      const { claim, now } = owned;
       const [task] = await tx
         .select()
         .from(tasks)
         .where(eq(tasks.id, claim.taskId))
         .for("update");
       if (!task) throw new ApiError(404, "NOT_FOUND", "Task not found.");
+      await assertCommentsAcknowledged(tx, {
+        projectId: claim.projectId,
+        taskId: task.id,
+        agentId: principal.agentId,
+        acknowledgedThrough
+      });
       const [updated] = await tx
         .update(taskClaims)
         .set({
@@ -249,7 +253,17 @@ export class TaskClaimService {
         actorAgentId: principal.agentId,
         entityId: claim.id,
         type: `claim.${status}`,
-        payload: { task_id: claim.taskId, session_id: claim.sessionId }
+        payload: {
+          task_id: claim.taskId,
+          session_id: claim.sessionId,
+          ...(status === "released" ? { reason: "agent_release" } : {})
+        }
+      });
+      await onClaimEnded(tx, {
+        projectId: claim.projectId,
+        taskId: task.id,
+        agentId: principal.agentId,
+        outcome: status
       });
       return { claim: claimJson(updated) };
     });
@@ -302,7 +316,7 @@ export class TaskClaimService {
       .where(and(eq(taskClaims.id, claim.id), eq(taskClaims.status, "active")))
       .returning();
     if (!updated) return;
-    if (task?.status === "claimed")
+    if (task && resetsToReadyOnClaimEnd(task.status))
       await tx
         .update(tasks)
         .set({ status: "ready", updatedAt: now, version: task.version + 1 })
@@ -409,5 +423,82 @@ export class TaskClaimService {
         lease_expires_at: claim.leaseExpiresAt.toISOString()
       }
     );
+  }
+
+  // Runs fn inside one transaction holding the caller's active claim, with the
+  // same project, agent, session and ownership checks as release/complete.
+  // An expired lease is expired (and committed) before CLAIM_NOT_FOUND.
+  async withActiveClaim<T>(
+    principal: AgentPrincipal,
+    sessionId: string,
+    token: string,
+    fn: (
+      tx: Transaction,
+      context: {
+        claim: typeof taskClaims.$inferSelect;
+        task: typeof tasks.$inferSelect;
+        now: Date;
+      }
+    ) => Promise<T>
+  ): Promise<T> {
+    const result = await this.db.transaction(async (tx) => {
+      const owned = await this.ownedActiveClaim(
+        tx,
+        principal,
+        sessionId,
+        token
+      );
+      if (!owned) return { expired: true as const };
+      const [task] = await tx
+        .select()
+        .from(tasks)
+        .where(eq(tasks.id, owned.claim.taskId))
+        .for("update");
+      if (!task) throw new ApiError(404, "NOT_FOUND", "Task not found.");
+      return {
+        expired: false as const,
+        value: await fn(tx, { claim: owned.claim, task, now: owned.now })
+      };
+    });
+    if (result.expired)
+      throw new ApiError(409, "CLAIM_NOT_FOUND", "Claim lease has expired.");
+    return result.value;
+  }
+
+  // Locks the project, agent, session and claim in that order. Returns null
+  // after expiring a lapsed lease so the caller can commit that first.
+  private async ownedActiveClaim(
+    tx: Transaction,
+    principal: AgentPrincipal,
+    sessionId: string,
+    token: string
+  ) {
+    await this.lockProject(tx, principal.projectId);
+    await this.activeAgent(tx, principal);
+    await this.activeSession(tx, principal, sessionId);
+    const [claim] = await tx
+      .select()
+      .from(taskClaims)
+      .where(eq(taskClaims.tokenHash, hash(token)))
+      .for("update");
+    if (!claim) throw new ApiError(404, "CLAIM_NOT_FOUND", "Claim not found.");
+    if (
+      claim.projectId !== principal.projectId ||
+      claim.agentId !== principal.agentId ||
+      claim.sessionId !== sessionId
+    )
+      throw new ApiError(
+        403,
+        "CLAIM_NOT_OWNER",
+        "The claim belongs to another agent."
+      );
+    if (claim.status !== "active")
+      throw new ApiError(409, "CLAIM_NOT_FOUND", "Claim is no longer active.");
+    const now = new Date();
+    if (claim.leaseExpiresAt <= now) {
+      await this.expireClaim(tx, claim, now);
+      return null;
+    }
+    return { claim, now };
   }
 }

@@ -8,6 +8,7 @@ import { normalizeClaudeHook } from "./claude-hooks.js";
 import { normalizeCursorHook } from "./cursor-hooks.js";
 import { normalizeAntigravityHook } from "./antigravity-hooks.js";
 import type { ConfigurableIntegration } from "./harnesses.js";
+import { clearRewakeLock } from "./stop-hooks.js";
 export type { NormalizedHook } from "./hook-types.js";
 export { deterministicSessionId } from "./hook-types.js";
 
@@ -71,6 +72,12 @@ export async function runHook(input: {
               input.event ?? input.eventName,
               input.payload
             );
+  // SessionEnd ends any Claude rewake watcher for the session (spec §11.3).
+  if (
+    input.integration === "claude-code" &&
+    normalized.event === "session.ended"
+  )
+    await clearRewakeLock(input.home, input.payload).catch(() => undefined);
   const payloadCwd = hookCwd(input.integration, input.payload, input.cwd);
   const resolved = await resolveInvocation({
     api: input.api,

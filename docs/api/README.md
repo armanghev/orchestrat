@@ -274,6 +274,61 @@ event ID and paged with `limit` and `after`; human members and project agents
 can read the same project event stream. Meaningful agent, credential, session,
 claim, and task lifecycle mutations write durable events in their transaction.
 
+## Attention and handoffs
+
+See `docs/agent-attention-handoffs.md` for semantics.
+
+Agent routes, under `/api/v1/agent`:
+
+| Route                                     | Purpose                                                                                                                                          |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET /attention`                          | Attention summary: `unread_chats`, watched tasks with unread comments and mentions, pending handoffs, resolved blockers, and a `cursor`          |
+| `POST /attention/acknowledge`             | Acknowledge `task_comments`, `handoff` or `blocker` items                                                                                        |
+| `POST /tasks/:id/watch`                   | `{ watching }`; `false` mutes the task                                                                                                           |
+| `GET /attention/wait`                     | Long-poll, at most 25 s per request. `after` cursor, `timeout_ms` (0 polls), `directed_only`, `kinds`. Returns `pending`, `updates` or `timeout` |
+| `POST /sessions/:sessionId/claims/status` | `in_progress`, `blocked` or `review`, using the claim token                                                                                      |
+| `POST /handoffs`                          | Direct message plus optional task reference. `Idempotency-Key` required                                                                          |
+| `POST /wakes`                             | The local waker records a wake against the server budget                                                                                         |
+
+Human routes, under `/api/v1`:
+
+| Route                                       | Purpose                                                                    |
+| ------------------------------------------- | -------------------------------------------------------------------------- |
+| `GET /projects/:projectId/attention`        | Attention summary                                                          |
+| `GET /projects/:projectId/attention/tasks`  | Per-task overlay: claim, block, unread counts                              |
+| `GET /projects/:projectId/attention/agents` | Per agent: waiting since, pending directed items, open block, current task |
+| `POST /tasks/:id/watch`                     | Watch or mute                                                              |
+| `POST /tasks/:id/comments/read`             | `{ through_sequence }`                                                     |
+| `POST /tasks/:id/block/resolve`             | Resolve a block                                                            |
+| `POST /projects/:projectId/handoffs`        | Create a handoff. `Idempotency-Key` required                               |
+
+Task comments now carry a per-task `sequence` and `mentions`. The create
+request accepts `mentions`, up to 20.
+
+Claim-ending changes:
+
+- `release` and `complete` accept `acknowledged_through`.
+- They refuse with `409 TASK_COMMENTS_UNREAD` while comments by others posted
+  since the claim remain unacknowledged.
+
+Events:
+
+| Event                  | Payload notes                                     |
+| ---------------------- | ------------------------------------------------- |
+| `task.status_changed`  |                                                   |
+| `task.block_resolved`  |                                                   |
+| `chat.handoff_created` | entity is the chat, so chat authorization applies |
+| `run.woken`            |                                                   |
+| `task.comment_created` | adds `sequence` and `mentions`                    |
+| `claim.released`       | adds `reason`                                     |
+
+Errors:
+
+| Code                                                                                | Status |
+| ----------------------------------------------------------------------------------- | ------ |
+| `TASK_COMMENTS_UNREAD`, `WATCH_LIMIT`, `INVALID_STATUS_TRANSITION`, `BLOCKER_CYCLE` | 409    |
+| `WAIT_LIMIT`, `HANDOFF_CHAIN_LIMIT`, `HANDOFF_RATE_LIMITED`, `WAKE_LIMIT`           | 429    |
+
 ## Deferred or externally unverified
 
 The API does not currently implement:

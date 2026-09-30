@@ -89,7 +89,20 @@ import {
   type InboxSummary,
   type ProjectMember,
   type ProjectInvitation,
-  type AcceptProjectInvitationResponse
+  type AcceptProjectInvitationResponse,
+  attentionSummarySchema,
+  taskAttentionOverlaysResponseSchema,
+  taskWatchSchema,
+  agentAttentionResponseSchema,
+  taskBlockSchema,
+  createHandoffResponseSchema,
+  type AttentionSummary,
+  type TaskAttentionOverlaysResponse,
+  type TaskWatch,
+  type AgentAttentionResponse,
+  type TaskBlock,
+  type CreateHandoffRequest,
+  type CreateHandoffResponse
 } from "@orchestrat/protocol";
 import { z, type ZodType } from "zod";
 
@@ -596,6 +609,73 @@ export class ApiClient {
           : undefined
       },
       taskCommentsResponseSchema.shape.comments.element
+    );
+  }
+
+  getProjectAttention(projectId: string): Promise<AttentionSummary> {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/attention`,
+      { method: "GET" },
+      attentionSummarySchema
+    );
+  }
+
+  listTaskAttention(projectId: string): Promise<TaskAttentionOverlaysResponse> {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/attention/tasks`,
+      { method: "GET" },
+      taskAttentionOverlaysResponseSchema
+    );
+  }
+
+  watchTask(taskId: string, watching: boolean): Promise<TaskWatch> {
+    return this.request(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/watch`,
+      { method: "POST", body: { watching } },
+      taskWatchSchema
+    );
+  }
+
+  markTaskCommentsRead(
+    taskId: string,
+    throughSequence: number
+  ): Promise<TaskWatch> {
+    return this.request(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/comments/read`,
+      { method: "POST", body: { through_sequence: throughSequence } },
+      taskWatchSchema
+    );
+  }
+
+  listAgentAttention(projectId: string): Promise<AgentAttentionResponse> {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/attention/agents`,
+      { method: "GET" },
+      agentAttentionResponseSchema
+    );
+  }
+
+  resolveTaskBlock(taskId: string): Promise<TaskBlock> {
+    return this.request(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/block/resolve`,
+      { method: "POST", body: {} },
+      taskBlockSchema
+    );
+  }
+
+  createHandoff(
+    projectId: string,
+    input: CreateHandoffRequest,
+    idempotencyKey: string
+  ): Promise<CreateHandoffResponse> {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/handoffs`,
+      {
+        method: "POST",
+        body: input,
+        headers: { "Idempotency-Key": idempotencyKey }
+      },
+      createHandoffResponseSchema
     );
   }
 

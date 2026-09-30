@@ -26,10 +26,18 @@ export type ProjectMapping = {
   mcpScopes?: Partial<Record<Integration, McpScope>>;
   integrations: Partial<Record<Integration, IntegrationMapping>>;
 };
+// Opt-in intrusive wake-ups (spec §11.3, §19.1). Absent means off.
+export type AttentionConfig = {
+  continue_on_stop?: ConfigurableIntegration[];
+  rewake?: boolean;
+};
 export type OrchestratConfig = {
   version: 1;
   projects: Record<string, ProjectMapping>;
   globalProjects?: Partial<Record<Integration, Record<string, GlobalProject>>>;
+  attention?: AttentionConfig;
+  // Validated by waker.ts; preserved verbatim here so other commands keep it.
+  waker?: Record<string, unknown>;
 };
 export type ResolvedMapping = ProjectMapping & {
   cwd: string;
@@ -191,11 +199,64 @@ export function parseConfig(value: unknown): OrchestratConfig {
       throw new Error("Invalid global MCP mapping");
     parseGlobalProjects(input.globalCursorProjects, "cursor");
   }
+  const attention = parseAttention(input.attention);
+  if (
+    input.waker !== undefined &&
+    (!input.waker ||
+      typeof input.waker !== "object" ||
+      Array.isArray(input.waker))
+  )
+    throw new Error("Invalid waker config");
   return {
     version: 1,
     projects,
-    ...(Object.keys(globalProjects).length ? { globalProjects } : {})
+    ...(Object.keys(globalProjects).length ? { globalProjects } : {}),
+    ...(attention ? { attention } : {}),
+    ...(input.waker === undefined
+      ? {}
+      : { waker: input.waker as Record<string, unknown> })
   };
+}
+
+function parseAttention(value: unknown): AttentionConfig | undefined {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new Error("Invalid attention config");
+  const input = value as Record<string, unknown>;
+  const attention: AttentionConfig = {};
+  if (input.continue_on_stop !== undefined) {
+    if (
+      !Array.isArray(input.continue_on_stop) ||
+      input.continue_on_stop.some(
+        (item) =>
+          typeof item !== "string" ||
+          !(INTEGRATIONS as readonly string[]).includes(item)
+      )
+    )
+      throw new Error("Invalid attention config");
+    attention.continue_on_stop = [
+      ...new Set(input.continue_on_stop as ConfigurableIntegration[])
+    ];
+  }
+  if (input.rewake !== undefined) {
+    if (typeof input.rewake !== "boolean")
+      throw new Error("Invalid attention config");
+    attention.rewake = input.rewake;
+  }
+  return attention;
+}
+
+export function continuesOnStop(
+  config: OrchestratConfig,
+  integration: Integration
+) {
+  return config.attention?.continue_on_stop?.includes(integration) ?? false;
+}
+
+export function rewakeEnabled(config: OrchestratConfig) {
+  return (
+    continuesOnStop(config, "claude-code") && config.attention?.rewake === true
+  );
 }
 
 export async function readConfig(home = homedir()): Promise<OrchestratConfig> {

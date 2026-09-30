@@ -12,6 +12,8 @@ import {
   CardAction
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import {
   Empty,
   EmptyHeader,
@@ -33,6 +35,9 @@ import {
   projectEventsQueryOptions
 } from "@/features/coordination/query-options";
 import { derivePresence } from "@/features/agents/presence";
+import { agentAttentionQueryOptions } from "@/features/attention/query-options";
+import { AgentAttentionLine } from "@/features/attention/agent-attention-line";
+import { PingDialog } from "@/features/attention/ping-dialog";
 import { DashboardApiError } from "@/lib/api/client";
 
 export const Route = createFileRoute(
@@ -42,8 +47,9 @@ export const Route = createFileRoute(
 function AgentsRoute() {
   const { projectId } = Route.useParams();
   const [search, setSearch] = useState("");
-  const { api } = Route.useRouteContext();
+  const { api, project } = Route.useRouteContext();
   const agents = useQuery(agentsQueryOptions(api, projectId));
+  const attention = useQuery(agentAttentionQueryOptions(api, projectId));
   const presence = useQuery(agentPresenceQueryOptions(api, projectId));
   const tasks = useQuery(tasksQueryOptions(api, projectId));
   const events = useQuery(projectEventsQueryOptions(api, projectId));
@@ -77,6 +83,10 @@ function AgentsRoute() {
   const taskById = new Map(
     (tasks.data?.tasks ?? []).map((task) => [task.id, task])
   );
+  const attentionByAgent = new Map(
+    (attention.data?.agents ?? []).map((item) => [item.agent_id, item])
+  );
+  const archived = project?.project.status === "archived";
   const online = presence.data.agents.filter(
     (item) => derivePresence(item.status, item.last_heartbeat_at) === "online"
   ).length;
@@ -101,6 +111,21 @@ function AgentsRoute() {
           </InputGroupAddon>
         </InputGroup>
       </div>
+      {attention.isError && !attention.data ? (
+        <Alert>
+          <AlertDescription className="flex flex-wrap items-center gap-2">
+            Agent status couldn’t be loaded.
+            <Button
+              type="button"
+              size="xs"
+              variant="outline"
+              onClick={() => void attention.refetch()}
+            >
+              Retry
+            </Button>
+          </AlertDescription>
+        </Alert>
+      ) : null}
       {!filtered.length ? (
         <Empty className="min-h-80 border">
           <EmptyHeader>
@@ -153,6 +178,25 @@ function AgentsRoute() {
                 <CardContent>
                   <dl className="grid gap-4 text-sm">
                     <div>
+                      <dt className="text-xs text-muted-foreground">Status</dt>
+                      <dd className="mt-1.5">
+                        {agent.status === "active" ? (
+                          <AgentAttentionLine
+                            loading={attention.isPending}
+                            attention={
+                              attention.isPending
+                                ? undefined
+                                : (attentionByAgent.get(agent.id) ?? null)
+                            }
+                          />
+                        ) : (
+                          <p className="text-sm text-muted-foreground">
+                            Revoked agents have no status.
+                          </p>
+                        )}
+                      </dd>
+                    </div>
+                    <div>
                       <dt className="text-xs text-muted-foreground">
                         Current task
                       </dt>
@@ -180,16 +224,21 @@ function AgentsRoute() {
                     </div>
                   </dl>
                 </CardContent>
-                <CardFooter className="justify-between gap-3">
+                <CardFooter className="flex-wrap justify-between gap-3">
                   <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
                     <HeartPulse className="size-3.5" />
-                    Heartbeat
-                  </span>
-                  <span className="text-xs text-muted-foreground">
+                    Heartbeat ·{" "}
                     {item?.last_heartbeat_at
                       ? heartbeatAge(item.last_heartbeat_at)
                       : "No heartbeat"}
                   </span>
+                  <PingDialog
+                    api={api}
+                    projectId={projectId}
+                    defaultRecipient={{ type: "agent", id: agent.id }}
+                    disabled={archived || agent.status !== "active"}
+                    triggerLabel={`Ping ${agent.name}`}
+                  />
                 </CardFooter>
               </Card>
             );

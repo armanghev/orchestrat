@@ -12,6 +12,8 @@ import {
 import type { QueryClient } from "@tanstack/react-query";
 import {
   realtimeEventEnvelopeSchema,
+  type AgentsResponse,
+  type ProjectEvent,
   type RealtimeEventEnvelope,
   type Task
 } from "@orchestrat/protocol";
@@ -25,6 +27,7 @@ import {
 import { coordinationKeys } from "@/features/coordination/query-options";
 import { messagingKeys } from "@/features/messaging/query-options";
 import { hierarchyKeys } from "@/features/hierarchy/query-options";
+import { attentionKeys } from "@/features/attention/query-options";
 import type { NativeNotification, Platform } from "@/platform/contract";
 
 export type RealtimeStatus = "connecting" | "connected" | "disconnected";
@@ -48,8 +51,12 @@ const notificationEventTypes = new Set([
   "run.failed",
   "claim.completed",
   "claim.expired",
-  "task.moved"
+  "task.moved",
+  "task.comment_created",
+  "task.status_changed"
 ]);
+const uuidPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
 function evictProjectMessagingCaches(
   queryClient: QueryClient,
@@ -91,9 +98,19 @@ type ChatNotice = {
   id: string;
   projectId: string;
   chatId: string;
+  /** Lets a handoff notice replace the plain notice for the same message. */
+  messageId?: string;
   title: string;
   body: string;
   mentioned: boolean;
+};
+
+/** What a task.status_changed notification needs from its durable event. */
+export type TaskStatusChangeNotice = {
+  toStatus: string;
+  taskId: string;
+  taskKey: string;
+  agentName?: string;
 };
 
 function notificationBody(value: string) {
@@ -106,11 +123,69 @@ function notificationBody(value: string) {
   );
 }
 
+export function isHumanMentionedInTaskComment(
+  event: RealtimeEventEnvelope,
+  currentUserId: string | undefined
+) {
+  return Boolean(
+    currentUserId &&
+    event.event_type === "task.comment_created" &&
+    !(event.actor?.type === "human" && event.actor.id === currentUserId) &&
+    event.mentions?.some(
+      (participant) =>
+        participant.type === "human" && participant.id === currentUserId
+    )
+  );
+}
+
 export function notificationForRealtimeEvent(
   event: RealtimeEventEnvelope,
   task?: Pick<Task, "status" | "title">,
-  claimTaskId?: string
+  claimTaskId?: string,
+  currentUserId?: string,
+  statusChange?: TaskStatusChangeNotice
 ): NativeNotification | null {
+  // Agents set blocked and review themselves (spec §14); other transitions,
+  // including system block resolutions, stay quiet.
+  if (event.event_type === "task.status_changed") {
+    if (
+      !statusChange ||
+      (event.actor?.type === "human" && event.actor.id === currentUserId)
+    )
+      return null;
+    const destination = {
+      kind: "task" as const,
+      projectId: event.project_id,
+      taskId: statusChange.taskId
+    };
+    if (statusChange.toStatus === "blocked")
+      return {
+        title: "Agent blocked",
+        body: notificationBody(
+          `${statusChange.agentName ?? "An agent"} is blocked on ${statusChange.taskKey}`
+        ),
+        destination
+      };
+    if (statusChange.toStatus === "review")
+      return {
+        title: "Ready for review",
+        body: notificationBody(`${statusChange.taskKey} is ready for review`),
+        destination
+      };
+    return null;
+  }
+  // task.comment_created is keyed by the comment; the task id comes from the
+  // durable event payload (claimTaskId).
+  if (event.event_type === "task.comment_created")
+    return isHumanMentionedInTaskComment(event, currentUserId)
+      ? {
+          title: "You were mentioned",
+          body: `${event.actor?.type === "agent" ? "An agent" : "A teammate"} mentioned you in a task comment.`,
+          destination: claimTaskId
+            ? { kind: "task", projectId: event.project_id, taskId: claimTaskId }
+            : { kind: "activity", projectId: event.project_id }
+        }
+      : null;
   if (event.event_type === "run.failed")
     return {
       title: "Agent run failed",
@@ -187,7 +262,8 @@ export class ProjectRealtimeController {
       | "listProjectEvents"
       | "getTask"
       | "listChats"
-    >,
+    > &
+      Partial<Pick<ApiClient, "listAgents">>,
     private readonly queryClient: QueryClient,
     private readonly projectId: string,
     private readonly socketFactory: SocketFactory = defaultSocket,
@@ -208,7 +284,8 @@ export class ProjectRealtimeController {
     private readonly onReconnectSummary?: (
       missedMessages: ReplayedChatMessage[],
       isCurrent: () => boolean
-    ) => void | Promise<void>
+    ) => void | Promise<void>,
+    private readonly currentUserId: () => string | undefined = () => undefined
   ) {}
 
   getStatus = () => this.status;
@@ -385,6 +462,11 @@ export class ProjectRealtimeController {
       return;
     }
     if (!notificationEventTypes.has(event.event_type)) return;
+    if (
+      event.event_type === "task.comment_created" &&
+      !isHumanMentionedInTaskComment(event, this.currentUserId())
+    )
+      return;
     this.notificationQueue = this.notificationQueue.then(() =>
       this.notifyForEvent(event)
     );
@@ -396,6 +478,9 @@ export class ProjectRealtimeController {
     this.queryClient.removeQueries({
       queryKey: coordinationKeys.all,
       predicate: ({ queryKey }) => queryKey.includes(this.projectId)
+    });
+    this.queryClient.removeQueries({
+      queryKey: attentionKeys.project(this.projectId)
     });
     void this.queryClient.invalidateQueries({
       queryKey: hierarchyKeys.catalog()
@@ -443,6 +528,7 @@ export class ProjectRealtimeController {
       if (!(await this.isBackgrounded()) || this.stopped) return;
       let task: Pick<Task, "status" | "title"> | undefined;
       let claimTaskId: string | undefined;
+      let statusChange: TaskStatusChangeNotice | undefined;
       let resolvedTarget = false;
       if (
         event.entity_type === "task" &&
@@ -452,9 +538,17 @@ export class ProjectRealtimeController {
         task = await this.api.getTask(event.entity_id);
         resolvedTarget = true;
       }
+      const userId = this.currentUserId();
+      if (event.event_type === "task.status_changed") {
+        if (event.actor?.type === "human" && event.actor.id === userId) return;
+        statusChange = await this.statusChange(event);
+        if (!statusChange) return;
+        resolvedTarget = true;
+      }
       if (
         event.event_type === "claim.completed" ||
-        event.event_type === "claim.expired"
+        event.event_type === "claim.expired" ||
+        event.event_type === "task.comment_created"
       ) {
         claimTaskId = await this.claimTaskId(event);
         resolvedTarget = true;
@@ -464,7 +558,9 @@ export class ProjectRealtimeController {
       const notification = notificationForRealtimeEvent(
         event,
         task,
-        claimTaskId
+        claimTaskId,
+        userId,
+        statusChange
       );
       if (!notification || this.stopped) return;
       this.lastNotifiedSequence = event.sequence;
@@ -474,23 +570,71 @@ export class ProjectRealtimeController {
     }
   }
 
+  // Realtime envelopes carry no payload, so notifications that need one read
+  // the durable event back by sequence.
+  private async durableEvent(
+    event: RealtimeEventEnvelope
+  ): Promise<ProjectEvent | undefined> {
+    const response = await this.api.listProjectEvents(this.projectId, {
+      after: event.sequence > 1 ? String(event.sequence - 1) : undefined,
+      limit: 1
+    });
+    return response.events.find(
+      (candidate) =>
+        candidate.id === event.sequence && candidate.type === event.event_type
+    );
+  }
+
   private async claimTaskId(event: RealtimeEventEnvelope) {
     try {
-      const response = await this.api.listProjectEvents(this.projectId, {
-        after: event.sequence > 1 ? String(event.sequence - 1) : undefined,
-        limit: 1
-      });
-      const durable = response.events.find(
-        (candidate) =>
-          candidate.id === event.sequence && candidate.type === event.event_type
-      );
-      const taskId = durable?.payload.task_id;
-      return typeof taskId === "string" &&
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
-          taskId
-        )
+      const taskId = (await this.durableEvent(event))?.payload.task_id;
+      return typeof taskId === "string" && uuidPattern.test(taskId)
         ? taskId
         : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async statusChange(
+    event: RealtimeEventEnvelope
+  ): Promise<TaskStatusChangeNotice | undefined> {
+    try {
+      const durable = await this.durableEvent(event);
+      const toStatus = durable?.payload.to_status;
+      if (toStatus !== "blocked" && toStatus !== "review") return undefined;
+      const taskId =
+        event.entity_id ??
+        (typeof durable?.payload.task_id === "string"
+          ? durable.payload.task_id
+          : null);
+      if (!taskId || !uuidPattern.test(taskId)) return undefined;
+      const task = await this.api.getTask(taskId);
+      const agentId =
+        event.actor?.type === "agent"
+          ? event.actor.id
+          : durable?.actor_agent_id;
+      return {
+        toStatus,
+        taskId,
+        taskKey: task.key,
+        agentName: agentId ? await this.agentName(agentId) : undefined
+      };
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async agentName(agentId: string) {
+    try {
+      const cached = this.queryClient.getQueryData<AgentsResponse>(
+        coordinationKeys.agents(this.projectId)
+      );
+      const agents =
+        cached?.agents ??
+        (await this.api.listAgents?.(this.projectId))?.agents ??
+        [];
+      return agents.find((agent) => agent.id === agentId)?.name;
     } catch {
       return undefined;
     }
@@ -571,12 +715,23 @@ export function ProjectRealtimeProvider({
   const dismissNotice = useCallback((id: string) => {
     setNotices((current) => current.filter((notice) => notice.id !== id));
   }, []);
-  const addNotice = useCallback((notice: ChatNotice) => {
-    setNotices((current) => {
-      if (current.some(({ id }) => id === notice.id)) return current;
-      return [...current, notice].slice(-6);
-    });
-  }, []);
+  const addNotice = useCallback(
+    (notice: ChatNotice, replacesMessage = false) => {
+      setNotices((current) => {
+        if (current.some(({ id }) => id === notice.id)) return current;
+        const kept = replacesMessage
+          ? current.filter(
+              (item) =>
+                item.projectId !== notice.projectId ||
+                item.chatId !== notice.chatId ||
+                item.messageId !== notice.messageId
+            )
+          : current;
+        return [...kept, notice].slice(-6);
+      });
+    },
+    []
+  );
   const notifyChatEvent = useCallback(
     async (
       event: RealtimeEventEnvelope,
@@ -620,13 +775,14 @@ export function ProjectRealtimeProvider({
         event.event_type === "chat.member_added" &&
         event.affected_participant?.type === "human" &&
         event.affected_participant.id === userId;
-      if (!isMessage && !isCreated && !isAdded) return;
-      if (
-        event.actor?.type === "human" &&
-        event.actor.id === userId &&
-        (isMessage || isCreated || isAdded)
-      )
-        return;
+      // A handoff arrives as a direct message first; its notice replaces the
+      // plain message notice for the same message.
+      const isHandoff =
+        event.event_type === "chat.handoff_created" &&
+        event.affected_participant?.type === "human" &&
+        event.affected_participant.id === userId;
+      if (!isMessage && !isCreated && !isAdded && !isHandoff) return;
+      if (event.actor?.type === "human" && event.actor.id === userId) return;
       const accessGeneration = getAccessGeneration();
       const chat = await api.getChat(event.entity_id);
       if (
@@ -661,29 +817,34 @@ export function ProjectRealtimeProvider({
             participant.type === "human" && participant.id === userId
         )
       );
-      const title = isAdded
-        ? `Added to ${name}`
-        : isCreated
-          ? `New chat from ${actor?.name ?? "an agent"}`
-          : mentioned
-            ? `Mentioned in ${name}`
-            : `New message in ${name}`;
-      const body = isAdded
-        ? "You can open the chat to see the full conversation."
-        : isCreated
-          ? "A new conversation is ready."
-          : mentioned
-            ? `${actor?.name ?? "A participant"} mentioned you.`
-            : `${actor?.name ?? "A participant"} sent a message.`;
+      const title = isHandoff
+        ? `Handoff from ${actor?.name ?? "an agent"}`
+        : isAdded
+          ? `Added to ${name}`
+          : isCreated
+            ? `New chat from ${actor?.name ?? "an agent"}`
+            : mentioned
+              ? `Mentioned in ${name}`
+              : `New message in ${name}`;
+      const body = isHandoff
+        ? `${actor?.name ?? "An agent"} handed work to you.`
+        : isAdded
+          ? "You can open the chat to see the full conversation."
+          : isCreated
+            ? "A new conversation is ready."
+            : mentioned
+              ? `${actor?.name ?? "A participant"} mentioned you.`
+              : `${actor?.name ?? "A participant"} sent a message.`;
       const notice: ChatNotice = {
         id: `${event.project_id}:${event.sequence}`,
         projectId: event.project_id,
         chatId: chat.id,
+        ...(event.message_id ? { messageId: event.message_id } : {}),
         title,
         body,
         mentioned
       };
-      addNotice(notice);
+      addNotice(notice, isHandoff && Boolean(event.message_id));
       try {
         if (
           !mountedRef.current ||
@@ -846,7 +1007,8 @@ export function ProjectRealtimeProvider({
               undefined,
               (event, isCurrent) => notifyChatEvent(event, isCurrent),
               (missedMessages, isCurrent) =>
-                summarizeReconnect(projectId, missedMessages, isCurrent)
+                summarizeReconnect(projectId, missedMessages, isCurrent),
+              () => currentUserRef.current
             )
         ),
     [
@@ -869,6 +1031,9 @@ export function ProjectRealtimeProvider({
       queryClient.removeQueries({
         queryKey: coordinationKeys.all,
         predicate: ({ queryKey }) => queryKey.includes(previousId)
+      });
+      queryClient.removeQueries({
+        queryKey: attentionKeys.project(previousId)
       });
       setNotices((current) =>
         current.filter((notice) => notice.projectId !== previousId)

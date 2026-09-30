@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode
 } from "react";
-import { useQueries } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import type { ProjectCatalog } from "@/features/hierarchy/catalog";
 import {
   buildCommands,
@@ -27,6 +27,10 @@ import { ConnectivityBanner } from "@/features/connectivity/connectivity-banner"
 import { WindowDragRegion } from "./top-toolbar";
 import type { ApiClient } from "@/lib/api/client";
 import { inboxQueryOptions } from "@/features/messaging/query-options";
+import {
+  attentionSummaryQueryOptions,
+  taskCommentCounts
+} from "@/features/attention/query-options";
 
 const TopToolbarActionsContext = createContext<
   ((actions: ReactNode | null) => void) | null
@@ -112,6 +116,11 @@ export function AppShell({
     }),
     { unread: 0, mentions: 0 }
   ) ?? { unread: 0, mentions: 0 };
+  const attention = useQuery({
+    ...attentionSummaryQueryOptions(api, activeProjectId ?? ""),
+    enabled: Boolean(current)
+  });
+  const taskCounts = taskCommentCounts(current ? attention.data : undefined);
   const projectIds = catalog.projects.map(({ project }) => project.id);
   const selectProject = (id: string) => {
     const ordered = orderProjects(projectIds, {
@@ -203,6 +212,7 @@ export function AppShell({
           onSignOut={signOut}
           profile={profile}
           messageCounts={messageCounts}
+          taskCounts={taskCounts}
         />
       </aside>
       <div className="flex w-full min-w-0 flex-1 flex-col">

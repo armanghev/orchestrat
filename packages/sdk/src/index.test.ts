@@ -207,6 +207,8 @@ test("maps agent task authoring and comments with stable idempotency keys", asyn
       avatar_url: null
     },
     body_markdown: "Done",
+    sequence: 1,
+    mentions: [],
     created_at: timestamp
   };
   const project = {

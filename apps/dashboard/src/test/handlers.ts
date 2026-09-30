@@ -1,6 +1,6 @@
 import { expect } from "vitest";
 import { http, HttpResponse } from "msw";
-import { organization, project } from "@/test/factories";
+import { attentionSummary, organization, project } from "@/test/factories";
 
 const apiUrl = "http://localhost:8801/api/v1";
 
@@ -106,6 +106,21 @@ export const handlers = [
     assertAuthorization(request);
     assertBodylessRequest(request);
     return HttpResponse.json({ unread_chats: [] });
+  }),
+  http.get(`${apiUrl}/projects/:projectId/attention`, ({ request }) => {
+    assertAuthorization(request);
+    assertBodylessRequest(request);
+    return HttpResponse.json(attentionSummary());
+  }),
+  http.get(`${apiUrl}/projects/:projectId/attention/tasks`, ({ request }) => {
+    assertAuthorization(request);
+    assertBodylessRequest(request);
+    return HttpResponse.json({ tasks: [] });
+  }),
+  http.get(`${apiUrl}/projects/:projectId/attention/agents`, ({ request }) => {
+    assertAuthorization(request);
+    assertBodylessRequest(request);
+    return HttpResponse.json({ agents: [] });
   }),
   http.post(`${apiUrl}/realtime/tickets`, ({ request }) => {
     assertAuthorization(request);

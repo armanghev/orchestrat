@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute } from "@tanstack/react-router";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -66,9 +66,31 @@ import {
   taskQueryOptions,
   tasksQueryOptions
 } from "@/features/coordination/query-options";
-import { DashboardApiError } from "@/lib/api/client";
+import { DashboardApiError, type ApiClient } from "@/lib/api/client";
 import { MarkdownContent } from "@/features/coordination/markdown-content";
-import type { HumanTaskStatus, Task, TaskPriority } from "@orchestrat/protocol";
+import {
+  invalidateAttentionQueries,
+  overlaysByTask,
+  taskAttentionQueryOptions
+} from "@/features/attention/query-options";
+import { TaskAttentionBadge } from "@/features/attention/task-attention-badge";
+import {
+  TaskAttentionPanel,
+  TaskClaimLine
+} from "@/features/attention/task-attention-panel";
+import {
+  BlockedCallout,
+  BlockedTaskLine
+} from "@/features/attention/blocked-callout";
+import { PingDialog } from "@/features/attention/ping-dialog";
+import type {
+  HumanTaskStatus,
+  ParticipantRef,
+  Task,
+  TaskAttentionOverlay,
+  TaskComment,
+  TaskPriority
+} from "@orchestrat/protocol";
 
 export const Route = createFileRoute(
   "/_authenticated/projects/$projectId/tasks"
@@ -117,6 +139,8 @@ function TasksRoute() {
     ...taskDependenciesQueryOptions(api, taskId),
     enabled: selectedInProject
   });
+  const attention = useQuery(taskAttentionQueryOptions(api, projectId));
+  const overlays = overlaysByTask(attention.data?.tasks);
   const refresh = () =>
     queryClient.invalidateQueries({
       queryKey: coordinationKeys.tasks(projectId)
@@ -202,13 +226,28 @@ function TasksRoute() {
     }
   });
   const addComment = useMutation({
-    mutationFn: ({ id, body }: { id: string; body: string }) =>
-      api.createTaskComment(id, { body_markdown: body }, crypto.randomUUID()),
+    mutationFn: ({
+      id,
+      body,
+      mentions
+    }: {
+      id: string;
+      body: string;
+      mentions: ParticipantRef[];
+    }) =>
+      api.createTaskComment(
+        id,
+        { body_markdown: body, mentions },
+        crypto.randomUUID()
+      ),
     onSuccess: async () => {
       setNotice(null);
-      await queryClient.invalidateQueries({
-        queryKey: coordinationKeys.comments(taskId)
-      });
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: coordinationKeys.comments(taskId)
+        }),
+        invalidateAttentionQueries(queryClient, projectId)
+      ]);
     },
     onError: (error) => setNotice(message(error))
   });
@@ -440,6 +479,7 @@ function TasksRoute() {
                                 </span>
                               </button>
                             </CardTitle>
+                            <OpenBlockLine overlay={overlays.get(task.id)} />
                           </CardHeader>
                           <CardContent className="flex items-center justify-between gap-2">
                             <Badge
@@ -451,12 +491,15 @@ function TasksRoute() {
                             >
                               {task.priority} priority
                             </Badge>
-                            {task.comment_count > 0 ? (
-                              <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                                <MessageSquare className="size-3" />
-                                {task.comment_count}
-                              </span>
-                            ) : null}
+                            <span className="flex items-center gap-2">
+                              <UnreadBadge overlay={overlays.get(task.id)} />
+                              {task.comment_count > 0 ? (
+                                <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                                  <MessageSquare className="size-3" />
+                                  {task.comment_count}
+                                </span>
+                              ) : null}
+                            </span>
                           </CardContent>
                         </Card>
                       ))}
@@ -490,17 +533,26 @@ function TasksRoute() {
                   {filtered.map((task) => (
                     <TableRow key={task.id}>
                       <TableCell className="pl-4">
-                        <button
-                          className="flex flex-col gap-1 py-2 text-left"
-                          onClick={() => selectTask(task.id)}
-                        >
-                          <span className="font-mono text-xs text-muted-foreground">
-                            {task.key}
-                          </span>
-                          <span className="max-w-96 truncate font-medium">
-                            {task.title}
-                          </span>
-                        </button>
+                        <div className="flex items-center gap-3">
+                          <div className="flex min-w-0 flex-col py-2">
+                            <button
+                              className="flex min-w-0 flex-col gap-1 text-left"
+                              onClick={() => selectTask(task.id)}
+                            >
+                              <span className="font-mono text-xs text-muted-foreground">
+                                {task.key}
+                              </span>
+                              <span className="max-w-96 truncate font-medium">
+                                {task.title}
+                              </span>
+                            </button>
+                            <OpenBlockLine
+                              overlay={overlays.get(task.id)}
+                              className="mt-1 max-w-96"
+                            />
+                          </div>
+                          <UnreadBadge overlay={overlays.get(task.id)} />
+                        </div>
                       </TableCell>
                       <TableCell>
                         <StatusBadge status={task.status} />
@@ -588,7 +640,14 @@ function TasksRoute() {
           {selected.data && selectedInProject ? (
             <TaskDetail
               key={selected.data.id}
+              api={api}
+              projectId={projectId}
               task={selected.data}
+              attention={
+                attention.isSuccess
+                  ? (overlays.get(selected.data.id) ?? null)
+                  : undefined
+              }
               comments={comments.data?.comments ?? []}
               dependencies={dependencies.data}
               taskOptions={tasks.data.tasks}
@@ -609,8 +668,12 @@ function TasksRoute() {
                   version: selected.data!.version
                 })
               }
-              onComment={(body) =>
-                addComment.mutateAsync({ id: selected.data!.id, body })
+              onComment={(body, mentions) =>
+                addComment.mutateAsync({
+                  id: selected.data!.id,
+                  body,
+                  mentions
+                })
               }
               onAddDependency={(dependsOnTaskId) =>
                 addDependency.mutateAsync({
@@ -747,7 +810,10 @@ function CreateTaskForm({
 }
 
 function TaskDetail({
+  api,
+  projectId,
   task,
+  attention,
   comments,
   dependencies,
   taskOptions,
@@ -762,13 +828,12 @@ function TaskDetail({
   onAddDependency,
   onRemoveDependency
 }: {
+  api: ApiClient;
+  projectId: string;
   task: Task;
-  comments: Array<{
-    id: string;
-    body_markdown: string;
-    created_at: string;
-    author: { type: "human" | "agent"; full_name: string };
-  }>;
+  /** The viewer's overlay; undefined while it loads, null when absent. */
+  attention: TaskAttentionOverlay | null | undefined;
+  comments: TaskComment[];
   dependencies?: { depends_on: Task[]; blocks: Task[] };
   taskOptions: Task[];
   archived: boolean;
@@ -783,17 +848,21 @@ function TaskDetail({
     expected_version: number;
   }) => Promise<Task>;
   onMove: (status: HumanTaskStatus) => void;
-  onComment: (body: string) => Promise<unknown>;
+  onComment: (body: string, mentions: ParticipantRef[]) => Promise<unknown>;
   onAddDependency: (dependsOnTaskId: string) => Promise<unknown>;
   onRemoveDependency: (dependsOnTaskId: string) => Promise<unknown>;
 }) {
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description ?? "");
   const [priority, setPriority] = useState<TaskPriority>(task.priority);
-  const [comment, setComment] = useState("");
   const [dependsOnTaskId, setDependsOnTaskId] = useState("");
   const [base, setBase] = useState(() => taskSnapshot(task));
-  const claimed = task.status === "claimed";
+  // An active claim locks the task whatever its status (agents may move a
+  // claimed task to in_progress or blocked); status is the fallback while the
+  // overlay loads.
+  const claim = attention?.claim ?? null;
+  const claimed =
+    attention === undefined ? task.status === "claimed" : claim !== null;
   const dirty =
     title !== base.title ||
     description !== base.description ||
@@ -806,10 +875,7 @@ function TaskDetail({
       setDescription(next.description);
       setPriority(next.priority);
       setBase(next);
-      if (next.id !== base.id) {
-        setComment("");
-        setDependsOnTaskId("");
-      }
+      if (next.id !== base.id) setDependsOnTaskId("");
     }
   }, [base.id, dirty, task]);
   const existingDependencies = new Set(
@@ -818,6 +884,13 @@ function TaskDetail({
   const dependencyOptions = taskOptions.filter(
     (item) => item.id !== task.id && !existingDependencies.has(item.id)
   );
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const block = attention?.block ?? null;
+  const pingRecipient = claim
+    ? { type: "agent" as const, id: claim.agent_id }
+    : block?.blocked_on
+      ? { type: block.blocked_on.type, id: block.blocked_on.id }
+      : null;
   return (
     <section className="p-5 pt-0" aria-labelledby="task-detail-heading">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -826,6 +899,7 @@ function TaskDetail({
             {task.key} · version {task.version}
           </p>
           <h2
+            ref={headingRef}
             id="task-detail-heading"
             tabIndex={-1}
             className="mt-1 text-xl font-semibold"
@@ -833,25 +907,58 @@ function TaskDetail({
             {task.title}
           </h2>
         </div>
-        {!claimed ? (
-          <NativeSelect
-            aria-label="Move task status"
-            value={task.status}
-            disabled={archived || moving}
-            onChange={(event) => onMove(event.target.value as HumanTaskStatus)}
-          >
-            {statuses.map((status) => (
-              <NativeSelectOption key={status} value={status}>
-                {status.replace("_", " ")}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-        ) : (
-          <p className="rounded bg-muted px-2 py-1 text-xs">
-            Claimed by an agent
-          </p>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {!claimed ? (
+            <NativeSelect
+              aria-label="Move task status"
+              value={task.status}
+              disabled={archived || moving}
+              onChange={(event) =>
+                onMove(event.target.value as HumanTaskStatus)
+              }
+            >
+              {statuses.map((status) => (
+                <NativeSelectOption key={status} value={status}>
+                  {status.replace("_", " ")}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          ) : claim ? (
+            <TaskClaimLine claim={claim} status={task.status} />
+          ) : (
+            <p className="rounded bg-muted px-2 py-1 text-xs">
+              Claimed by an agent
+            </p>
+          )}
+          <PingDialog
+            api={api}
+            projectId={projectId}
+            task={{ id: task.id, key: task.key, title: task.title }}
+            defaultRecipient={pingRecipient}
+            disabled={archived}
+          />
+        </div>
       </div>
+      {block ? (
+        <BlockedCallout
+          api={api}
+          projectId={projectId}
+          taskKey={task.key}
+          block={block}
+          archived={archived}
+          renderTaskLink={(blocking) => (
+            <Link
+              to="/projects/$projectId/tasks"
+              params={{ projectId }}
+              search={{ task: blocking.id }}
+              className="underline underline-offset-4"
+            >
+              <span className="font-mono">{blocking.key}</span> {blocking.title}
+            </Link>
+          )}
+          onResolved={() => headingRef.current?.focus()}
+        />
+      ) : null}
       <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-3">
         <div>
           <dt className="text-xs text-muted-foreground">Priority</dt>
@@ -1044,51 +1151,40 @@ function TaskDetail({
             Blocks:{" "}
             {dependencies?.blocks.map((item) => item.key).join(", ") || "None"}
           </p>
-          <h3 className="mt-5 text-sm font-semibold">Comments</h3>
-          <div className="mt-2 flex flex-col gap-2">
-            {comments.length ? (
-              comments.map((item) => (
-                <div key={item.id} className="rounded bg-muted/50 p-2 text-sm">
-                  <span className="font-medium">
-                    {item.author.full_name}
-                    {item.author.type === "agent" ? " (agent)" : ""}
-                  </span>
-                  <MarkdownContent content={item.body_markdown} empty="" />
-                </div>
-              ))
-            ) : (
-              <p className="text-sm text-muted-foreground">No comments yet.</p>
-            )}
-          </div>
-          <form
-            className="mt-3 flex gap-2"
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (!comment.trim()) return;
-              void onComment(comment.trim())
-                .then(() => setComment(""))
-                .catch(() => undefined);
-            }}
-          >
-            <Input
-              aria-label="Add comment"
-              value={comment}
-              disabled={archived || commenting}
-              onChange={(event) => setComment(event.target.value)}
-              placeholder="Add a Markdown comment"
-            />
-            <Button
-              type="submit"
-              variant="outline"
-              disabled={archived || commenting || !comment.trim()}
-            >
-              {commenting ? "Commenting…" : "Comment"}
-            </Button>
-          </form>
+          <TaskAttentionPanel
+            api={api}
+            projectId={projectId}
+            taskId={task.id}
+            comments={comments}
+            archived={archived}
+            commenting={commenting}
+            onComment={onComment}
+          />
         </div>
       </div>
     </section>
   );
+}
+
+function OpenBlockLine({
+  overlay,
+  className
+}: {
+  overlay?: TaskAttentionOverlay;
+  className?: string;
+}) {
+  return overlay?.block ? (
+    <BlockedTaskLine block={overlay.block} className={className} />
+  ) : null;
+}
+
+function UnreadBadge({ overlay }: { overlay?: TaskAttentionOverlay }) {
+  return overlay?.watching ? (
+    <TaskAttentionBadge
+      unread={overlay.unread_count}
+      mentions={overlay.mention_count}
+    />
+  ) : null;
 }
 
 function taskSnapshot(task: Task) {

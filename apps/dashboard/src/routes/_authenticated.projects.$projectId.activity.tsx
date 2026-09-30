@@ -22,6 +22,7 @@ import { Link, createFileRoute } from "@tanstack/react-router";
 import { coordinationKeys } from "@/features/coordination/query-options";
 import { groupActivityEvents } from "@/features/coordination/group-activity-events";
 import {
+  activitySuffix,
   activityTaskId,
   activityVerb
 } from "@/features/coordination/activity-copy";
@@ -92,6 +93,13 @@ function ActivityRoute() {
   const memberById = new Map(
     (members.data?.members ?? []).map((member) => [member.user_id, member])
   );
+  const participantName = (participant: {
+    type: "human" | "agent";
+    id: string;
+  }) =>
+    participant.type === "agent"
+      ? agentById.get(participant.id)?.name
+      : memberById.get(participant.id)?.full_name;
   return (
     <section className="dashboard-page" aria-label="Project activity">
       <TopToolbarActions>
@@ -162,7 +170,7 @@ function ActivityRoute() {
                     <div className="min-w-0 flex-1 pt-1">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <h3 className="text-sm font-medium">
-                          {actor} {activityVerb(event.type)}{" "}
+                          {actor} {activityVerb(event.type, event.payload)}{" "}
                           {task ? (
                             <Link
                               to="/projects/$projectId/tasks"
@@ -180,7 +188,10 @@ function ActivityRoute() {
                             "a task"
                           ) : event.type.startsWith("document.") ? (
                             "a document"
+                          ) : event.type === "chat.handoff_created" ? (
+                            "work"
                           ) : null}
+                          {activitySuffix(event, participantName)}
                           {groupedEvents.length > 1
                             ? ` (${groupedEvents.length} revisions)`
                             : ""}

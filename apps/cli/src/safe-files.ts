@@ -1,4 +1,5 @@
 import {
+  lstat,
   mkdir,
   mkdtemp,
   readFile,
@@ -46,6 +47,130 @@ export async function atomicWrite(
   return true;
 }
 
+// Writes managed content, or deletes the file when the managed result is
+// "absent" (undefined). Used for whole files Orchestrat owns, such as the
+// OpenCode plugin.
+export async function writeManaged(
+  path: string,
+  next: string | undefined,
+  backup = true
+) {
+  if (next !== undefined) return atomicWrite(path, next, backup);
+  if ((await readOptional(path)) === undefined) return false;
+  await rm(path, { force: true });
+  return true;
+}
+
+// Reads small private state (hook state, locks). Symbolic links and oversized
+// files read as absent so a planted link can never redirect or bloat a hook.
+export async function readPrivateState(path: string, maxBytes = 256 * 1024) {
+  try {
+    const info = await lstat(path);
+    if (!info.isFile() || info.size > maxBytes) return undefined;
+    return await readFile(path, "utf8");
+  } catch {
+    return undefined;
+  }
+}
+
+export async function writePrivateState(path: string, content: string) {
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  const parent = await lstat(dirname(path));
+  if (parent.isSymbolicLink() || !parent.isDirectory())
+    throw new Error("Orchestrat state directory must not be a symbolic link");
+  return atomicWrite(path, content, false);
+}
+
+// Stop continuation (spec §11.3) and Codex/Antigravity MCP budgets are opt-in
+// per integration; these constants are the managed values setup writes.
+export const WAIT_BUDGET_SECONDS = 600;
+export const MCP_TOOL_TIMEOUT_SECONDS = 660;
+export const REWAKE_TIMEOUT_SECONDS = 3600;
+export const CURSOR_STOP_LOOP_LIMIT = 2;
+export type StopHookOptions = { enabled: boolean; rewake?: boolean };
+const quoted = (command: string) => `'${command.replaceAll("'", "'\\''")}'`;
+const stopCommand = (command: string, integration: string, watch = false) =>
+  `${quoted(command)} hook ${integration} --event Stop${watch ? " --watch" : ""}`;
+function managedStopHandlers(
+  command: string,
+  integration: "codex" | "claude-code",
+  stop: StopHookOptions
+) {
+  if (!stop.enabled) return [];
+  return [
+    { type: "command", command: stopCommand(command, integration) },
+    ...(integration === "claude-code" && stop.rewake
+      ? [
+          {
+            type: "command",
+            command: stopCommand(command, integration, true),
+            async: true,
+            asyncRewake: true,
+            timeout: REWAKE_TIMEOUT_SECONDS
+          }
+        ]
+      : [])
+  ];
+}
+const isStopHandler = (value: unknown, integration: string) => {
+  if (!value || typeof value !== "object") return false;
+  const item = value as { type?: unknown; command?: unknown };
+  return (
+    item.type === "command" &&
+    typeof item.command === "string" &&
+    new RegExp(
+      `(?:^|/)orchestrat['"]? hook ${integration} --event Stop(?:\\s|$)`
+    ).test(item.command)
+  );
+};
+
+// Reconciles the managed Stop handlers without touching user handlers. An
+// unexpected Orchestrat Stop command is a conflict, like the other events.
+function reconcileStop(
+  hooks: Record<string, unknown>,
+  integration: "codex" | "claude-code",
+  command: string,
+  stop: StopHookOptions
+) {
+  const desired = managedStopHandlers(command, integration, stop);
+  const allowed = new Set([
+    stopCommand(command, integration),
+    stopCommand(command, integration, true)
+  ]);
+  if (hooks.Stop !== undefined && !Array.isArray(hooks.Stop))
+    throw new Error("Existing Stop hooks must be an array");
+  const groups = (hooks.Stop ?? []) as Record<string, unknown>[];
+  let ours = 0;
+  for (const group of groups) {
+    const handlers = Array.isArray(group?.hooks) ? group.hooks : [];
+    for (const handler of handlers)
+      if (isStopHandler(handler, integration)) {
+        ours += 1;
+        if (!allowed.has((handler as { command: string }).command))
+          throw new Error("Existing Orchestrat Stop hook conflicts");
+      }
+  }
+  const exact = groups.filter(
+    (group) =>
+      group &&
+      group.matcher === undefined &&
+      JSON.stringify(group.hooks) === JSON.stringify(desired)
+  );
+  if (desired.length && exact.length === 1 && ours === desired.length) return;
+  if (!desired.length && !ours) return;
+  const kept = groups.flatMap((group) => {
+    if (!group || !Array.isArray(group.hooks)) return [group];
+    const handlers = (group.hooks as unknown[]).filter(
+      (handler) => !isStopHandler(handler, integration)
+    );
+    if (handlers.length === (group.hooks as unknown[]).length) return [group];
+    return handlers.length ? [{ ...group, hooks: handlers }] : [];
+  });
+  if (desired.length) kept.push({ hooks: desired });
+  if (kept.length) hooks.Stop = kept;
+  else delete hooks.Stop;
+}
+
 export function mergeJson(
   text: string | undefined,
   integration: "claude-code",
@@ -85,37 +210,86 @@ export function mergeJson(
   return `${JSON.stringify(root, null, 2)}\n`;
 }
 
+const tomlArgsPattern = (
+  integration: string,
+  global: boolean,
+  attention: boolean | "any"
+) =>
+  new RegExp(
+    `args\\s*=\\s*\\[\\s*"mcp"\\s*,\\s*"--integration"\\s*,\\s*"${integration}"${global ? '\\s*,\\s*"--global"' : ""}${
+      attention === "any"
+        ? `(?:\\s*,\\s*"--wait-budget-seconds"\\s*,\\s*"${WAIT_BUDGET_SECONDS}")?`
+        : attention
+          ? `\\s*,\\s*"--wait-budget-seconds"\\s*,\\s*"${WAIT_BUDGET_SECONDS}"`
+          : ""
+    }\\s*\\]`
+  );
+const tomlArgs = (integration: string, global: boolean, attention: boolean) =>
+  `args = ["mcp", "--integration", ${JSON.stringify(integration)}${global ? ', "--global"' : ""}${attention ? `, "--wait-budget-seconds", "${WAIT_BUDGET_SECONDS}"` : ""}]`;
+function tomlSection(source: string) {
+  const match = /^[ \t]*\[mcp_servers\.orchestrat\][ \t]*$/m.exec(source);
+  if (!match) return undefined;
+  const bodyStart = match.index + match[0].length;
+  const next = /\n[ \t]*\[/m.exec(source.slice(bodyStart));
+  const end = next ? bodyStart + next.index + 1 : source.length;
+  return { start: match.index, end, section: source.slice(match.index, end) };
+}
+
 export function mergeToml(
   text: string | undefined,
   integration: "codex",
   command: string,
-  global = false
+  global = false,
+  attention = false
 ) {
   const source = text ?? "";
-  if (/^[ \t]*\[mcp_servers\.orchestrat\][ \t]*$/m.test(source)) {
-    const start = source.search(/^[ \t]*\[mcp_servers\.orchestrat\][ \t]*$/m);
-    const rest = source.slice(start);
-    const section = rest.slice(
-      0,
-      rest.search(/\n[ \t]*\[/) >= 0 ? rest.search(/\n[ \t]*\[/) : rest.length
-    );
-    const expectedArgs = new RegExp(
-      `args\\s*=\\s*\\[\\s*"mcp"\\s*,\\s*"--integration"\\s*,\\s*"${integration}"${global ? '\\s*,\\s*"--global"' : ""}\\s*\\]`
-    );
+  const found = tomlSection(source);
+  if (found) {
+    let { section } = found;
     if (
       !section.includes(`command = ${JSON.stringify(command)}`) ||
-      !expectedArgs.test(section)
+      !tomlArgsPattern(integration, global, "any").test(section)
     )
       throw new Error("Existing Orchestrat MCP entry conflicts");
-    return source;
+    // Only rewrite what the opt-in changes, so an unchanged entry keeps the
+    // user's formatting byte for byte.
+    if (!tomlArgsPattern(integration, global, attention).test(section))
+      section = section.replace(
+        /^([ \t]*)args\s*=\s*\[[^\]]*\]/m,
+        (_, indent: string) =>
+          `${indent}${tomlArgs(integration, global, attention)}`
+      );
+    const timeout = `tool_timeout_sec = ${MCP_TOOL_TIMEOUT_SECONDS}`;
+    if (attention) {
+      if (/^[ \t]*tool_timeout_sec\s*=/m.test(section))
+        section = section.replace(
+          /^([ \t]*)tool_timeout_sec\s*=[^\n]*/m,
+          (line, indent: string) =>
+            line.trim() === timeout ? line : `${indent}${timeout}`
+        );
+      else
+        section = section.replace(
+          /^([ \t]*)args\s*=\s*\[[^\]]*\]/m,
+          (line, indent: string) => `${line}\n${indent}${timeout}`
+        );
+    } else
+      section = section.replace(
+        new RegExp(
+          `^[ \\t]*tool_timeout_sec\\s*=\\s*${MCP_TOOL_TIMEOUT_SECONDS}[ \\t]*(?:\\n|$)`,
+          "m"
+        ),
+        ""
+      );
+    return `${source.slice(0, found.start)}${section}${source.slice(found.end)}`;
   }
-  return `${source}${source && !source.endsWith("\n") ? "\n" : ""}\n[mcp_servers.orchestrat]\ncommand = ${JSON.stringify(command)}\nargs = ["mcp", "--integration", ${JSON.stringify(integration)}${global ? ', "--global"' : ""}]\n`;
+  return `${source}${source && !source.endsWith("\n") ? "\n" : ""}\n[mcp_servers.orchestrat]\ncommand = ${JSON.stringify(command)}\n${tomlArgs(integration, global, attention)}\n${attention ? `tool_timeout_sec = ${MCP_TOOL_TIMEOUT_SECONDS}\n` : ""}`;
 }
 
 export function mergeHooks(
   text: string | undefined,
   integration: "codex" | "claude-code",
-  command: string
+  command: string,
+  stop: StopHookOptions = { enabled: false }
 ) {
   const executable = `'${command.replaceAll("'", "'\\''")}'`;
   const value = text === undefined ? {} : JSON.parse(text);
@@ -169,6 +343,7 @@ export function mergeHooks(
     if (!managedPresent) groups.push(managed);
     hooks[event] = groups;
   }
+  reconcileStop(hooks, integration, command, stop);
   root.hooks = hooks;
   return `${JSON.stringify(root, null, 2)}\n`;
 }
@@ -187,12 +362,9 @@ export function removeToml(
   const next = /\n[ \t]*\[/m.exec(text.slice(start + match[0].length));
   const end = next ? start + match[0].length + next.index + 1 : text.length;
   const section = text.slice(start, end);
-  const args = new RegExp(
-    `args\\s*=\\s*\\[\\s*"mcp"\\s*,\\s*"--integration"\\s*,\\s*"${integration}"${global ? '\\s*,\\s*"--global"' : ""}\\s*\\]`
-  );
   if (
     !section.includes(`command = ${JSON.stringify(command)}`) ||
-    !args.test(section)
+    !tomlArgsPattern(integration, global, "any").test(section)
   )
     throw new Error("Existing Orchestrat MCP entry conflicts");
   return `${text.slice(0, start)}${text.slice(end).replace(/^\n/, "")}`;
@@ -256,6 +428,25 @@ export function removeHooks(
     });
     if (!(hooks[event] as unknown[]).length) delete hooks[event];
   }
+  if (Array.isArray(hooks.Stop)) {
+    // Removal never fails on a foreign Stop handler; it drops only ours.
+    const allowed = new Set([
+      stopCommand(command, integration),
+      stopCommand(command, integration, true)
+    ]);
+    const groups = hooks.Stop as Record<string, unknown>[];
+    hooks.Stop = groups.flatMap((group) => {
+      if (!group || !Array.isArray(group.hooks)) return [group];
+      const handlers = group.hooks as Record<string, unknown>[];
+      const kept = handlers.filter(
+        (h) => !(h?.type === "command" && allowed.has(h.command as string))
+      );
+      if (kept.length === handlers.length) return [group];
+      removed = true;
+      return kept.length ? [{ ...group, hooks: kept }] : [];
+    });
+    if (!(hooks.Stop as unknown[]).length) delete hooks.Stop;
+  }
   return removed ? `${JSON.stringify(root, null, 2)}\n` : text;
 }
 
@@ -280,15 +471,33 @@ const jsonObject = (text: string | undefined, message: string) => {
 const managedCommand = (command: string, integration: string, event?: string) =>
   `'${command.replaceAll("'", "'\\''")}' hook ${integration}${event ? ` --event ${event}` : ""}`;
 
+const flatMcpEntry = (
+  command: string,
+  integration: string,
+  cwd: string | undefined,
+  global: boolean,
+  attention: boolean
+) => ({
+  command,
+  args: [
+    ...commandArgs(command, integration, cwd, global).slice(1),
+    ...(attention ? ["--wait-budget-seconds", String(WAIT_BUDGET_SECONDS)] : [])
+  ],
+  ...(attention ? { timeoutSeconds: MCP_TOOL_TIMEOUT_SECONDS } : {})
+});
+
+// `attention` (Codex and Antigravity only) raises the MCP tool timeout and
+// passes the wait budget so `wait_for_update` can hold for ten minutes.
 export function mergeHarnessMcp(
   text: string | undefined,
   integration: ConfigurableIntegration,
   command: string,
   cwd?: string,
-  global = false
+  global = false,
+  attention = false
 ) {
   if (integration === "codex")
-    return mergeToml(text, integration, command, global);
+    return mergeToml(text, integration, command, global, attention);
   if (integration === "claude-code")
     return mergeJson(text, integration, command, global);
   const root = jsonObject(text, "Harness configuration must be a JSON object");
@@ -327,13 +536,19 @@ export function mergeHarnessMcp(
       !Array.isArray(root.mcpServers)
         ? root.mcpServers
         : {};
-    const expected = {
+    const budgeted = attention && integration === "antigravity";
+    const expected = flatMcpEntry(command, integration, cwd, global, budgeted);
+    const alternate = flatMcpEntry(
       command,
-      args: commandArgs(command, integration, cwd, global).slice(1)
-    };
+      integration,
+      cwd,
+      global,
+      integration === "antigravity" && !budgeted
+    );
     if (
       mcp.orchestrat !== undefined &&
-      JSON.stringify(mcp.orchestrat) !== JSON.stringify(expected)
+      JSON.stringify(mcp.orchestrat) !== JSON.stringify(expected) &&
+      JSON.stringify(mcp.orchestrat) !== JSON.stringify(alternate)
     )
       throw new Error("Existing Orchestrat MCP entry conflicts");
     mcp.orchestrat = expected;
@@ -359,23 +574,23 @@ export function removeHarnessMcp(
     integration === "opencode"
       ? (root.mcp?.servers ?? root.mcp)
       : root.mcpServers;
-  const expected =
+  const expected: Record<string, unknown> =
     integration === "opencode"
       ? {
           type: "local",
           command: commandArgs(command, integration, cwd, global)
         }
-      : {
-          command,
-          args: commandArgs(command, integration, cwd, global).slice(1)
-        };
+      : flatMcpEntry(command, integration, cwd, global, false);
+  const budgeted = flatMcpEntry(command, integration, cwd, global, true);
   if (parent?.orchestrat === undefined) return text;
   if (
     integration === "opencode"
       ? parent.orchestrat.type !== expected.type ||
         JSON.stringify(parent.orchestrat.command) !==
           JSON.stringify(expected.command)
-      : JSON.stringify(parent.orchestrat) !== JSON.stringify(expected)
+      : JSON.stringify(parent.orchestrat) !== JSON.stringify(expected) &&
+        (integration !== "antigravity" ||
+          JSON.stringify(parent.orchestrat) !== JSON.stringify(budgeted))
   )
     throw new Error("Existing Orchestrat MCP entry conflicts");
   delete parent.orchestrat;
@@ -385,10 +600,11 @@ export function removeHarnessMcp(
 export function mergeHarnessHooks(
   text: string | undefined,
   integration: ConfigurableIntegration,
-  command: string
+  command: string,
+  stop: StopHookOptions = { enabled: false }
 ) {
   if (integration === "codex" || integration === "claude-code")
-    return mergeHooks(text, integration, command);
+    return mergeHooks(text, integration, command, stop);
   const root = jsonObject(text, "Hook configuration must be a JSON object");
   if (integration === "cursor") {
     if (root.version !== undefined && root.version !== 1)
@@ -412,6 +628,7 @@ export function mergeHarnessHooks(
       if (!managed.length) entries.push(expected);
       hooks[event] = entries;
     }
+    reconcileCursorStop(hooks, command, stop.enabled);
     root.version = 1;
     root.hooks = hooks;
   } else {
@@ -430,6 +647,40 @@ export function mergeHarnessHooks(
     root.orchestrat = expected;
   }
   return `${JSON.stringify(root, null, 2)}\n`;
+}
+
+// Cursor's `stop` fires every turn. The managed entry keeps the lifecycle
+// ingest and adds `followup_message`; `loop_limit` caps continuations.
+function reconcileCursorStop(
+  hooks: Record<string, unknown>,
+  command: string,
+  enabled: boolean
+) {
+  if (hooks.stop !== undefined && !Array.isArray(hooks.stop))
+    throw new Error("Cursor stop hooks must be an array");
+  const entries = (hooks.stop ?? []) as { command?: unknown }[];
+  const expected = {
+    command: managedCommand(command, "cursor", "stop"),
+    loop_limit: CURSOR_STOP_LOOP_LIMIT
+  };
+  const managed = entries.filter(
+    (entry) =>
+      typeof entry?.command === "string" &&
+      /(?:^|\/)orchestrat['"]? hook cursor(?:\s|$)/.test(entry.command)
+  );
+  if (managed.some((entry) => entry.command !== expected.command))
+    throw new Error("Existing Orchestrat stop hook conflicts");
+  if (
+    enabled &&
+    managed.length === 1 &&
+    JSON.stringify(managed[0]) === JSON.stringify(expected)
+  )
+    return;
+  if (!enabled && !managed.length) return;
+  const kept = entries.filter((entry) => !managed.includes(entry));
+  if (enabled) kept.push(expected);
+  if (kept.length) hooks.stop = kept;
+  else delete hooks.stop;
 }
 
 export function removeHarnessHooks(
@@ -460,6 +711,14 @@ export function removeHarnessHooks(
       const kept = entries.filter((entry) => entry.command !== expected);
       if (kept.length) hooks[event] = kept;
       else delete hooks[event];
+    }
+    if (Array.isArray(hooks.stop)) {
+      const expected = managedCommand(command, integration, "stop");
+      const kept = (hooks.stop as { command?: unknown }[]).filter(
+        (entry) => entry?.command !== expected
+      );
+      if (kept.length) hooks.stop = kept;
+      else delete hooks.stop;
     }
     if (!Object.keys(hooks).length) delete root.hooks;
   } else {

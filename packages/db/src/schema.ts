@@ -241,11 +241,21 @@ export const taskComments = pgTable(
     authorAgentId: uuid("author_agent_id"),
     authorName: text("author_name").notNull(),
     bodyMarkdown: text("body_markdown").notNull(),
+    // Per-task, contiguous from 1; assigned under the task row lock.
+    sequence: integer("sequence").notNull(),
+    mentions: jsonb("mentions")
+      .$type<{ type: "human" | "agent"; id: string; name: string }[]>()
+      .default([])
+      .notNull(),
     createdAt: timestamp("created_at", { withTimezone: true, precision: 3 })
       .defaultNow()
       .notNull()
   },
   (table) => [
+    uniqueIndex("task_comments_task_sequence_unique").on(
+      table.taskId,
+      table.sequence
+    ),
     index("task_comments_task_created_idx").on(
       table.taskId,
       table.createdAt,
@@ -268,7 +278,8 @@ export const taskComments = pgTable(
     check(
       "task_comments_body_not_blank",
       sql`btrim(${table.bodyMarkdown}) <> ''`
-    )
+    ),
+    check("task_comments_sequence_positive", sql`${table.sequence} > 0`)
   ]
 );
 
@@ -1079,5 +1090,229 @@ export const chatMessages = pgTable(
       sql`btrim(${table.bodyMarkdown}) <> ''`
     ),
     check("chat_messages_sequence_positive", sql`${table.sequence} > 0`)
+  ]
+).enableRLS();
+
+export const taskWatches = pgTable(
+  "task_watches",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    projectId: uuid("project_id").notNull(),
+    taskId: uuid("task_id").notNull(),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+    agentId: uuid("agent_id"),
+    // watching | muted
+    state: text("state").default("watching").notNull(),
+    // created | claimed | commented | mentioned | handoff | explicit
+    reason: text("reason").notNull(),
+    lastReadSequence: integer("last_read_sequence").default(0).notNull(),
+    claimBaselineSequence: integer("claim_baseline_sequence"),
+    ...timestamps
+  },
+  (table) => [
+    unique("task_watches_user_unique").on(table.taskId, table.userId),
+    unique("task_watches_agent_unique").on(table.taskId, table.agentId),
+    index("task_watches_project_agent_idx").on(table.projectId, table.agentId),
+    index("task_watches_project_user_idx").on(table.projectId, table.userId),
+    foreignKey({
+      columns: [table.projectId, table.taskId],
+      foreignColumns: [tasks.projectId, tasks.id],
+      name: "task_watches_task_project_fk"
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.projectId, table.agentId],
+      foreignColumns: [agents.projectId, agents.id],
+      name: "task_watches_agent_project_fk"
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.projectId, table.userId],
+      foreignColumns: [projectMembers.projectId, projectMembers.userId],
+      name: "task_watches_user_project_fk"
+    }).onDelete("cascade"),
+    check(
+      "task_watches_actor_consistent",
+      sql`(${table.userId} is not null and ${table.agentId} is null) or (${table.agentId} is not null and ${table.userId} is null)`
+    ),
+    check(
+      "task_watches_state_valid",
+      sql`${table.state} in ('watching', 'muted')`
+    ),
+    check("task_watches_read_nonnegative", sql`${table.lastReadSequence} >= 0`)
+  ]
+).enableRLS();
+
+export const taskBlocks = pgTable(
+  "task_blocks",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    projectId: uuid("project_id").notNull(),
+    taskId: uuid("task_id").notNull(),
+    createdByType: documentAuthorType("created_by_type").notNull(),
+    createdByUserId: uuid("created_by_user_id").references(() => users.id, {
+      onDelete: "restrict"
+    }),
+    createdByAgentId: uuid("created_by_agent_id"),
+    // The claim active when the block was set; informational only.
+    claimId: uuid("claim_id").references(() => taskClaims.id, {
+      onDelete: "set null"
+    }),
+    reason: text("reason").notNull(),
+    blockingTaskId: uuid("blocking_task_id"),
+    blockedOnUserId: uuid("blocked_on_user_id").references(() => users.id, {
+      onDelete: "restrict"
+    }),
+    blockedOnAgentId: uuid("blocked_on_agent_id"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    // blocking_task_done | blocking_task_cancelled | participant_responded |
+    // status_changed | moved_by_human | resolved_by_human | released
+    resolution: text("resolution"),
+    resolvedByUserId: uuid("resolved_by_user_id").references(() => users.id, {
+      onDelete: "restrict"
+    }),
+    resolvedByAgentId: uuid("resolved_by_agent_id"),
+    resolutionSeenAt: timestamp("resolution_seen_at", { withTimezone: true })
+  },
+  (table) => [
+    uniqueIndex("task_blocks_one_open_per_task")
+      .on(table.taskId)
+      .where(sql`${table.resolvedAt} is null`),
+    index("task_blocks_open_blocking_task_idx")
+      .on(table.projectId, table.blockingTaskId)
+      .where(sql`${table.resolvedAt} is null`),
+    index("task_blocks_open_blocked_on_idx")
+      .on(table.projectId, table.blockedOnAgentId)
+      .where(sql`${table.resolvedAt} is null`),
+    index("task_blocks_creator_idx").on(
+      table.projectId,
+      table.createdByAgentId
+    ),
+    foreignKey({
+      columns: [table.projectId, table.taskId],
+      foreignColumns: [tasks.projectId, tasks.id],
+      name: "task_blocks_task_project_fk"
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.projectId, table.blockingTaskId],
+      foreignColumns: [tasks.projectId, tasks.id],
+      name: "task_blocks_blocking_task_project_fk"
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.projectId, table.createdByAgentId],
+      foreignColumns: [agents.projectId, agents.id],
+      name: "task_blocks_created_by_agent_project_fk"
+    }),
+    foreignKey({
+      columns: [table.projectId, table.blockedOnAgentId],
+      foreignColumns: [agents.projectId, agents.id],
+      name: "task_blocks_blocked_on_agent_project_fk"
+    }),
+    foreignKey({
+      columns: [table.projectId, table.resolvedByAgentId],
+      foreignColumns: [agents.projectId, agents.id],
+      name: "task_blocks_resolved_by_agent_project_fk"
+    }),
+    check(
+      "task_blocks_creator_consistent",
+      sql`(${table.createdByType} = 'human' and ${table.createdByUserId} is not null and ${table.createdByAgentId} is null) or (${table.createdByType} = 'agent' and ${table.createdByAgentId} is not null and ${table.createdByUserId} is null)`
+    ),
+    check("task_blocks_reason_not_blank", sql`btrim(${table.reason}) <> ''`),
+    check(
+      "task_blocks_not_self",
+      sql`${table.blockingTaskId} is null or ${table.blockingTaskId} <> ${table.taskId}`
+    ),
+    check(
+      "task_blocks_on_single",
+      sql`${table.blockedOnUserId} is null or ${table.blockedOnAgentId} is null`
+    ),
+    check(
+      "task_blocks_resolved_by_single",
+      sql`${table.resolvedByUserId} is null or ${table.resolvedByAgentId} is null`
+    ),
+    check(
+      "task_blocks_resolution_consistent",
+      sql`(${table.resolvedAt} is null and ${table.resolution} is null) or (${table.resolvedAt} is not null and ${table.resolution} is not null)`
+    )
+  ]
+).enableRLS();
+
+export const handoffs = pgTable(
+  "handoffs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    projectId: uuid("project_id").notNull(),
+    chatId: uuid("chat_id").notNull(),
+    messageId: uuid("message_id")
+      .notNull()
+      .references(() => chatMessages.id, { onDelete: "cascade" }),
+    messageSequence: integer("message_sequence").notNull(),
+    fromUserId: uuid("from_user_id").references(() => users.id, {
+      onDelete: "restrict"
+    }),
+    fromAgentId: uuid("from_agent_id"),
+    toUserId: uuid("to_user_id").references(() => users.id, {
+      onDelete: "restrict"
+    }),
+    toAgentId: uuid("to_agent_id"),
+    taskId: uuid("task_id"),
+    chainId: uuid("chain_id").notNull(),
+    hop: integer("hop").default(0).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    unique("handoffs_message_unique").on(table.messageId),
+    index("handoffs_project_to_agent_created_idx").on(
+      table.projectId,
+      table.toAgentId,
+      table.createdAt
+    ),
+    index("handoffs_project_to_user_created_idx").on(
+      table.projectId,
+      table.toUserId,
+      table.createdAt
+    ),
+    index("handoffs_project_from_agent_created_idx").on(
+      table.projectId,
+      table.fromAgentId,
+      table.createdAt
+    ),
+    index("handoffs_chain_idx").on(table.chainId),
+    foreignKey({
+      columns: [table.projectId, table.chatId],
+      foreignColumns: [chats.projectId, chats.id],
+      name: "handoffs_chat_project_fk"
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.projectId, table.taskId],
+      foreignColumns: [tasks.projectId, tasks.id],
+      name: "handoffs_task_project_fk"
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.projectId, table.fromAgentId],
+      foreignColumns: [agents.projectId, agents.id],
+      name: "handoffs_from_agent_project_fk"
+    }),
+    foreignKey({
+      columns: [table.projectId, table.toAgentId],
+      foreignColumns: [agents.projectId, agents.id],
+      name: "handoffs_to_agent_project_fk"
+    }),
+    check(
+      "handoffs_from_single",
+      sql`(${table.fromUserId} is null) <> (${table.fromAgentId} is null)`
+    ),
+    check(
+      "handoffs_to_single",
+      sql`(${table.toUserId} is null) <> (${table.toAgentId} is null)`
+    ),
+    check(
+      "handoffs_message_sequence_positive",
+      sql`${table.messageSequence} > 0`
+    ),
+    check("handoffs_hop_nonnegative", sql`${table.hop} >= 0`)
   ]
 ).enableRLS();

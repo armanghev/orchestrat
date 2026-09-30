@@ -22,7 +22,18 @@ import { idempotencyKeySchema } from "@orchestrat/protocol";
 import { and, asc, count, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import { ApiError } from "./api-error.js";
 import { insertProjectEvent } from "./agent-service.js";
+import {
+  nextCommentSequence,
+  onTaskCommentCreated,
+  onTaskCreated,
+  resolveCommentMentions
+} from "./attention-hooks.js";
 import { PermissionService } from "./permission-service.js";
+import {
+  hasActiveClaim,
+  onTaskMoved,
+  resolveBlocksOnParticipantResponse
+} from "./task-block-hooks.js";
 import { TaskClaimService } from "./task-claim-service.js";
 
 const hash = (value: unknown) =>
@@ -247,6 +258,7 @@ export class TaskService {
           type: "task.created",
           payload: { status: task.status }
         });
+        await onTaskCreated(tx, { projectId, taskId: task.id, actor });
         return taskJson(task);
       })();
       await tx
@@ -481,7 +493,7 @@ export class TaskService {
           "Task version is stale.",
           { current_version: locked?.version }
         );
-      if (locked.status === "claimed")
+      if (locked.status === "claimed" || (await hasActiveClaim(tx, id)))
         throw new ApiError(
           409,
           "TASK_NOT_CLAIMABLE",
@@ -571,6 +583,13 @@ export class TaskService {
         type: "task.moved",
         payload: { from_status: locked.status, to_status: input.status }
       });
+      await onTaskMoved(tx, {
+        projectId: locked.projectId,
+        taskId: id,
+        fromStatus: locked.status,
+        toStatus: input.status,
+        userId
+      });
       return taskJson(moved);
     });
   }
@@ -622,6 +641,8 @@ export class TaskService {
           avatar_url: user?.avatarUrl ?? null
         },
         body_markdown: comment.bodyMarkdown,
+        sequence: comment.sequence,
+        mentions: comment.mentions,
         created_at: comment.createdAt.toISOString()
       })),
       next_cursor:
@@ -723,16 +744,38 @@ export class TaskService {
                     .where(eq(agents.id, actor.id))
                     .limit(1)
                 )[0]!.name,
-          bodyMarkdown: input.body_markdown
+          bodyMarkdown: input.body_markdown,
+          sequence: await nextCommentSequence(tx, id),
+          mentions: await resolveCommentMentions(tx, projectId, input.mentions)
         })
         .returning();
+      const mentionRefs = comment.mentions.map(({ type, id }) => ({
+        type,
+        id
+      }));
       await insertProjectEvent(tx, {
         projectId,
         actorUserId: actor.type === "human" ? actor.id : null,
         actorAgentId: actor.type === "agent" ? actor.id : null,
         entityId: comment.id,
         type: "task.comment_created",
-        payload: { task_id: id }
+        payload: {
+          task_id: id,
+          sequence: comment.sequence,
+          mentions: mentionRefs
+        }
+      });
+      await onTaskCommentCreated(tx, {
+        projectId,
+        taskId: id,
+        sequence: comment.sequence,
+        actor,
+        mentions: mentionRefs
+      });
+      await resolveBlocksOnParticipantResponse(tx, {
+        projectId,
+        taskId: id,
+        participant: actor
       });
       const [record] = await tx
         .select({ comment: taskComments, user: users })
@@ -752,6 +795,8 @@ export class TaskService {
           avatar_url: record.user?.avatarUrl ?? null
         },
         body_markdown: record.comment.bodyMarkdown,
+        sequence: record.comment.sequence,
+        mentions: record.comment.mentions,
         created_at: record.comment.createdAt.toISOString()
       };
       await tx

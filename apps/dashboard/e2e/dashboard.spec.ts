@@ -23,6 +23,9 @@ type HierarchyState = {
   chats?: Array<Record<string, unknown>>;
   messageCandidates?: Array<Record<string, unknown>>;
   messages?: Record<string, Array<Record<string, unknown>>>;
+  attention?: Record<string, unknown>;
+  taskAttention?: Array<Record<string, unknown>>;
+  agentAttention?: Array<Record<string, unknown>>;
   failingOrganizationId?: string;
   abortOrganizations?: boolean;
   unauthorized?: "once" | "always";
@@ -83,6 +86,10 @@ async function mockHierarchy(page: Page, state: HierarchyState) {
         document_ids: string[];
       }
     | undefined;
+  const handoffs: Array<{
+    body: Record<string, unknown>;
+    idempotencyKey: string | undefined;
+  }> = [];
   const sockets = new Map<string, WebSocketRoute>();
   await page.routeWebSocket(
     "wss://api.orchestrat.test/api/v1/realtime/**",
@@ -273,6 +280,47 @@ async function mockHierarchy(page: Page, state: HierarchyState) {
       });
     if (/^\/api\/v1\/projects\/[^/]+\/inbox$/.test(path))
       return route.fulfill({ json: { unread_chats: [] } });
+    if (/^\/api\/v1\/projects\/[^/]+\/attention$/.test(path))
+      return route.fulfill({
+        json: state.attention ?? attentionSummary()
+      });
+    if (/^\/api\/v1\/projects\/[^/]+\/attention\/tasks$/.test(path))
+      return route.fulfill({ json: { tasks: state.taskAttention ?? [] } });
+    if (/^\/api\/v1\/projects\/[^/]+\/attention\/agents$/.test(path))
+      return route.fulfill({ json: { agents: state.agentAttention ?? [] } });
+    const handoff = path.match(/^\/api\/v1\/projects\/([^/]+)\/handoffs$/);
+    if (handoff && method === "POST") {
+      const body = route.request().postDataJSON() as {
+        to: { type: "human" | "agent"; id: string };
+        body_markdown: string;
+        task_id?: string;
+      };
+      handoffs.push({
+        body,
+        idempotencyKey: route.request().headers()["idempotency-key"]
+      });
+      const recipient = (state.messageCandidates ?? []).find(
+        (candidate) =>
+          candidate.type === body.to.type && candidate.id === body.to.id
+      );
+      return route.fulfill({
+        status: 201,
+        json: {
+          handoff: {
+            id: "00000000-0000-4000-8000-000000000060",
+            chat_id: "00000000-0000-4000-8000-000000000061",
+            message_id: "00000000-0000-4000-8000-000000000062",
+            message_sequence: 1,
+            from: { type: "human", id: ids.user, name: "E2E User" },
+            to: { ...body.to, name: recipient?.name ?? "Agent" },
+            task: null,
+            chain_id: "00000000-0000-4000-8000-000000000063",
+            hop: 0,
+            created_at: now
+          }
+        }
+      });
+    }
     const chat = path.match(/^\/api\/v1\/chats\/([^/]+)$/);
     if (chat && method === "GET") {
       const value = state.chats?.find(({ id }) => id === chat[1]);
@@ -387,7 +435,20 @@ async function mockHierarchy(page: Page, state: HierarchyState) {
     getChat: (chatId: string) => state.chats?.find(({ id }) => id === chatId),
     getLastCreatedChat: () => lastCreatedChat,
     getLastSentMessage: () => lastSentMessage,
+    getHandoffs: () => handoffs,
     getSocket: (projectId: string) => sockets.get(projectId)
+  };
+}
+
+function attentionSummary(tasks: Array<Record<string, unknown>> = []) {
+  return {
+    cursor: "0",
+    branch_id: null,
+    unread_chats: [],
+    tasks,
+    handoffs: [],
+    blockers_resolved: [],
+    truncated: false
   };
 }
 
@@ -401,6 +462,14 @@ async function seed(
     localStorage.setItem("orchestrat.e2e.auth", value);
     sessionStorage.setItem("orchestrat.e2e.seeded", "true");
   }, authentication);
+}
+// Sheets and dialogs fade in; contrast checks must wait for the final colors.
+async function settle(page: Page) {
+  await page.waitForFunction(() =>
+    document
+      .getAnimations()
+      .every((animation) => animation.playState !== "running")
+  );
 }
 async function expectNoAxe(page: Page) {
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
@@ -588,6 +657,8 @@ test("@phone creates, edits, and comments on a task with human and agent authors
         avatar_url: null
       },
       body_markdown: "Agent context is ready.",
+      sequence: 1,
+      mentions: [],
       created_at: now
     }
   ];
@@ -653,6 +724,8 @@ test("@phone creates, edits, and comments on a task with human and agent authors
             avatar_url: null
           },
           body_markdown: body.body_markdown,
+          sequence: comments.length + 1,
+          mentions: [],
           created_at: now
         };
         comments = [...comments, created];
@@ -785,6 +858,465 @@ test("@phone task details render Markdown and edit dependencies", async ({
       .locator("#main-content")
       .evaluate((element) => element.scrollWidth <= element.clientWidth)
   ).toBe(true);
+  await expectNoAxe(page);
+});
+
+test("@phone task attention shows unread badges, a New divider, and a watch toggle in both themes", async ({
+  page
+}) => {
+  await page.emulateMedia({ colorScheme: "light" });
+  const task = {
+    id: ids.task,
+    project_id: ids.alpha,
+    key: "ALPHA-1",
+    title: "Review attention",
+    description: null,
+    priority: "medium",
+    status: "in_progress",
+    position: 0,
+    version: 1,
+    created_by: { type: "human", id: ids.user },
+    created_by_user_id: ids.user,
+    created_at: now,
+    updated_at: now,
+    started_at: null,
+    completed_at: null,
+    cancelled_at: null,
+    comment_count: 3,
+    unresolved_blocker_count: 0
+  };
+  const comment = (sequence: number, body: string) => ({
+    id: `00000000-0000-4000-8000-0000000001${String(sequence).padStart(2, "0")}`,
+    task_id: ids.task,
+    author: {
+      type: "agent",
+      id: ids.agent,
+      user_id: null,
+      agent_id: ids.agent,
+      username: null,
+      full_name: "Codex",
+      avatar_url: null
+    },
+    body_markdown: body,
+    sequence,
+    mentions:
+      sequence === 3 ? [{ type: "human", id: ids.user, name: "E2E User" }] : [],
+    created_at: now
+  });
+  const comments = [
+    comment(1, "Earlier context."),
+    comment(2, "Tests are green."),
+    comment(3, "Can you review?")
+  ];
+  const attention = { watching: true, lastRead: 1, unread: 2, mentions: 1 };
+  const state: HierarchyState = { ...populatedState(), tasks: [task] };
+  const sync = () => {
+    state.taskAttention = [
+      {
+        task_id: ids.task,
+        watching: attention.watching,
+        unread_count: attention.unread,
+        mention_count: attention.mentions,
+        claim: null,
+        block: null
+      }
+    ];
+    state.attention = attentionSummary(
+      attention.watching && attention.unread
+        ? [
+            {
+              task_id: ids.task,
+              key: task.key,
+              title: task.title,
+              status: task.status,
+              watching: true,
+              claimed_by_you: false,
+              unread_count: attention.unread,
+              mention_count: attention.mentions,
+              blocking_unread_count: 0,
+              last_read_sequence: attention.lastRead,
+              latest_sequence: 3,
+              unread: []
+            }
+          ]
+        : []
+    );
+  };
+  sync();
+  const reads: number[] = [];
+  const watches: boolean[] = [];
+  await seed(page);
+  await mockHierarchy(page, state);
+  await page.route(
+    `https://api.orchestrat.test/api/v1/tasks/${ids.task}**`,
+    async (route) => {
+      const path = new URL(route.request().url()).pathname;
+      const watchState = () => ({
+        task_id: ids.task,
+        state: attention.watching ? "watching" : "muted",
+        reason: "explicit",
+        last_read_sequence: attention.lastRead
+      });
+      if (path.endsWith("/comments/read")) {
+        const body = route.request().postDataJSON() as {
+          through_sequence: number;
+        };
+        reads.push(body.through_sequence);
+        Object.assign(attention, {
+          lastRead: body.through_sequence,
+          unread: 0,
+          mentions: 0
+        });
+        sync();
+        return route.fulfill({ json: watchState() });
+      }
+      if (path.endsWith("/watch")) {
+        const body = route.request().postDataJSON() as { watching: boolean };
+        watches.push(body.watching);
+        attention.watching = body.watching;
+        sync();
+        return route.fulfill({ json: watchState() });
+      }
+      if (path.endsWith("/comments"))
+        return route.fulfill({ json: { comments, next_cursor: null } });
+      if (path.endsWith("/dependencies"))
+        return route.fulfill({ json: { depends_on: [], blocks: [] } });
+      return route.fulfill({ json: task });
+    }
+  );
+  await page.goto(`/projects/${ids.alpha}/tasks`);
+  await expect(
+    page.getByRole("img", { name: "2 unread comments, 1 mention" })
+  ).toBeVisible();
+  const phone = (page.viewportSize()?.width ?? 1280) < 768;
+  if (phone)
+    await page.getByRole("button", { name: "Open navigation" }).click();
+  await expect(
+    page.getByRole("img", { name: "2 unread task comments, 1 mention" })
+  ).toBeVisible();
+  // Let the mobile sidebar sheet finish its entrance before checking contrast.
+  await page.waitForFunction(() =>
+    document
+      .getAnimations()
+      .every((animation) => animation.playState !== "running")
+  );
+  await expectNoAxe(page);
+  await page.emulateMedia({ colorScheme: "dark" });
+  await expect(page.locator("html")).toHaveClass(/dark/);
+  await page.waitForTimeout(250);
+  await expectNoAxe(page);
+  if (phone) {
+    await page.getByRole("button", { name: /^Tasks/ }).click();
+    await expect(
+      page.getByRole("dialog", { name: "Sidebar" })
+    ).not.toBeVisible();
+  }
+  await page.getByRole("button", { name: "ALPHA-1 Review attention" }).click();
+  const sheet = page.getByRole("dialog", { name: "Task details" });
+  const divider = sheet
+    .getByRole("list", { name: "Task comments" })
+    .getByText("New", { exact: true });
+  await divider.scrollIntoViewIfNeeded();
+  await expect(divider).toBeVisible();
+  await expect(
+    sheet.getByRole("listitem").filter({ hasText: "Tests are green." })
+  ).toBeVisible();
+  await expect.poll(() => reads).toEqual([3]);
+  // The divider stays where the unread comments started after the read.
+  await expect(divider).toBeVisible();
+  await expectNoAxe(page);
+  await page.emulateMedia({ colorScheme: "light" });
+  await expect(page.locator("html")).not.toHaveClass(/dark/);
+  await page.waitForTimeout(250);
+  await expectNoAxe(page);
+  const toggle = sheet.getByRole("button", { name: "Watch task" });
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  expect(watches).toEqual([false]);
+  expect(
+    await page
+      .locator("#main-content")
+      .evaluate((element) => element.scrollWidth <= element.clientWidth)
+  ).toBe(true);
+  await expectNoAxe(page);
+});
+
+test("@phone blocked tasks show the card line and callout, and Resolve blocker confirms in both themes", async ({
+  page
+}) => {
+  await page.emulateMedia({ colorScheme: "light" });
+  const blockingTaskId = "00000000-0000-4000-8000-000000000012";
+  const baseTask = {
+    project_id: ids.alpha,
+    description: null,
+    priority: "medium",
+    position: 0,
+    version: 1,
+    created_by: { type: "human", id: ids.user },
+    created_by_user_id: ids.user,
+    created_at: now,
+    updated_at: now,
+    started_at: null,
+    completed_at: null,
+    cancelled_at: null,
+    comment_count: 0,
+    unresolved_blocker_count: 0
+  };
+  let task: Record<string, unknown> = {
+    ...baseTask,
+    id: ids.task,
+    key: "ALPHA-1",
+    title: "Wire the API",
+    status: "blocked"
+  };
+  const blocking = {
+    ...baseTask,
+    id: blockingTaskId,
+    key: "ALPHA-2",
+    title: "Ship the contract",
+    status: "in_progress",
+    position: 1
+  };
+  const block = {
+    id: "00000000-0000-4000-8000-000000000040",
+    task_id: ids.task,
+    reason: "Waiting for the handoff schema to land.",
+    blocking_task: {
+      id: blockingTaskId,
+      key: "ALPHA-2",
+      title: blocking.title
+    },
+    blocked_on: { type: "agent", id: ids.agent, name: "Codex" },
+    created_by: { type: "agent", id: ids.agent, name: "Codex" },
+    created_at: new Date(Date.now() - 12 * 60_000).toISOString(),
+    resolved_at: null,
+    resolution: null
+  };
+  const state: HierarchyState = {
+    ...populatedState(),
+    tasks: [task, blocking],
+    messageCandidates: [
+      { type: "agent", id: ids.agent, name: "Codex", avatar_url: null }
+    ],
+    taskAttention: [
+      {
+        task_id: ids.task,
+        watching: false,
+        unread_count: 0,
+        mention_count: 0,
+        claim: null,
+        block
+      }
+    ]
+  };
+  const resolves: unknown[] = [];
+  await seed(page);
+  await mockHierarchy(page, state);
+  await page.route(
+    `https://api.orchestrat.test/api/v1/tasks/${ids.task}**`,
+    async (route) => {
+      const path = new URL(route.request().url()).pathname;
+      if (path.endsWith("/block/resolve")) {
+        resolves.push(route.request().postDataJSON());
+        task = { ...task, status: "ready", version: 2 };
+        state.tasks = [task, blocking];
+        state.taskAttention = [];
+        return route.fulfill({
+          json: {
+            ...block,
+            resolved_at: now,
+            resolution: "resolved_by_human"
+          }
+        });
+      }
+      if (path.endsWith("/comments"))
+        return route.fulfill({ json: { comments: [], next_cursor: null } });
+      if (path.endsWith("/dependencies"))
+        return route.fulfill({ json: { depends_on: [], blocks: [] } });
+      return route.fulfill({ json: task });
+    }
+  );
+  await page.goto(`/projects/${ids.alpha}/tasks`);
+  const cardLine = page.getByText("Blocked by ALPHA-2 · waiting on Codex");
+  await expect(cardLine).toBeVisible();
+  await settle(page);
+  await expectNoAxe(page);
+  await page.getByRole("tab", { name: "List" }).click();
+  await expect(
+    page.getByRole("table").getByText("Blocked by ALPHA-2 · waiting on Codex")
+  ).toBeVisible();
+  await page.getByRole("tab", { name: "Board" }).click();
+  await page.getByRole("button", { name: "ALPHA-1 Wire the API" }).click();
+  const sheet = page.getByRole("dialog", { name: "Task details" });
+  const callout = sheet.getByRole("region", { name: "Blocked" });
+  await expect(
+    callout.getByText("Waiting for the handoff schema to land.")
+  ).toBeVisible();
+  await expect(
+    callout.getByRole("link", { name: "ALPHA-2 Ship the contract" })
+  ).toBeVisible();
+  await expect(callout.getByText("Codex (agent)")).toBeVisible();
+  await expect(callout.getByText("12 min ago")).toBeVisible();
+  await settle(page);
+  await expectNoAxe(page);
+  await page.emulateMedia({ colorScheme: "dark" });
+  await expect(page.locator("html")).toHaveClass(/dark/);
+  await settle(page);
+  await expectNoAxe(page);
+  // Ping from the sheet prefills the task and the participant it waits on.
+  const ping = sheet.getByRole("button", { name: "Ping" });
+  await ping.click();
+  const pingDialog = page.getByRole("dialog", { name: "Ping" });
+  await expect(pingDialog).toContainText("Task ALPHA-1 · Wire the API");
+  await expect(pingDialog.getByLabel("Recipient")).toHaveValue(
+    `agent:${ids.agent}`
+  );
+  await settle(page);
+  await expectNoAxe(page);
+  await page.keyboard.press("Escape");
+  await expect(pingDialog).not.toBeVisible();
+  await expect(sheet).toBeVisible();
+  await expect(ping).toBeFocused();
+  await callout.getByRole("button", { name: "Resolve blocker" }).click();
+  const confirm = page.getByRole("dialog", { name: "Resolve blocker?" });
+  await expect(confirm).toContainText("ALPHA-1 returns to In progress");
+  await settle(page);
+  await expectNoAxe(page);
+  await page.keyboard.press("Escape");
+  await expect(confirm).not.toBeVisible();
+  await expect(
+    callout.getByRole("button", { name: "Resolve blocker" })
+  ).toBeFocused();
+  expect(resolves).toEqual([]);
+  await page.emulateMedia({ colorScheme: "light" });
+  await expect(page.locator("html")).not.toHaveClass(/dark/);
+  await callout.getByRole("button", { name: "Resolve blocker" }).click();
+  await confirm.getByRole("button", { name: "Resolve blocker" }).click();
+  await expect(confirm).not.toBeVisible();
+  expect(resolves).toEqual([{}]);
+  await expect(callout).not.toBeVisible();
+  await expect(
+    sheet.getByRole("heading", { name: "Wire the API" })
+  ).toBeFocused();
+  await expect(cardLine).toHaveCount(0);
+  expect(
+    await page
+      .locator("#main-content")
+      .evaluate((element) => element.scrollWidth <= element.clientWidth)
+  ).toBe(true);
+  await settle(page);
+  await expectNoAxe(page);
+});
+
+test("@phone Agents page shows attention lines and a keyboard Ping flow in both themes", async ({
+  page
+}) => {
+  await page.emulateMedia({ colorScheme: "light" });
+  const claude = "00000000-0000-4000-8000-000000000013";
+  const agent = (id: string, name: string) => ({
+    id,
+    project_id: ids.alpha,
+    name,
+    status: "active",
+    created_at: now,
+    updated_at: now,
+    revoked_at: null
+  });
+  const state: HierarchyState = {
+    ...populatedState(),
+    agents: [agent(claude, "claude-code"), agent(ids.agent, "codex")],
+    messageCandidates: [
+      { type: "agent", id: claude, name: "claude-code", avatar_url: null },
+      { type: "agent", id: ids.agent, name: "codex", avatar_url: null }
+    ],
+    agentAttention: [
+      {
+        agent_id: ids.agent,
+        waiting_since: null,
+        pending_directed_count: 0,
+        open_block: null,
+        current_task: {
+          id: ids.task,
+          key: "ALPHA-3",
+          title: "Wire the API",
+          status: "in_progress"
+        }
+      },
+      {
+        agent_id: claude,
+        waiting_since: now,
+        pending_directed_count: 2,
+        open_block: {
+          task: {
+            id: "00000000-0000-4000-8000-000000000012",
+            key: "ALPHA-4",
+            title: "Ship the contract"
+          },
+          reason: "Waiting on codex"
+        },
+        current_task: null
+      }
+    ]
+  };
+  await seed(page);
+  const mock = await mockHierarchy(page, state);
+  await page.goto(`/projects/${ids.alpha}/agents`);
+  await expect(
+    page.getByText("Working on ALPHA-3 · in progress")
+  ).toBeVisible();
+  await expect(
+    page.getByText("Blocked on ALPHA-4 · waiting for updates · 2 pending items")
+  ).toBeVisible();
+  await expectNoAxe(page);
+  await page.emulateMedia({ colorScheme: "dark" });
+  await expect(page.locator("html")).toHaveClass(/dark/);
+  await settle(page);
+  await expectNoAxe(page);
+  const trigger = page.getByRole("button", { name: "Ping codex" });
+  await trigger.focus();
+  await page.keyboard.press("Enter");
+  const dialog = page.getByRole("dialog", { name: "Ping" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByLabel("Recipient")).toHaveValue(
+    `agent:${ids.agent}`
+  );
+  // The recipient is preset, so focus starts in the message.
+  await expect(dialog.getByLabel("Message")).toBeFocused();
+  await settle(page);
+  await expectNoAxe(page);
+  await page.keyboard.type("Can you pick up ALPHA-4 next?");
+  // WebKit's Tab skips buttons unless Alt is held, like Safari's default.
+  await page.keyboard.press("Alt+Tab");
+  await expect(dialog.getByRole("button", { name: "Cancel" })).toBeFocused();
+  await page.keyboard.press("Alt+Tab");
+  await expect(dialog.getByRole("button", { name: "Send ping" })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(dialog).not.toBeVisible();
+  await expect(trigger).toBeFocused();
+  await expect(page.getByText("Ping sent to codex")).toBeVisible();
+  const [sent] = mock.getHandoffs();
+  expect(mock.getHandoffs()).toHaveLength(1);
+  expect(sent?.body).toEqual({
+    to: { type: "agent", id: ids.agent },
+    body_markdown: "Can you pick up ALPHA-4 next?"
+  });
+  expect(sent?.idempotencyKey).toMatch(/^[0-9a-f-]{36}$/u);
+  await page.emulateMedia({ colorScheme: "light" });
+  await expect(page.locator("html")).not.toHaveClass(/dark/);
+  await page.getByRole("button", { name: "Ping claude-code" }).click();
+  await expect(dialog.getByLabel("Recipient")).toHaveValue(`agent:${claude}`);
+  await page.keyboard.press("Escape");
+  await expect(dialog).not.toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Ping claude-code" })
+  ).toBeFocused();
+  expect(
+    await page
+      .locator("#main-content")
+      .evaluate((element) => element.scrollWidth <= element.clientWidth)
+  ).toBe(true);
+  await settle(page);
   await expectNoAxe(page);
 });
 

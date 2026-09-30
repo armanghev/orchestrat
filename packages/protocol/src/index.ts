@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { attentionErrorCodeSchema } from "./attention.js";
 
 export const healthResponseSchema = z.object({ status: z.literal("ok") });
 export type HealthResponse = z.infer<typeof healthResponseSchema>;
@@ -75,7 +76,8 @@ export const errorCodeSchema = z.union([
   baseErrorCodeSchema,
   taskErrorCodeSchema,
   coordinationErrorCodeSchema,
-  documentErrorCodeSchema
+  documentErrorCodeSchema,
+  attentionErrorCodeSchema
 ]);
 export type ErrorCode = z.infer<typeof errorCodeSchema>;
 
@@ -441,6 +443,14 @@ export const taskCommentSchema = z.object({
     })
   ]),
   body_markdown: markdownSchema,
+  sequence: z.number().int().positive(),
+  mentions: z.array(
+    z.object({
+      type: z.enum(["human", "agent"]),
+      id: idSchema,
+      name: z.string()
+    })
+  ),
   created_at: dateSchema
 });
 export type TaskComment = z.infer<typeof taskCommentSchema>;
@@ -457,8 +467,13 @@ export const taskCommentsResponseSchema = z.object({
 });
 export type TaskCommentsResponse = z.infer<typeof taskCommentsResponseSchema>;
 
+// Inline ref: participantRefSchema is declared later and would hit a TDZ error.
 export const createTaskCommentRequestSchema = z.object({
-  body_markdown: markdownSchema
+  body_markdown: markdownSchema,
+  mentions: z
+    .array(z.object({ type: z.enum(["human", "agent"]), id: idSchema }))
+    .max(20)
+    .default([])
 });
 export type CreateTaskCommentRequest = z.infer<
   typeof createTaskCommentRequestSchema
@@ -684,7 +699,8 @@ export const claimResponseSchema = z.object({
 export type ClaimResponse = z.infer<typeof claimResponseSchema>;
 
 export const claimMutationRequestSchema = z.object({
-  claim_token: claimTokenSchema
+  claim_token: claimTokenSchema,
+  acknowledged_through: z.number().int().nonnegative().optional()
 });
 export const releaseClaimRequestSchema = claimMutationRequestSchema;
 export const completeClaimRequestSchema = claimMutationRequestSchema;
@@ -1299,3 +1315,5 @@ export type AcceptProjectInvitationResponse = z.infer<
 
 export const projectChatParamsSchema = z.object({ projectId: idSchema });
 export const chatParamsSchema = z.object({ id: idSchema });
+
+export * from "./attention.js";
