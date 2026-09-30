@@ -22,7 +22,9 @@ for tool in \
   read_document create_document update_document edit_document \
   list_document_revisions read_document_revision \
   list_message_candidates list_chats create_chat manage_chat_members \
-  send_message check_messages acknowledge_messages
+  send_message check_messages acknowledge_messages \
+  get_attention acknowledge_attention watch_task wait_for_update \
+  set_task_status handoff
 do
   grep -Fq "\"$tool\"" "$bundle" || {
     echo "missing bundled MCP tool: $tool" >&2
@@ -135,7 +137,8 @@ try {
     "read_document", "read_document_revision", "release_task", "select_project",
     "update_document", "update_task", "list_message_candidates", "list_chats",
     "create_chat", "manage_chat_members", "send_message", "check_messages",
-    "acknowledge_messages"
+    "acknowledge_messages", "get_attention", "acknowledge_attention",
+    "watch_task", "wait_for_update", "set_task_status", "handoff"
   ].sort();
   assert.deepEqual(names, expected);
   const unselected = await request("tools/call", {
