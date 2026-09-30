@@ -87,6 +87,39 @@ test("local, global and hook credentials cannot cross API origins or use legacy 
   assert.equal(global!.apiUrl, other);
 });
 
+test("global resolution skips a stale project instead of failing the connection", async () => {
+  const twoProjects: OrchestratConfig = {
+    ...config,
+    globalProjects: {
+      codex: {
+        ...config.globalProjects!.codex,
+        stale: {
+          name: "Old acceptance",
+          organizationName: "Org",
+          apiUrl: other,
+          agentId: "c"
+        }
+      }
+    }
+  };
+  const warnings: string[] = [];
+  const projects = await resolveGlobalInvocation({
+    integration: "codex",
+    read: async () => twoProjects,
+    credentials: new MemoryCredentialReader(
+      new Map([[agentAccount("p", "codex", other), "live-agent"]])
+    ),
+    warn: (message) => warnings.push(message)
+  });
+  assert.deepEqual(
+    projects.map((project) => project.projectId),
+    ["p"]
+  );
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0]!, /skipping Org \/ Old acceptance/);
+  assert.doesNotMatch(warnings[0]!, /live-agent/);
+});
+
 test("CLI setup reauthorizes unknown origins and records the actual normalized issuer", async () => {
   const stored = new Map(values);
   const store = {

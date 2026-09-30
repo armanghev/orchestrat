@@ -59,6 +59,10 @@ import {
   apiOrigin
 } from "./config.js";
 import {
+  OPENCODE_V2_NOTE,
+  opencodeSupportsIdlePlugin
+} from "./opencode-plugin.js";
+import {
   HARNESSES,
   isConfigurableIntegration,
   type HarnessRecord
@@ -433,7 +437,21 @@ export type SetupRunOptions = SetupTransport & {
   // `rewake` adds Claude Code's async idle wake. Both only ever add.
   autoContinue?: boolean;
   rewake?: boolean;
+  // Injectable for tests; defaults to `opencode --version`.
+  opencodeVersion?: () => Promise<string | undefined>;
   reportPreview?: (previews: SetupPreview[]) => Promise<void> | void;
+};
+const detectOpencodeVersion = async () => {
+  try {
+    const { stdout } = await execFileAsync("opencode", ["--version"], {
+      timeout: 3000,
+      maxBuffer: 4096,
+      windowsHide: true
+    });
+    return String(stdout).trim();
+  } catch {
+    return undefined;
+  }
 };
 export async function runSetup(options: SetupRunOptions) {
   options = { ...options, api: apiOrigin(options.api) };
@@ -458,18 +476,36 @@ export async function runSetup(options: SetupRunOptions) {
   for (const integration of options.integrations)
     mcpScopes[integration] =
       options.mcpScope ?? mcpScopes[integration] ?? "project";
+  const opencodeSkipped =
+    options.integrations.includes("opencode") &&
+    (options.autoContinue ||
+      config.attention?.continue_on_stop?.includes("opencode") === true) &&
+    !opencodeSupportsIdlePlugin(
+      await (options.opencodeVersion ?? detectOpencodeVersion)()
+    );
+  const continueOnStop = (values: readonly Integration[]): Integration[] =>
+    opencodeSkipped
+      ? values.filter((value) => value !== "opencode")
+      : [...values];
   const attention: AttentionConfig | undefined = options.autoContinue
     ? {
         ...config.attention,
-        continue_on_stop: [
+        continue_on_stop: continueOnStop([
           ...new Set([
             ...(config.attention?.continue_on_stop ?? []),
             ...options.integrations
           ])
-        ],
+        ]),
         ...(options.rewake || config.attention?.rewake ? { rewake: true } : {})
       }
-    : config.attention;
+    : opencodeSkipped && config.attention
+      ? {
+          ...config.attention,
+          continue_on_stop: continueOnStop(
+            config.attention.continue_on_stop ?? []
+          )
+        }
+      : config.attention;
   const configPreviews = await previewSetup(
     options.home,
     options.integrations,
@@ -654,12 +690,14 @@ export async function runSetup(options: SetupRunOptions) {
   const pathFix = pathEntries.includes(localBin)
     ? undefined
     : `export PATH="${localBin}:$PATH"`;
-  const notes =
-    options.autoContinue && options.integrations.includes("codex")
+  const notes = [
+    ...(options.autoContinue && options.integrations.includes("codex")
       ? [
           "Codex: open /hooks in Codex and trust the new Orchestrat Stop hook; Codex does not run new or changed hooks until you do."
         ]
-      : [];
+      : []),
+    ...(opencodeSkipped ? [OPENCODE_V2_NOTE] : [])
+  ];
   return {
     projectId,
     integrations,

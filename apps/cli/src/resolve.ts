@@ -55,27 +55,39 @@ export async function resolveGlobalInvocation(input: {
   read: (home?: string) => Promise<OrchestratConfig>;
   credentials: CredentialReader;
   home?: string;
+  warn?: (message: string) => void;
 }) {
   const config = await input.read(input.home);
-  const projects = await Promise.all(
-    Object.entries(config.globalProjects?.[input.integration] ?? {}).map(
-      async ([projectId, project]) => {
-        const apiUrl = apiOrigin(
-          project.apiUrl ?? input.api ?? DEFAULT_API_URL
-        );
-        const credential = await input.credentials.read(
-          agentAccount(projectId, input.integration, apiUrl)
-        );
-        if (!credential)
-          throw new Error(
-            `No ${input.integration} credential found for ${project.organizationName} / ${project.name} on this API; run orchestrat setup`
-          );
-        return { projectId, ...project, apiUrl, credential };
-      }
-    )
+  const configured = Object.entries(
+    config.globalProjects?.[input.integration] ?? {}
   );
-  if (!projects.length)
+  if (!configured.length)
     throw new Error(`No global ${input.integration} projects are configured`);
+  const resolved = await Promise.all(
+    configured.map(async ([projectId, project]) => {
+      const apiUrl = apiOrigin(project.apiUrl ?? input.api ?? DEFAULT_API_URL);
+      const credential = await input.credentials.read(
+        agentAccount(projectId, input.integration, apiUrl)
+      );
+      return { projectId, ...project, apiUrl, credential };
+    })
+  );
+  // One stale project (credential removed or never issued) must not take the
+  // whole global connection down; skip it and say so on stderr.
+  const projects = resolved.flatMap(({ credential, ...project }) =>
+    credential ? [{ ...project, credential }] : []
+  );
+  const missing = resolved.filter((project) => !project.credential);
+  if (!projects.length) {
+    const [first] = missing;
+    throw new Error(
+      `No ${input.integration} credential found for ${first!.organizationName} / ${first!.name} on this API; run orchestrat setup`
+    );
+  }
+  for (const project of missing)
+    input.warn?.(
+      `orchestrat: skipping ${project.organizationName} / ${project.name}: no ${input.integration} credential on this API; run orchestrat setup to reconnect it\n`
+    );
   return projects;
 }
 

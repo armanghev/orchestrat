@@ -412,7 +412,8 @@ test("setup --auto-continue --rewake writes managed entries idempotently and dis
       sourceCommand,
       pathEnv: "/usr/bin",
       autoContinue: true,
-      rewake: true
+      rewake: true,
+      opencodeVersion: async () => "1.14.41"
     });
   const result = await setup();
   assert.equal(result.notes?.length, 1);
@@ -460,9 +461,32 @@ test("setup --auto-continue --rewake writes managed entries idempotently and dis
     home,
     integrations: [...integrations],
     sourceCommand,
-    pathEnv: "/usr/bin"
+    pathEnv: "/usr/bin",
+    opencodeVersion: async () => "1.14.41"
   });
   assert.deepEqual(await snapshot(), first);
+  // OpenCode 2 has no idle hook for plugins: setup skips the plugin, keeps
+  // OpenCode out of continue_on_stop and says why.
+  const v2 = await runSetup({
+    api: "https://api.example",
+    fetch,
+    open: async () => undefined,
+    sleep: async () => undefined,
+    store,
+    cwd,
+    home,
+    integrations: [...integrations],
+    sourceCommand,
+    pathEnv: "/usr/bin",
+    autoContinue: true,
+    opencodeVersion: async () => "opencode v2.0.20"
+  });
+  assert.equal((await snapshot()).plugin, undefined);
+  assert.ok(v2.notes?.some((note) => /version 2/.test(note)));
+  assert.deepEqual(
+    (await readConfig(home)).attention?.continue_on_stop,
+    integrations.filter((value) => value !== "opencode")
+  );
   await disconnectLocal({
     home,
     cwd,

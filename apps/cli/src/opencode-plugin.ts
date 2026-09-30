@@ -7,6 +7,17 @@ import { join } from "node:path";
 // (3 prompts per 30 minutes) on top of the CLI's dedupe and budget.
 export const OPENCODE_PLUGIN_MARKER = "// orchestrat-managed-plugin v1";
 
+// OpenCode 2 replaced this plugin API with `{ id, setup | effect }` modules
+// whose public context has no session events or prompting, so the idle
+// continuation cannot be built there yet. Unknown versions keep the plugin.
+export const opencodeSupportsIdlePlugin = (version: string | undefined) => {
+  const major = /(\d+)\.\d+/.exec(version ?? "")?.[1];
+  return major === undefined || Number(major) < 2;
+};
+
+export const OPENCODE_V2_NOTE =
+  "OpenCode: version 2 changed its plugin system and has no hook for idle sessions yet, so the OpenCode wake-up plugin was skipped. Orchestrat's MCP tools (attention, wait_for_update, handoff) still work in OpenCode.";
+
 export const opencodePluginPath = (home: string) =>
   join(home, ".config", "opencode", "plugins", "orchestrat.ts");
 

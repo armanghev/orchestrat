@@ -653,7 +653,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         integration,
         read: readConfig,
         credentials: new KeychainCredentialReader(),
-        home
+        home,
+        warn: (message) => process.stderr.write(message)
       });
       const { bridge } = await startStdioBridge({
         integration,

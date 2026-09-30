@@ -149,12 +149,12 @@ orchestrat setup --auto-continue
 work is pending: handoffs, direct messages, mentions, or comments on its
 claimed tasks. It applies to the integrations set up in that run:
 
-| Integration        | Mechanism                           |
-| ------------------ | ----------------------------------- |
-| Claude Code, Codex | `Stop` hook                         |
-| Cursor             | `stop` hook with `followup_message` |
-| Antigravity        | `Stop` hook                         |
-| OpenCode           | an idle plugin                      |
+| Integration        | Mechanism                                                                              |
+| ------------------ | -------------------------------------------------------------------------------------- |
+| Claude Code, Codex | `Stop` hook                                                                            |
+| Cursor             | `stop` hook with `followup_message`                                                    |
+| Antigravity        | `Stop` hook                                                                            |
+| OpenCode           | an idle plugin (OpenCode 1.x only; OpenCode 2 has no idle hook yet, so setup skips it) |
 
 - It blocks at most once per new item and at most 3 times per 30 minutes.
 - It fails open if Orchestrat is unreachable.
