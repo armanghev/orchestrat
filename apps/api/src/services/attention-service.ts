@@ -268,7 +268,7 @@ export class AttentionService {
     // event that landed while the summary was being assembled.
     const cursor = await this.currentCursor(principal.projectId);
     const branchId = await this.agentBranchId(principal, opts.branchId);
-    const inbox = await this.chats.inboxAgent(principal);
+    const inbox = await this.chats.inboxAgent(principal, branchId);
     return this.summaryFor(
       { type: "agent", id: principal.agentId },
       principal.projectId,
@@ -284,7 +284,13 @@ export class AttentionService {
   ): Promise<AttentionSummary> {
     await this.permissions.projectAccess(userId, projectId);
     const cursor = await this.currentCursor(projectId);
-    const inbox = await this.chats.inboxHuman(userId, projectId);
+    // Human attention spans every branch, like its task items.
+    const inbox = await this.chats.inboxHuman(
+      userId,
+      projectId,
+      undefined,
+      true
+    );
     return this.summaryFor(
       { type: "human", id: userId },
       projectId,
@@ -987,11 +993,10 @@ export class AttentionService {
     ]);
     const summaries = [];
     for (const agent of activeAgents) {
-      const inbox = await this.chats.inboxAgent({
-        agentId: agent.id,
-        projectId,
-        credentialId: ""
-      });
+      const inbox = await this.chats.inboxAgent(
+        { agentId: agent.id, projectId, credentialId: "" },
+        null
+      );
       summaries.push({
         agentId: agent.id,
         summary: await this.summaryFor(

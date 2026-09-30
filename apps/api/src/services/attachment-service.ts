@@ -31,11 +31,28 @@ import type {
 } from "@orchestrat/protocol";
 import { and, asc, eq, gt, sql } from "drizzle-orm";
 import { ApiError } from "./api-error.js";
+import { assertEntityBranch, type BranchSelector } from "./branch-context.js";
 import { PermissionService } from "./permission-service.js";
 import type { DocumentStorageConfig } from "./document-service.js";
 import { AttachmentDownloadTicketStore } from "../realtime/realtime.js";
 
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+/**
+ * Who writes to a document's attachments. The document's branch decides
+ * (spec §6.1): archived branches are read-only and an agent working on
+ * another branch gets BRANCH_MISMATCH.
+ */
+type Writer = {
+  actor: "human" | "agent";
+  agentId?: string;
+  selector?: BranchSelector;
+};
+const humanWriter: Writer = { actor: "human" };
+const agentWriter = (principal: AgentPrincipal): Writer => ({
+  actor: "agent",
+  agentId: principal.agentId,
+  selector: principal.branch
+});
 const MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024 * 1024;
 const PROJECT_QUOTA_BYTES = 10 * 1024 * 1024 * 1024;
 const MULTIPART_THRESHOLD_BYTES = 100 * 1024 * 1024;
@@ -101,7 +118,11 @@ export class AttachmentService {
   private key(projectId: string, documentId: string, attachmentId: string) {
     return `document-attachments/v1/${projectId}/${documentId}/${attachmentId}`;
   }
-  private async document(projectId: string, documentId: string, write = false) {
+  private async document(
+    projectId: string,
+    documentId: string,
+    writer?: Writer
+  ) {
     const [document] = await this.db
       .select()
       .from(documents)
@@ -110,19 +131,14 @@ export class AttachmentService {
       )
       .limit(1);
     if (!document) throw new ApiError(404, "NOT_FOUND", "Document not found.");
-    if (write && document.archivedAt)
-      throw new ApiError(
-        409,
-        "DOCUMENT_ARCHIVED",
-        "Archived documents are read-only."
-      );
+    if (writer) await this.assertWritable(this.db, document, writer);
     return document;
   }
   private async documentTx(
     tx: Transaction,
     projectId: string,
     documentId: string,
-    write = false
+    writer?: Writer
   ) {
     const [document] = await tx
       .select()
@@ -132,13 +148,32 @@ export class AttachmentService {
       )
       .for("update");
     if (!document) throw new ApiError(404, "NOT_FOUND", "Document not found.");
-    if (write && document.archivedAt)
+    if (writer) await this.assertWritable(tx, document, writer);
+    return document;
+  }
+  private async assertWritable(
+    tx: Database | Transaction,
+    document: typeof documents.$inferSelect,
+    writer: Writer
+  ) {
+    await assertEntityBranch(
+      tx,
+      document.projectId,
+      document.branchId,
+      writer.selector,
+      {
+        actor: writer.actor,
+        write: true,
+        agentId: writer.agentId,
+        notFound: "Document not found."
+      }
+    );
+    if (document.archivedAt)
       throw new ApiError(
         409,
         "DOCUMENT_ARCHIVED",
         "Archived documents are read-only."
       );
-    return document;
   }
   private async access(userId: string, projectId: string, write = false) {
     const record = await this.permissions.projectAccess(userId, projectId);
@@ -262,10 +297,11 @@ export class AttachmentService {
     documentId: string,
     input: CreateAttachmentUploadRequest,
     actorType: "human" | "agent",
-    actorId: string
+    actorId: string,
+    writer: Writer
   ) {
     this.requireStorage();
-    await this.document(projectId, documentId, true);
+    await this.document(projectId, documentId, writer);
     if (input.size_bytes > MAX_ATTACHMENT_BYTES)
       throw new ApiError(
         400,
@@ -309,7 +345,12 @@ export class AttachmentService {
     try {
       const row = await this.db.transaction(async (tx) => {
         await this.lockProject(tx, projectId);
-        const document = await this.documentTx(tx, projectId, documentId, true);
+        const document = await this.documentTx(
+          tx,
+          projectId,
+          documentId,
+          writer
+        );
         if (
           (await this.quota(tx, projectId)) + input.size_bytes >
           PROJECT_QUOTA_BYTES
@@ -391,7 +432,8 @@ export class AttachmentService {
       documentId,
       input,
       "human",
-      userId
+      userId,
+      humanWriter
     );
   }
   async createForAgent(
@@ -404,7 +446,8 @@ export class AttachmentService {
       documentId,
       input,
       "agent",
-      principal.agentId
+      principal.agentId,
+      agentWriter(principal)
     );
   }
   private async findUpload(id: string) {
@@ -515,7 +558,7 @@ export class AttachmentService {
     const row = await this.findUpload(id);
     this.assertUploadDocument(row, documentId);
     await this.access(userId, row.projectId, true);
-    await this.document(row.projectId, row.documentId, true);
+    await this.document(row.projectId, row.documentId, humanWriter);
     return this.signParts(row, numbers);
   }
   async signPartsForAgent(
@@ -528,7 +571,7 @@ export class AttachmentService {
     this.assertUploadDocument(row, documentId);
     if (row.projectId !== principal.projectId)
       throw new ApiError(404, "NOT_FOUND", "Upload session not found.");
-    await this.document(row.projectId, row.documentId, true);
+    await this.document(row.projectId, row.documentId, agentWriter(principal));
     return this.signParts(row, numbers);
   }
   async refresh(userId: string, id: string, documentId?: string) {
@@ -536,7 +579,7 @@ export class AttachmentService {
     this.assertUploadDocument(row, documentId);
     this.requirePending(row);
     await this.access(userId, row.projectId, true);
-    await this.document(row.projectId, row.documentId, true);
+    await this.document(row.projectId, row.documentId, humanWriter);
     return {
       upload: this.uploadJson(
         row,
@@ -570,7 +613,7 @@ export class AttachmentService {
     this.requirePending(row);
     if (row.projectId !== principal.projectId)
       throw new ApiError(404, "NOT_FOUND", "Upload session not found.");
-    await this.document(row.projectId, row.documentId, true);
+    await this.document(row.projectId, row.documentId, agentWriter(principal));
     return {
       upload: this.uploadJson(
         row,
@@ -595,14 +638,15 @@ export class AttachmentService {
     };
   }
   private async completeProject(
-    row: typeof documentAttachmentUploads.$inferSelect
+    row: typeof documentAttachmentUploads.$inferSelect,
+    writer: Writer
   ) {
     const { storage, config } = this.requireStorage();
     if (row.status !== "pending")
       throw new ApiError(409, "CONFLICT", "Upload session is not pending.");
     // Recheck archive state before mutating provider state. The transaction
     // below repeats this check under the project lock for the race window.
-    await this.document(row.projectId, row.documentId, true);
+    await this.document(row.projectId, row.documentId, writer);
     let head: HeadObjectCommandOutput | undefined;
     if (row.uploadMode === "multipart") {
       if (!row.providerUploadId)
@@ -720,7 +764,7 @@ export class AttachmentService {
     }
     return this.db.transaction(async (tx) => {
       await this.lockProject(tx, row.projectId);
-      await this.documentTx(tx, row.projectId, row.documentId, true);
+      await this.documentTx(tx, row.projectId, row.documentId, writer);
       const [current] = await tx
         .select()
         .from(documentAttachmentUploads)
@@ -759,6 +803,7 @@ export class AttachmentService {
         .returning();
       await insertProjectEvent(tx, {
         projectId: current.projectId,
+        branchId: current.branchId,
         actorUserId: current.actorUserId,
         actorAgentId: current.actorAgentId,
         entityId: current.documentId,
@@ -810,7 +855,7 @@ export class AttachmentService {
     this.assertUploadDocument(row, documentId);
     await this.access(userId, row.projectId, row.status === "pending");
     if (row.status === "completed") return this.completedProject(row);
-    return this.completeProject(row);
+    return this.completeProject(row, humanWriter);
   }
   async completeForAgent(
     principal: AgentPrincipal,
@@ -823,7 +868,7 @@ export class AttachmentService {
     if (row.projectId !== principal.projectId)
       throw new ApiError(404, "NOT_FOUND", "Upload session not found.");
     if (row.status === "completed") return this.completedProject(row);
-    return this.completeProject(row);
+    return this.completeProject(row, agentWriter(principal));
   }
   async abort(userId: string, id: string, documentId?: string) {
     const row = await this.findUpload(id);
@@ -1005,14 +1050,16 @@ export class AttachmentService {
       .limit(1);
     if (!row) throw new ApiError(404, "NOT_FOUND", "Attachment not found.");
     await this.access(userId, row.projectId, true);
-    await this.document(row.projectId, documentId, true);
+    await this.document(row.projectId, documentId, humanWriter);
     await this.db.transaction(async (tx) => {
       await this.lockProject(tx, row.projectId);
+      await this.documentTx(tx, row.projectId, documentId, humanWriter);
       await tx
         .delete(documentAttachments)
         .where(eq(documentAttachments.id, id));
       await insertProjectEvent(tx, {
         projectId: row.projectId,
+        branchId: row.branchId,
         actorUserId: userId,
         entityId: documentId,
         type: "document.attachment_removed",
@@ -1046,14 +1093,25 @@ export class AttachmentService {
       )
       .limit(1);
     if (!row) throw new ApiError(404, "NOT_FOUND", "Attachment not found.");
-    await this.document(principal.projectId, documentId, true);
+    await this.document(
+      principal.projectId,
+      documentId,
+      agentWriter(principal)
+    );
     await this.db.transaction(async (tx) => {
       await this.lockProject(tx, principal.projectId);
+      await this.documentTx(
+        tx,
+        principal.projectId,
+        documentId,
+        agentWriter(principal)
+      );
       await tx
         .delete(documentAttachments)
         .where(eq(documentAttachments.id, id));
       await insertProjectEvent(tx, {
         projectId: principal.projectId,
+        branchId: row.branchId,
         actorAgentId: principal.agentId,
         entityId: documentId,
         type: "document.attachment_removed",

@@ -321,7 +321,7 @@ export class HandoffService {
         (await resolveBranch(this.db, projectId, selector)).id,
       candidates: () => this.chats.listCandidatesHuman(userId, projectId),
       directChat: (chat, chatKey) =>
-        this.chats.createHuman(userId, projectId, chat, chatKey),
+        this.chats.createHuman(userId, projectId, chat, chatKey, selector),
       send: (chatId, message, messageKey) =>
         this.chats.sendHuman(userId, chatId, message, messageKey)
     });

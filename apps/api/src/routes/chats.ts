@@ -1,5 +1,6 @@
 import {
   acknowledgeMessagesRequestSchema,
+  allBranchesQuerySchema,
   chatMessagesQuerySchema,
   chatParamsSchema,
   createChatRequestSchema,
@@ -8,6 +9,7 @@ import {
   sendMessageRequestSchema
 } from "@orchestrat/protocol";
 import type { FastifyInstance } from "fastify";
+import { humanBranchSelector } from "../services/branch-context.js";
 import type { ChatService } from "../services/chat-service.js";
 
 const key = (headers: Record<string, unknown>) =>
@@ -26,7 +28,8 @@ export async function humanChatRoutes(
   app.get("/projects/:projectId/chats", (request) =>
     options.chats.listHuman(
       request.userId,
-      projectChatParamsSchema.parse(request.params).projectId
+      projectChatParamsSchema.parse(request.params).projectId,
+      humanBranchSelector(request.query)
     )
   );
   app.post("/projects/:projectId/chats", async (request, reply) => {
@@ -34,14 +37,17 @@ export async function humanChatRoutes(
       request.userId,
       projectChatParamsSchema.parse(request.params).projectId,
       createChatRequestSchema.parse(request.body),
-      key(request.headers)
+      key(request.headers),
+      humanBranchSelector(request.query)
     );
     return reply.code(result.status).send(result.body);
   });
   app.get("/projects/:projectId/inbox", (request) =>
     options.chats.inboxHuman(
       request.userId,
-      projectChatParamsSchema.parse(request.params).projectId
+      projectChatParamsSchema.parse(request.params).projectId,
+      humanBranchSelector(request.query),
+      allBranchesQuerySchema.parse(request.query).all_branches
     )
   );
   app.get("/chats/:id", (request) =>

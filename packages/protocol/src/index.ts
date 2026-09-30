@@ -1273,6 +1273,7 @@ export const inboxSummarySchema = z.object({
   unread_chats: z.array(
     z.object({
       chat_id: idSchema,
+      // Set on reads across branches (`all_branches=true`, human attention).
       branch_id: idSchema.optional(),
       unread_count: z.number().int().nonnegative(),
       mention_count: z.number().int().nonnegative()

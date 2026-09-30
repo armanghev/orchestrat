@@ -45,7 +45,11 @@ import {
   type Transaction
 } from "./agent-service.js";
 import { ApiError } from "./api-error.js";
-import { defaultBranchId } from "./branch-context.js";
+import {
+  assertEntityBranch,
+  resolveBranch,
+  type BranchSelector
+} from "./branch-context.js";
 
 type Actor =
   | { type: "human"; id: string }
@@ -78,6 +82,13 @@ const stableHash = (value: unknown) =>
 const eventActor = (actor: Actor) => ({
   actorUserId: actor.type === "human" ? actor.id : null,
   actorAgentId: actor.type === "agent" ? actor.id : null
+});
+const agentIdOf = (actor: Actor) =>
+  actor.type === "agent" ? actor.id : undefined;
+const agentActor = (principal: AgentPrincipal): Actor => ({
+  type: "agent",
+  id: principal.agentId,
+  credentialId: principal.credentialId
 });
 
 export class ChatService {
@@ -387,6 +398,8 @@ export class ChatService {
           and(
             eq(chatMessages.chatId, chat.id),
             gt(chatMessages.sequence, lastRead),
+            // Messages copied in by an import or merge are never unread.
+            isNull(chatMessages.importedAt),
             actor.type === "human"
               ? or(
                   ne(chatMessages.authorType, "human"),
@@ -408,6 +421,7 @@ export class ChatService {
     return {
       id: chat.id,
       project_id: chat.projectId,
+      branch_id: chat.branchId,
       kind: chat.kind,
       name: chat.name,
       has_human: chat.hasHuman,
@@ -500,12 +514,21 @@ export class ChatService {
     }
   }
 
-  private async listAs(executor: Database, actor: Actor, projectId: string) {
+  private async listAs(
+    executor: Database,
+    actor: Actor,
+    projectId: string,
+    branchId: string
+  ) {
     const memberships = await executor
       .select({ chatId: chatParticipants.chatId })
       .from(chatParticipants)
       .where(
-        and(eq(chatParticipants.projectId, projectId), participantClause(actor))
+        and(
+          eq(chatParticipants.projectId, projectId),
+          eq(chatParticipants.branchId, branchId),
+          participantClause(actor)
+        )
       );
     const chatIds = memberships.map((value) => value.chatId);
     if (actor.type === "agent" && chatIds.length === 0) return { chats: [] };
@@ -515,6 +538,7 @@ export class ChatService {
       .where(
         and(
           eq(chats.projectId, projectId),
+          eq(chats.branchId, branchId),
           actor.type === "human"
             ? or(
                 eq(chats.hasHuman, false),
@@ -531,21 +555,38 @@ export class ChatService {
     };
   }
 
-  async listHuman(userId: string, projectId: string) {
+  async listHuman(
+    userId: string,
+    projectId: string,
+    selector?: BranchSelector
+  ) {
     return this.withProjectReadLock(projectId, async (executor) => {
       await this.humanProject(userId, projectId, executor);
-      return this.listAs(executor, { type: "human", id: userId }, projectId);
+      const branch = await resolveBranch(executor, projectId, selector);
+      return this.listAs(
+        executor,
+        { type: "human", id: userId },
+        projectId,
+        branch.id
+      );
     });
   }
 
   async listAgent(principal: AgentPrincipal) {
-    return this.withProjectReadLock(principal.projectId, (executor) =>
-      this.listAs(
+    return this.withProjectReadLock(principal.projectId, async (executor) => {
+      const branch = await resolveBranch(
+        executor,
+        principal.projectId,
+        principal.branch,
+        { agentId: principal.agentId }
+      );
+      return this.listAs(
         executor,
         { type: "agent", id: principal.agentId },
-        principal.projectId
-      )
-    );
+        principal.projectId,
+        branch.id
+      );
+    });
   }
 
   async getHuman(userId: string, chatId: string) {
@@ -622,11 +663,45 @@ export class ChatService {
       .where(eq(apiIdempotencyKeys.id, id));
   }
 
+  /**
+   * create_chat keys are scoped to the branch (spec §6.5). Before branches
+   * they were scoped to the project, so a retry that spans the deploy still
+   * replays on the default branch.
+   */
+  private async legacyIdempotency(
+    tx: Transaction,
+    actor: Actor,
+    projectId: string,
+    key: string | undefined,
+    requestHash: string
+  ) {
+    const [legacy] = await tx
+      .select()
+      .from(apiIdempotencyKeys)
+      .where(
+        and(
+          actorClause(actor),
+          eq(apiIdempotencyKeys.operation, "create_chat"),
+          eq(apiIdempotencyKeys.resourceId, projectId),
+          eq(apiIdempotencyKeys.idempotencyKey, idempotencyKeySchema.parse(key))
+        )
+      )
+      .limit(1);
+    if (legacy && legacy.requestHash !== requestHash)
+      throw new ApiError(
+        409,
+        "IDEMPOTENCY_CONFLICT",
+        "The idempotency key was already used with a different request."
+      );
+    return legacy ?? null;
+  }
+
   private async createAs(
     actor: Actor,
     projectId: string,
     input: CreateChatRequest,
-    key?: string
+    key?: string,
+    selector?: BranchSelector
   ) {
     const normalized = {
       ...input,
@@ -637,14 +712,24 @@ export class ChatService {
     return this.db.transaction(async (tx) => {
       await this.lockActiveProject(tx, projectId);
       await this.assertActorEligible(tx, actor, projectId);
-      const idempotency = await this.reserveIdempotency(
-        tx,
-        actor,
-        "create_chat",
-        projectId,
-        key,
-        stableHash(normalized)
-      );
+      const branch = await resolveBranch(tx, projectId, selector, {
+        write: true,
+        agentId: agentIdOf(actor)
+      });
+      const requestHash = stableHash(normalized);
+      const legacy = branch.isDefault
+        ? await this.legacyIdempotency(tx, actor, projectId, key, requestHash)
+        : null;
+      const idempotency = legacy
+        ? { reserved: null, existing: legacy }
+        : await this.reserveIdempotency(
+            tx,
+            actor,
+            "create_chat",
+            branch.id,
+            key,
+            requestHash
+          );
       if (idempotency.existing) {
         const cached = idempotency.existing.responseBody as { id?: unknown };
         const [chat] =
@@ -704,11 +789,12 @@ export class ChatService {
       let chat: ChatRow | undefined;
       let status = 201;
       if (directKey) {
+        // Each branch has its own direct message between two participants.
         [chat] = await tx
           .select()
           .from(chats)
           .where(
-            and(eq(chats.projectId, projectId), eq(chats.directKey, directKey))
+            and(eq(chats.branchId, branch.id), eq(chats.directKey, directKey))
           )
           .limit(1);
         if (chat) {
@@ -742,6 +828,7 @@ export class ChatService {
             for (const participant of missing)
               await insertProjectEvent(tx, {
                 projectId,
+                branchId: chat.branchId,
                 ...eventActor(actor),
                 entityId: chat.id,
                 type: "chat.member_added",
@@ -756,7 +843,7 @@ export class ChatService {
           .values({
             id: randomUUID(),
             projectId,
-            branchId: await defaultBranchId(tx, projectId),
+            branchId: branch.id,
             kind: input.kind,
             name: input.kind === "group" ? input.name! : null,
             directKey,
@@ -777,6 +864,7 @@ export class ChatService {
         );
         await insertProjectEvent(tx, {
           projectId,
+          branchId: chat.branchId,
           ...eventActor(actor),
           entityId: chat.id,
           type: "chat.created",
@@ -793,9 +881,16 @@ export class ChatService {
     userId: string,
     projectId: string,
     input: CreateChatRequest,
-    key?: string
+    key?: string,
+    selector?: BranchSelector
   ) {
-    return this.createAs({ type: "human", id: userId }, projectId, input, key);
+    return this.createAs(
+      { type: "human", id: userId },
+      projectId,
+      input,
+      key,
+      selector
+    );
   }
 
   async createAgent(
@@ -804,14 +899,11 @@ export class ChatService {
     key?: string
   ) {
     return this.createAs(
-      {
-        type: "agent",
-        id: principal.agentId,
-        credentialId: principal.credentialId
-      },
+      agentActor(principal),
       principal.projectId,
       input,
-      key
+      key,
+      principal.branch
     );
   }
 
@@ -949,6 +1041,7 @@ export class ChatService {
   ) {
     const event = await insertProjectEvent(tx, {
       projectId: chat.projectId,
+      branchId: chat.branchId,
       ...eventActor(actor),
       entityId: chat.id,
       type: "chat.access_invalidated",
@@ -971,7 +1064,8 @@ export class ChatService {
     actor: Actor,
     projectId: string,
     chatId: string,
-    input: ManageChatMembersRequest
+    input: ManageChatMembersRequest,
+    selector?: BranchSelector
   ) {
     return this.db.transaction(async (tx) => {
       await this.lockActiveProject(tx, projectId);
@@ -982,6 +1076,7 @@ export class ChatService {
         .where(and(eq(chats.id, chatId), eq(chats.projectId, projectId)))
         .for("update");
       if (!chat) throw new ApiError(404, "NOT_FOUND", "Chat not found.");
+      await this.chatBranchGuard(tx, chat, actor, selector);
       if (chat.kind === "direct")
         throw new ApiError(
           409,
@@ -1068,6 +1163,7 @@ export class ChatService {
         .where(eq(chats.id, chat.id));
       await insertProjectEvent(tx, {
         projectId,
+        branchId: chat.branchId,
         ...eventActor(actor),
         entityId: chat.id,
         type:
@@ -1102,14 +1198,11 @@ export class ChatService {
     input: ManageChatMembersRequest
   ) {
     return this.manageAs(
-      {
-        type: "agent",
-        id: principal.agentId,
-        credentialId: principal.credentialId
-      },
+      agentActor(principal),
       principal.projectId,
       chatId,
-      input
+      input,
+      principal.branch
     );
   }
 
@@ -1128,6 +1221,7 @@ export class ChatService {
         .where(and(eq(chats.id, chatId), eq(chats.projectId, projectId)))
         .for("update");
       if (!locked) throw new ApiError(404, "NOT_FOUND", "Chat not found.");
+      await this.chatBranchGuard(tx, locked, { type: "human", id: userId });
       const [participant] = await tx
         .select({ id: chatParticipants.id })
         .from(chatParticipants)
@@ -1170,6 +1264,7 @@ export class ChatService {
       );
       await insertProjectEvent(tx, {
         projectId: locked.projectId,
+        branchId: locked.branchId,
         actorUserId: userId,
         entityId: locked.id,
         type: "chat.member_added",
@@ -1187,6 +1282,7 @@ export class ChatService {
       id: message.id,
       chat_id: message.chatId,
       project_id: message.projectId,
+      branch_id: message.branchId,
       sequence: message.sequence,
       author: {
         type: message.authorType,
@@ -1220,7 +1316,8 @@ export class ChatService {
     let newestFirst = false;
     if (query.unread_only)
       clauses.push(
-        gt(chatMessages.sequence, participant?.lastReadSequence ?? 0)
+        gt(chatMessages.sequence, participant?.lastReadSequence ?? 0),
+        isNull(chatMessages.importedAt)
       );
     else if (query.after !== undefined)
       clauses.push(gt(chatMessages.sequence, query.after));
@@ -1293,7 +1390,8 @@ export class ChatService {
     projectId: string,
     chatId: string,
     input: SendMessageRequest,
-    key?: string
+    key?: string,
+    selector?: BranchSelector
   ) {
     const normalized = {
       ...input,
@@ -1336,6 +1434,7 @@ export class ChatService {
           status: idempotency.existing.responseStatus,
           body: idempotency.existing.responseBody
         };
+      await this.chatBranchGuard(tx, chat, actor, selector);
 
       const participants = await this.participantRows(
         tx as unknown as Database,
@@ -1361,7 +1460,11 @@ export class ChatService {
       const documentIds = [...new Set(input.document_ids)];
       const documentRows = documentIds.length
         ? await tx
-            .select({ id: documents.id, path: documents.path })
+            .select({
+              id: documents.id,
+              path: documents.path,
+              branchId: documents.branchId
+            })
             .from(documents)
             .where(
               and(
@@ -1375,6 +1478,13 @@ export class ChatService {
           400,
           "VALIDATION_ERROR",
           "Document references must belong to this project."
+        );
+      if (documentRows.some((row) => row.branchId !== chat.branchId))
+        throw new ApiError(
+          400,
+          "VALIDATION_ERROR",
+          "Document references must be on the chat's branch.",
+          { reason: "cross_branch" }
         );
       const author = participantByKey.get(keyFor(actor))!;
       const sequence = chat.lastSequence + 1;
@@ -1392,7 +1502,7 @@ export class ChatService {
           authorName: author.name,
           bodyMarkdown: input.body_markdown,
           mentions: mentions as Candidate[],
-          documentRefs: documentRows
+          documentRefs: documentRows.map(({ id, path }) => ({ id, path }))
         })
         .returning();
       await tx
@@ -1402,6 +1512,7 @@ export class ChatService {
       const body = this.messageJson(message);
       await insertProjectEvent(tx, {
         projectId,
+        branchId: chat.branchId,
         ...eventActor(actor),
         entityId: chat.id,
         type: "chat.message_created",
@@ -1440,15 +1551,12 @@ export class ChatService {
     key?: string
   ) {
     return this.sendAs(
-      {
-        type: "agent",
-        id: principal.agentId,
-        credentialId: principal.credentialId
-      },
+      agentActor(principal),
       principal.projectId,
       chatId,
       input,
-      key
+      key,
+      principal.branch
     );
   }
 
@@ -1526,10 +1634,17 @@ export class ChatService {
     );
   }
 
-  private async inboxAs(executor: Database, actor: Actor, projectId: string) {
+  /** `branchId` null = every branch (the human selector's unread dots). */
+  private async inboxAs(
+    executor: Database,
+    actor: Actor,
+    projectId: string,
+    branchId: string | null
+  ) {
     const unreadChats = await executor
       .select({
         chatId: chatParticipants.chatId,
+        branchId: chats.branchId,
         unreadCount: count(chatMessages.id),
         mentionCount:
           sql<number>`sum(case when ${chatMessages.mentions} @> ${JSON.stringify(
@@ -1541,7 +1656,8 @@ export class ChatService {
         chats,
         and(
           eq(chats.id, chatParticipants.chatId),
-          eq(chats.projectId, projectId)
+          eq(chats.projectId, projectId),
+          branchId ? eq(chats.branchId, branchId) : undefined
         )
       )
       .innerJoin(
@@ -1550,6 +1666,7 @@ export class ChatService {
           eq(chatMessages.chatId, chatParticipants.chatId),
           eq(chatMessages.projectId, projectId),
           gt(chatMessages.sequence, chatParticipants.lastReadSequence),
+          isNull(chatMessages.importedAt),
           actor.type === "human"
             ? or(
                 ne(chatMessages.authorType, "human"),
@@ -1564,31 +1681,84 @@ export class ChatService {
       .where(
         and(eq(chatParticipants.projectId, projectId), participantClause(actor))
       )
-      .groupBy(chatParticipants.chatId, chats.updatedAt, chats.id)
+      .groupBy(
+        chatParticipants.chatId,
+        chats.updatedAt,
+        chats.id,
+        chats.branchId
+      )
       .orderBy(desc(chats.updatedAt), desc(chats.id));
     return {
       unread_chats: unreadChats.map((chat) => ({
         chat_id: chat.chatId,
+        // Only a read across branches says which one; otherwise it is implied.
+        ...(branchId === null ? { branch_id: chat.branchId } : {}),
         unread_count: chat.unreadCount,
         mention_count: chat.mentionCount
       }))
     };
   }
 
-  async inboxHuman(userId: string, projectId: string) {
+  async inboxHuman(
+    userId: string,
+    projectId: string,
+    selector?: BranchSelector,
+    allBranches = false
+  ) {
     return this.withProjectReadLock(projectId, async (executor) => {
       await this.humanProject(userId, projectId, executor);
-      return this.inboxAs(executor, { type: "human", id: userId }, projectId);
+      const branchId = allBranches
+        ? null
+        : (await resolveBranch(executor, projectId, selector)).id;
+      return this.inboxAs(
+        executor,
+        { type: "human", id: userId },
+        projectId,
+        branchId
+      );
     });
   }
 
-  async inboxAgent(principal: AgentPrincipal) {
-    return this.withProjectReadLock(principal.projectId, (executor) =>
+  /**
+   * The agent's working branch by default; `branchId` overrides it, and null
+   * reads every branch (the project-wide agent overview).
+   */
+  async inboxAgent(principal: AgentPrincipal, branchId?: string | null) {
+    return this.withProjectReadLock(principal.projectId, async (executor) =>
       this.inboxAs(
         executor,
         { type: "agent", id: principal.agentId },
-        principal.projectId
+        principal.projectId,
+        branchId !== undefined
+          ? branchId
+          : (
+              await resolveBranch(
+                executor,
+                principal.projectId,
+                principal.branch,
+                { agentId: principal.agentId }
+              )
+            ).id
       )
     );
+  }
+
+  /**
+   * Entity writes take the branch from the chat (spec §6.1): archived
+   * branches are read-only, and an agent working on another branch gets
+   * BRANCH_MISMATCH.
+   */
+  private chatBranchGuard(
+    tx: Transaction,
+    chat: ChatRow,
+    actor: Actor,
+    selector?: BranchSelector
+  ) {
+    return assertEntityBranch(tx, chat.projectId, chat.branchId, selector, {
+      actor: actor.type,
+      write: true,
+      agentId: agentIdOf(actor),
+      notFound: "Chat not found."
+    });
   }
 }
