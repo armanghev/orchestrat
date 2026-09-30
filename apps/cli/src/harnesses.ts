@@ -2,8 +2,7 @@ export const CONFIGURABLE_INTEGRATIONS = [
   "codex",
   "claude-code",
   "cursor",
-  "antigravity",
-  "opencode"
+  "antigravity"
 ] as const;
 
 export type ConfigurableIntegration =
@@ -19,9 +18,10 @@ export type HarnessRecord = {
   configurable: boolean;
   supportsMcp: boolean;
   supportsHooks: boolean;
-  // How opt-in stop continuation is delivered (spec §11.3). OpenCode has no
-  // lifecycle hooks, so `supportsHooks` stays false and a plugin does it.
-  continuation?: "stop-hook" | "plugin";
+  // How opt-in stop continuation is delivered (spec §11.3).
+  continuation?: "stop-hook";
+  // Shown when a detected harness is not offered by setup.
+  unsupportedReason?: string;
 };
 
 export const HARNESSES: readonly HarnessRecord[] = [
@@ -64,16 +64,6 @@ export const HARNESSES: readonly HarnessRecord[] = [
     supportsMcp: true,
     supportsHooks: true,
     continuation: "stop-hook"
-  },
-  {
-    id: "opencode",
-    label: "OpenCode",
-    command: "opencode",
-    applications: ["OpenCode.app"],
-    configurable: true,
-    supportsMcp: true,
-    supportsHooks: false,
-    continuation: "plugin"
   },
   {
     id: "pi",

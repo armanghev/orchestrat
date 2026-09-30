@@ -273,8 +273,6 @@ export function parseInvocationArgs(argv: string[]): {
     if (
       positionals.length !== 2 ||
       !isConfigurableIntegration(hookIntegration) ||
-      // OpenCode has no hooks; its plugin calls only the idle continuation.
-      (hookIntegration === "opencode" && values.event !== "idle") ||
       (hookIntegration === "antigravity" &&
         !["PreInvocation", "Stop"].includes(values.event ?? "")) ||
       (hookIntegration === "cursor" &&
@@ -332,7 +330,7 @@ export function parseInvocationArgs(argv: string[]): {
 
 function usage(): never {
   throw new Error(
-    "Usage: orchestrat setup [--auto-continue [--rewake]] | status | doctor | hook <integration> [--event <event>] | hook <claude-code|codex> --event Stop [--watch] | hook opencode --event idle | disconnect <integration|all> | mcp --integration <integration> [--cwd <project>] [--global] [--wait-budget-seconds <n>] | waker <enable|disable|status|run> [--once] [--dry-run] | document(s) <list|read|create|write|patch|history|upload|download> --integration <integration>"
+    "Usage: orchestrat setup [--auto-continue [--rewake]] | status | doctor | hook <integration> [--event <event>] | hook <claude-code|codex> --event Stop [--watch] | disconnect <integration|all> | mcp --integration <integration> [--cwd <project>] [--global] [--wait-budget-seconds <n>] | waker <enable|disable|status|run> [--once] [--dry-run] | document(s) <list|read|create|write|patch|history|upload|download> --integration <integration>"
   );
 }
 
@@ -368,9 +366,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     command === "hook" &&
     integration !== undefined &&
     integration !== "all" &&
-    ((event === "Stop" &&
-      (integration === "claude-code" || integration === "codex")) ||
-      (integration === "opencode" && event === "idle"))
+    event === "Stop" &&
+    (integration === "claude-code" || integration === "codex")
   ) {
     writeStopOutput(
       await runStopCommand({ integration, home, watch: watch === true })
@@ -545,7 +542,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       hooksSupported: item.supportsHooks,
       unsupportedReason: item.configurable
         ? undefined
-        : "built-in MCP configuration unavailable"
+        : (item.unsupportedReason ?? "built-in MCP configuration unavailable")
     }));
     if (interactive)
       renderDetectedAgents(detectedUi, {

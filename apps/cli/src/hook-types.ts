@@ -20,7 +20,7 @@ export const deterministicSessionId = (
 };
 
 // The harness's own session id, read the same way the lifecycle normalizers
-// read it: Claude/Codex/OpenCode `session_id`, Cursor `conversation_id`,
+// read it: Claude/Codex `session_id`, Cursor `conversation_id`,
 // Antigravity `conversationId`.
 export function externalSessionId(
   integration: string,

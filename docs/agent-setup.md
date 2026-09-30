@@ -35,8 +35,8 @@ and restart agent MCP connections. Running an older persistent launcher does
 not automatically fetch the newest npm package. The `latest` tag advances only
 after hosted acceptance; use the exact version during staged release testing.
 
-Setup detects installed Claude Code, Codex, Cursor, Antigravity, OpenCode, and
-Pi commands, then asks which configurable agents to connect. Before any
+Setup detects installed Claude Code, Codex, Cursor, Antigravity, and Pi
+commands, then asks which configurable agents to connect. Before any
 mutation it prints the paths and managed entries that will change. Browser
 authorization proves the account only; the CLI then asks for the project to
 configure. It creates a separate project-scoped agent identity and credential
@@ -52,9 +52,10 @@ ignored rather than assigned an issuer from editable configuration. Changing
 --local` remains available for offline cleanup.
 
 Claude Code, Codex, Cursor, and Antigravity receive MCP and lifecycle-hook
-configuration. OpenCode receives MCP configuration only because it has no
-stable native lifecycle-hook contract. Pi is detected and reported, but is not
-selectable because it has no stable built-in MCP configuration path.
+configuration.
+
+Pi is detected and reported, but is not selectable because it has no stable
+built-in MCP configuration path.
 
 Managed files are:
 
@@ -69,7 +70,6 @@ Managed files are:
 - `~/.cursor/hooks.json`
 - `~/.gemini/config/mcp_config.json`
 - `~/.gemini/config/hooks.json`
-- `~/.config/opencode/opencode.json`
 
 Each changed file may have a sibling `.orchestrat-backup`. Credentials never
 belong in the JSON/TOML config or mapping.
@@ -98,7 +98,6 @@ orchestrat disconnect codex
 orchestrat disconnect claude-code
 orchestrat disconnect cursor
 orchestrat disconnect antigravity
-orchestrat disconnect opencode
 orchestrat disconnect all
 ```
 
@@ -149,12 +148,11 @@ orchestrat setup --auto-continue
 work is pending: handoffs, direct messages, mentions, or comments on its
 claimed tasks. It applies to the integrations set up in that run:
 
-| Integration        | Mechanism                                                                              |
-| ------------------ | -------------------------------------------------------------------------------------- |
-| Claude Code, Codex | `Stop` hook                                                                            |
-| Cursor             | `stop` hook with `followup_message`                                                    |
-| Antigravity        | `Stop` hook                                                                            |
-| OpenCode           | an idle plugin (OpenCode 1.x only; OpenCode 2 has no idle hook yet, so setup skips it) |
+| Integration        | Mechanism                           |
+| ------------------ | ----------------------------------- |
+| Claude Code, Codex | `Stop` hook                         |
+| Cursor             | `stop` hook with `followup_message` |
+| Antigravity        | `Stop` hook                         |
 
 - It blocks at most once per new item and at most 3 times per 30 minutes.
 - It fails open if Orchestrat is unreachable.
@@ -221,7 +219,6 @@ formats and hook contracts:
 - [Cursor hooks](https://cursor.com/docs/hooks)
 - [Antigravity MCP](https://antigravity.google/docs/mcp)
 - [Antigravity hooks](https://antigravity.google/docs/hooks)
-- [OpenCode MCP](https://opencode.ai/docs/mcp-servers/)
 
 ## Current limits
 

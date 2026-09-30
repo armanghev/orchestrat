@@ -121,11 +121,6 @@ export const HARNESS_COMMANDS: Record<
       "--output-format",
       "json"
     ]
-  },
-  opencode: {
-    binary: "opencode",
-    start: (prompt) => ["run", "--format", "json", prompt],
-    resume: (id, prompt) => ["run", "--session", id, "--format", "json", prompt]
   }
 };
 
@@ -152,12 +147,11 @@ export function harnessArgv(
 }
 
 // Harness JSON output carries the session id under different keys: Claude and
-// Cursor `session_id`, Codex `thread_id`, OpenCode `sessionID`, Antigravity
+// Cursor `session_id`, Codex `thread_id`, Antigravity
 // `conversation_id` (TODO-verify-against---help with the table above).
 const SESSION_KEYS = [
   "session_id",
   "thread_id",
-  "sessionID",
   "sessionId",
   "conversation_id",
   "conversationId",
@@ -192,7 +186,7 @@ export function parseSessionId(output: string): string | undefined {
   try {
     documents.push(JSON.parse(output));
   } catch {
-    // JSON Lines (Codex, OpenCode) or a single object after log noise.
+    // JSON Lines (Codex) or a single object after log noise.
     for (const line of output.split("\n")) {
       const trimmed = line.trim();
       if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) continue;
@@ -574,7 +568,7 @@ async function acquireLock(home: string, deps: WakerDeps) {
 }
 
 // Keeps the first and last MiB of harness stdout: session ids appear in the
-// first event (Codex, OpenCode) or the final result object (Claude, Cursor).
+// first event (Codex) or the final result object (Claude, Cursor).
 class OutputCapture {
   private static readonly LIMIT = 1024 * 1024;
   private head = "";

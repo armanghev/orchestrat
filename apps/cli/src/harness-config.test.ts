@@ -5,7 +5,7 @@ import { harnessConfigPlan } from "./harness-config.js";
 const command = "/tmp/orchestrat";
 
 test("new harness plans use native paths and are idempotent", () => {
-  for (const integration of ["cursor", "antigravity", "opencode"] as const) {
+  for (const integration of ["cursor", "antigravity"] as const) {
     const plan = harnessConfigPlan("/home/test", integration, command);
     assert.ok(plan.mcp);
     const first = plan.mcp.merge(undefined);
@@ -32,67 +32,6 @@ test("new harness plans reject managed conflicts", () => {
   assert.ok(antigravity.hooks);
   assert.throws(() =>
     antigravity.hooks!.merge(JSON.stringify({ orchestrat: { Stop: [] } }))
-  );
-});
-
-test("OpenCode intentionally has no hook plan", () => {
-  assert.equal(
-    harnessConfigPlan("/home/test", "opencode", command).hooks,
-    undefined
-  );
-});
-
-test("OpenCode preserves native flat and existing nested server maps", () => {
-  const plan = harnessConfigPlan(
-    "/home/test",
-    "opencode",
-    command,
-    "/work",
-    "global"
-  ).mcp!;
-  const entry = {
-    type: "local",
-    command: [command, "mcp", "--integration", "opencode", "--global"],
-    enabled: true
-  };
-  for (const nested of [false, true]) {
-    const servers = {
-      orchestrat: entry,
-      other: { type: "local", command: ["keep"] }
-    };
-    const existing = { mcp: nested ? { servers } : servers };
-    const merged = plan.merge(JSON.stringify(existing));
-    assert.deepEqual(JSON.parse(merged), existing);
-    const removed = JSON.parse(plan.remove(merged)!);
-    assert.deepEqual(nested ? removed.mcp.servers : removed.mcp, {
-      other: servers.other
-    });
-  }
-  assert.deepEqual(
-    JSON.parse(plan.merge(undefined)).mcp.orchestrat.command,
-    entry.command
-  );
-  assert.throws(() =>
-    plan.merge(
-      JSON.stringify({
-        mcp: { orchestrat: { ...entry, command: ["unrelated"] } }
-      })
-    )
-  );
-  assert.throws(() =>
-    plan.remove(
-      JSON.stringify({
-        mcp: { orchestrat: { ...entry, command: ["unrelated"] } }
-      })
-    )
-  );
-  assert.equal(
-    JSON.parse(
-      plan.merge(
-        JSON.stringify({ mcp: { orchestrat: { ...entry, enabled: false } } })
-      )
-    ).mcp.orchestrat.enabled,
-    true
   );
 });
 
@@ -134,8 +73,7 @@ test("every configurable harness can use the global MCP bridge", () => {
     "codex",
     "claude-code",
     "cursor",
-    "antigravity",
-    "opencode"
+    "antigravity"
   ] as const) {
     const plan = harnessConfigPlan(
       "/home/test",

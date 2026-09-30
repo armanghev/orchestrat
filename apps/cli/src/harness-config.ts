@@ -10,11 +10,6 @@ import {
   removeHarnessHooks,
   removeHarnessMcp
 } from "./safe-files.js";
-import {
-  mergeOpencodePlugin,
-  opencodePluginPath,
-  removeOpencodePlugin
-} from "./opencode-plugin.js";
 
 // Opt-in attention wiring for one integration (spec §11.3). The default is
 // off, which reproduces the pre-attention configuration exactly.
@@ -52,13 +47,6 @@ export type HarnessConfigPlan = {
     merge: (text: string | undefined) => string;
     remove: (text: string | undefined) => string | undefined;
   };
-  // A whole file Orchestrat owns; `undefined` means the file should not exist.
-  plugin?: {
-    path: string;
-    entries: string[];
-    merge: (text: string | undefined) => string | undefined;
-    remove: (text: string | undefined) => string | undefined;
-  };
 };
 
 export function harnessConfigPlan(
@@ -82,8 +70,7 @@ export function harnessConfigPlan(
         ".cursor",
         "mcp.json"
       ),
-      antigravity: join(home, ".gemini", "config", "mcp_config.json"),
-      opencode: join(home, ".config", "opencode", "opencode.json")
+      antigravity: join(home, ".gemini", "config", "mcp_config.json")
     } as Record<ConfigurableIntegration, string>
   )[integration];
   if (integration === "cursor" && mcpScope === "project") {
@@ -116,11 +103,9 @@ export function harnessConfigPlan(
     plan.mcp = {
       path: mcpPath,
       entries: [
-        integration === "opencode"
-          ? "mcp.orchestrat"
-          : integration === "codex"
-            ? "mcp_servers.orchestrat"
-            : "mcpServers.orchestrat",
+        integration === "codex"
+          ? "mcp_servers.orchestrat"
+          : "mcpServers.orchestrat",
         ...(budgeted
           ? [integration === "codex" ? "tool_timeout_sec" : "timeoutSeconds"]
           : [])
@@ -170,13 +155,6 @@ export function harnessConfigPlan(
         }),
       remove: (text) => removeHarnessHooks(text, integration, command)
     };
-  if (integration === "opencode")
-    plan.plugin = {
-      path: opencodePluginPath(home),
-      entries: ["plugins/orchestrat.ts"],
-      merge: (text) => mergeOpencodePlugin(text, command, autoContinue),
-      remove: (text) => removeOpencodePlugin(text)
-    };
   return plan;
 }
 
@@ -205,12 +183,10 @@ export async function previewHarnessConfig(
   }[];
   for (const [capability, item] of [
     ["mcp", plan.mcp],
-    ["hooks", plan.hooks],
-    ["hooks", plan.plugin]
+    ["hooks", plan.hooks]
   ] as const) {
     if (!item) continue;
     const source = await readOptional(item.path);
-    if (item === plan.plugin && source === item.merge(source)) continue;
     previews.push({
       integration,
       path: item.path,

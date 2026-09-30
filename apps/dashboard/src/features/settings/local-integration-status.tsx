@@ -188,9 +188,8 @@ export function LocalIntegrationStatusSection({
         </Button>
       </div>
       <p className="text-sm text-muted-foreground">
-        Supported setup targets: Claude Code, Codex, Cursor, Antigravity, and
-        OpenCode. OpenCode receives MCP only; Pi is detected but has no stable
-        MCP configuration path.
+        Supported setup targets: Claude Code, Codex, Cursor, and Antigravity. Pi
+        is detected but has no stable MCP configuration path.
       </p>
       <details className="text-sm">
         <summary className="cursor-pointer font-medium text-primary">
@@ -207,9 +206,9 @@ export function LocalIntegrationStatusSection({
             run from this dashboard.
           </p>
           <p>
-            Claude Code, Codex, Cursor, and Antigravity receive MCP and hooks;
-            OpenCode receives MCP only. Pi is detected but cannot be configured
-            through a stable MCP contract.
+            Claude Code, Codex, Cursor, and Antigravity receive MCP and hooks.
+            Pi is detected but cannot be configured through a stable MCP
+            contract.
           </p>
         </div>
       </details>

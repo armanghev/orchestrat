@@ -465,15 +465,6 @@ export function renderStopDecision(
   integration: ConfigurableIntegration,
   decision: StopDecision
 ): StopOutput {
-  if (integration === "opencode")
-    return {
-      exitCode: 0,
-      stdout: `${JSON.stringify(
-        decision.continue
-          ? { continue: true, reason: decision.reason }
-          : { continue: false }
-      )}\n`
-    };
   if (!decision.continue) return { exitCode: 0 };
   if (integration === "claude-code" || integration === "codex")
     return { exitCode: 2, stderr: `${decision.reason}\n` };

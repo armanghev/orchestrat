@@ -321,3 +321,32 @@ test("resolves only the configured global Cursor projects", async () => {
     ["550e8400-e29b-41d4-a716-446655440000"]
   );
 });
+
+test("configs that still name the retired OpenCode integration load without it", () => {
+  const config = parseConfig({
+    version: 1,
+    projects: {
+      "/work": {
+        projectId: "p",
+        apiUrl: "https://api.test",
+        mcpScopes: { codex: "global", opencode: "global" },
+        integrations: {
+          codex: { agentId: "a" },
+          opencode: { agentId: "b" }
+        }
+      }
+    },
+    globalProjects: {
+      opencode: {
+        p: { name: "Project", organizationName: "Org", agentId: "b" }
+      }
+    },
+    attention: { continue_on_stop: ["codex", "opencode"] }
+  });
+  assert.deepEqual(Object.keys(config.projects["/work"]!.integrations), [
+    "codex"
+  ]);
+  assert.deepEqual(config.projects["/work"]!.mcpScopes, { codex: "global" });
+  assert.equal(config.globalProjects, undefined);
+  assert.deepEqual(config.attention?.continue_on_stop, ["codex"]);
+});

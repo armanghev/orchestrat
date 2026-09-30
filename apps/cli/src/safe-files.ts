@@ -48,8 +48,7 @@ export async function atomicWrite(
 }
 
 // Writes managed content, or deletes the file when the managed result is
-// "absent" (undefined). Used for whole files Orchestrat owns, such as the
-// OpenCode plugin.
+// "absent" (undefined).
 export async function writeManaged(
   path: string,
   next: string | undefined,
@@ -501,59 +500,30 @@ export function mergeHarnessMcp(
   if (integration === "claude-code")
     return mergeJson(text, integration, command, global);
   const root = jsonObject(text, "Harness configuration must be a JSON object");
-  if (integration === "opencode") {
-    const mcp =
-      root.mcp && typeof root.mcp === "object" && !Array.isArray(root.mcp)
-        ? root.mcp
-        : {};
-    const servers =
-      mcp.servers &&
-      typeof mcp.servers === "object" &&
-      !Array.isArray(mcp.servers)
-        ? mcp.servers
-        : mcp;
-    const expected = {
-      type: "local",
-      command: commandArgs(command, integration, cwd, global)
-    };
-    if (
-      servers.orchestrat !== undefined &&
-      (servers.orchestrat.type !== expected.type ||
-        JSON.stringify(servers.orchestrat.command) !==
-          JSON.stringify(expected.command))
-    )
-      throw new Error("Existing Orchestrat MCP entry conflicts");
-    servers.orchestrat = {
-      ...servers.orchestrat,
-      ...expected,
-      ...(servers.orchestrat?.enabled === false ? { enabled: true } : {})
-    };
-    root.mcp = mcp;
-  } else {
-    const mcp =
-      root.mcpServers &&
-      typeof root.mcpServers === "object" &&
-      !Array.isArray(root.mcpServers)
-        ? root.mcpServers
-        : {};
-    const budgeted = attention && integration === "antigravity";
-    const expected = flatMcpEntry(command, integration, cwd, global, budgeted);
-    const alternate = flatMcpEntry(
-      command,
-      integration,
-      cwd,
-      global,
-      integration === "antigravity" && !budgeted
-    );
-    if (
-      mcp.orchestrat !== undefined &&
-      JSON.stringify(mcp.orchestrat) !== JSON.stringify(expected) &&
-      JSON.stringify(mcp.orchestrat) !== JSON.stringify(alternate)
-    )
-      throw new Error("Existing Orchestrat MCP entry conflicts");
-    mcp.orchestrat = expected;
-    root.mcpServers = mcp;
-  }
+  const mcp =
+    root.mcpServers &&
+    typeof root.mcpServers === "object" &&
+    !Array.isArray(root.mcpServers)
+      ? root.mcpServers
+      : {};
+  const budgeted = attention && integration === "antigravity";
+  const expected = flatMcpEntry(command, integration, cwd, global, budgeted);
+  const alternate = flatMcpEntry(
+    command,
+    integration,
+    cwd,
+    global,
+    integration === "antigravity" && !budgeted
+  );
+  if (
+    mcp.orchestrat !== undefined &&
+    JSON.stringify(mcp.orchestrat) !== JSON.stringify(expected) &&
+    JSON.stringify(mcp.orchestrat) !== JSON.stringify(alternate)
+  )
+    throw new Error("Existing Orchestrat MCP entry conflicts");
+  mcp.orchestrat = expected;
+  root.mcpServers = mcp;
+
   return `${JSON.stringify(root, null, 2)}\n`;
 }
 
@@ -570,27 +540,20 @@ export function removeHarnessMcp(
   if (integration === "claude-code")
     return removeJson(text, integration, command, global);
   const root = jsonObject(text, "Harness configuration must be a JSON object");
-  const parent =
-    integration === "opencode"
-      ? (root.mcp?.servers ?? root.mcp)
-      : root.mcpServers;
-  const expected: Record<string, unknown> =
-    integration === "opencode"
-      ? {
-          type: "local",
-          command: commandArgs(command, integration, cwd, global)
-        }
-      : flatMcpEntry(command, integration, cwd, global, false);
+  const parent = root.mcpServers;
+  const expected: Record<string, unknown> = flatMcpEntry(
+    command,
+    integration,
+    cwd,
+    global,
+    false
+  );
   const budgeted = flatMcpEntry(command, integration, cwd, global, true);
   if (parent?.orchestrat === undefined) return text;
   if (
-    integration === "opencode"
-      ? parent.orchestrat.type !== expected.type ||
-        JSON.stringify(parent.orchestrat.command) !==
-          JSON.stringify(expected.command)
-      : JSON.stringify(parent.orchestrat) !== JSON.stringify(expected) &&
-        (integration !== "antigravity" ||
-          JSON.stringify(parent.orchestrat) !== JSON.stringify(budgeted))
+    JSON.stringify(parent.orchestrat) !== JSON.stringify(expected) &&
+    (integration !== "antigravity" ||
+      JSON.stringify(parent.orchestrat) !== JSON.stringify(budgeted))
   )
     throw new Error("Existing Orchestrat MCP entry conflicts");
   delete parent.orchestrat;

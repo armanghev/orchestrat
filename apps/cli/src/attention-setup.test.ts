@@ -8,7 +8,6 @@ import { disconnectLocal } from "./diagnostics.js";
 import { harnessConfigPlan } from "./harness-config.js";
 import type { CredentialStore } from "./keychain.js";
 import { parseInvocationArgs } from "./main.js";
-import { OPENCODE_PLUGIN_MARKER } from "./opencode-plugin.js";
 import { readOptional } from "./safe-files.js";
 import { runSetup } from "./setup.js";
 
@@ -16,13 +15,12 @@ const command = "/tmp/orchestrat";
 const on = { autoContinue: true };
 const rewake = { autoContinue: true, rewake: true };
 
-test("default plans are unchanged: no Stop, timeout, budget or plugin", () => {
+test("default plans are unchanged: no Stop, timeout or budget", () => {
   for (const integration of [
     "codex",
     "claude-code",
     "cursor",
-    "antigravity",
-    "opencode"
+    "antigravity"
   ] as const) {
     const before = harnessConfigPlan("/home/test", integration, command);
     const off = harnessConfigPlan(
@@ -40,7 +38,6 @@ test("default plans are unchanged: no Stop, timeout, budget or plugin", () => {
     // Antigravity's existing Stop lifecycle entry predates attention.
     if (integration !== "antigravity")
       assert.doesNotMatch(hooks ?? "", /"Stop"|"stop"|loop_limit/);
-    assert.equal(before.plugin?.merge(undefined), undefined);
   }
 });
 
@@ -210,33 +207,6 @@ test("Antigravity gets timeoutSeconds 660 and the wait budget; hooks stay the sa
   );
 });
 
-test("OpenCode plugin installs, is idempotent, never clobbers a foreign file and uninstalls", () => {
-  const plan = harnessConfigPlan(
-    "/home/test",
-    "opencode",
-    command,
-    "/home/test",
-    "project",
-    on
-  );
-  assert.equal(
-    plan.plugin!.path,
-    "/home/test/.config/opencode/plugins/orchestrat.ts"
-  );
-  const content = plan.plugin!.merge(undefined)!;
-  assert.ok(content.startsWith(OPENCODE_PLUGIN_MARKER));
-  assert.match(content, /const COMMAND = "\/tmp\/orchestrat";/);
-  assert.match(content, /"hook", "opencode", "--event", "idle"/);
-  assert.match(content, /client\.session\.promptAsync/);
-  assert.equal(plan.plugin!.merge(content), content);
-  assert.throws(() => plan.plugin!.merge("export const Mine = 1;\n"));
-  assert.equal(plan.plugin!.remove(content), undefined);
-  assert.equal(plan.plugin!.remove("mine\n"), "mine\n");
-  const off = harnessConfigPlan("/home/test", "opencode", command).plugin!;
-  assert.equal(off.merge(content), undefined);
-  assert.equal(off.merge("mine\n"), "mine\n");
-});
-
 test("config preserves attention and waker keys and rejects malformed attention", () => {
   const config = parseConfig({
     version: 1,
@@ -297,13 +267,8 @@ test("CLI parses attention flags, hook events and waker commands", () => {
     integration: "codex",
     event: "Stop"
   });
-  assert.deepEqual(
-    parseInvocationArgs(["hook", "opencode", "--event", "idle"]),
-    {
-      command: "hook",
-      integration: "opencode",
-      event: "idle"
-    }
+  assert.throws(() =>
+    parseInvocationArgs(["hook", "opencode", "--event", "idle"])
   );
   assert.deepEqual(parseInvocationArgs(["hook", "cursor", "--event", "stop"]), {
     command: "hook",
@@ -396,8 +361,7 @@ test("setup --auto-continue --rewake writes managed entries idempotently and dis
     "codex",
     "claude-code",
     "cursor",
-    "antigravity",
-    "opencode"
+    "antigravity"
   ] as const;
   const setup = () =>
     runSetup({
@@ -412,8 +376,7 @@ test("setup --auto-continue --rewake writes managed entries idempotently and dis
       sourceCommand,
       pathEnv: "/usr/bin",
       autoContinue: true,
-      rewake: true,
-      opencodeVersion: async () => "1.14.41"
+      rewake: true
     });
   const result = await setup();
   assert.equal(result.notes?.length, 1);
@@ -429,8 +392,7 @@ test("setup --auto-continue --rewake writes managed entries idempotently and dis
     codexHooks: join(home, ".codex", "hooks.json"),
     codexMcp: join(home, ".codex", "config.toml"),
     cursor: join(home, ".cursor", "hooks.json"),
-    antigravity: join(home, ".gemini", "config", "mcp_config.json"),
-    plugin: join(home, ".config", "opencode", "plugins", "orchestrat.ts")
+    antigravity: join(home, ".gemini", "config", "mcp_config.json")
   };
   const snapshot = async () =>
     Object.fromEntries(
@@ -447,7 +409,6 @@ test("setup --auto-continue --rewake writes managed entries idempotently and dis
   assert.match(first.codexMcp!, /tool_timeout_sec = 660/);
   assert.match(first.cursor!, /"loop_limit": 2/);
   assert.match(first.antigravity!, /"timeoutSeconds": 660/);
-  assert.ok(first.plugin!.startsWith(OPENCODE_PLUGIN_MARKER));
   // A second run (flags or not) converges on the same files.
   await setup();
   assert.deepEqual(await snapshot(), first);
@@ -461,32 +422,9 @@ test("setup --auto-continue --rewake writes managed entries idempotently and dis
     home,
     integrations: [...integrations],
     sourceCommand,
-    pathEnv: "/usr/bin",
-    opencodeVersion: async () => "1.14.41"
+    pathEnv: "/usr/bin"
   });
   assert.deepEqual(await snapshot(), first);
-  // OpenCode 2 has no idle hook for plugins: setup skips the plugin, keeps
-  // OpenCode out of continue_on_stop and says why.
-  const v2 = await runSetup({
-    api: "https://api.example",
-    fetch,
-    open: async () => undefined,
-    sleep: async () => undefined,
-    store,
-    cwd,
-    home,
-    integrations: [...integrations],
-    sourceCommand,
-    pathEnv: "/usr/bin",
-    autoContinue: true,
-    opencodeVersion: async () => "opencode v2.0.20"
-  });
-  assert.equal((await snapshot()).plugin, undefined);
-  assert.ok(v2.notes?.some((note) => /version 2/.test(note)));
-  assert.deepEqual(
-    (await readConfig(home)).attention?.continue_on_stop,
-    integrations.filter((value) => value !== "opencode")
-  );
   await disconnectLocal({
     home,
     cwd,
@@ -497,7 +435,6 @@ test("setup --auto-continue --rewake writes managed entries idempotently and dis
     sourceCommand
   });
   const after = await snapshot();
-  assert.equal(after.plugin, undefined);
   for (const key of [
     "claude",
     "codexHooks",

@@ -309,9 +309,13 @@ test("detects both, one, or no supported integrations", async () => {
     "codex",
     "claude-code",
     "cursor",
-    "antigravity",
-    "opencode"
+    "antigravity"
   ]);
+  // OpenCode is detected but not offered in the private alpha.
+  await assert.rejects(
+    detectIntegrations(async (command) => command === "opencode"),
+    /No supported agent integrations found/
+  );
   assert.deepEqual(
     await detectIntegrations(async (command) => command === "codex"),
     ["codex"]

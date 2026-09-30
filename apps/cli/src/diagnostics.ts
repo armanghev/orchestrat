@@ -227,7 +227,7 @@ export async function runDoctor(input: {
           attentionPlanOptions(config?.attention, integration)
         );
         let current = true;
-        for (const item of [plan.mcp, plan.hooks, plan.plugin]) {
+        for (const item of [plan.mcp, plan.hooks]) {
           if (!item) continue;
           const source = await readOptional(item.path);
           const merged = item.merge(source);
@@ -311,7 +311,6 @@ export async function disconnectLocal(input: {
       "Disconnect API differs from the project mapping; use its API or --local"
     );
   const command = join(input.home, ".local", "bin", "orchestrat");
-  // `content: undefined` deletes a whole managed file (the OpenCode plugin).
   const writes: {
     path: string;
     entries: string[];
@@ -339,7 +338,7 @@ export async function disconnectLocal(input: {
       mcpScope,
       attentionPlanOptions(config.attention, name)
     );
-    for (const item of [plan.mcp, plan.hooks, plan.plugin]) {
+    for (const item of [plan.mcp, plan.hooks]) {
       if (!item) continue;
       if (
         (otherProjectUses || globalProjectsRemain) &&
@@ -353,7 +352,7 @@ export async function disconnectLocal(input: {
         writes.push({
           path: item.path,
           entries: item.entries,
-          content: item === plan.plugin ? next : (next ?? "")
+          content: next ?? ""
         });
     }
   }

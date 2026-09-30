@@ -659,10 +659,6 @@ test("session ids are parsed from each harness's JSON output and must not look l
     "t-1"
   );
   assert.equal(
-    parseSessionId(`${JSON.stringify({ type: "step", sessionID: "ses_9" })}\n`),
-    "ses_9"
-  );
-  assert.equal(
     parseSessionId(JSON.stringify({ session_id: "--dangerously-skip" })),
     undefined
   );

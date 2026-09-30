@@ -29,13 +29,7 @@ import { readPrivateState } from "./safe-files.js";
 const uuid = (n: number) =>
   `550e8400-e29b-41d4-a716-${String(n).padStart(12, "0")}`;
 const now = new Date("2026-09-27T12:00:00Z").toISOString();
-const INTEGRATIONS = [
-  "claude-code",
-  "codex",
-  "cursor",
-  "antigravity",
-  "opencode"
-] as const;
+const INTEGRATIONS = ["claude-code", "codex", "cursor", "antigravity"] as const;
 
 async function fixture(
   continueOn: ConfigurableIntegration[] = [...INTEGRATIONS],
@@ -122,8 +116,7 @@ const payloads = (cwd: string) => ({
   antigravity: {
     conversationId: "agy-conv-1",
     workspacePaths: [cwd]
-  },
-  opencode: { hook_event_name: "idle", session_id: "ses_1", cwd }
+  }
 });
 
 const summary = (
@@ -383,8 +376,7 @@ test("not opted in is a no-op that never calls the API", async () => {
   for (const [integration, payload] of [
     ["claude-code", payloads(cwd).claude],
     ["codex", payloads(cwd).codex],
-    ["antigravity", payloads(cwd).antigravity],
-    ["opencode", payloads(cwd).opencode]
+    ["antigravity", payloads(cwd).antigravity]
   ] as const) {
     const decision = await decideStop(base(home, integration, payload, fetch));
     assert.deepEqual(decision, { continue: false, why: "not opted in" });
@@ -393,7 +385,7 @@ test("not opted in is a no-op that never calls the API", async () => {
   assert.equal(await readPrivateState(stopStatePath(home)), undefined);
 });
 
-test("Codex, Cursor, Antigravity and OpenCode render their own continuation", async () => {
+test("Codex, Cursor and Antigravity render their own continuation", async () => {
   const { home, cwd } = await fixture();
   const { fetch } = recorder(() => json(waitBody({ handoffs: [{ id: 1 }] })));
   const codex = renderStopDecision(
@@ -420,17 +412,6 @@ test("Codex, Cursor, Antigravity and OpenCode render their own continuation", as
   const parsed = JSON.parse(antigravity.stdout!);
   assert.equal(parsed.decision, "continue");
   assert.match(parsed.reason, /^Orchestrat: 1 handoff/);
-  const opencode = renderStopDecision(
-    "opencode",
-    await decideStop(base(home, "opencode", payloads(cwd).opencode, fetch))
-  );
-  assert.equal(JSON.parse(opencode.stdout!).continue, true);
-  assert.deepEqual(
-    JSON.parse(
-      renderStopDecision("opencode", { continue: false, why: "x" }).stdout!
-    ),
-    { continue: false }
-  );
 });
 
 test("Cursor loop_count behaves like stop_hook_active and aborted turns never continue", async () => {
@@ -574,7 +555,7 @@ test("rewake needs its own opt-in", async () => {
   assert.equal(urls.length, 0);
 });
 
-test("the built CLI fails open for Stop hooks and answers OpenCode idle with JSON", async () => {
+test("the built CLI fails open for Stop hooks", async () => {
   const { home, cwd } = await fixture([]);
   const main = fileURLToPath(new URL("./main.js", import.meta.url));
   const run = (args: string[], input: string) =>
@@ -599,10 +580,4 @@ test("the built CLI fails open for Stop hooks and answers OpenCode idle with JSO
   assert.deepEqual(claude, { code: 0, stdout: "", stderr: "" });
   const malformed = await run(["hook", "codex", "--event", "Stop"], "not json");
   assert.deepEqual(malformed, { code: 0, stdout: "", stderr: "" });
-  const opencode = await run(
-    ["hook", "opencode", "--event", "idle"],
-    JSON.stringify(payloads(cwd).opencode)
-  );
-  assert.equal(opencode.code, 0);
-  assert.deepEqual(JSON.parse(opencode.stdout), { continue: false });
 });

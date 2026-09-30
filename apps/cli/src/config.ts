@@ -9,6 +9,9 @@ import {
 } from "./harnesses.js";
 
 export const INTEGRATIONS = CONFIGURABLE_INTEGRATIONS;
+// Integrations removed from the product. Old configs may still name them;
+// their entries are dropped on read (and so on the next write).
+const RETIRED_INTEGRATIONS: ReadonlySet<string> = new Set(["opencode"]);
 export const DEFAULT_API_URL = "https://api.orchestrat.dev";
 export type Integration = ConfigurableIntegration;
 
@@ -101,6 +104,7 @@ export function parseConfig(value: unknown): OrchestratConfig {
     for (const [integration, rawAgent] of Object.entries(
       project.integrations as Record<string, unknown>
     )) {
+      if (RETIRED_INTEGRATIONS.has(integration)) continue;
       if (
         !(INTEGRATIONS as readonly string[]).includes(integration) ||
         !rawAgent ||
@@ -120,6 +124,7 @@ export function parseConfig(value: unknown): OrchestratConfig {
       for (const [integration, scope] of Object.entries(
         project.mcpScopes as Record<string, unknown>
       )) {
+        if (RETIRED_INTEGRATIONS.has(integration)) continue;
         if (
           !(INTEGRATIONS as readonly string[]).includes(integration) ||
           (scope !== "project" && scope !== "global")
@@ -189,6 +194,7 @@ export function parseConfig(value: unknown): OrchestratConfig {
     for (const [integration, projects] of Object.entries(
       input.globalProjects as Record<string, unknown>
     )) {
+      if (RETIRED_INTEGRATIONS.has(integration)) continue;
       if (!(INTEGRATIONS as readonly string[]).includes(integration))
         throw new Error("Invalid global MCP mapping");
       parseGlobalProjects(projects, integration as Integration);
@@ -225,6 +231,10 @@ function parseAttention(value: unknown): AttentionConfig | undefined {
   const input = value as Record<string, unknown>;
   const attention: AttentionConfig = {};
   if (input.continue_on_stop !== undefined) {
+    if (Array.isArray(input.continue_on_stop))
+      input.continue_on_stop = input.continue_on_stop.filter(
+        (item) => typeof item !== "string" || !RETIRED_INTEGRATIONS.has(item)
+      );
     if (
       !Array.isArray(input.continue_on_stop) ||
       input.continue_on_stop.some(

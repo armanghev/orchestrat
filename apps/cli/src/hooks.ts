@@ -59,8 +59,6 @@ export async function runHook(input: {
   api: string;
   fetch?: typeof globalThis.fetch;
 }) {
-  if (input.integration === "opencode")
-    throw new Error("OpenCode does not support hooks");
   const normalized =
     input.integration === "codex"
       ? normalizeCodexHook(input.payload)
