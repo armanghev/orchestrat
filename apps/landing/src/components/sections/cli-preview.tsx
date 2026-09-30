@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Check, Copy } from "lucide-react";
+import { Eyebrow, WindowBar } from "@/components/landing/agents";
 
 const examples = [
   {
@@ -20,10 +21,19 @@ const examples = [
     note: "Use your API URL, project ID, and access token to read project tasks."
   }
 ];
-const connections = [
-  { name: "MCP", detail: "A shared project context for your agents." },
-  { name: "Hooks", detail: "Keep task and session activity connected." },
-  { name: "API", detail: "Read and update project state from your tools." }
+const steps = [
+  {
+    title: "Install the CLI",
+    text: "One global package. It includes the local MCP bridge your agents talk to."
+  },
+  {
+    title: "Run setup in your project",
+    text: "It detects your installed coding tools, previews the config it will manage, and creates an agent identity for each one."
+  },
+  {
+    title: "Restart your agents",
+    text: "They can now read tasks, claim work, update documents, and take part in project chats. Follow along in your browser or the macOS app."
+  }
 ];
 
 export function CliPreviewSection() {
@@ -43,37 +53,40 @@ export function CliPreviewSection() {
   }
   return (
     <section
+      id="setup"
       aria-labelledby="protocol-heading"
-      className="site-container section-space pt-6 pb-0 md:pt-12 lg:pt-16"
+      className="site-container section-space"
     >
-      <div
-        id="protocol"
-        className="mb-12 grid gap-6 lg:grid-cols-[1.9fr_1fr] lg:items-center lg:gap-16"
-      >
-        <h2 id="protocol-heading" className="section-title">
-          Your tools stay.
-          <br />
-          <span className="text-muted-foreground">The context connects.</span>
-        </h2>
-        <p className="section-copy max-w-sm">
-          Bring your coding tools. Orchestrat coordinates the tasks, documents,
-          and activity around them.
-        </p>
-      </div>
       <div className="integration-grid">
-        <dl className="divide-y">
-          {connections.map((connection) => (
-            <div key={connection.name} className="py-7 first:pt-1 last:pb-1">
-              <dt className="text-xl font-medium tracking-tight">
-                {connection.name}
-              </dt>
-              <dd className="mt-2 text-sm leading-relaxed text-muted-foreground">
-                {connection.detail}
-              </dd>
-            </div>
-          ))}
-        </dl>
-        <div className="command-panel">
+        <div>
+          <Eyebrow>Do I have to switch tools?</Eyebrow>
+          <h2 id="protocol-heading" className="section-title">
+            Your tools stay.
+            <br />
+            <span className="text-muted-foreground">The context connects.</span>
+          </h2>
+          <p className="section-copy mt-6 max-w-md">
+            Keep using the coding tools you already pay for. Orchestrat connects
+            them through MCP, lifecycle hooks, and an API.
+          </p>
+          <ol className="mt-10 space-y-7">
+            {steps.map((step, index) => (
+              <li key={step.title} className="flex gap-5">
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-full border font-mono text-xs text-primary-text">
+                  {index + 1}
+                </span>
+                <div>
+                  <p className="font-medium">{step.title}</p>
+                  <p className="mt-1 max-w-sm text-sm leading-relaxed text-muted-foreground">
+                    {step.text}
+                  </p>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </div>
+        <div className="command-panel lg:mt-4">
+          <WindowBar title="Terminal · ~/acme" />
           <div className="flex items-center justify-between gap-3 border-b px-5 sm:px-7">
             <div
               role="group"
@@ -116,9 +129,31 @@ export function CliPreviewSection() {
               <pre
                 key={example.name}
                 hidden={selected !== index}
-                className="min-h-40 overflow-x-auto font-mono text-[12px] leading-8 sm:text-sm"
+                className="min-h-44 overflow-x-auto font-mono text-[12px] leading-8 sm:text-sm"
               >
-                <code>{example.code}</code>
+                <code>
+                  {example.code.split("\n").map((line, lineIndex) => (
+                    <span key={lineIndex} className="block">
+                      {line.startsWith("#") ? (
+                        <span className="text-muted-foreground">{line}</span>
+                      ) : line.startsWith(" ") ? (
+                        line
+                      ) : line ? (
+                        <>
+                          <span
+                            aria-hidden="true"
+                            className="mr-3 text-primary-text select-none"
+                          >
+                            $
+                          </span>
+                          {line}
+                        </>
+                      ) : (
+                        "\u00a0"
+                      )}
+                    </span>
+                  ))}
+                </code>
               </pre>
             ))}
             <p
