@@ -4,16 +4,20 @@ import { execFile } from "node:child_process";
 import { homedir } from "node:os";
 import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
-const commandAvailable = async (command: string) => {
+// A command is missing only when it cannot be spawned. A slow cold start
+// (timeout) or a failing `--version` (for example a config error) still
+// means the harness is installed.
+export const commandAvailable = async (command: string) => {
   try {
     await execFileAsync(command, ["--version"], {
-      timeout: 1500,
+      timeout: 5000,
       maxBuffer: 1024,
       windowsHide: true
     });
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code !== "ENOENT" && code !== "EACCES";
   }
 };
 import {

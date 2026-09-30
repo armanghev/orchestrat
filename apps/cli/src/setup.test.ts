@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { readConfig } from "./config.js";
 import type { CredentialStore } from "./keychain.js";
-import { runSetup, type SetupPreview } from "./setup.js";
+import { commandAvailable, runSetup, type SetupPreview } from "./setup.js";
 import { resolveInvocation } from "./resolve.js";
 
 class Store implements CredentialStore {
@@ -620,4 +620,16 @@ test("partial setup records provisioned agents and names the rejected harness", 
     "550e8400-e29b-41d4-a716-446655440001"
   );
   assert.equal(await store.read("agent:cursor"), undefined);
+});
+
+test("harness detection treats a failing --version as installed, not missing", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "orchestrat-detect-"));
+  const failing = join(dir, "broken-harness");
+  await writeFile(
+    failing,
+    "#!/bin/sh\necho 'Error loading config' >&2\nexit 1\n"
+  );
+  await chmod(failing, 0o755);
+  assert.equal(await commandAvailable(failing), true);
+  assert.equal(await commandAvailable(join(dir, "not-installed")), false);
 });
