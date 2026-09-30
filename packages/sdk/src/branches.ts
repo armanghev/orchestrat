@@ -9,6 +9,12 @@ import {
 import type { RegisterBranchRequest } from "@orchestrat/protocol";
 import type { RequestFn } from "./attention.js";
 
+export type {
+  Branch,
+  RegisterBranchRequest,
+  RegisterBranchResponse
+} from "@orchestrat/protocol";
+
 type BranchListInput = { include_archived?: boolean; name?: string };
 
 /**

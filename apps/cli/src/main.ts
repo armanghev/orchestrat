@@ -39,6 +39,7 @@ import {
 } from "./stop-hooks.js";
 import { runWakerCommand } from "./waker.js";
 import { runDocumentCommand } from "./documents.js";
+import { clientForCheckout, runBranchCommand } from "./branches.js";
 import { disconnectLocal, runDoctor, runStatus } from "./diagnostics.js";
 import {
   finishSetup,
@@ -65,6 +66,7 @@ export function parseInvocationArgs(argv: string[]): {
     | "doctor"
     | "disconnect"
     | "document"
+    | "branch"
     | "waker"
     | "version";
   integration?: ConfigurableIntegration | "all";
@@ -94,6 +96,9 @@ export function parseInvocationArgs(argv: string[]): {
   baseRevision?: number;
   resume?: string;
   includeArchived?: boolean;
+  branchAction?: "current" | "list" | "create" | "select";
+  branchName?: string;
+  follow?: boolean;
 } {
   if (argv.length === 1 && (argv[0] === "--version" || argv[0] === "-v"))
     return { command: "version" };
@@ -115,15 +120,18 @@ export function parseInvocationArgs(argv: string[]): {
       "auto-continue": { type: "boolean", default: false },
       rewake: { type: "boolean", default: false },
       once: { type: "boolean", default: false },
-      "dry-run": { type: "boolean", default: false }
+      "dry-run": { type: "boolean", default: false },
+      follow: { type: "boolean", default: false }
     },
     allowPositionals: true,
     strict: true
   });
   const documentCommand =
     positionals[0] === "document" || positionals[0] === "documents";
+  const branchCommand = positionals[0] === "branch";
   if (
     (!documentCommand &&
+      !branchCommand &&
       positionals.length !== 1 &&
       !(
         positionals.length === 2 &&
@@ -140,7 +148,8 @@ export function parseInvocationArgs(argv: string[]): {
       positionals[0] !== "setup" &&
       positionals[0] !== "waker" &&
       positionals[0] !== "document" &&
-      positionals[0] !== "documents")
+      positionals[0] !== "documents" &&
+      positionals[0] !== "branch")
   )
     usage();
   const integration = values.integration;
@@ -156,6 +165,7 @@ export function parseInvocationArgs(argv: string[]): {
     usage();
   if (values.rewake && !values["auto-continue"]) usage();
   if ((values.once || values["dry-run"]) && positionals[0] !== "waker") usage();
+  if (values.follow && !branchCommand) usage();
   if (
     typeof integration !== "undefined" &&
     !isConfigurableIntegration(integration)
@@ -165,9 +175,34 @@ export function parseInvocationArgs(argv: string[]): {
     integration !== undefined &&
     positionals[0] !== "mcp" &&
     positionals[0] !== "document" &&
-    positionals[0] !== "documents"
+    positionals[0] !== "documents" &&
+    !branchCommand
   )
     usage();
+  if (branchCommand) {
+    // Branch commands only read, register and select; local Git never
+    // merges, archives or deletes Orchestrat branches.
+    const action = (positionals[1] ?? "current") as
+      "current" | "list" | "create" | "select";
+    if (!integration || !isConfigurableIntegration(integration)) usage();
+    const allowed = {
+      current: [1, 2],
+      list: [2],
+      create: [3],
+      select: values.follow ? [2] : [3]
+    }[action];
+    if (!allowed || !allowed.includes(positionals.length)) usage();
+    if (values["include-archived"] && action !== "list") usage();
+    if (values.follow && action !== "select") usage();
+    return {
+      command: "branch",
+      integration,
+      branchAction: action,
+      ...(positionals[2] ? { branchName: positionals[2] } : {}),
+      ...(values.follow ? { follow: true } : {}),
+      ...(values["include-archived"] ? { includeArchived: true } : {})
+    };
+  }
   if (positionals[0] === "document" || positionals[0] === "documents") {
     const action = positionals[1] as
       | "list"
@@ -330,7 +365,7 @@ export function parseInvocationArgs(argv: string[]): {
 
 function usage(): never {
   throw new Error(
-    "Usage: orchestrat setup [--auto-continue [--rewake]] | status | doctor | hook <integration> [--event <event>] | hook <claude-code|codex> --event Stop [--watch] | disconnect <integration|all> | mcp --integration <integration> [--cwd <project>] [--global] [--wait-budget-seconds <n>] | waker <enable|disable|status|run> [--once] [--dry-run] | document(s) <list|read|create|write|patch|history|upload|download> --integration <integration>"
+    "Usage: orchestrat setup [--auto-continue [--rewake]] | status | doctor | hook <integration> [--event <event>] | hook <claude-code|codex> --event Stop [--watch] | disconnect <integration|all> | mcp --integration <integration> [--cwd <project>] [--global] [--wait-budget-seconds <n>] | waker <enable|disable|status|run> [--once] [--dry-run] | document(s) <list|read|create|write|patch|history|upload|download> --integration <integration> | branch [current|list [--include-archived]|create <name>|select <name>|select --follow] --integration <integration>"
   );
 }
 
@@ -351,6 +386,9 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     baseRevision,
     resume,
     includeArchived,
+    branchAction,
+    branchName,
+    follow,
     waitBudgetSeconds,
     watch,
     autoContinue,
@@ -397,10 +435,15 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       read: readConfig,
       credentials: new KeychainCredentialReader()
     });
-    const client = new AgentApiClient({
-      baseUrl: resolved.api!,
-      token: resolved.credential!
-    });
+    // Documents live on the checkout's branch.
+    const { client } = await clientForCheckout(
+      new AgentApiClient({
+        baseUrl: resolved.api!,
+        token: resolved.credential!
+      }),
+      invocationCwd,
+      home
+    );
     const result = await runDocumentCommand({
       action: documentAction!,
       client,
@@ -411,6 +454,30 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       cursor,
       baseRevision,
       resume,
+      includeArchived
+    });
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+    return;
+  }
+  if (command === "branch") {
+    const resolved = await resolveInvocation({
+      api,
+      home,
+      cwd: invocationCwd,
+      integration: integration as ConfigurableIntegration,
+      read: readConfig,
+      credentials: new KeychainCredentialReader()
+    });
+    const result = await runBranchCommand({
+      action: branchAction!,
+      client: new AgentApiClient({
+        baseUrl: resolved.api!,
+        token: resolved.credential!
+      }),
+      cwd: invocationCwd,
+      home,
+      name: branchName,
+      follow,
       includeArchived
     });
     process.stdout.write(`${JSON.stringify(result)}\n`);
