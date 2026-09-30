@@ -171,6 +171,84 @@ export const projects = pgTable(
   ]
 );
 
+// Branches (0016). Existing rows moved onto one default branch per project;
+// branch-scoped tables below carry branch_id with same-branch composite FKs.
+export const projectBranches = pgTable(
+  "project_branches",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    isDefault: boolean("is_default").default(false).notNull(),
+    nameSource: text("name_source")
+      .$type<"fallback" | "cli" | "provider" | "user">()
+      .notNull(),
+    createdVia: text("created_via")
+      .$type<"migration" | "dashboard" | "cli" | "agent" | "provider">()
+      .notNull(),
+    createdByType: documentAuthorType("created_by_type"),
+    createdByUserId: uuid("created_by_user_id").references(() => users.id, {
+      onDelete: "restrict"
+    }),
+    createdByAgentId: uuid("created_by_agent_id"),
+    onboardingState: text("onboarding_state")
+      .$type<"pending" | "completed">()
+      .default("pending")
+      .notNull(),
+    onboardingChoice: text("onboarding_choice").$type<
+      "blank" | "import_all" | "selected"
+    >(),
+    onboardingCompletedAt: timestamp("onboarding_completed_at", {
+      withTimezone: true
+    }),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    archivedReason: text("archived_reason").$type<
+      "provider_deleted" | "manual" | "replaced_on_connect"
+    >(),
+    archivedByUserId: uuid("archived_by_user_id").references(() => users.id, {
+      onDelete: "set null"
+    }),
+    ...timestamps
+  },
+  (table) => [
+    unique("project_branches_project_id_id_unique").on(
+      table.projectId,
+      table.id
+    ),
+    uniqueIndex("project_branches_active_name_unique")
+      .on(table.projectId, table.name)
+      .where(sql`${table.archivedAt} is null`),
+    uniqueIndex("project_branches_one_default")
+      .on(table.projectId)
+      .where(sql`${table.isDefault}`),
+    index("project_branches_project_archived_idx").on(
+      table.projectId,
+      table.archivedAt,
+      table.updatedAt
+    ),
+    foreignKey({
+      columns: [table.projectId, table.createdByAgentId],
+      foreignColumns: [agents.projectId, agents.id],
+      name: "project_branches_created_by_agent_project_fk"
+    }),
+    check("project_branches_name_not_blank", sql`btrim(${table.name}) <> ''`),
+    check(
+      "project_branches_default_active",
+      sql`not ${table.isDefault} or ${table.archivedAt} is null`
+    ),
+    check(
+      "project_branches_archive_consistent",
+      sql`(${table.archivedAt} is null) = (${table.archivedReason} is null)`
+    ),
+    check(
+      "project_branches_created_by_consistent",
+      sql`(${table.createdByType} is null and ${table.createdByUserId} is null and ${table.createdByAgentId} is null) or (${table.createdByType} = 'human' and ${table.createdByUserId} is not null and ${table.createdByAgentId} is null) or (${table.createdByType} = 'agent' and ${table.createdByUserId} is null and ${table.createdByAgentId} is not null)`
+    )
+  ]
+).enableRLS();
+
 export const tasks = pgTable(
   "tasks",
   {
@@ -178,6 +256,7 @@ export const tasks = pgTable(
     projectId: uuid("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
+    branchId: uuid("branch_id").notNull(),
     taskKey: text("task_key").notNull(),
     taskNumber: integer("task_number").notNull(),
     title: text("title").notNull(),
@@ -194,21 +273,34 @@ export const tasks = pgTable(
     ...timestamps,
     startedAt: timestamp("started_at", { withTimezone: true }),
     completedAt: timestamp("completed_at", { withTimezone: true }),
-    cancelledAt: timestamp("cancelled_at", { withTimezone: true })
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    // Lineage root for copies made by imports and merges; null = this row.
+    originId: uuid("origin_id")
   },
   (table) => [
     unique("tasks_project_id_id_unique").on(table.projectId, table.id),
-    uniqueIndex("tasks_project_key_unique").on(table.projectId, table.taskKey),
-    uniqueIndex("tasks_project_number_unique").on(
-      table.projectId,
+    unique("tasks_branch_id_id_unique").on(table.branchId, table.id),
+    // Copies keep their origin's key, so keys are unique per branch; the
+    // project-wide task_counter keeps fresh numbers unique project-wide.
+    uniqueIndex("tasks_branch_key_unique").on(table.branchId, table.taskKey),
+    uniqueIndex("tasks_branch_number_unique").on(
+      table.branchId,
       table.taskNumber
     ),
-    index("tasks_project_board_order_idx").on(
-      table.projectId,
+    uniqueIndex("tasks_branch_origin_unique")
+      .on(table.branchId, table.originId)
+      .where(sql`${table.originId} is not null`),
+    index("tasks_branch_board_order_idx").on(
+      table.branchId,
       table.status,
       table.position,
       table.id
     ),
+    foreignKey({
+      columns: [table.projectId, table.branchId],
+      foreignColumns: [projectBranches.projectId, projectBranches.id],
+      name: "tasks_branch_project_fk"
+    }).onDelete("cascade"),
     index("tasks_created_by_user_id_idx").on(table.createdByUserId),
     index("tasks_created_by_agent_id_idx").on(table.createdByAgentId),
     foreignKey({
@@ -234,6 +326,7 @@ export const taskComments = pgTable(
       .notNull()
       .references(() => tasks.id, { onDelete: "cascade" }),
     projectId: uuid("project_id").notNull(),
+    branchId: uuid("branch_id").notNull(),
     authorType: documentAuthorType("author_type").notNull(),
     authorUserId: uuid("author_user_id").references(() => users.id, {
       onDelete: "restrict"
@@ -249,9 +342,25 @@ export const taskComments = pgTable(
       .notNull(),
     createdAt: timestamp("created_at", { withTimezone: true, precision: 3 })
       .defaultNow()
-      .notNull()
+      .notNull(),
+    originId: uuid("origin_id"),
+    // Set on comments copied by imports and merges; they never notify.
+    importedAt: timestamp("imported_at", { withTimezone: true })
   },
   (table) => [
+    foreignKey({
+      columns: [table.projectId, table.branchId],
+      foreignColumns: [projectBranches.projectId, projectBranches.id],
+      name: "task_comments_branch_project_fk"
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.branchId, table.taskId],
+      foreignColumns: [tasks.branchId, tasks.id],
+      name: "task_comments_task_branch_fk"
+    }).onDelete("cascade"),
+    uniqueIndex("task_comments_branch_origin_unique")
+      .on(table.branchId, table.originId)
+      .where(sql`${table.originId} is not null`),
     uniqueIndex("task_comments_task_sequence_unique").on(
       table.taskId,
       table.sequence
@@ -289,6 +398,7 @@ export const taskDependencies = pgTable(
     projectId: uuid("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
+    branchId: uuid("branch_id").notNull(),
     taskId: uuid("task_id").notNull(),
     dependsOnTaskId: uuid("depends_on_task_id").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -297,6 +407,22 @@ export const taskDependencies = pgTable(
   },
   (table) => [
     primaryKey({ columns: [table.taskId, table.dependsOnTaskId] }),
+    foreignKey({
+      columns: [table.projectId, table.branchId],
+      foreignColumns: [projectBranches.projectId, projectBranches.id],
+      name: "task_dependencies_branch_project_fk"
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.branchId, table.taskId],
+      foreignColumns: [tasks.branchId, tasks.id],
+      name: "task_dependencies_task_branch_fk"
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.branchId, table.dependsOnTaskId],
+      foreignColumns: [tasks.branchId, tasks.id],
+      name: "task_dependencies_blocker_branch_fk"
+    }).onDelete("cascade"),
+    index("task_dependencies_branch_task_idx").on(table.branchId, table.taskId),
     foreignKey({
       columns: [table.projectId, table.taskId],
       foreignColumns: [tasks.projectId, tasks.id],
@@ -441,6 +567,8 @@ export const agentSessions = pgTable(
     projectId: uuid("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
+    // A session is pinned to one branch; its claims share it.
+    branchId: uuid("branch_id").notNull(),
     agentId: uuid("agent_id").notNull(),
     runtime: text("runtime").notNull(),
     integration: text("integration").notNull(),
@@ -468,8 +596,14 @@ export const agentSessions = pgTable(
       foreignColumns: [agents.projectId, agents.id],
       name: "agent_sessions_agent_project_fk"
     }).onDelete("cascade"),
-    index("agent_sessions_project_agent_status_idx").on(
-      table.projectId,
+    unique("agent_sessions_branch_id_id_unique").on(table.branchId, table.id),
+    foreignKey({
+      columns: [table.projectId, table.branchId],
+      foreignColumns: [projectBranches.projectId, projectBranches.id],
+      name: "agent_sessions_branch_project_fk"
+    }).onDelete("cascade"),
+    index("agent_sessions_branch_agent_status_idx").on(
+      table.branchId,
       table.agentId,
       table.status
     ),
@@ -495,6 +629,8 @@ export const projectEvents = pgTable(
     projectId: uuid("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
+    // null = a project-wide event (agents, credentials, branches, repository).
+    branchId: uuid("branch_id"),
     type: text("type").notNull(),
     actorAgentId: uuid("actor_agent_id"),
     actorUserId: uuid("actor_user_id").references(() => users.id, {
@@ -513,6 +649,16 @@ export const projectEvents = pgTable(
       name: "project_events_actor_agent_project_fk"
     }),
     index("project_events_project_id_id_idx").on(table.projectId, table.id),
+    index("project_events_project_branch_id_idx").on(
+      table.projectId,
+      table.branchId,
+      table.id
+    ),
+    foreignKey({
+      columns: [table.projectId, table.branchId],
+      foreignColumns: [projectBranches.projectId, projectBranches.id],
+      name: "project_events_branch_project_fk"
+    }).onDelete("cascade"),
     check("project_events_type_not_blank", sql`btrim(${table.type}) <> ''`)
   ]
 );
@@ -574,6 +720,7 @@ export const taskClaims = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     projectId: uuid("project_id").notNull(),
+    branchId: uuid("branch_id").notNull(),
     taskId: uuid("task_id").notNull(),
     agentId: uuid("agent_id").notNull(),
     sessionId: uuid("session_id").notNull(),
@@ -616,6 +763,21 @@ export const taskClaims = pgTable(
         agentSessions.id
       ],
       name: "task_claims_session_agent_project_fk"
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.projectId, table.branchId],
+      foreignColumns: [projectBranches.projectId, projectBranches.id],
+      name: "task_claims_branch_project_fk"
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.branchId, table.taskId],
+      foreignColumns: [tasks.branchId, tasks.id],
+      name: "task_claims_task_branch_fk"
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.branchId, table.sessionId],
+      foreignColumns: [agentSessions.branchId, agentSessions.id],
+      name: "task_claims_session_branch_fk"
     }).onDelete("cascade"),
     check(
       "task_claims_lifecycle_consistent",
@@ -674,6 +836,7 @@ export const documents = pgTable(
     projectId: uuid("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
+    branchId: uuid("branch_id").notNull(),
     path: text("path").notNull(),
     currentRevision: integer("current_revision").default(1).notNull(),
     archivedAt: timestamp("archived_at", { withTimezone: true }),
@@ -682,19 +845,26 @@ export const documents = pgTable(
       onDelete: "restrict"
     }),
     createdByAgentId: uuid("created_by_agent_id"),
+    originId: uuid("origin_id"),
     ...timestamps
   },
   (table) => [
     unique("documents_project_id_id_unique").on(table.projectId, table.id),
-    uniqueIndex("documents_project_path_unique").on(
-      table.projectId,
-      table.path
-    ),
-    index("documents_project_updated_idx").on(
-      table.projectId,
+    unique("documents_branch_id_id_unique").on(table.branchId, table.id),
+    uniqueIndex("documents_branch_path_unique").on(table.branchId, table.path),
+    uniqueIndex("documents_branch_origin_unique")
+      .on(table.branchId, table.originId)
+      .where(sql`${table.originId} is not null`),
+    index("documents_branch_updated_idx").on(
+      table.branchId,
       table.updatedAt,
       table.id
     ),
+    foreignKey({
+      columns: [table.projectId, table.branchId],
+      foreignColumns: [projectBranches.projectId, projectBranches.id],
+      name: "documents_branch_project_fk"
+    }).onDelete("cascade"),
     foreignKey({
       columns: [table.projectId, table.createdByAgentId],
       foreignColumns: [agents.projectId, agents.id],
@@ -719,16 +889,22 @@ export const documentFolders = pgTable(
     projectId: uuid("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
+    branchId: uuid("branch_id").notNull(),
     path: text("path").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull()
   },
   (table) => [
-    uniqueIndex("document_folders_project_path_unique").on(
-      table.projectId,
+    uniqueIndex("document_folders_branch_path_unique").on(
+      table.branchId,
       table.path
     ),
+    foreignKey({
+      columns: [table.projectId, table.branchId],
+      foreignColumns: [projectBranches.projectId, projectBranches.id],
+      name: "document_folders_branch_project_fk"
+    }).onDelete("cascade"),
     check("document_folders_path_not_blank", sql`btrim(${table.path}) <> ''`)
   ]
 ).enableRLS();
@@ -738,6 +914,7 @@ export const documentRevisions = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     projectId: uuid("project_id").notNull(),
+    branchId: uuid("branch_id").notNull(),
     documentId: uuid("document_id").notNull(),
     revisionNumber: integer("revision_number").notNull(),
     contentMarkdown: text("content_markdown").notNull(),
@@ -750,9 +927,23 @@ export const documentRevisions = pgTable(
     authorAgentId: uuid("author_agent_id"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
-      .notNull()
+      .notNull(),
+    originId: uuid("origin_id")
   },
   (table) => [
+    foreignKey({
+      columns: [table.projectId, table.branchId],
+      foreignColumns: [projectBranches.projectId, projectBranches.id],
+      name: "document_revisions_branch_project_fk"
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.branchId, table.documentId],
+      foreignColumns: [documents.branchId, documents.id],
+      name: "document_revisions_document_branch_fk"
+    }).onDelete("cascade"),
+    uniqueIndex("document_revisions_branch_origin_unique")
+      .on(table.branchId, table.originId)
+      .where(sql`${table.originId} is not null`),
     uniqueIndex("document_revisions_document_id_revision_unique").on(
       table.documentId,
       table.revisionNumber
@@ -792,6 +983,7 @@ export const documentAttachments = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     projectId: uuid("project_id").notNull(),
+    branchId: uuid("branch_id").notNull(),
     documentId: uuid("document_id").notNull(),
     filename: text("filename").notNull(),
     mimeType: text("mime_type").notNull(),
@@ -801,7 +993,8 @@ export const documentAttachments = pgTable(
     addedByAgentId: uuid("added_by_agent_id"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
-      .notNull()
+      .notNull(),
+    originId: uuid("origin_id")
   },
   (table) => [
     foreignKey({
@@ -809,6 +1002,19 @@ export const documentAttachments = pgTable(
       foreignColumns: [documents.projectId, documents.id],
       name: "document_attachments_document_project_fk"
     }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.projectId, table.branchId],
+      foreignColumns: [projectBranches.projectId, projectBranches.id],
+      name: "document_attachments_branch_project_fk"
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.branchId, table.documentId],
+      foreignColumns: [documents.branchId, documents.id],
+      name: "document_attachments_document_branch_fk"
+    }).onDelete("cascade"),
+    uniqueIndex("document_attachments_branch_origin_unique")
+      .on(table.branchId, table.originId)
+      .where(sql`${table.originId} is not null`),
     foreignKey({
       columns: [table.addedByUserId],
       foreignColumns: [users.id],
@@ -840,6 +1046,7 @@ export const documentAttachmentUploads = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     projectId: uuid("project_id").notNull(),
+    branchId: uuid("branch_id").notNull(),
     documentId: uuid("document_id").notNull(),
     filename: text("filename").notNull(),
     mimeType: text("mime_type").notNull(),
@@ -861,6 +1068,16 @@ export const documentAttachmentUploads = pgTable(
       columns: [table.projectId, table.documentId],
       foreignColumns: [documents.projectId, documents.id],
       name: "document_attachment_uploads_document_project_fk"
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.projectId, table.branchId],
+      foreignColumns: [projectBranches.projectId, projectBranches.id],
+      name: "document_attachment_uploads_branch_project_fk"
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.branchId, table.documentId],
+      foreignColumns: [documents.branchId, documents.id],
+      name: "document_attachment_uploads_document_branch_fk"
     }).onDelete("cascade"),
     foreignKey({
       columns: [table.actorUserId],
@@ -954,6 +1171,7 @@ export const chats = pgTable(
     projectId: uuid("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
+    branchId: uuid("branch_id").notNull(),
     kind: text("kind").$type<"direct" | "group">().notNull(),
     name: text("name"),
     directKey: text("direct_key"),
@@ -964,15 +1182,25 @@ export const chats = pgTable(
     }),
     creatorAgentId: uuid("creator_agent_id"),
     lastSequence: integer("last_sequence").default(0).notNull(),
+    originId: uuid("origin_id"),
     ...timestamps
   },
   (table) => [
     unique("chats_project_id_id_unique").on(table.projectId, table.id),
-    uniqueIndex("chats_direct_pair_unique").on(
-      table.projectId,
+    unique("chats_branch_id_id_unique").on(table.branchId, table.id),
+    uniqueIndex("chats_branch_direct_pair_unique").on(
+      table.branchId,
       table.directKey
     ),
-    index("chats_project_updated_idx").on(table.projectId, table.updatedAt),
+    uniqueIndex("chats_branch_origin_unique")
+      .on(table.branchId, table.originId)
+      .where(sql`${table.originId} is not null`),
+    index("chats_branch_updated_idx").on(table.branchId, table.updatedAt),
+    foreignKey({
+      columns: [table.projectId, table.branchId],
+      foreignColumns: [projectBranches.projectId, projectBranches.id],
+      name: "chats_branch_project_fk"
+    }).onDelete("cascade"),
     foreignKey({
       columns: [table.projectId, table.creatorAgentId],
       foreignColumns: [agents.projectId, agents.id],
@@ -995,6 +1223,7 @@ export const chatParticipants = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     projectId: uuid("project_id").notNull(),
+    branchId: uuid("branch_id").notNull(),
     chatId: uuid("chat_id").notNull(),
     userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
     agentId: uuid("agent_id"),
@@ -1016,6 +1245,16 @@ export const chatParticipants = pgTable(
       columns: [table.projectId, table.chatId],
       foreignColumns: [chats.projectId, chats.id],
       name: "chat_participants_chat_project_fk"
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.projectId, table.branchId],
+      foreignColumns: [projectBranches.projectId, projectBranches.id],
+      name: "chat_participants_branch_project_fk"
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.branchId, table.chatId],
+      foreignColumns: [chats.branchId, chats.id],
+      name: "chat_participants_chat_branch_fk"
     }).onDelete("cascade"),
     foreignKey({
       columns: [table.projectId, table.agentId],
@@ -1043,6 +1282,7 @@ export const chatMessages = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     projectId: uuid("project_id").notNull(),
+    branchId: uuid("branch_id").notNull(),
     chatId: uuid("chat_id").notNull(),
     sequence: integer("sequence").notNull(),
     authorType: documentAuthorType("author_type").notNull(),
@@ -1062,10 +1302,26 @@ export const chatMessages = pgTable(
       .notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
-      .notNull()
+      .notNull(),
+    originId: uuid("origin_id"),
+    // Set on messages copied by imports and merges: never unread, never notify.
+    importedAt: timestamp("imported_at", { withTimezone: true })
   },
   (table) => [
     unique("chat_messages_sequence_unique").on(table.chatId, table.sequence),
+    foreignKey({
+      columns: [table.projectId, table.branchId],
+      foreignColumns: [projectBranches.projectId, projectBranches.id],
+      name: "chat_messages_branch_project_fk"
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.branchId, table.chatId],
+      foreignColumns: [chats.branchId, chats.id],
+      name: "chat_messages_chat_branch_fk"
+    }).onDelete("cascade"),
+    uniqueIndex("chat_messages_branch_origin_unique")
+      .on(table.branchId, table.originId)
+      .where(sql`${table.originId} is not null`),
     index("chat_messages_project_chat_sequence_idx").on(
       table.projectId,
       table.chatId,

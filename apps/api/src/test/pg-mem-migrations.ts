@@ -17,6 +17,11 @@ export function isPgMemMigrationStatementSupported(statement: string): boolean {
   )
     return false;
 
+  // pg-mem cannot run plpgsql. The 0016 rollout-window shim only fills
+  // branch_id for inserts from the pre-branches API; new code always sets it,
+  // and the real PostgreSQL acceptance test covers the shim.
+  if (statement.includes("orchestrat_fill_default_branch")) return false;
+
   // pg-mem does not parse PostgreSQL RLS DDL. Production migrations retain it,
   // and the policy behavior is covered by the real PostgreSQL integration test.
   if (

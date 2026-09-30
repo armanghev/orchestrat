@@ -27,6 +27,7 @@ import { and, asc, desc, eq, gt, isNull, lt, ne, or } from "drizzle-orm";
 import { insertProjectEvent } from "./agent-service.js";
 import type { AgentPrincipal } from "./agent-service.js";
 import { ApiError } from "./api-error.js";
+import { defaultBranchId } from "./branch-context.js";
 import { PermissionService } from "./permission-service.js";
 
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
@@ -404,7 +405,11 @@ export class DocumentService {
         await this.lockActiveProject(tx, projectId);
         const [folder] = await tx
           .insert(documentFolders)
-          .values({ projectId, path: input.path })
+          .values({
+            projectId,
+            branchId: await defaultBranchId(tx, projectId),
+            path: input.path
+          })
           .returning();
         return { folder: folderJson(folder!) };
       });
@@ -458,6 +463,7 @@ export class DocumentService {
           .values({
             id: documentId,
             projectId,
+            branchId: await defaultBranchId(tx, projectId),
             path: input.path,
             createdByType: authorType,
             ...(authorType === "human"
@@ -469,6 +475,7 @@ export class DocumentService {
           .insert(documentRevisions)
           .values({
             projectId,
+            branchId: document!.branchId,
             documentId,
             id: revisionId,
             revisionNumber: 1,
@@ -668,6 +675,7 @@ export class DocumentService {
           .insert(documentRevisions)
           .values({
             projectId,
+            branchId: document.branchId,
             documentId: id,
             id: revisionId,
             revisionNumber,

@@ -6,6 +6,8 @@ import { parseSeedAuthSubject } from "./seed-config.js";
 import {
   organizationMembers,
   organizations,
+  projectBranches,
+  projectMembers,
   projects,
   users
 } from "./schema.js";
@@ -81,6 +83,24 @@ try {
           eq(projects.slug, "demo")
         )
       }))!;
+
+    // Access needs both memberships, and every project has a default branch.
+    await tx
+      .insert(projectMembers)
+      .values({ projectId: activeProject.id, userId: user.id, role: "owner" })
+      .onConflictDoNothing();
+    await tx
+      .insert(projectBranches)
+      .values({
+        projectId: activeProject.id,
+        name: "main",
+        isDefault: true,
+        nameSource: "fallback",
+        createdVia: "migration",
+        onboardingState: "completed",
+        onboardingCompletedAt: new Date()
+      })
+      .onConflictDoNothing();
 
     return {
       organization: activeOrganization.id,

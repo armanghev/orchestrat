@@ -5,6 +5,7 @@ import { S3Client } from "@aws-sdk/client-s3";
 import {
   documentAttachmentUploads,
   documentAttachments,
+  documents,
   projectEvents,
   users
 } from "@orchestrat/db";
@@ -466,9 +467,14 @@ test("archived documents reject attachment uploads", async () => {
 
 test("project quota includes completed and pending reservations", async () => {
   const { db, document, project, service, userId } = await setup();
+  const [{ branchId }] = await db
+    .select({ branchId: documents.branchId })
+    .from(documents)
+    .where(eq(documents.id, document.id));
   await db.insert(documentAttachments).values({
     id: randomUUID(),
     projectId: project.id,
+    branchId,
     documentId: document.id,
     filename: "existing.bin",
     mimeType: "application/octet-stream",
@@ -479,6 +485,7 @@ test("project quota includes completed and pending reservations", async () => {
   await db.insert(documentAttachmentUploads).values({
     id: randomUUID(),
     projectId: project.id,
+    branchId,
     documentId: document.id,
     filename: "reserved.bin",
     mimeType: "application/octet-stream",

@@ -114,6 +114,7 @@ test("committed project events publish once, rollback publishes zero, and failur
     recordProjectEvent(tx as never, {
       id,
       projectId,
+      branchId: null,
       type: "task.updated",
       actorAgentId: null,
       actorUserId: null,
@@ -131,6 +132,7 @@ test("committed project events publish once, rollback publishes zero, and failur
     recordProjectEvent(tx as never, {
       id: 4,
       projectId,
+      branchId: null,
       type: "run.failed",
       actorAgentId: null,
       actorUserId: null,
@@ -172,6 +174,7 @@ test("targeted notices and project events publish in persisted sequence order", 
     recordProjectEvent(value, {
       id: 12,
       projectId,
+      branchId: null,
       type: "chat.member_added",
       actorAgentId: null,
       actorUserId: "550e8400-e29b-41d4-a716-446655440001",
@@ -445,6 +448,7 @@ test("stalled socket authorization cannot delay a committed mutation or disclose
     recordProjectEvent(tx as never, {
       id: 1,
       projectId: "project-a",
+      branchId: null,
       type: "task.updated",
       actorAgentId: null,
       actorUserId: null,

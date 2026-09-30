@@ -38,6 +38,7 @@ import {
   or
 } from "drizzle-orm";
 import { ApiError } from "./api-error.js";
+import { defaultBranchId } from "./branch-context.js";
 import { PermissionService } from "./permission-service.js";
 import { recordProjectEvent } from "../realtime/realtime.js";
 import { resetsToReadyOnClaimEnd } from "./task-block-hooks.js";
@@ -488,6 +489,7 @@ export class AgentService {
         .values({
           id: randomUUID(),
           projectId: principal.projectId,
+          branchId: await defaultBranchId(tx, principal.projectId),
           agentId: principal.agentId,
           runtime: input.runtime,
           integration: input.integration,
@@ -612,6 +614,7 @@ export class AgentService {
               .values({
                 id: input.session_id,
                 projectId: principal.projectId,
+                branchId: await defaultBranchId(tx, principal.projectId),
                 agentId: principal.agentId,
                 runtime: input.runtime,
                 integration: input.integration,

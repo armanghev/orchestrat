@@ -1,8 +1,12 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool, type PoolConfig } from "pg";
-import * as schema from "./schema.js";
+import * as coreSchema from "./schema.js";
+import * as branchSchema from "./schema-branches.js";
 
 export * from "./schema.js";
+export * from "./schema-branches.js";
+
+const schema = { ...coreSchema, ...branchSchema };
 
 export function createDatabase(config: PoolConfig | Pool) {
   const pool =

@@ -45,6 +45,7 @@ import {
   type Transaction
 } from "./agent-service.js";
 import { ApiError } from "./api-error.js";
+import { defaultBranchId } from "./branch-context.js";
 
 type Actor =
   | { type: "human"; id: string }
@@ -732,6 +733,7 @@ export class ChatService {
             await tx.insert(chatParticipants).values(
               missing.map((value) => ({
                 projectId,
+                branchId: chat!.branchId,
                 chatId: chat!.id,
                 userId: value.type === "human" ? value.id : null,
                 agentId: value.type === "agent" ? value.id : null
@@ -754,6 +756,7 @@ export class ChatService {
           .values({
             id: randomUUID(),
             projectId,
+            branchId: await defaultBranchId(tx, projectId),
             kind: input.kind,
             name: input.kind === "group" ? input.name! : null,
             directKey,
@@ -766,6 +769,7 @@ export class ChatService {
         await tx.insert(chatParticipants).values(
           refs.map((value) => ({
             projectId,
+            branchId: chat!.branchId,
             chatId: chat!.id,
             userId: value.type === "human" ? value.id : null,
             agentId: value.type === "agent" ? value.id : null
@@ -1017,6 +1021,7 @@ export class ChatService {
         await this.validateCandidates(tx, projectId, [input.participant]);
         await tx.insert(chatParticipants).values({
           projectId,
+          branchId: chat.branchId,
           chatId,
           userId:
             input.participant.type === "human" ? input.participant.id : null,
@@ -1146,6 +1151,7 @@ export class ChatService {
         );
       await tx.insert(chatParticipants).values({
         projectId: locked.projectId,
+        branchId: locked.branchId,
         chatId: locked.id,
         userId
       });
@@ -1377,6 +1383,7 @@ export class ChatService {
         .values({
           id: randomUUID(),
           projectId,
+          branchId: chat.branchId,
           chatId,
           sequence,
           authorType: actor.type,

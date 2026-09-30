@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   organizationMembers,
   organizations,
+  projectBranches,
   projectMembers,
   projects,
   users,
@@ -20,6 +21,7 @@ import type {
 } from "@orchestrat/protocol";
 import { and, asc, count, eq, inArray } from "drizzle-orm";
 import { ApiError } from "./api-error.js";
+import { FALLBACK_DEFAULT_BRANCH_NAME } from "./branch-context.js";
 import { PermissionService } from "./permission-service.js";
 
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
@@ -480,6 +482,19 @@ export class ProjectService {
         projectId: project.id,
         userId,
         role: "owner"
+      });
+      // Every project starts with its default branch (docs/project-branches.md
+      // §5.3); Git names it later (§8.7).
+      await tx.insert(projectBranches).values({
+        projectId: project.id,
+        name: FALLBACK_DEFAULT_BRANCH_NAME,
+        isDefault: true,
+        nameSource: "fallback",
+        createdVia: "dashboard",
+        createdByType: "human",
+        createdByUserId: userId,
+        onboardingState: "completed",
+        onboardingCompletedAt: new Date()
       });
       return projectJson(project, "owner");
     });

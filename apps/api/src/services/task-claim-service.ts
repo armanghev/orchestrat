@@ -118,6 +118,7 @@ export class TaskClaimService {
           .values({
             id: randomUUID(),
             projectId: principal.projectId,
+            branchId: task.branchId,
             taskId,
             agentId: principal.agentId,
             sessionId: input.session_id,

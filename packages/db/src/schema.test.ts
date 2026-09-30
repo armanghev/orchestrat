@@ -3,7 +3,18 @@ import { readdir, readFile } from "node:fs/promises";
 import test from "node:test";
 import { getTableConfig } from "drizzle-orm/pg-core";
 import {
+  branchItemBaselines,
+  branchMergeDecisions,
+  branchMergeRuns,
+  repositoryConnectionAttempts,
+  repositoryConnections,
+  repositoryRefs,
+  repositoryWebhookDeliveries
+} from "./schema-branches.js";
+import {
   agentLifecycleEvents,
+  documentAttachments,
+  projectBranches,
   cliCredentials,
   agentCredentials,
   agentSessions,
@@ -63,7 +74,7 @@ test("agent lifecycle idempotency is project/agent scoped and hash-only", async 
       "utf8"
     )
   ) as { entries: { tag: string }[] };
-  assert.equal(journal.entries.at(-1)?.tag, "0015_agent_attention");
+  assert.equal(journal.entries.at(-1)?.tag, "0016_project_branches");
 });
 
 test("agent attention schema matches the 0015 migration", async () => {
@@ -150,7 +161,7 @@ test("project messaging schema preserves access, authorship, and ordering", asyn
   const chatConfig = getTableConfig(chats);
   assert.ok(
     chatConfig.indexes.find(
-      (index) => index.config.name === "chats_direct_pair_unique"
+      (index) => index.config.name === "chats_branch_direct_pair_unique"
     )?.config.unique
   );
   assert.equal(
@@ -243,7 +254,7 @@ test("identity migration labels legacy rows then removes the default", async () 
   assert.match(sql, /CREATE INDEX "users_email_idx".*"email"/);
 });
 
-test("task schema keeps Kanban ordering, versions, and project-scoped keys", () => {
+test("task schema keeps Kanban ordering, versions, and branch-scoped keys", () => {
   assert.equal(projects.taskKeyPrefix.hasDefault, true);
   assert.equal(projects.taskCounter.hasDefault, true);
   assert.equal(tasks.position.notNull, true);
@@ -254,13 +265,13 @@ test("task schema keeps Kanban ordering, versions, and project-scoped keys", () 
   );
   assert.equal(
     config.indexes.find(
-      (index) => index.config.name === "tasks_project_board_order_idx"
+      (index) => index.config.name === "tasks_branch_board_order_idx"
     )?.config.columns.length,
     4
   );
   assert.ok(
     config.indexes.find(
-      (index) => index.config.name === "tasks_project_key_unique"
+      (index) => index.config.name === "tasks_branch_key_unique"
     )
   );
 });
@@ -432,7 +443,7 @@ test("documents enforce project paths, revisions, and coherent authors", () => {
   assert.equal(documents.currentRevision.hasDefault, true);
   assert.ok(
     getTableConfig(documents).indexes.find(
-      (index) => index.config.name === "documents_project_path_unique"
+      (index) => index.config.name === "documents_branch_path_unique"
     )
   );
   assert.ok(
@@ -499,4 +510,152 @@ test("remote document storage migration keeps metadata and upload invariants", a
   assert.match(sql, /document_revisions_content_metadata_consistent/);
   assert.match(sql, /document_attachment_uploads_mode_provider_consistent/);
   assert.doesNotMatch(sql, /DROP COLUMN.*content_markdown/);
+});
+
+test("migration journal applies in order: each when exceeds the previous", async () => {
+  // drizzle-kit migrate skips any migration whose `when` is not greater than
+  // the newest applied one, so an out-of-order entry is silently lost
+  // (docs/project-branches.md §15.2).
+  const journal = JSON.parse(
+    await readFile(
+      new URL("../drizzle/meta/_journal.json", import.meta.url),
+      "utf8"
+    )
+  ) as { entries: { idx: number; when: number; tag: string }[] };
+  for (let index = 1; index < journal.entries.length; index += 1) {
+    const previous = journal.entries[index - 1];
+    const entry = journal.entries[index];
+    assert.ok(entry.idx > previous.idx, entry.tag);
+    assert.ok(entry.when > previous.when, entry.tag);
+  }
+  const files = (await readdir(new URL("../drizzle/", import.meta.url)))
+    .filter((name) => name.endsWith(".sql"))
+    .map((name) => name.replace(/\.sql$/, ""))
+    .sort();
+  assert.deepEqual(
+    files,
+    journal.entries.map((entry) => entry.tag)
+  );
+});
+
+test("project branches schema matches the 0016 migration", async () => {
+  const scoped = [
+    tasks,
+    taskComments,
+    taskDependencies,
+    taskClaims,
+    agentSessions,
+    documents,
+    documentFolders,
+    documentRevisions,
+    documentAttachments,
+    documentAttachmentUploads,
+    chats,
+    chatParticipants,
+    chatMessages
+  ];
+  for (const table of scoped) {
+    const config = getTableConfig(table);
+    assert.equal(
+      config.columns.find((column) => column.name === "branch_id")?.notNull,
+      true,
+      config.name
+    );
+    assert.ok(
+      config.foreignKeys.some(
+        (foreignKey) =>
+          foreignKey.getName() === `${config.name}_branch_project_fk`
+      ),
+      config.name
+    );
+  }
+  assert.equal(projectEvents.branchId.notNull, false);
+  for (const table of [
+    projectBranches,
+    branchMergeRuns,
+    branchItemBaselines,
+    branchMergeDecisions,
+    repositoryConnections,
+    repositoryConnectionAttempts,
+    repositoryRefs,
+    repositoryWebhookDeliveries
+  ])
+    assert.equal(getTableConfig(table).enableRLS, true);
+
+  const branchConfig = getTableConfig(projectBranches);
+  for (const name of [
+    "project_branches_active_name_unique",
+    "project_branches_one_default"
+  ])
+    assert.ok(
+      branchConfig.indexes.find((index) => index.config.name === name)?.config
+        .unique,
+      name
+    );
+  for (const [table, name] of [
+    [taskComments, "task_comments_task_branch_fk"],
+    [taskDependencies, "task_dependencies_task_branch_fk"],
+    [taskDependencies, "task_dependencies_blocker_branch_fk"],
+    [taskClaims, "task_claims_task_branch_fk"],
+    [taskClaims, "task_claims_session_branch_fk"],
+    [documentRevisions, "document_revisions_document_branch_fk"],
+    [documentAttachments, "document_attachments_document_branch_fk"],
+    [chatParticipants, "chat_participants_chat_branch_fk"],
+    [chatMessages, "chat_messages_chat_branch_fk"]
+  ] as const)
+    assert.ok(
+      getTableConfig(table).foreignKeys.some(
+        (foreignKey) => foreignKey.getName() === name
+      ),
+      name
+    );
+  for (const [table, name] of [
+    [tasks, "tasks_project_key_unique"],
+    [documents, "documents_project_path_unique"],
+    [documentFolders, "document_folders_project_path_unique"],
+    [chats, "chats_direct_pair_unique"]
+  ] as const)
+    assert.equal(
+      getTableConfig(table).indexes.some((index) => index.config.name === name),
+      false,
+      name
+    );
+
+  const sql = await readFile(
+    new URL("../drizzle/0016_project_branches.sql", import.meta.url),
+    "utf8"
+  );
+  for (const table of [
+    "project_branches",
+    "branch_merge_runs",
+    "branch_item_baselines",
+    "branch_merge_decisions",
+    "repository_connections",
+    "repository_connection_attempts",
+    "repository_refs",
+    "repository_webhook_deliveries"
+  ])
+    assert.match(
+      sql,
+      new RegExp(`ALTER TABLE "${table}" ENABLE ROW LEVEL SECURITY`)
+    );
+  assert.match(
+    sql,
+    /SELECT gen_random_uuid\(\), "id", 'main', true, 'fallback'/
+  );
+  for (const name of [
+    "tasks_project_key_unique",
+    "documents_project_path_unique",
+    "document_folders_project_path_unique",
+    "chats_direct_pair_unique"
+  ])
+    assert.match(sql, new RegExp(`DROP INDEX "${name}"`));
+  for (const table of scoped.map((table) => getTableConfig(table).name))
+    assert.match(
+      sql,
+      new RegExp(
+        `CREATE TRIGGER "orchestrat_fill_default_branch_${table}" BEFORE INSERT ON "${table}"`
+      ),
+      table
+    );
 });

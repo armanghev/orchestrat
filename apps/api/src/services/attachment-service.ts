@@ -309,7 +309,7 @@ export class AttachmentService {
     try {
       const row = await this.db.transaction(async (tx) => {
         await this.lockProject(tx, projectId);
-        await this.documentTx(tx, projectId, documentId, true);
+        const document = await this.documentTx(tx, projectId, documentId, true);
         if (
           (await this.quota(tx, projectId)) + input.size_bytes >
           PROJECT_QUOTA_BYTES
@@ -324,6 +324,7 @@ export class AttachmentService {
           .values({
             id: uploadId,
             projectId,
+            branchId: document.branchId,
             documentId,
             filename: input.filename,
             mimeType: input.content_type,
@@ -740,6 +741,7 @@ export class AttachmentService {
         .values({
           id: current.id,
           projectId: current.projectId,
+          branchId: current.branchId,
           documentId: current.documentId,
           filename: current.filename,
           mimeType: current.mimeType,

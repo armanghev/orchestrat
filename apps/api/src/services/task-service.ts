@@ -21,6 +21,7 @@ import type { AgentPrincipal } from "./agent-service.js";
 import { idempotencyKeySchema } from "@orchestrat/protocol";
 import { and, asc, count, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import { ApiError } from "./api-error.js";
+import { defaultBranchId } from "./branch-context.js";
 import { insertProjectEvent } from "./agent-service.js";
 import {
   nextCommentSequence,
@@ -238,6 +239,7 @@ export class TaskService {
           .values({
             id: randomUUID(),
             projectId,
+            branchId: await defaultBranchId(tx, projectId),
             taskKey: `${counter.prefix}-${number}`,
             taskNumber: number,
             title: input.title,
@@ -724,6 +726,7 @@ export class TaskService {
         .values({
           id: randomUUID(),
           projectId,
+          branchId: task.branchId,
           taskId: id,
           authorType: actor.type,
           authorUserId: actor.type === "human" ? actor.id : null,
@@ -945,6 +948,7 @@ export class TaskService {
         );
       await tx.insert(taskDependencies).values({
         projectId: task.projectId,
+        branchId: current.branchId,
         taskId: id,
         dependsOnTaskId: blocker.id
       });
