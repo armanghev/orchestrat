@@ -21,7 +21,11 @@ import type { AgentPrincipal } from "./agent-service.js";
 import { idempotencyKeySchema } from "@orchestrat/protocol";
 import { and, asc, count, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import { ApiError } from "./api-error.js";
-import { defaultBranchId } from "./branch-context.js";
+import {
+  assertEntityBranch,
+  resolveBranch,
+  type BranchSelector
+} from "./branch-context.js";
 import { insertProjectEvent } from "./agent-service.js";
 import {
   nextCommentSequence,
@@ -87,6 +91,7 @@ type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 const taskJson = (task: typeof tasks.$inferSelect) => ({
   id: task.id,
   project_id: task.projectId,
+  branch_id: task.branchId,
   key: task.taskKey,
   title: task.title,
   description: task.description,
@@ -106,6 +111,8 @@ const taskJson = (task: typeof tasks.$inferSelect) => ({
   cancelled_at: task.cancelledAt?.toISOString() ?? null
 });
 type Actor = { type: "human"; id: string } | { type: "agent"; id: string };
+const agentIdOf = (actor: Actor) =>
+  actor.type === "agent" ? actor.id : undefined;
 const actorValues = (actor: Actor) => ({
   userId: actor.type === "human" ? actor.id : null,
   agentId: actor.type === "agent" ? actor.id : null
@@ -171,18 +178,47 @@ export class TaskService {
     actor: Actor,
     projectId: string,
     input: CreateTaskRequest,
-    key?: string
+    key?: string,
+    selector?: BranchSelector
   ) {
     const idempotencyKey = idempotencyKeySchema.parse(key);
     const requestHash = hash(input);
     return this.db.transaction(async (tx) => {
       await this.lockActiveProject(tx, projectId);
+      const branch = await resolveBranch(tx, projectId, selector, {
+        write: true,
+        agentId: agentIdOf(actor)
+      });
+      // Keys are scoped to the branch. Before branches they were scoped to the
+      // project, so a retry that spans the deploy still replays on the default.
+      if (branch.isDefault) {
+        const [legacy] = await tx
+          .select()
+          .from(apiIdempotencyKeys)
+          .where(
+            and(
+              actorClause(actor),
+              eq(apiIdempotencyKeys.operation, "create_task"),
+              eq(apiIdempotencyKeys.resourceId, projectId),
+              eq(apiIdempotencyKeys.idempotencyKey, idempotencyKey)
+            )
+          );
+        if (legacy) {
+          if (legacy.requestHash !== requestHash)
+            throw new ApiError(
+              409,
+              "IDEMPOTENCY_CONFLICT",
+              "The idempotency key was already used with a different request."
+            );
+          return { status: legacy.responseStatus, body: legacy.responseBody };
+        }
+      }
       const [reserved] = await tx
         .insert(apiIdempotencyKeys)
         .values({
           ...actorValues(actor),
           operation: "create_task",
-          resourceId: projectId,
+          resourceId: branch.id,
           idempotencyKey,
           requestHash,
           responseStatus: 0,
@@ -198,7 +234,7 @@ export class TaskService {
             and(
               actorClause(actor),
               eq(apiIdempotencyKeys.operation, "create_task"),
-              eq(apiIdempotencyKeys.resourceId, projectId),
+              eq(apiIdempotencyKeys.resourceId, branch.id),
               eq(apiIdempotencyKeys.idempotencyKey, idempotencyKey)
             )
           );
@@ -230,7 +266,7 @@ export class TaskService {
           .from(tasks)
           .where(
             and(
-              eq(tasks.projectId, projectId),
+              eq(tasks.branchId, branch.id),
               eq(tasks.status, input.status ?? "backlog")
             )
           );
@@ -239,7 +275,7 @@ export class TaskService {
           .values({
             id: randomUUID(),
             projectId,
-            branchId: await defaultBranchId(tx, projectId),
+            branchId: branch.id,
             taskKey: `${counter.prefix}-${number}`,
             taskNumber: number,
             title: input.title,
@@ -257,6 +293,7 @@ export class TaskService {
           actorUserId: actor.type === "human" ? actor.id : null,
           actorAgentId: actor.type === "agent" ? actor.id : null,
           entityId: task.id,
+          branchId: branch.id,
           type: "task.created",
           payload: { status: task.status }
         });
@@ -275,10 +312,17 @@ export class TaskService {
     userId: string,
     projectId: string,
     input: CreateTaskRequest,
-    key?: string
+    key?: string,
+    selector?: BranchSelector
   ) {
     await this.access(userId, projectId, true);
-    return this.createAs({ type: "human", id: userId }, projectId, input, key);
+    return this.createAs(
+      { type: "human", id: userId },
+      projectId,
+      input,
+      key,
+      selector
+    );
   }
 
   async createForAgent(
@@ -290,18 +334,29 @@ export class TaskService {
       { type: "agent", id: principal.agentId },
       principal.projectId,
       input,
-      key
+      key,
+      principal.branch
     );
   }
 
-  async list(userId: string, projectId: string, query: TaskListQuery) {
+  async list(
+    userId: string,
+    projectId: string,
+    query: TaskListQuery,
+    selector?: BranchSelector
+  ) {
     await this.access(userId, projectId);
-    return this.listProject(projectId, query);
+    const branch = await resolveBranch(this.db, projectId, selector);
+    return this.listProject(projectId, branch.id, query);
   }
 
-  private async listProject(projectId: string, query: TaskListQuery) {
+  private async listProject(
+    projectId: string,
+    branchId: string,
+    query: TaskListQuery
+  ) {
     await this.claims.reconcileExpired(projectId);
-    const clauses = [eq(tasks.projectId, projectId)];
+    const clauses = [eq(tasks.branchId, branchId)];
     if (query.status) clauses.push(eq(tasks.status, query.status));
     if (query.priority) clauses.push(eq(tasks.priority, query.priority));
     if (query.cursor) {
@@ -324,7 +379,7 @@ export class TaskService {
       .from(tasks)
       .where(
         and(
-          eq(tasks.projectId, projectId),
+          eq(tasks.branchId, branchId),
           ...(query.status ? [eq(tasks.status, query.status)] : []),
           ...(query.priority ? [eq(tasks.priority, query.priority)] : [])
         )
@@ -395,7 +450,13 @@ export class TaskService {
   }
 
   async listForAgent(principal: AgentPrincipal, query: TaskListQuery) {
-    return this.listProject(principal.projectId, query);
+    const branch = await resolveBranch(
+      this.db,
+      principal.projectId,
+      principal.branch,
+      { agentId: principal.agentId }
+    );
+    return this.listProject(principal.projectId, branch.id, query);
   }
 
   async getForAgent(principal: AgentPrincipal, id: string) {
@@ -406,7 +467,8 @@ export class TaskService {
     actor: Actor,
     projectId: string,
     id: string,
-    input: UpdateTaskRequest
+    input: UpdateTaskRequest,
+    selector?: BranchSelector
   ) {
     return this.db.transaction(async (tx) => {
       await this.lockActiveProject(tx, projectId);
@@ -416,6 +478,12 @@ export class TaskService {
         .where(and(eq(tasks.id, id), eq(tasks.projectId, projectId)))
         .for("update");
       if (!current) throw new ApiError(404, "NOT_FOUND", "Task not found.");
+      await assertEntityBranch(tx, projectId, current.branchId, selector, {
+        actor: actor.type,
+        write: true,
+        agentId: agentIdOf(actor),
+        notFound: "Task not found."
+      });
       if (current.version !== input.expected_version)
         throw new ApiError(
           409,
@@ -448,6 +516,7 @@ export class TaskService {
         actorUserId: actor.type === "human" ? actor.id : null,
         actorAgentId: actor.type === "agent" ? actor.id : null,
         entityId: task.id,
+        branchId: task.branchId,
         type: "task.updated",
         payload: { fields: Object.keys(input) }
       });
@@ -474,7 +543,8 @@ export class TaskService {
       { type: "agent", id: principal.agentId },
       principal.projectId,
       id,
-      input
+      input,
+      principal.branch
     );
   }
 
@@ -495,6 +565,13 @@ export class TaskService {
           "Task version is stale.",
           { current_version: locked?.version }
         );
+      await assertEntityBranch(
+        tx,
+        authorized.projectId,
+        locked.branchId,
+        undefined,
+        { actor: "human", write: true, notFound: "Task not found." }
+      );
       if (locked.status === "claimed" || (await hasActiveClaim(tx, id)))
         throw new ApiError(
           409,
@@ -507,7 +584,7 @@ export class TaskService {
         .from(tasks)
         .where(
           and(
-            eq(tasks.projectId, locked.projectId),
+            eq(tasks.branchId, locked.branchId),
             inArray(tasks.status, statuses)
           )
         )
@@ -582,6 +659,7 @@ export class TaskService {
         projectId: locked.projectId,
         actorUserId: userId,
         entityId: moved.id,
+        branchId: moved.branchId,
         type: "task.moved",
         payload: { from_status: locked.status, to_status: input.status }
       });
@@ -676,7 +754,8 @@ export class TaskService {
     projectId: string,
     id: string,
     input: CreateTaskCommentRequest,
-    key?: string
+    key?: string,
+    selector?: BranchSelector
   ) {
     const idempotencyKey = idempotencyKeySchema.parse(key);
     const requestHash = hash(input);
@@ -688,6 +767,12 @@ export class TaskService {
         .where(and(eq(tasks.id, id), eq(tasks.projectId, projectId)))
         .for("update");
       if (!task) throw new ApiError(404, "NOT_FOUND", "Task not found.");
+      await assertEntityBranch(tx, projectId, task.branchId, selector, {
+        actor: actor.type,
+        write: true,
+        agentId: agentIdOf(actor),
+        notFound: "Task not found."
+      });
       const [reserved] = await tx
         .insert(apiIdempotencyKeys)
         .values({
@@ -761,6 +846,7 @@ export class TaskService {
         actorUserId: actor.type === "human" ? actor.id : null,
         actorAgentId: actor.type === "agent" ? actor.id : null,
         entityId: comment.id,
+        branchId: comment.branchId,
         type: "task.comment_created",
         payload: {
           task_id: id,
@@ -837,7 +923,8 @@ export class TaskService {
       principal.projectId,
       id,
       input,
-      key
+      key,
+      principal.branch
     );
   }
 
@@ -878,6 +965,13 @@ export class TaskService {
         "VALIDATION_ERROR",
         "Dependencies must stay within a project."
       );
+    if (task.branchId !== blocker.branchId)
+      throw new ApiError(
+        400,
+        "VALIDATION_ERROR",
+        "Dependencies must stay within a branch.",
+        { reason: "cross_branch" }
+      );
     if (id === blocker.id)
       throw new ApiError(
         409,
@@ -900,6 +994,17 @@ export class TaskService {
         .for("update");
       if (!currentBlocker)
         throw new ApiError(404, "NOT_FOUND", "Task not found.");
+      await assertEntityBranch(
+        tx,
+        task.projectId,
+        current.branchId,
+        undefined,
+        {
+          actor: "human",
+          write: true,
+          notFound: "Task not found."
+        }
+      );
       const [existing] = await tx
         .select()
         .from(taskDependencies)
@@ -915,7 +1020,7 @@ export class TaskService {
       const edges = await tx
         .select()
         .from(taskDependencies)
-        .where(eq(taskDependencies.projectId, task.projectId));
+        .where(eq(taskDependencies.branchId, current.branchId));
       const graph = new Map<string, string[]>();
       for (const edge of edges)
         graph.set(edge.taskId, [
@@ -956,6 +1061,7 @@ export class TaskService {
         projectId: task.projectId,
         actorUserId: userId,
         entityId: id,
+        branchId: current.branchId,
         type: "task.dependency_added",
         payload: { depends_on_task_id: blocker.id }
       });
@@ -978,6 +1084,17 @@ export class TaskService {
         .where(eq(tasks.id, id))
         .for("update");
       if (!current) throw new ApiError(404, "NOT_FOUND", "Task not found.");
+      await assertEntityBranch(
+        tx,
+        task.projectId,
+        current.branchId,
+        undefined,
+        {
+          actor: "human",
+          write: true,
+          notFound: "Task not found."
+        }
+      );
       const [edge] = await tx
         .select()
         .from(taskDependencies)
@@ -1013,6 +1130,7 @@ export class TaskService {
         projectId: task.projectId,
         actorUserId: userId,
         entityId: id,
+        branchId: current.branchId,
         type: "task.dependency_removed",
         payload: { depends_on_task_id: dependsOnTaskId }
       });

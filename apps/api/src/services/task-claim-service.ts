@@ -15,6 +15,7 @@ import type {
 } from "@orchestrat/protocol";
 import { and, eq, lte, sql } from "drizzle-orm";
 import { ApiError } from "./api-error.js";
+import { findProjectBranch } from "./branch-context.js";
 import { assertCommentsAcknowledged } from "./attention-guard.js";
 import { onTaskClaimed } from "./attention-hooks.js";
 import {
@@ -30,6 +31,7 @@ const hash = (value: string) =>
 const claimJson = (value: typeof taskClaims.$inferSelect) => ({
   id: value.id,
   project_id: value.projectId,
+  branch_id: value.branchId,
   task_id: value.taskId,
   agent_id: value.agentId,
   session_id: value.sessionId,
@@ -61,7 +63,25 @@ export class TaskClaimService {
       return await this.db.transaction(async (tx) => {
         const project = await this.lockProject(tx, principal.projectId);
         await this.activeAgent(tx, principal);
-        await this.activeSession(tx, principal, input.session_id);
+        const session = await this.activeSession(
+          tx,
+          principal,
+          input.session_id
+        );
+        // The session pins the branch; a header naming another one is refused.
+        if (
+          principal.branch?.branchId &&
+          principal.branch.branchId !== session.branchId
+        )
+          throw new ApiError(
+            409,
+            "BRANCH_MISMATCH",
+            "The requested branch differs from the session's pinned branch.",
+            {
+              session_branch_id: session.branchId,
+              requested_branch_id: principal.branch.branchId
+            }
+          );
         let [task] = await tx
           .select()
           .from(tasks)
@@ -78,6 +98,31 @@ export class TaskClaimService {
             and(eq(tasks.id, taskId), eq(tasks.projectId, principal.projectId))
           )
           .for("update");
+        // Claims belong to the session's branch (spec §6.2). Existing codes
+        // with a reason keep old clients parsing the error.
+        if (task.branchId !== session.branchId)
+          throw new ApiError(
+            409,
+            "TASK_NOT_CLAIMABLE",
+            "The task is on a different branch than the session.",
+            {
+              reason: "branch_mismatch",
+              task_branch_id: task.branchId,
+              session_branch_id: session.branchId
+            }
+          );
+        const branch = await findProjectBranch(
+          tx,
+          principal.projectId,
+          task.branchId
+        );
+        if (branch?.archivedAt)
+          throw new ApiError(
+            409,
+            "TASK_NOT_CLAIMABLE",
+            "Tasks on an archived branch cannot be claimed.",
+            { reason: "branch_archived", branch_id: task.branchId }
+          );
         const [activeClaim] = await tx
           .select()
           .from(taskClaims)
@@ -136,6 +181,7 @@ export class TaskClaimService {
           projectId: project.id,
           actorAgentId: principal.agentId,
           entityId: claim.id,
+          branchId: claim.branchId,
           type: "claim.created",
           payload: {
             task_id: task.id,
@@ -253,6 +299,7 @@ export class TaskClaimService {
         projectId: claim.projectId,
         actorAgentId: principal.agentId,
         entityId: claim.id,
+        branchId: claim.branchId,
         type: `claim.${status}`,
         payload: {
           task_id: claim.taskId,
@@ -325,6 +372,7 @@ export class TaskClaimService {
     await insertProjectEvent(tx, {
       projectId: claim.projectId,
       entityId: claim.id,
+      branchId: claim.branchId,
       type: "claim.expired",
       payload: {
         task_id: claim.taskId,

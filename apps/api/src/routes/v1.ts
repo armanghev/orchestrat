@@ -22,6 +22,7 @@ import {
   deleteTaskDependencyRequestSchema
 } from "@orchestrat/protocol";
 import type { FastifyInstance, preHandlerHookHandler } from "fastify";
+import { humanBranchSelector } from "../services/branch-context.js";
 import type { ProjectService } from "../services/project-service.js";
 import type { ProfileService } from "../services/profile-service.js";
 import type { TaskService } from "../services/task-service.js";
@@ -199,7 +200,8 @@ export async function v1Routes(
       request.userId,
       projectTaskParamsSchema.parse(request.params).projectId,
       createTaskRequestSchema.parse(request.body),
-      request.headers["idempotency-key"] as string | undefined
+      request.headers["idempotency-key"] as string | undefined,
+      humanBranchSelector(request.query)
     );
     return reply.code(result.status).send(result.body);
   });
@@ -207,7 +209,8 @@ export async function v1Routes(
     options.tasks.list(
       request.userId,
       projectTaskParamsSchema.parse(request.params).projectId,
-      taskListQuerySchema.parse(request.query)
+      taskListQuerySchema.parse(request.query),
+      humanBranchSelector(request.query)
     )
   );
   app.get("/tasks/:id", (request) =>

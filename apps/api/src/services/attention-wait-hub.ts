@@ -176,7 +176,8 @@ export class AttentionWaitHub {
     const options = {
       directedOnly: query.directed_only,
       kinds: query.kinds,
-      limit: waitEventLimit
+      limit: waitEventLimit,
+      branchId: await this.attention.agentBranchId(principal, query.branch_id)
     };
     for (;;) {
       waiter.dirty = false;

@@ -43,6 +43,7 @@ import {
   type Transaction
 } from "./agent-service.js";
 import { ApiError } from "./api-error.js";
+import { resolveBranch, type BranchSelector } from "./branch-context.js";
 import {
   ensureWatch,
   latestCommentSequence,
@@ -71,6 +72,8 @@ type SendResult = { status: number; body: unknown };
 // The ChatService entry points for one sender kind; they carry the sender's
 // own access checks (membership or an unrevoked credential).
 type Via = {
+  /** The branch the sender works on; the handoff's DM and task live there. */
+  branchId(): Promise<string>;
   candidates(): Promise<{ candidates: ParticipantRef[] }>;
   directChat(input: CreateChatRequest, key: string): Promise<ChatResult>;
   send(
@@ -288,6 +291,15 @@ export class HandoffService {
       input,
       key,
       {
+        branchId: async () =>
+          (
+            await resolveBranch(
+              this.db,
+              principal.projectId,
+              principal.branch,
+              { agentId: principal.agentId }
+            )
+          ).id,
         candidates: () => this.chats.listCandidatesAgent(principal),
         directChat: (chat, chatKey) =>
           this.chats.createAgent(principal, chat, chatKey),
@@ -301,9 +313,12 @@ export class HandoffService {
     userId: string,
     projectId: string,
     input: CreateHandoffRequest,
-    key: string
+    key: string,
+    selector?: BranchSelector
   ): Promise<{ status: number; body: CreateHandoffResponse }> {
     return this.createAs({ type: "human", id: userId }, projectId, input, key, {
+      branchId: async () =>
+        (await resolveBranch(this.db, projectId, selector)).id,
       candidates: () => this.chats.listCandidatesHuman(userId, projectId),
       directChat: (chat, chatKey) =>
         this.chats.createHuman(userId, projectId, chat, chatKey),
@@ -343,6 +358,21 @@ export class HandoffService {
     const task = input.task_id
       ? await projectTask(this.db, projectId, input.task_id)
       : null;
+    // The handoff's DM goes out on the sender's branch; its task must be there.
+    const branchId = await via.branchId();
+    if (task) {
+      const [owner] = await this.db
+        .select({ branchId: tasks.branchId })
+        .from(tasks)
+        .where(eq(tasks.id, task.id));
+      if (owner?.branchId !== branchId)
+        throw new ApiError(
+          400,
+          "VALIDATION_ERROR",
+          "Hand off a task from the branch it is on.",
+          { reason: "cross_branch" }
+        );
+    }
     const messageKey = derivedKey(key, "message");
     // Refuse before the DM goes out. A retry whose message was already sent
     // skips this: the insert transaction below completes or refuses it.
@@ -424,6 +454,7 @@ export class HandoffService {
         actorUserId: sender.type === "human" ? sender.id : null,
         actorAgentId: sender.type === "agent" ? sender.id : null,
         entityId: chat.body.id,
+        branchId,
         type: "chat.handoff_created",
         payload: {
           message_id: message.id,

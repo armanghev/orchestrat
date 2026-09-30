@@ -472,7 +472,8 @@ withSetup(
     await s.agentComment(s.agentB, task.id, "second");
     let attention = await s.summary(s.agentA);
     assert.match(attention.cursor, /^[0-9]+$/);
-    assert.equal(attention.branch_id, null);
+    // Agent attention follows the branch it works on: the default here.
+    assert.equal(attention.branch_id, s.project.default_branch_id);
     assert.equal(attention.truncated, false);
     assert.equal(attention.tasks.length, 1);
     const [item] = attention.tasks;

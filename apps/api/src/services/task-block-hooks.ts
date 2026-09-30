@@ -77,10 +77,15 @@ export async function closeBlock(
     .where(and(eq(taskBlocks.id, block.id), isNull(taskBlocks.resolvedAt)))
     .returning();
   if (!closed) return null;
+  const [owner] = await tx
+    .select({ branchId: tasks.branchId })
+    .from(tasks)
+    .where(eq(tasks.id, block.taskId));
   await insertProjectEvent(tx, {
     projectId: block.projectId,
     ...eventActor(input.resolvedBy),
     entityId: block.taskId,
+    branchId: owner?.branchId ?? null,
     type: "task.block_resolved",
     payload: {
       block_id: block.id,
@@ -127,6 +132,7 @@ export async function resolveBlock(
     projectId: task.projectId,
     ...eventActor(input.resolvedBy),
     entityId: task.id,
+    branchId: task.branchId,
     type: "task.status_changed",
     payload: {
       from_status: task.status,

@@ -1,5 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { agentSessions, projectBranches, type Database } from "@orchestrat/db";
+import { branchSelectorQuerySchema } from "@orchestrat/protocol";
 import { ApiError } from "./api-error.js";
 
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
@@ -162,36 +163,43 @@ export function assertBranchWritable(
 }
 
 /**
- * Entity routes take the branch from the row. A caller that named a
- * different branch gets a 404 like a wrong project today; an agent whose
- * session is pinned elsewhere cannot write to the entity (spec §6.1).
+ * Entity routes take the branch from the row (spec §6.1). A human who names a
+ * different branch gets a 404, like a wrong project today. Agents may read
+ * entities on any branch of their project, but a write must match the
+ * branch they named or the one their session is pinned to.
  */
 export async function assertEntityBranch(
   tx: Executor,
   projectId: string,
   entityBranchId: string,
   selector: BranchSelector | undefined,
-  options: { write?: boolean; agentId?: string; notFound?: string } = {}
+  options: {
+    actor: "human" | "agent";
+    write?: boolean;
+    agentId?: string;
+    notFound?: string;
+  }
 ): Promise<BranchRow> {
   if (
+    options.actor === "human" &&
     selector?.branchId &&
-    selector.branchId !== entityBranchId &&
-    !selector.sessionId
+    selector.branchId !== entityBranchId
   )
     throw new ApiError(404, "NOT_FOUND", options.notFound ?? "Not found.");
-  if (selector?.sessionId && options.write) {
-    const pinned = await resolveBranch(
-      tx,
-      projectId,
-      { sessionId: selector.sessionId, branchId: selector.branchId },
-      { agentId: options.agentId }
-    );
-    if (pinned.id !== entityBranchId)
+  if (
+    options.actor === "agent" &&
+    options.write &&
+    (selector?.branchId || selector?.sessionId)
+  ) {
+    const working = await resolveBranch(tx, projectId, selector, {
+      agentId: options.agentId
+    });
+    if (working.id !== entityBranchId)
       throw new ApiError(
         409,
         "BRANCH_MISMATCH",
-        "This item is on a different branch than the session.",
-        { session_branch_id: pinned.id, entity_branch_id: entityBranchId }
+        "This item is on a different branch than the one you are working on.",
+        { branch_id: working.id, entity_branch_id: entityBranchId }
       );
   }
   const branch = await findProjectBranch(tx, projectId, entityBranchId);
@@ -199,6 +207,11 @@ export async function assertEntityBranch(
     throw new ApiError(404, "NOT_FOUND", options.notFound ?? "Not found.");
   if (options.write) assertBranchWritable(branch, selector);
   return branch;
+}
+
+/** `?branch_id=` on human collection routes; absent = the default branch. */
+export function humanBranchSelector(query: unknown): BranchSelector {
+  return { branchId: branchSelectorQuerySchema.parse(query).branch_id ?? null };
 }
 
 const uuidPattern =

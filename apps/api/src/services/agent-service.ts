@@ -38,7 +38,11 @@ import {
   or
 } from "drizzle-orm";
 import { ApiError } from "./api-error.js";
-import { defaultBranchId, type BranchSelector } from "./branch-context.js";
+import {
+  defaultBranchId,
+  resolveBranch,
+  type BranchSelector
+} from "./branch-context.js";
 import { PermissionService } from "./permission-service.js";
 import { recordProjectEvent } from "../realtime/realtime.js";
 import { resetsToReadyOnClaimEnd } from "./task-block-hooks.js";
@@ -86,6 +90,7 @@ const sessionJson = (value: typeof agentSessions.$inferSelect) => ({
   id: value.id,
   agent_id: value.agentId,
   project_id: value.projectId,
+  branch_id: value.branchId,
   runtime: value.runtime,
   integration: value.integration,
   external_session_id: value.externalSessionId,
@@ -292,6 +297,7 @@ export class AgentService {
           projectId,
           actorUserId: userId,
           entityId: session.id,
+          branchId: session.branchId,
           type: "session.closed",
           payload: { reason: "agent_revoked" }
         });
@@ -334,6 +340,7 @@ export class AgentService {
           projectId,
           actorUserId: userId,
           entityId: claim.id,
+          branchId: claim.branchId,
           type: "claim.revoked",
           payload: { task_id: claim.taskId, reason: "agent_revoked" }
         });
@@ -490,12 +497,20 @@ export class AgentService {
     return this.db.transaction(async (tx) => {
       await this.activeProject(tx, principal.projectId);
       await this.agentFor(tx, principal);
+      // A new session pins the body's branch, else the header's, else the
+      // default (spec §6.2). It never inherits another session's pin.
+      const branch = await resolveBranch(
+        tx,
+        principal.projectId,
+        { branchId: input.branch_id ?? principal.branch?.branchId ?? null },
+        { write: true, agentId: principal.agentId }
+      );
       const [session] = await tx
         .insert(agentSessions)
         .values({
           id: randomUUID(),
           projectId: principal.projectId,
-          branchId: await defaultBranchId(tx, principal.projectId),
+          branchId: branch.id,
           agentId: principal.agentId,
           runtime: input.runtime,
           integration: input.integration,
@@ -506,6 +521,7 @@ export class AgentService {
         projectId: principal.projectId,
         actorAgentId: principal.agentId,
         entityId: session.id,
+        branchId: session.branchId,
         type: "session.opened",
         payload: { runtime: session.runtime, integration: session.integration }
       });
@@ -602,6 +618,23 @@ export class AgentService {
               "AGENT_SESSION_CLOSED",
               "Agent session is closed."
             );
+          // The strict hook body carries no branch; it rides in the header.
+          const branch = await resolveBranch(
+            tx,
+            principal.projectId,
+            { branchId: principal.branch?.branchId ?? null },
+            { write: true, agentId: principal.agentId }
+          );
+          if (existing && existing.branchId !== branch.id)
+            throw new ApiError(
+              409,
+              "AGENT_SESSION_CLOSED",
+              "Agent session is pinned to another branch.",
+              {
+                reason: "branch_mismatch",
+                session_branch_id: existing.branchId
+              }
+            );
           if (existing) {
             const [updated] = await tx
               .update(agentSessions)
@@ -620,7 +653,7 @@ export class AgentService {
               .values({
                 id: input.session_id,
                 projectId: principal.projectId,
-                branchId: await defaultBranchId(tx, principal.projectId),
+                branchId: branch.id,
                 agentId: principal.agentId,
                 runtime: input.runtime,
                 integration: input.integration,
@@ -642,6 +675,27 @@ export class AgentService {
             existing,
             now
           );
+          // A checkout that switched branches mid-conversation left a sibling
+          // session with the same external id on the other branch.
+          if (existing.externalSessionId) {
+            const siblings = await tx
+              .select()
+              .from(agentSessions)
+              .where(
+                and(
+                  eq(agentSessions.projectId, principal.projectId),
+                  eq(agentSessions.agentId, principal.agentId),
+                  eq(
+                    agentSessions.externalSessionId,
+                    existing.externalSessionId
+                  ),
+                  eq(agentSessions.status, "active")
+                )
+              )
+              .for("update");
+            for (const sibling of siblings)
+              await this.closeSessionInTransaction(tx, principal, sibling, now);
+          }
         } else {
           if (!existing)
             throw new ApiError(
@@ -660,6 +714,7 @@ export class AgentService {
           projectId: principal.projectId,
           actorAgentId: principal.agentId,
           entityId: session.id,
+          branchId: session.branchId,
           type: input.event,
           payload: {
             runtime: input.runtime,
@@ -745,6 +800,7 @@ export class AgentService {
         projectId: principal.projectId,
         actorAgentId: principal.agentId,
         entityId: session.id,
+        branchId: session.branchId,
         type: "session.heartbeat",
         payload: { renewed_claim_ids: renewed.map((row) => row.id) }
       });
@@ -844,6 +900,7 @@ export class AgentService {
         projectId: principal.projectId,
         actorAgentId: principal.agentId,
         entityId: claim.id,
+        branchId: claim.branchId,
         type: "claim.revoked",
         payload: { task_id: claim.taskId, reason: "session_closed" }
       });
@@ -857,6 +914,7 @@ export class AgentService {
       projectId: principal.projectId,
       actorAgentId: principal.agentId,
       entityId: session.id,
+      branchId: session.branchId,
       type: "session.closed"
     });
     return updated!;
@@ -903,6 +961,7 @@ export class AgentService {
         agent_id: row.agent.id,
         project_id: projectId,
         session_id: row.session?.id ?? null,
+        branch_id: row.session?.branchId ?? null,
         status: row.session ? "online" : "offline",
         last_heartbeat_at: row.session
           ? row.session.lastHeartbeatAt.toISOString()
@@ -916,23 +975,44 @@ export class AgentService {
   async listEventsHuman(
     userId: string,
     projectId: string,
-    query: PaginationQuery
+    query: PaginationQuery,
+    selector?: BranchSelector,
+    allBranches = false
   ): Promise<ProjectEventsResponse> {
     await this.permissions.projectAccess(userId, projectId);
-    return this.listEvents(projectId, query, { type: "human", id: userId });
+    // A branch's feed includes project-wide events; realtime catch-up reads
+    // every branch so it keeps one monotonic cursor (spec §6.3).
+    const branchId = allBranches
+      ? null
+      : (await resolveBranch(this.db, projectId, selector)).id;
+    return this.listEvents(
+      projectId,
+      query,
+      { type: "human", id: userId },
+      branchId
+    );
   }
 
   async listEventsAgent(principal: AgentPrincipal, query: PaginationQuery) {
-    return this.listEvents(principal.projectId, query, {
-      type: "agent",
-      id: principal.agentId
-    });
+    const branch = await resolveBranch(
+      this.db,
+      principal.projectId,
+      principal.branch,
+      { agentId: principal.agentId }
+    );
+    return this.listEvents(
+      principal.projectId,
+      query,
+      { type: "agent", id: principal.agentId },
+      branch.id
+    );
   }
 
   private async listEvents(
     projectId: string,
     query: PaginationQuery,
-    viewer: { type: "human" | "agent"; id: string }
+    viewer: { type: "human" | "agent"; id: string },
+    branchId: string | null
   ) {
     const after = query.after ? Number(query.after) : 0;
     if (!Number.isSafeInteger(after) || after < 0)
@@ -964,6 +1044,12 @@ export class AgentService {
         and(
           eq(projectEvents.projectId, projectId),
           gt(projectEvents.id, after),
+          branchId
+            ? or(
+                eq(projectEvents.branchId, branchId),
+                isNull(projectEvents.branchId)
+              )
+            : undefined,
           ne(projectEvents.type, "chat.access_invalidated"),
           or(
             notLike(projectEvents.type, "chat.%"),
@@ -979,6 +1065,7 @@ export class AgentService {
       events: page.map((event) => ({
         id: event.id,
         project_id: event.projectId,
+        branch_id: event.branchId,
         type: event.type,
         actor_agent_id: event.actorAgentId,
         actor_user_id: event.actorUserId,
