@@ -3,6 +3,7 @@ import {
   chatMessages,
   chatParticipants,
   chats,
+  handoffs,
   projectEvents,
   taskBlocks,
   taskClaims,
@@ -51,6 +52,12 @@ const statusTypes = new Set([
   "claim.completed"
 ]);
 const bodyPrefix = sql`2000`;
+// HandoffService sends the direct message, then records the handoff in a
+// second transaction. A wait that lands between the two holds the message
+// back briefly so the agent sees one `handoff` event, not a DM and then a
+// handoff for the same message.
+const handoffMarker = "**Handoff**";
+export const handoffHoldMs = 10_000;
 
 type EventRow = typeof projectEvents.$inferSelect;
 type Ref = { type: "human" | "agent"; id: string };
@@ -226,6 +233,51 @@ export async function classifyEventsSince(
     }
   }
 
+  // Direct messages whose handoff row exists are reported by that handoff's
+  // own event; ones that look like a handoff whose row isn't committed yet
+  // are held (the scan stops before them) so the next pass sees both.
+  const held = new Set<number>();
+  const directIds = unique(
+    [...candidates.values()]
+      .filter((item) => item.kind === "direct_message")
+      .map((item) => item.messageId)
+  );
+  if (directIds.length) {
+    const [recorded, marked] = await Promise.all([
+      db
+        .select({ messageId: handoffs.messageId })
+        .from(handoffs)
+        .where(
+          and(
+            eq(handoffs.projectId, principal.projectId),
+            inArray(handoffs.messageId, directIds)
+          )
+        ),
+      db
+        .select({ id: chatMessages.id })
+        .from(chatMessages)
+        .where(
+          and(
+            eq(chatMessages.projectId, principal.projectId),
+            inArray(chatMessages.id, directIds),
+            sql`left(${chatMessages.bodyMarkdown}, ${handoffMarker.length}) = ${handoffMarker}`
+          )
+        )
+    ]);
+    const recordedIds = new Set(recorded.map((row) => row.messageId));
+    const markedIds = new Set(marked.map((row) => row.id));
+    const now = Date.now();
+    for (const [id, item] of candidates) {
+      if (item.kind !== "direct_message" || !item.messageId) continue;
+      if (recordedIds.has(item.messageId)) candidates.delete(id);
+      else if (
+        markedIds.has(item.messageId) &&
+        now - item.event.occurredAt.getTime() < handoffHoldMs
+      )
+        held.add(id);
+    }
+  }
+
   const found = [...candidates.values()];
   const blockIds = unique(found.map((item) => item.blockId));
   const blocks = new Map(
@@ -383,6 +435,7 @@ export async function classifyEventsSince(
   let cursor = after;
   let stopped = false;
   for (const { event } of rows) {
+    if (held.has(event.id)) break;
     cursor = event.id;
     const item = candidates.get(event.id);
     if (!item) continue;

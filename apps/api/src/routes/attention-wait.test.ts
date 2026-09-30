@@ -674,6 +674,57 @@ withSetup("times out with the cursor and a fresh summary", async (s) => {
   assert.ok(Date.now() - polled < 1_000);
 });
 
+withSetup(
+  "a handoff's direct message is held until its handoff row lands",
+  async (s) => {
+    const direct = await s.chat(s.agentB, [s.agentA]);
+    const cursor = await s.cursorOf(s.agentA);
+    // The handoff service sends the DM first and records the handoff in a
+    // second transaction; a wait in between must not report the DM.
+    const message = await s.send(s.agentB, direct.id, "**Handoff**\n\ntake it");
+    const early = await s.waitOk(s.agentA, { after: cursor, timeout_ms: 0 });
+    assert.deepEqual(early.events, []);
+    assert.equal(early.cursor, cursor);
+    const [handoff] = await s.db
+      .insert(handoffs)
+      .values({
+        projectId: s.project.id,
+        chatId: direct.id,
+        messageId: message.id,
+        messageSequence: message.sequence,
+        fromAgentId: s.agentB.id,
+        toAgentId: s.agentA.id,
+        chainId: randomUUID(),
+        hop: 0
+      })
+      .returning();
+    await s.insertEvent({
+      type: "chat.handoff_created",
+      actorAgentId: s.agentB.id,
+      entityId: direct.id,
+      payload: {
+        message_id: message.id,
+        handoff_id: handoff.id,
+        participant: { type: "agent", id: s.agentA.id },
+        task_id: null,
+        hop: 0
+      }
+    });
+    const late = await s.waitOk(s.agentA, { after: early.cursor, timeout_ms: 0 });
+    assert.deepEqual(
+      late.events.map((event) => event.kind),
+      ["handoff"]
+    );
+    // An ordinary DM is never held.
+    const next = await s.send(s.agentB, direct.id, "plain hello");
+    const plain = await s.waitOk(s.agentA, { after: late.cursor, timeout_ms: 0 });
+    assert.deepEqual(
+      plain.events.map((event) => [event.kind, event.message_id]),
+      [["direct_message", next.id]]
+    );
+  }
+);
+
 withSetup("committed events wake a waiting agent", async (s) => {
   const watched = await s.agentTask(s.agentA, "Watched");
   const moved = await s.agentTask(s.agentA, "Moved");
