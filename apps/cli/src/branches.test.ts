@@ -10,8 +10,11 @@ import {
 import { join } from "node:path";
 import test from "node:test";
 import { AgentApiClient } from "@orchestrat/sdk";
+import { utimes } from "node:fs/promises";
+import { nodeGitReader, type GitReader } from "./git.js";
 import {
   branchOverridesPath,
+  checkoutResolver,
   checkoutTarget,
   registerTarget,
   runBranchCommand,
@@ -367,4 +370,41 @@ test("branch arguments are strict", () => {
     ["status", "--follow"]
   ])
     assert.throws(() => parseInvocationArgs(argv), argv.join(" "));
+});
+
+test("the MCP resolver re-reads the checkout only when HEAD changes", async (t) => {
+  const { home, root } = await repo();
+  t.after(() => rm(home, { recursive: true, force: true }));
+  let reads = 0;
+  const counting: GitReader = {
+    readFile: (path) => {
+      reads++;
+      return nodeGitReader.readFile(path);
+    },
+    kind: nodeGitReader.kind
+  };
+  const resolve = checkoutResolver(root, home, counting);
+  assert.deepEqual(await resolve(), {
+    name: "feat/login",
+    defaultBranch: "main",
+    headSha: sha
+  });
+  const afterFirst = reads;
+  await resolve();
+  assert.equal(reads, afterFirst, "an unchanged HEAD is served from cache");
+
+  await writeFile(join(root, ".git/HEAD"), "ref: refs/heads/main\n");
+  const later = new Date(Date.now() + 5_000);
+  await utimes(join(root, ".git/HEAD"), later, later);
+  assert.equal((await resolve())?.name, "main");
+
+  await setBranchOverride(home, root, "release/1.0");
+  const overridden = await resolve();
+  assert.equal(overridden?.name, "release/1.0");
+  assert.equal(
+    overridden?.headSha,
+    null,
+    "HEAD's commit is not the override's"
+  );
+  assert.equal(await checkoutResolver(home, home)(), null, "no checkout");
 });

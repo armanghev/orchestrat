@@ -39,7 +39,11 @@ import {
 } from "./stop-hooks.js";
 import { runWakerCommand } from "./waker.js";
 import { runDocumentCommand } from "./documents.js";
-import { clientForCheckout, runBranchCommand } from "./branches.js";
+import {
+  checkoutResolver,
+  clientForCheckout,
+  runBranchCommand
+} from "./branches.js";
 import { disconnectLocal, runDoctor, runStatus } from "./diagnostics.js";
 import {
   finishSetup,
@@ -765,7 +769,9 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     const { bridge } = await startStdioBridge({
       client,
       integration: publicResult.integration as ConfigurableIntegration,
-      ...(waitBudgetSeconds === undefined ? {} : { waitBudgetSeconds })
+      ...(waitBudgetSeconds === undefined ? {} : { waitBudgetSeconds }),
+      // The session follows the checkout's branch (spec §7.2).
+      resolveCheckoutBranch: checkoutResolver(invocationCwd, home)
     });
     const shutdown = async () => {
       try {

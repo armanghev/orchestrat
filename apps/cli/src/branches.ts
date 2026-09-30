@@ -1,5 +1,6 @@
-import { realpath } from "node:fs/promises";
+import { realpath, stat } from "node:fs/promises";
 import { join } from "node:path";
+import type { CheckoutBranch } from "@orchestrat/mcp";
 import {
   AgentApiError,
   type AgentApiClient,
@@ -77,6 +78,51 @@ export async function checkoutTarget(
   return override
     ? { checkout, name: override, overridden: true }
     : { checkout, name: checkout.branch, overridden: false };
+}
+
+/**
+ * The MCP bridge asks before every tool call which branch the checkout is on.
+ * This re-reads the checkout only when HEAD or the overrides file changed.
+ */
+export function checkoutResolver(
+  cwd: string,
+  home: string,
+  reader: GitReader = nodeGitReader
+) {
+  let cache:
+    { stamp: string; headPath: string; value: CheckoutBranch } | undefined;
+  const stampOf = async (headPath: string) =>
+    (
+      await Promise.all(
+        [headPath, branchOverridesPath(home)].map((path) =>
+          stat(path).then(
+            (info) => info.mtimeMs,
+            () => 0
+          )
+        )
+      )
+    ).join(":");
+  return async (): Promise<CheckoutBranch | null> => {
+    // Stamp before reading: a change during the read shows up next time.
+    const stamp = cache && (await stampOf(cache.headPath));
+    if (cache && stamp === cache.stamp) return cache.value;
+    const target = await checkoutTarget(cwd, home, reader);
+    if (!target.checkout) return null;
+    const value = {
+      name: target.name,
+      defaultBranch: target.checkout.defaultBranch,
+      headSha: target.overridden ? null : target.checkout.headSha
+    };
+    cache = {
+      stamp:
+        stamp !== undefined && cache?.headPath === target.checkout.headPath
+          ? stamp
+          : await stampOf(target.checkout.headPath),
+      headPath: target.checkout.headPath,
+      value
+    };
+    return value;
+  };
 }
 
 /**
