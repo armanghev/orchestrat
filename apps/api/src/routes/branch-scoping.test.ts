@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
-import { agentSessions, apiIdempotencyKeys } from "@orchestrat/db";
-import { eq } from "drizzle-orm";
+import {
+  agentSessions,
+  apiIdempotencyKeys,
+  projectMembers,
+  tasks
+} from "@orchestrat/db";
+import { and, eq } from "drizzle-orm";
 import { workspace } from "../test/workspace.js";
 
 const key = () => ({ "idempotency-key": randomUUID() });
@@ -463,4 +468,98 @@ test("agent attention follows the pinned branch", async (t) => {
   assert.equal(pinned.statusCode, 200, pinned.body);
   assert.equal(pinned.json().branch_id, s.feature);
   assert.equal((await call("GET", "/attention")).json().branch_id, s.main);
+});
+
+test("task keys are unique per branch, not per project", async (t) => {
+  const s = await twoBranches();
+  t.after(() => s.app.close());
+  const original = (
+    await s.alice(
+      "POST",
+      `/projects/${s.project.id}/tasks`,
+      { title: "Original" },
+      key()
+    )
+  ).json();
+  // An import copies a task with its key onto another branch.
+  const copy = {
+    projectId: s.project.id,
+    taskKey: original.key,
+    taskNumber: Number(original.key.split("-").at(-1)),
+    title: "Copy",
+    createdByType: "human" as const,
+    createdByUserId: s.aliceUser.id
+  };
+  await s.db
+    .insert(tasks)
+    .values({ ...copy, branchId: s.feature, originId: original.id });
+  await assert.rejects(
+    s.db.insert(tasks).values({ ...copy, branchId: s.main })
+  );
+});
+
+test("branch permissions follow the role matrix", async (t) => {
+  const s = await twoBranches();
+  t.after(() => s.app.close());
+  const setRole = (role: "admin" | "member") =>
+    s.db
+      .update(projectMembers)
+      .set({ role })
+      .where(
+        and(
+          eq(projectMembers.projectId, s.project.id),
+          eq(projectMembers.userId, s.bobUser.id)
+        )
+      );
+  const attempt = async (
+    as: typeof s.alice,
+    action: "create" | "onboarding" | "default" | "archive"
+  ) => {
+    const branch = (
+      await s.alice("POST", `/projects/${s.project.id}/branches`, {
+        name: `feat/${randomUUID().slice(0, 8)}`
+      })
+    ).json().branch;
+    const base = `/projects/${s.project.id}/branches`;
+    const response =
+      action === "create"
+        ? await as("POST", base, { name: `feat/${randomUUID().slice(0, 8)}` })
+        : await as(
+            "POST",
+            `${base}/${branch.id}/${action}`,
+            action === "onboarding" ? { choice: "blank" } : {}
+          );
+    return response.statusCode;
+  };
+  const table = {
+    owner: { create: 201, onboarding: 200, default: 200, archive: 200 },
+    admin: { create: 201, onboarding: 200, default: 200, archive: 200 },
+    member: { create: 201, onboarding: 200, default: 403, archive: 403 }
+  } as const;
+  for (const [role, expected] of Object.entries(table)) {
+    if (role !== "owner") await setRole(role as "admin" | "member");
+    const as = role === "owner" ? s.alice : s.bob;
+    for (const [action, status] of Object.entries(expected))
+      assert.equal(
+        await attempt(as, action as keyof typeof expected),
+        status,
+        `${role} ${action}`
+      );
+    if (role !== "owner")
+      await s.alice(
+        "POST",
+        `/projects/${s.project.id}/branches/${s.main}/default`,
+        {}
+      );
+  }
+  const { call } = await s.createAgent("codex");
+  assert.equal(
+    (
+      await call("POST", `/projects/${s.project.id}/branches`, {
+        name: "feat/agent"
+      })
+    ).statusCode,
+    404,
+    "agents register branches; they have no human branch routes"
+  );
 });

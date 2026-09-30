@@ -1,5 +1,7 @@
-import { organizationMembers, users } from "@orchestrat/db";
+import { randomUUID } from "node:crypto";
+import { organizationMembers, users, type Database } from "@orchestrat/db";
 import { eq } from "drizzle-orm";
+import type { FastifyInstance } from "fastify";
 import { fixture } from "./fixture.js";
 
 type Method = "GET" | "POST" | "PATCH" | "DELETE";
@@ -11,6 +13,11 @@ type Headers = Record<string, string>;
  */
 export async function workspace(options: Parameters<typeof fixture>[0] = {}) {
   const { app, db } = await fixture(options);
+  return workspaceOn(app, db);
+}
+
+/** The same workspace on an app built elsewhere (the real-Postgres suites). */
+export async function workspaceOn(app: FastifyInstance, db: Database) {
   const human =
     (token: string) =>
     (method: Method, url: string, payload?: unknown, headers: Headers = {}) =>
@@ -23,7 +30,9 @@ export async function workspace(options: Parameters<typeof fixture>[0] = {}) {
   const alice = human("alice");
   const bob = human("bob");
   const organization = (
-    await alice("POST", "/organizations", { name: "Branches org" })
+    await alice("POST", "/organizations", {
+      name: `Branches ${randomUUID().slice(0, 8)}`
+    })
   ).json();
   const project = (
     await alice("POST", `/organizations/${organization.id}/projects`, {
