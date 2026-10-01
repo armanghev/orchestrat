@@ -20,7 +20,18 @@ import { AgentService } from "./services/agent-service.js";
 import { agentBranchSelector } from "./services/branch-context.js";
 import { BranchService } from "./services/branch-service.js";
 import { agentBranchRoutes, humanBranchRoutes } from "./routes/branches.js";
+import type { RepositoryConfig } from "@orchestrat/config";
 import { humanMergeRoutes } from "./routes/merges.js";
+import {
+  humanRepositoryRoutes,
+  publicRepositoryRoutes
+} from "./routes/repository.js";
+import { BranchSync } from "./services/repository/branch-sync.js";
+import { RepositoryService } from "./services/repository/connection-service.js";
+import type { SecretBox } from "./services/repository/secrets.js";
+import { RepositorySyncWorker } from "./services/repository/sync-worker.js";
+import type { ProviderAdapter } from "./services/repository/types.js";
+import { WebhookIngress } from "./services/repository/webhook-ingress.js";
 import { MergeService } from "./services/merge-service.js";
 import { MergeEngine } from "./services/merges/engine.js";
 import { TaskClaimService } from "./services/task-claim-service.js";
@@ -68,6 +79,22 @@ import {
 } from "./routes/attention.js";
 
 type AppOptions = {
+  /** Repository connections (docs/project-branches.md §8). Off by default. */
+  repository?: {
+    config?: Partial<
+      Pick<
+        RepositoryConfig,
+        | "publicApiUrl"
+        | "dashboardUrl"
+        | "unavailable"
+        | "reconcileIntervalSeconds"
+        | "syncEnabled"
+      >
+    >;
+    adapters?: ProviderAdapter[];
+    secrets?: SecretBox | null;
+    now?: () => Date;
+  };
   allowedOrigins: string[];
   auth: HumanAuth;
   closeDatabase?: () => Promise<void>;
@@ -82,6 +109,10 @@ type AppOptions = {
     expensive: number;
   }>;
 };
+
+// Tests drive the repository worker's ticks directly.
+const repositoryWorkers = new WeakMap<object, RepositorySyncWorker>();
+export const repositoryWorkerOf = (app: object) => repositoryWorkers.get(app);
 
 const errorResponse = (
   requestId: string,
@@ -150,6 +181,54 @@ export function buildApp(options: AppOptions) {
     options.documentStorage,
     attachmentDownloadTickets
   );
+  const repositoryOptions = options.repository ?? {};
+  const repositoryConfig = {
+    publicApiUrl: repositoryOptions.config?.publicApiUrl ?? null,
+    dashboardUrl: repositoryOptions.config?.dashboardUrl ?? null,
+    unavailable: repositoryOptions.config?.unavailable ?? {
+      github: "Repository connections aren't set up on this server.",
+      gitlab: "Repository connections aren't set up on this server.",
+      origin: "Repository connections aren't set up on this server."
+    }
+  };
+  const providerAdapters = new Map(
+    (repositoryOptions.adapters ?? []).map((adapter) => [
+      adapter.provider,
+      adapter
+    ])
+  );
+  const branchSync = new BranchSync(db, branches, providerAdapters);
+  const repositoryWorker = new RepositorySyncWorker(
+    db,
+    branchSync,
+    providerAdapters,
+    {
+      reconcileIntervalSeconds:
+        repositoryOptions.config?.reconcileIntervalSeconds ?? 900,
+      now: repositoryOptions.now
+    }
+  );
+  repositoryWorkers.set(app, repositoryWorker);
+  const repositories = new RepositoryService(
+    db,
+    branches,
+    branchSync,
+    providerAdapters,
+    repositoryConfig,
+    repositoryOptions.secrets ?? null,
+    (connectionId) => repositoryWorker.requestReconcile(connectionId),
+    repositoryOptions.now
+  );
+  const webhookIngress = new WebhookIngress(
+    db,
+    providerAdapters,
+    repositoryOptions.now
+  );
+  if (repositoryOptions.config?.syncEnabled) {
+    app.addHook("onReady", () => repositoryWorker.resetStale());
+    app.addHook("onListen", async () => repositoryWorker.start());
+    app.addHook("preClose", () => repositoryWorker.stop());
+  }
   const merges = new MergeService(
     db,
     new MergeEngine(db, branches, attachments.mergeObjects()),
@@ -275,6 +354,15 @@ export function buildApp(options: AppOptions) {
     pollRateLimit: publicCliPollRateLimit
   });
   app.register(cliSetupRoutes, { prefix: "/api/v1", setup: cliSetup });
+  app.register(publicRepositoryRoutes, {
+    prefix: "/api/v1",
+    repositories,
+    ingress: webhookIngress,
+    rateLimit: rateLimitHook(
+      new FixedWindowRateLimit(600, 60_000),
+      (request) => request.ip
+    )
+  });
   app.decorateRequest("agentPrincipal", null);
   app.register(
     async (api) => {
@@ -328,6 +416,7 @@ export function buildApp(options: AppOptions) {
       api.register(agentManagementRoutes, { agents });
       api.register(humanBranchRoutes, { branches });
       api.register(humanMergeRoutes, { merges });
+      api.register(humanRepositoryRoutes, { repositories });
       api.register(humanChatRoutes, { chats });
       api.register(projectMemberRoutes, { memberships });
       api.register(humanAttentionRoutes, {

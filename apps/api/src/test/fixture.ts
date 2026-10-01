@@ -11,6 +11,7 @@ import { isPgMemMigrationStatementSupported } from "./pg-mem-migrations.js";
 export async function fixture(
   options: {
     documentStorage?: DocumentStorageConfig;
+    repository?: Parameters<typeof buildApp>[0]["repository"];
     trustProxyHops?: number;
     rateLimits?: Partial<{
       publicCliCreate: number;
@@ -119,6 +120,7 @@ export async function fixture(
       auth,
       db,
       documentStorage: options.documentStorage,
+      repository: options.repository,
       rateLimits: options.rateLimits,
       trustProxyHops: options.trustProxyHops
     }),

@@ -1,15 +1,17 @@
 import { config as loadEnv } from "dotenv";
 import { createSupabaseAuth } from "@orchestrat/auth";
-import { loadApiConfig } from "@orchestrat/config";
+import { loadApiConfig, loadRepositoryConfig } from "@orchestrat/config";
 import { createDatabase } from "@orchestrat/db";
 import { logger } from "@orchestrat/logger";
 import { buildApp } from "./app.js";
 import { readDocumentStorageConfig } from "./document-storage-config.js";
+import { SecretBox } from "./services/repository/secrets.js";
 import { createShutdownHandler } from "./services/shutdown.js";
 
 loadEnv({ path: "../../.env" });
 
 const config = loadApiConfig();
+const repositoryConfig = loadRepositoryConfig();
 const { db, pool } = createDatabase({
   connectionString: config.ORCHESTRAT_DATABASE_URL,
   connectionTimeoutMillis: 2_000
@@ -46,6 +48,15 @@ const app = buildApp({
         }
       : undefined,
   documentStorage,
+  repository: {
+    config: repositoryConfig,
+    secrets: repositoryConfig.secretKey
+      ? new SecretBox(
+          repositoryConfig.secretKey,
+          repositoryConfig.previousSecretKeys
+        )
+      : null
+  },
   trustProxyHops: config.ORCHESTRAT_TRUST_PROXY_HOPS
 });
 const shutdown = createShutdownHandler(() => app.close());

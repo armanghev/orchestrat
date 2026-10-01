@@ -8,12 +8,16 @@ import {
   branchMergeRuns,
   createDatabase,
   documentAttachments,
+  repositoryConnections,
+  repositoryWebhookDeliveries,
   projectBranches,
   taskClaims,
   tasks
 } from "@orchestrat/db";
 import { and, eq } from "drizzle-orm";
-import { buildApp } from "../app.js";
+import { buildApp, repositoryWorkerOf } from "../app.js";
+import { SecretBox } from "../services/repository/secrets.js";
+import { FakeProvider } from "../services/repository/testing/fake-provider.js";
 import { AgentService } from "../services/agent-service.js";
 import { BranchService } from "../services/branch-service.js";
 import { MergeEngine, type AttachmentKey } from "../services/merges/engine.js";
@@ -36,9 +40,16 @@ test(
       connectionString: url.toString(),
       max: 12
     });
+    const fake = new FakeProvider("github");
+    let clock = new Date();
     const app = buildApp({
       allowedOrigins: [],
       db,
+      repository: {
+        adapters: [fake],
+        secrets: new SecretBox({ id: "test", key: Buffer.alloc(32, 3) }),
+        now: () => clock
+      },
       auth: {
         async authenticate(request) {
           const token = [...(request.headers as Iterable<[string, string]>)]
@@ -606,6 +617,120 @@ test(
           assert.equal(rows.length, 0);
         }
       );
+
+      const worker = repositoryWorkerOf(app)!;
+      const linkRepository = async () => {
+        const s = await space();
+        const repo = fake.repository({ fullName: `acme/${randomUUID()}` });
+        await db.insert(repositoryConnections).values({
+          projectId: s.project.id,
+          provider: "github",
+          providerRepositoryId: repo.id,
+          repositoryFullName: repo.fullName,
+          providerDefaultBranch: "main",
+          installationId: repo.installation,
+          lastReconciledAt: new Date()
+        });
+        const send = (payload: Record<string, unknown>, id?: string) => {
+          const signed = fake.sign(
+            "push",
+            {
+              repository: repo.id,
+              installation: repo.installation,
+              ...payload
+            },
+            id
+          );
+          return app.inject({
+            method: "POST",
+            url: "/api/v1/webhooks/github",
+            headers: signed.headers,
+            payload: signed.body
+          });
+        };
+        const deliveries = async () =>
+          (await db.select().from(repositoryWebhookDeliveries)).filter(
+            (row) =>
+              (row.payload as { repository?: string }).repository === repo.id
+          );
+        return { s, repo, send, deliveries };
+      };
+
+      await t.test(
+        "concurrent duplicate deliveries are stored once",
+        async () => {
+          const { send, deliveries } = await linkRepository();
+          const responses = await Promise.all(
+            Array.from({ length: 5 }, () =>
+              send(
+                { ref: "refs/heads/feat/dup", after: "sha-1" },
+                "dup-delivery"
+              )
+            )
+          );
+          assert.deepEqual(
+            responses.map((response) => response.statusCode),
+            [202, 202, 202, 202, 202]
+          );
+          assert.equal((await deliveries()).length, 1);
+        }
+      );
+
+      await t.test(
+        "a crashed worker's delivery is reset and applied once",
+        async () => {
+          const { s, repo, send, deliveries } = await linkRepository();
+          repo.branches.set("feat/crash", "sha-c-1");
+          await send({ ref: "refs/heads/feat/crash", after: "sha-c-1" });
+          const [row] = await deliveries();
+          await db
+            .update(repositoryWebhookDeliveries)
+            .set({
+              status: "processing",
+              processedAt: new Date(clock.getTime() - 10 * 60_000)
+            })
+            .where(eq(repositoryWebhookDeliveries.id, row!.id));
+          await worker.tick();
+          assert.equal(
+            (await deliveries())[0]!.status,
+            "processing",
+            "untouched until reset"
+          );
+          await worker.resetStale();
+          await worker.tick();
+          await worker.tick();
+          assert.equal((await deliveries())[0]!.status, "applied");
+          const branches = (
+            await s.alice(
+              "GET",
+              `/projects/${s.project.id}/branches?include_archived=true`
+            )
+          )
+            .json()
+            .branches.filter(
+              (branch: { name: string }) => branch.name === "feat/crash"
+            );
+          assert.equal(branches.length, 1, "applied exactly once");
+        }
+      );
+
+      await t.test("a failed delivery backs off, then applies", async () => {
+        const { send, deliveries } = await linkRepository();
+        fake.failing.add("feat/flaky-pg");
+        await send({
+          ref: "refs/heads/feat/flaky-pg",
+          deleted: true,
+          before: "x"
+        });
+        await worker.tick();
+        const [failed] = await deliveries();
+        assert.equal(failed!.status, "pending");
+        assert.equal(failed!.attempts, 1);
+        fake.failing.delete("feat/flaky-pg");
+        clock = new Date(clock.getTime() + 60_000);
+        await worker.tick();
+        assert.equal((await deliveries())[0]!.status, "applied");
+      });
     } finally {
       await app.close();
       await pool.end();
