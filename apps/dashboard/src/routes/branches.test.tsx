@@ -655,3 +655,283 @@ describe("project branches in the dashboard", () => {
     );
   });
 });
+
+describe("branch settings", () => {
+  const preview = (
+    fingerprint: string,
+    extra: Partial<{
+      counts: Record<string, number>;
+    }> = {}
+  ) => ({
+    fingerprint: fingerprint.repeat(64).slice(0, 64),
+    kind: "merge",
+    source_branch_id: feature.id,
+    target_branch_id: main.id,
+    counts: { "task.copy": 2, "document.apply": 1, "task.conflict": 1 },
+    items: [
+      {
+        item_type: "task",
+        lineage_key: "00000000-0000-4000-8000-000000000081",
+        source_id: "00000000-0000-4000-8000-000000000081",
+        target_id: "00000000-0000-4000-8000-000000000082",
+        outcome: "conflict",
+        reason: "changed_on_both",
+        fields: ["title"],
+        required_by: [],
+        label: "Checkout copy",
+        task_key: "DASH-7",
+        audience: null,
+        source_values: { title: "Checkout copy" },
+        target_values: { title: "Checkout text" }
+      },
+      {
+        item_type: "chat",
+        lineage_key: "00000000-0000-4000-8000-000000000083",
+        source_id: "00000000-0000-4000-8000-000000000083",
+        target_id: null,
+        outcome: "skipped",
+        reason: "audience_would_widen",
+        fields: [],
+        required_by: [],
+        label: "Design review",
+        task_key: null,
+        audience: [],
+        source_values: null,
+        target_values: null
+      }
+    ],
+    ...extra
+  });
+  const settingsHandlers = (role: "owner" | "member") => [
+    http.get(`${apiUrl}/organizations/:organizationId/projects`, () =>
+      HttpResponse.json({ projects: [project({ role })] })
+    ),
+    http.get(`${apiUrl}/projects/:projectId/members`, () =>
+      HttpResponse.json({ members: [] })
+    ),
+    http.get(`${apiUrl}/projects/:projectId/invitations`, () =>
+      HttpResponse.json({ invitations: [] })
+    ),
+    http.get(`${apiUrl}/projects/:projectId/merges`, () =>
+      HttpResponse.json({
+        runs: [
+          {
+            id: "00000000-0000-4000-8000-000000000091",
+            project_id: projectId,
+            source_branch_id: feature.id,
+            target_branch_id: main.id,
+            kind: "merge",
+            trigger: "provider_merge",
+            status: "applied_with_decisions",
+            skip_reason: null,
+            provider: {
+              provider: "github",
+              change_number: "42",
+              change_url: "https://github.com/acme/app/pull/42",
+              head_sha: "a1",
+              merge_sha: "b2"
+            },
+            counts: { "task.copy": 3 },
+            skipped: [],
+            decision_count: 1,
+            created_by: null,
+            created_at: "2026-09-29T10:00:00.000Z",
+            applied_at: "2026-09-29T10:00:00.000Z"
+          }
+        ],
+        next_cursor: null
+      })
+    )
+  ];
+
+  it("shows members the branches and history but no owner actions", async () => {
+    await render(`/projects/${projectId}/settings`, [
+      ...settingsHandlers("member"),
+      ...branchHandlers()
+    ]);
+    const section = await screen.findByRole("heading", { name: "Branches" });
+    expect(section).toBeVisible();
+    expect(screen.getByRole("cell", { name: /feat\/checkout/ })).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: /^Actions for/ })
+    ).not.toBeInTheDocument();
+    // Archived branches appear only on request.
+    expect(screen.queryByText("feat/old")).not.toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.click(
+      screen.getByRole("checkbox", { name: "Show archived (1)" })
+    );
+    expect(screen.getByText("feat/old")).toBeVisible();
+    await user.click(screen.getByRole("tab", { name: "Merge history" }));
+    expect(await screen.findByText("Merge feat/checkout → main")).toBeVisible();
+    expect(screen.getByRole("link", { name: "PR #42" })).toHaveAttribute(
+      "href",
+      "https://github.com/acme/app/pull/42"
+    );
+    expect(screen.getByText(/3 tasks added · 1 decision/)).toBeVisible();
+  });
+
+  it("asks owners before setting the default or archiving", async () => {
+    const posted: string[] = [];
+    const view = await render(`/projects/${projectId}/settings`, [
+      ...settingsHandlers("owner"),
+      http.post(
+        `${apiUrl}/projects/:projectId/branches/:branchId/:action`,
+        ({ params }) => {
+          posted.push(`${params.action}:${params.branchId}`);
+          return HttpResponse.json({ branch: feature });
+        }
+      ),
+      ...branchHandlers()
+    ]);
+    const user = userEvent.setup();
+    // The default can be merged elsewhere but never archived or re-defaulted.
+    await user.click(
+      await screen.findByRole("button", { name: "Actions for main" })
+    );
+    expect(
+      screen.getAllByRole("menuitem").map((item) => item.textContent)
+    ).toEqual(["Merge into…"]);
+    await user.keyboard("{Escape}");
+    await user.click(
+      screen.getByRole("button", { name: "Actions for feat/checkout" })
+    );
+    await user.click(screen.getByRole("menuitem", { name: "Set as default" }));
+    const confirm = await screen.findByRole("dialog", {
+      name: "Make feat/checkout the default branch?"
+    });
+    expect(confirm).toHaveTextContent(
+      "including older CLI versions, will read and write there. main stays as a regular branch."
+    );
+    await user.click(screen.getByRole("button", { name: "Make default" }));
+    await waitFor(() => expect(posted).toEqual([`default:${feature.id}`]));
+    // The page stays on the branch it showed.
+    await waitFor(() =>
+      expect(view.router.state.location.search).toEqual({ branch: main.id })
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Actions for feat/checkout" })
+    );
+    await user.click(screen.getByRole("menuitem", { name: "Archive" }));
+    expect(
+      await screen.findByRole("dialog", { name: "Archive feat/checkout?" })
+    ).toHaveTextContent(
+      "It becomes read-only and hidden. Nothing is deleted. Active agent sessions on it will be closed."
+    );
+    await user.click(screen.getByRole("button", { name: "Archive branch" }));
+    await waitFor(() =>
+      expect(posted).toEqual([`default:${feature.id}`, `archive:${feature.id}`])
+    );
+  });
+
+  it("previews a merge, merges and keeps going after a stale preview", async () => {
+    const requests: Array<{
+      body: Record<string, unknown>;
+      key: string | null;
+    }> = [];
+    await render(`/projects/${projectId}/settings`, [
+      ...settingsHandlers("owner"),
+      http.post(`${apiUrl}/projects/:projectId/merges/preview`, () =>
+        HttpResponse.json({ preview: preview("a") })
+      ),
+      http.post(`${apiUrl}/projects/:projectId/merges`, async ({ request }) => {
+        requests.push({
+          body: (await request.json()) as Record<string, unknown>,
+          key: request.headers.get("idempotency-key")
+        });
+        if (requests.length === 1)
+          return HttpResponse.json(
+            {
+              error: {
+                code: "BRANCH_PREVIEW_STALE",
+                message: "The preview is out of date.",
+                request_id: "req_1",
+                details: {
+                  preview: preview("b", {
+                    counts: { "task.copy": 3, "task.conflict": 1 }
+                  })
+                }
+              }
+            },
+            { status: 409 }
+          );
+        return HttpResponse.json(
+          {
+            run: {
+              id: "00000000-0000-4000-8000-000000000092",
+              project_id: projectId,
+              source_branch_id: feature.id,
+              target_branch_id: main.id,
+              kind: "merge",
+              trigger: "dashboard",
+              status: "applied_with_decisions",
+              skip_reason: null,
+              provider: null,
+              counts: { "task.copy": 3 },
+              skipped: [],
+              decision_count: 1,
+              created_by: { type: "human", id: selfId },
+              created_at: "2026-09-30T10:00:00.000Z",
+              applied_at: "2026-09-30T10:00:00.000Z"
+            }
+          },
+          { status: 201 }
+        );
+      }),
+      ...branchHandlers()
+    ]);
+    const user = userEvent.setup();
+    await user.click(
+      await screen.findByRole("button", { name: "Actions for feat/checkout" })
+    );
+    await user.click(screen.getByRole("menuitem", { name: "Merge into…" }));
+    const dialog = await screen.findByRole("dialog", {
+      name: "Merge feat/checkout"
+    });
+    expect(screen.getByLabelText("Into")).toHaveValue(main.id);
+    expect(await screen.findByText("2 tasks added")).toBeVisible();
+    expect(screen.getByText("1 document updated")).toBeVisible();
+    expect(dialog).toHaveTextContent("Will need your decision (1)");
+    expect(dialog).toHaveTextContent("DASH-7Checkout copy");
+    expect(dialog).toHaveTextContent("Changed on both branches");
+    expect(dialog).toHaveTextContent("Won’t be merged (1)");
+    expect(dialog).toHaveTextContent("More people would see this conversation");
+    // The source isn't tracked by a provider, so archiving is suggested.
+    expect(
+      screen.getByRole("checkbox", {
+        name: "Archive feat/checkout after merging"
+      })
+    ).toBeChecked();
+
+    await user.click(screen.getByRole("button", { name: "Merge" }));
+    expect(
+      await screen.findByText(/Things changed while you were choosing/)
+    ).toBeVisible();
+    expect(screen.getByText("3 tasks added")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Merge" }));
+    expect(
+      await screen.findByText("Merged feat/checkout into main.")
+    ).toBeVisible();
+    expect(screen.getByText("1 item needs your decision.")).toBeVisible();
+    expect(requests.map(({ body }) => body)).toEqual([
+      {
+        source_branch_id: feature.id,
+        target_branch_id: main.id,
+        kind: "merge",
+        preview_fingerprint: "a".repeat(64),
+        archive_source: true
+      },
+      {
+        source_branch_id: feature.id,
+        target_branch_id: main.id,
+        kind: "merge",
+        preview_fingerprint: "b".repeat(64),
+        archive_source: true
+      }
+    ]);
+    // A new preview gets a new idempotency key.
+    expect(requests[0]?.key).toBeTruthy();
+    expect(requests[1]?.key).not.toBe(requests[0]?.key);
+  });
+});

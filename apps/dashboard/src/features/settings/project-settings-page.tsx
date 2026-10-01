@@ -16,6 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ConfirmDeleteDialog } from "./confirm-delete-dialog";
 import { LocalIntegrationStatusSection } from "./local-integration-status";
 import { ProjectMembersSection } from "./project-members-section";
+import { BranchesSettingsSection } from "@/features/branches/branches-settings-section";
 import type { ProjectContext } from "@/features/hierarchy/catalog";
 import type { ApiClient } from "@/lib/api/client";
 
@@ -211,6 +212,7 @@ export function ProjectSettingsPage({
           </CardContent>
         </Card>
       </div>
+      <BranchesSettingsSection api={api} projectId={project.id} />
       <ProjectMembersSection
         project={project}
         organization={organization}

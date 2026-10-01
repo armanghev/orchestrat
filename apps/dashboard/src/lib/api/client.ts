@@ -105,9 +105,17 @@ import {
   type CreateHandoffResponse,
   branchResponseSchema,
   branchesResponseSchema,
+  mergeApplyRequestSchema,
+  mergePreviewRequestSchema,
+  mergePreviewResponseSchema,
+  mergeRunResponseSchema,
+  mergeRunsResponseSchema,
   type Branch,
   type BranchesResponse,
-  type CreateBranchRequest
+  type CreateBranchRequest,
+  type MergePreview,
+  type MergeRun,
+  type MergeRunsResponse
 } from "@orchestrat/protocol";
 import { z, type ZodType } from "zod";
 
@@ -442,6 +450,47 @@ export class ApiClient {
       { method: "POST", body: { choice: "blank" } },
       branchResponseSchema
     ).then(({ branch }) => branch);
+  }
+
+  /** What an import or merge would do (docs/project-branches.md §9.5). */
+  previewMerge(
+    projectId: string,
+    input: z.input<typeof mergePreviewRequestSchema>
+  ): Promise<MergePreview> {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/merges/preview`,
+      { method: "POST", body: input },
+      mergePreviewResponseSchema
+    ).then(({ preview }) => preview);
+  }
+
+  /** Applies a previewed import or merge. A stale preview fails with
+   * BRANCH_PREVIEW_STALE and the fresh preview in `details.preview`. */
+  applyMerge(
+    projectId: string,
+    input: z.input<typeof mergeApplyRequestSchema>,
+    idempotencyKey: string
+  ): Promise<MergeRun> {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/merges`,
+      {
+        method: "POST",
+        body: input,
+        headers: { "Idempotency-Key": idempotencyKey }
+      },
+      mergeRunResponseSchema
+    ).then(({ run }) => run);
+  }
+
+  listMergeRuns(
+    projectId: string,
+    query: { branch_id?: string; limit?: number; cursor?: string } = {}
+  ): Promise<MergeRunsResponse> {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/merges${queryString(query)}`,
+      { method: "GET" },
+      mergeRunsResponseSchema
+    );
   }
 
   listMessageCandidates(

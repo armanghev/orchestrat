@@ -1,4 +1,4 @@
-import { queryOptions } from "@tanstack/react-query";
+import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import type { Branch } from "@orchestrat/protocol";
 import type { ApiClient } from "@/lib/api/client";
 
@@ -6,11 +6,28 @@ import type { ApiClient } from "@/lib/api/client";
 // (docs/project-branches.md §11.1), so a short stale time is enough.
 const branchesStaleTime = 30_000;
 
+// Merges, decisions and previews live under the project key, so one
+// invalidation after a merge refreshes all of them.
 export const branchKeys = {
   all: ["branches"] as const,
   project: (projectId: string) => [...branchKeys.all, projectId] as const,
   list: (projectId: string) =>
-    [...branchKeys.project(projectId), "list"] as const
+    [...branchKeys.project(projectId), "list"] as const,
+  merges: (projectId: string) =>
+    [...branchKeys.project(projectId), "merges"] as const,
+  preview: (
+    projectId: string,
+    kind: "import" | "merge",
+    sourceId: string,
+    targetId: string
+  ) =>
+    [
+      ...branchKeys.project(projectId),
+      "preview",
+      kind,
+      sourceId,
+      targetId
+    ] as const
 };
 
 /** Every branch of a project, archived ones included: active first, the
@@ -32,3 +49,13 @@ export function resolveBranch(branches: Branch[], requested?: string) {
   if (!requested) return defaultBranchOf(branches);
   return branches.find((branch) => branch.id === requested) ?? null;
 }
+
+/** Merge history, newest first, a page at a time. */
+export const mergeRunsQueryOptions = (api: ApiClient, projectId: string) =>
+  infiniteQueryOptions({
+    queryKey: branchKeys.merges(projectId),
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) =>
+      api.listMergeRuns(projectId, { limit: 25, cursor: pageParam }),
+    getNextPageParam: (page) => page.next_cursor ?? undefined
+  });
