@@ -74,6 +74,18 @@ export async function humanRepositoryRoutes(
         )
       )
   );
+  app.post(
+    "/projects/:projectId/repository/hook/reenable",
+    async (request, reply) =>
+      reply
+        .code(202)
+        .send(
+          await options.repositories.reenableHook(
+            request.userId,
+            project(request.params)
+          )
+        )
+  );
   app.get("/projects/:projectId/repository/deliveries", (request) =>
     options.repositories.deliveries(
       request.userId,

@@ -308,6 +308,17 @@ async function mockHierarchy(page: Page, state: HierarchyState) {
           ]
         }
       });
+    if (/^\/api\/v1\/projects\/[^/]+\/repository$/.test(path))
+      return route.fulfill({
+        json: {
+          repository: null,
+          providers: ["github", "gitlab", "origin"].map((provider) => ({
+            provider,
+            configured: false,
+            unavailable_reason: "Not set up on this server."
+          }))
+        }
+      });
     if (/^\/api\/v1\/projects\/[^/]+\/inbox$/.test(path))
       return route.fulfill({ json: { unread_chats: [] } });
     if (/^\/api\/v1\/projects\/[^/]+\/attention$/.test(path))

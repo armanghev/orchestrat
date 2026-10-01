@@ -606,6 +606,26 @@ export class RepositoryService {
     return { queued: true as const };
   }
 
+  /** Re-enables a webhook the provider disabled (GitLab), then refreshes its
+   * health with a reconcile. */
+  async reenableHook(userId: string, projectId: string) {
+    await this.permissions.projectEditor(userId, projectId);
+    const connection = await this.active(projectId);
+    if (!connection)
+      throw new ApiError(404, "NOT_FOUND", "No repository is connected.");
+    const adapter = this.adapters.get(connection.provider);
+    if (!adapter?.reenableHook)
+      throw new ApiError(
+        409,
+        "CONFLICT",
+        "This provider has no webhook to re-enable.",
+        { reason: "no_hook" }
+      );
+    await provider(() => adapter.reenableHook!(connection));
+    this.requestReconcile(connection.id);
+    return { queued: true as const };
+  }
+
   async deliveries(userId: string, projectId: string, status?: string) {
     await this.permissions.projectEditor(userId, projectId);
     const connection = await this.active(projectId);

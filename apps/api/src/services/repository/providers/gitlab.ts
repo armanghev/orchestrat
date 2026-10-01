@@ -597,7 +597,7 @@ export class GitlabAdapter implements ProviderAdapter {
   }
 
   /** Settings → Re-enable: a test delivery wakes a disabled hook. */
-  async reenable(connection: ConnectionRow) {
+  async reenableHook(connection: ConnectionRow) {
     if (!connection.gitlabHookId) return;
     const response = await send(
       this.http,

@@ -528,6 +528,7 @@ All paths are under `/api/v1`. JSON is snake_case. Request and response schemas 
 | POST `/projects/:projectId/repository/sync` | owner/admin | `{}` | 202 `{ queued: true }` | |
 | GET `/projects/:projectId/repository/deliveries?status=failed` | owner/admin | — | `{ deliveries: [{ id, event_type, received_at, attempts, last_error }] }` | |
 | POST `/projects/:projectId/repository/deliveries/:id/retry` | owner/admin | `{}` | `{ delivery }` | |
+| POST `/projects/:projectId/repository/hook/reenable` | owner/admin | `{}` | 202 `{ queued: true }` (GitLab: a test delivery wakes a disabled project hook, then a reconcile refreshes its health) | 409 `CONFLICT` reason `no_hook` for providers without a project hook |
 | DELETE `/projects/:projectId/repository` | owner/admin | — | 204 | |
 
 ¹ Import into the default branch, and `kind: "merge"`, require owner/admin.

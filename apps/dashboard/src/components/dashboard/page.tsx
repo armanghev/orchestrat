@@ -79,11 +79,14 @@ export function StatusBadge({ status }: { status: string }) {
   const variant =
     status === "archived"
       ? "secondary"
-      : status === "blocked" || status === "cancelled"
+      : status === "blocked" || status === "cancelled" || status === "error"
         ? "destructive"
         : status === "online" || status === "active" || status === "done"
           ? "success"
-          : status === "review" || status === "stale"
+          : status === "review" ||
+              status === "stale" ||
+              status === "needs_reauthorization" ||
+              status === "suspended"
             ? "warning"
             : status === "in_progress" || status === "claimed"
               ? "info"

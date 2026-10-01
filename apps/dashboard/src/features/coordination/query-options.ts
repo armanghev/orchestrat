@@ -4,6 +4,7 @@ import type { ApiClient } from "@/lib/api/client";
 import { messagingKeys } from "@/features/messaging/query-options";
 import { attentionKeys } from "@/features/attention/query-options";
 import { branchKeys } from "@/features/branches/query-options";
+import { repositoryKeys } from "@/features/repository/query-options";
 
 const knownRealtimeEventTypes = new Set([
   "task.created",
@@ -256,8 +257,15 @@ export function invalidateRealtimeEvent(
         messagingKeys.inboxAllBranches(projectId)
       ]
     : [messagingKeys.inbox(projectId)];
-  if (event.entity_type === "branch" || event.entity_type === "repository")
+  if (event.entity_type === "branch")
     return invalidate([branchKeys.project(projectId), ...events]);
+  // Connecting can rename or move the default branch.
+  if (event.entity_type === "repository")
+    return invalidate([
+      repositoryKeys.project(projectId),
+      branchKeys.project(projectId),
+      ...events
+    ]);
   if (event.entity_type === "merge" || event.entity_type === "decision")
     return invalidate([
       branchKeys.project(projectId),

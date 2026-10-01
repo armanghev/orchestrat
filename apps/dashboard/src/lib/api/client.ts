@@ -112,6 +112,22 @@ import {
   mergeRunsResponseSchema,
   decisionResponseSchema,
   decisionsResponseSchema,
+  githubInstallationResponseSchema,
+  repositoryAuthorizationResponseSchema,
+  repositoryCandidatesResponseSchema,
+  repositoryConnectionResponseSchema,
+  repositoryDeliveriesResponseSchema,
+  repositoryDeliveryResponseSchema,
+  repositoryResponseSchema,
+  repositorySyncResponseSchema,
+  connectRepositoryRequestSchema,
+  type GithubInstallationResponse,
+  type RepositoryAuthorizationResponse,
+  type RepositoryCandidate,
+  type RepositoryConnection,
+  type RepositoryDelivery,
+  type RepositoryProvider,
+  type RepositoryResponse,
   type Decision,
   type DecisionStatus,
   type MergeChoice,
@@ -522,6 +538,108 @@ export class ApiClient {
       { method: "POST", body: { choice } },
       decisionResponseSchema
     ).then(({ decision }) => decision);
+  }
+
+  getRepository(projectId: string): Promise<RepositoryResponse> {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/repository`,
+      { method: "GET" },
+      repositoryResponseSchema
+    );
+  }
+
+  /** Starts connecting a provider; the browser then visits `authorize_url`
+   * and returns to `return_path` (docs/project-branches.md §8.1). */
+  authorizeRepository(
+    projectId: string,
+    input: { provider: RepositoryProvider; return_path?: string }
+  ): Promise<RepositoryAuthorizationResponse> {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/repository/authorizations`,
+      { method: "POST", body: input },
+      repositoryAuthorizationResponseSchema
+    );
+  }
+
+  /** The GitHub Setup URL's installation, which the API checks (§8.3). */
+  submitGithubInstallation(
+    projectId: string,
+    authorizationId: string,
+    installationId: string
+  ): Promise<GithubInstallationResponse> {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/repository/authorizations/${encodeURIComponent(authorizationId)}/github-installation`,
+      { method: "POST", body: { installation_id: installationId } },
+      githubInstallationResponseSchema
+    );
+  }
+
+  listRepositoryCandidates(
+    projectId: string,
+    authorizationId: string
+  ): Promise<{ repositories: RepositoryCandidate[] }> {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/repository/authorizations/${encodeURIComponent(authorizationId)}/repositories`,
+      { method: "GET" },
+      repositoryCandidatesResponseSchema
+    );
+  }
+
+  connectRepository(
+    projectId: string,
+    input: z.input<typeof connectRepositoryRequestSchema>
+  ): Promise<RepositoryConnection> {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/repository`,
+      { method: "POST", body: input },
+      repositoryConnectionResponseSchema
+    ).then(({ repository }) => repository);
+  }
+
+  syncRepository(projectId: string): Promise<{ queued: true }> {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/repository/sync`,
+      { method: "POST", body: {} },
+      repositorySyncResponseSchema
+    );
+  }
+
+  reenableRepositoryHook(projectId: string): Promise<{ queued: true }> {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/repository/hook/reenable`,
+      { method: "POST", body: {} },
+      repositorySyncResponseSchema
+    );
+  }
+
+  listFailedRepositoryDeliveries(
+    projectId: string
+  ): Promise<{ deliveries: RepositoryDelivery[] }> {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/repository/deliveries?status=failed`,
+      { method: "GET" },
+      repositoryDeliveriesResponseSchema
+    );
+  }
+
+  retryRepositoryDelivery(
+    projectId: string,
+    deliveryId: string
+  ): Promise<RepositoryDelivery> {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/repository/deliveries/${encodeURIComponent(deliveryId)}/retry`,
+      { method: "POST", body: {} },
+      repositoryDeliveryResponseSchema
+    ).then(({ delivery }) => delivery);
+  }
+
+  /** Ends the link to the provider; branches and their work stay. */
+  disconnectRepository(projectId: string): Promise<void> {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/repository`,
+      { method: "DELETE" },
+      z.undefined()
+    );
   }
 
   listMessageCandidates(

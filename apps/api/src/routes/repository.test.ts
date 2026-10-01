@@ -70,6 +70,18 @@ test("connecting authorizes once, links the default and snapshots branches", asy
     403,
     "members can't sync or connect"
   );
+  assert.equal(
+    (await s.bob("POST", `${s.base}/repository/hook/reenable`, {})).statusCode,
+    403,
+    "members can't re-enable hooks"
+  );
+  const noHook = await s.alice(
+    "POST",
+    `${s.base}/repository/hook/reenable`,
+    {}
+  );
+  assert.equal(noHook.statusCode, 409, "only GitLab has a hook to re-enable");
+  assert.equal(noHook.json().error.details.reason, "no_hook");
 
   // The first push to a snapshotted branch creates its Orchestrat branch.
   s.fake.repositories.get(s.repo.id)!.branches.set("feat/old", "sha-old-2");

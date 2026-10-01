@@ -344,7 +344,12 @@ test("hook health shows an auto-disabled hook, and a test delivery re-enables it
     alert_status: "temporarily_disabled",
     disabled_until: "2026-10-01T01:00:00Z"
   });
-  await s.adapter.reenable(await s.row());
+  const reenabled = await s.alice(
+    "POST",
+    `${s.base}/repository/hook/reenable`,
+    {}
+  );
+  assert.equal(reenabled.statusCode, 202, reenabled.body);
   assert.deepEqual(s.gitlab.tested, [1]);
 });
 

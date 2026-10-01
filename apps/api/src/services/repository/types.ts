@@ -137,6 +137,8 @@ export interface ProviderAdapter {
   ): Promise<MergedChange[]>;
   /** Provider-side redelivery and hook health, during reconcile. */
   maintain?(connection: ConnectionRow): Promise<Partial<ConnectionRow>>;
+  /** Settings → Re-enable: wakes a webhook the provider disabled. */
+  reenableHook?(connection: ConnectionRow): Promise<void>;
 }
 
 /** A provider answered that the connection's authorization is gone. */
