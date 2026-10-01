@@ -34,6 +34,7 @@ import {
 import { useOptionalBranch } from "@/features/branches/branch-context";
 import { BranchSelector } from "@/features/branches/branch-selector";
 import { ArchivedBranchBanner } from "@/features/branches/archived-banner";
+import { BranchOnboardingPanel } from "@/features/branches/onboarding-panel";
 
 const TopToolbarActionsContext = createContext<
   ((actions: ReactNode | null) => void) | null
@@ -232,6 +233,7 @@ export function AppShell({
           profile={profile}
           messageCounts={messageCounts}
           taskCounts={taskCounts}
+          decisionCount={branchContext?.branch.open_decision_count}
         />
       </aside>
       <div className="flex w-full min-w-0 flex-1 flex-col">
@@ -253,6 +255,7 @@ export function AppShell({
         >
           <ConnectivityBanner />
           <ArchivedBranchBanner />
+          <BranchOnboardingPanel api={api} />
           {catalog.failures.length ? (
             <Alert role="status" className="m-4 w-auto">
               <AlertDescription>

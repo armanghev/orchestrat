@@ -1,5 +1,6 @@
 import { createContext, useContext, type ReactNode } from "react";
 import type { Branch } from "@orchestrat/protocol";
+import type { ImportRequest } from "./import-dialog";
 
 // The branch a project page shows (docs/project-branches.md §11.1). The
 // project layout resolves it once from `?branch=` and every page, the toolbar
@@ -24,6 +25,8 @@ export type BranchContextValue = {
   branchParam: (branchId: string) => string | undefined;
   openCreateBranch: () => void;
   openAllBranches: () => void;
+  /** Opens the import dialog (docs/project-branches.md §11.6). */
+  openImport: (request: ImportRequest) => void;
 };
 
 const BranchContext = createContext<BranchContextValue | null>(null);

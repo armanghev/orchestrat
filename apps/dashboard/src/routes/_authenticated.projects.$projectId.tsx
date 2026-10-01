@@ -39,6 +39,10 @@ import {
 import { useUnreadBranchIds } from "@/features/branches/branch-selector";
 import { CreateBranchDialog } from "@/features/branches/create-branch-dialog";
 import { AllBranchesDialog } from "@/features/branches/all-branches-dialog";
+import {
+  ImportDialog,
+  type ImportRequest
+} from "@/features/branches/import-dialog";
 import { usePreferences } from "@/platform/preferences-provider";
 import { DashboardApiError } from "@/lib/api/client";
 
@@ -274,6 +278,7 @@ function ProjectBranchScope({
   const { api } = useRouter().options.context;
   const [creating, setCreating] = useState(false);
   const [browsing, setBrowsing] = useState(false);
+  const [importing, setImporting] = useState<ImportRequest | null>(null);
   const projectId = context.project.id;
   const unread = useUnreadBranchIds(api, projectId);
   const defaultBranch = defaultBranchOf(branches);
@@ -308,7 +313,8 @@ function ProjectBranchScope({
       selectBranch,
       branchParam: (id) => (id === defaultBranch?.id ? undefined : id),
       openCreateBranch: () => setCreating(true),
-      openAllBranches: () => setBrowsing(true)
+      openAllBranches: () => setBrowsing(true),
+      openImport: setImporting
     };
   }, [branch, branches, context, defaultBranch, projectId, selectBranch]);
   return (
@@ -329,6 +335,14 @@ function ProjectBranchScope({
         unreadBranchIds={unread}
         onSelect={selectBranch}
       />
+      {importing ? (
+        <ImportDialog
+          api={api}
+          projectId={projectId}
+          request={importing}
+          onClose={() => setImporting(null)}
+        />
+      ) : null}
     </BranchProvider>
   );
 }

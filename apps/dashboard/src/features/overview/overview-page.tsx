@@ -8,6 +8,7 @@ import {
   ListTodo,
   Activity,
   CircleCheck,
+  Scale,
   Timer
 } from "lucide-react";
 import type { ProjectContext } from "@/features/hierarchy/catalog";
@@ -52,7 +53,7 @@ import {
 export function OverviewPage({ context }: { context: ProjectContext }) {
   const { project } = context;
   const { api } = useRouter().options.context;
-  const { branchId } = useBranch();
+  const { branchId, branch } = useBranch();
   const tasks = useQuery(tasksQueryOptions(api, project.id, branchId));
   const agents = useQuery(agentsQueryOptions(api, project.id));
   const presence = useQuery(agentPresenceQueryOptions(api, project.id));
@@ -117,8 +118,39 @@ export function OverviewPage({ context }: { context: ProjectContext }) {
     .slice(-5)
     .reverse();
 
+  const openDecisions = branch.open_decision_count;
   return (
     <section className="dashboard-page" aria-label="Project overview">
+      {openDecisions ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              <h2 className="flex items-center gap-2">
+                <Scale
+                  className="size-4 text-muted-foreground"
+                  aria-hidden="true"
+                />
+                Needs your decision
+              </h2>
+            </CardTitle>
+            <CardDescription>
+              {openDecisions === 1
+                ? "A merge left 1 conflict on this branch for a person to settle."
+                : `Merges left ${openDecisions} conflicts on this branch for a person to settle.`}
+            </CardDescription>
+            <CardAction>
+              <Button asChild variant="outline" size="sm">
+                <Link
+                  to="/projects/$projectId/decisions"
+                  params={{ projectId: project.id }}
+                >
+                  Review decisions
+                </Link>
+              </Button>
+            </CardAction>
+          </CardHeader>
+        </Card>
+      ) : null}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {[
           {

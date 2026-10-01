@@ -1,5 +1,6 @@
 import type { Branch } from "@orchestrat/protocol";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import { useOptionalBranch } from "./branch-context";
 
 const providerNames = {
@@ -31,16 +32,40 @@ export function archivedReason(branch: Branch) {
 export function ArchivedBranchBanner() {
   const context = useOptionalBranch();
   if (!context?.branchArchived) return null;
-  const { branch } = context;
+  const { branch, branches, canManage, projectArchived, defaultBranch } =
+    context;
+  // Its work can still move to an active branch (spec §11.5).
+  const targets = branches.filter(
+    (item) => !item.archived_at && (canManage || !item.is_default)
+  );
+  const target =
+    targets.find((item) => item.id === defaultBranch?.id) ?? targets[0];
   return (
     <Alert role="status" className="m-4 w-auto">
-      <AlertDescription>
+      <AlertDescription className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <p>
           <strong className="font-medium text-foreground">
             {branch.name} is archived.
           </strong>{" "}
           {archivedReason(branch)} Its work is read-only.
         </p>
+        {!projectArchived && target ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() =>
+              context.openImport({
+                sourceId: branch.id,
+                targetId: target.id,
+                lock: "source",
+                preselect: "all"
+              })
+            }
+          >
+            Import into another branch
+          </Button>
+        ) : null}
       </AlertDescription>
     </Alert>
   );

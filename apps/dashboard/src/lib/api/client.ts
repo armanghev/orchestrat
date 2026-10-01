@@ -110,6 +110,11 @@ import {
   mergePreviewResponseSchema,
   mergeRunResponseSchema,
   mergeRunsResponseSchema,
+  decisionResponseSchema,
+  decisionsResponseSchema,
+  type Decision,
+  type DecisionStatus,
+  type MergeChoice,
   type Branch,
   type BranchesResponse,
   type CreateBranchRequest,
@@ -491,6 +496,32 @@ export class ApiClient {
       { method: "GET" },
       mergeRunsResponseSchema
     );
+  }
+
+  /** Decisions whose target is `branch_id`, or every branch without it. */
+  listDecisions(
+    projectId: string,
+    query: { branch_id?: string; status?: DecisionStatus } = {}
+  ): Promise<{ decisions: Decision[] }> {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/decisions${queryString(query)}`,
+      { method: "GET" },
+      decisionsResponseSchema
+    );
+  }
+
+  /** Settles a decision. A target that changed since the merge fails with
+   * BRANCH_DECISION_STALE and the refreshed decision in `details.decision`. */
+  resolveDecision(
+    projectId: string,
+    decisionId: string,
+    choice: MergeChoice
+  ): Promise<Decision> {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/decisions/${encodeURIComponent(decisionId)}/resolve`,
+      { method: "POST", body: { choice } },
+      decisionResponseSchema
+    ).then(({ decision }) => decision);
   }
 
   listMessageCandidates(

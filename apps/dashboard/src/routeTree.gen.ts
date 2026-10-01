@@ -25,6 +25,7 @@ import { Route as AuthenticatedOrganizationsOrganizationIdSettingsRouteImport } 
 import { Route as AuthenticatedProjectsProjectIdIndexRouteImport } from './routes/_authenticated.projects.$projectId.index'
 import { Route as AuthenticatedProjectsProjectIdActivityRouteImport } from './routes/_authenticated.projects.$projectId.activity'
 import { Route as AuthenticatedProjectsProjectIdAgentsRouteImport } from './routes/_authenticated.projects.$projectId.agents'
+import { Route as AuthenticatedProjectsProjectIdDecisionsRouteImport } from './routes/_authenticated.projects.$projectId.decisions'
 import { Route as AuthenticatedProjectsProjectIdDocumentsRouteImport } from './routes/_authenticated.projects.$projectId.documents'
 import { Route as AuthenticatedProjectsProjectIdIntegrationsRouteImport } from './routes/_authenticated.projects.$projectId.integrations'
 import { Route as AuthenticatedProjectsProjectIdMessagesRouteImport } from './routes/_authenticated.projects.$projectId.messages'
@@ -117,6 +118,12 @@ const AuthenticatedProjectsProjectIdAgentsRoute =
     path: '/agents',
     getParentRoute: () => AuthenticatedProjectsProjectIdRoute,
   } as any)
+const AuthenticatedProjectsProjectIdDecisionsRoute =
+  AuthenticatedProjectsProjectIdDecisionsRouteImport.update({
+    id: '/decisions',
+    path: '/decisions',
+    getParentRoute: () => AuthenticatedProjectsProjectIdRoute,
+  } as any)
 const AuthenticatedProjectsProjectIdDocumentsRoute =
   AuthenticatedProjectsProjectIdDocumentsRouteImport.update({
     id: '/documents',
@@ -169,6 +176,7 @@ export interface FileRoutesByFullPath {
   '/organizations/$organizationId/settings': typeof AuthenticatedOrganizationsOrganizationIdSettingsRoute
   '/projects/$projectId/activity': typeof AuthenticatedProjectsProjectIdActivityRoute
   '/projects/$projectId/agents': typeof AuthenticatedProjectsProjectIdAgentsRoute
+  '/projects/$projectId/decisions': typeof AuthenticatedProjectsProjectIdDecisionsRoute
   '/projects/$projectId/documents': typeof AuthenticatedProjectsProjectIdDocumentsRoute
   '/projects/$projectId/integrations': typeof AuthenticatedProjectsProjectIdIntegrationsRoute
   '/projects/$projectId/messages': typeof AuthenticatedProjectsProjectIdMessagesRoute
@@ -191,6 +199,7 @@ export interface FileRoutesByTo {
   '/organizations/$organizationId/settings': typeof AuthenticatedOrganizationsOrganizationIdSettingsRoute
   '/projects/$projectId/activity': typeof AuthenticatedProjectsProjectIdActivityRoute
   '/projects/$projectId/agents': typeof AuthenticatedProjectsProjectIdAgentsRoute
+  '/projects/$projectId/decisions': typeof AuthenticatedProjectsProjectIdDecisionsRoute
   '/projects/$projectId/documents': typeof AuthenticatedProjectsProjectIdDocumentsRoute
   '/projects/$projectId/integrations': typeof AuthenticatedProjectsProjectIdIntegrationsRoute
   '/projects/$projectId/messages': typeof AuthenticatedProjectsProjectIdMessagesRoute
@@ -216,6 +225,7 @@ export interface FileRoutesById {
   '/_authenticated/organizations/$organizationId/settings': typeof AuthenticatedOrganizationsOrganizationIdSettingsRoute
   '/_authenticated/projects/$projectId/activity': typeof AuthenticatedProjectsProjectIdActivityRoute
   '/_authenticated/projects/$projectId/agents': typeof AuthenticatedProjectsProjectIdAgentsRoute
+  '/_authenticated/projects/$projectId/decisions': typeof AuthenticatedProjectsProjectIdDecisionsRoute
   '/_authenticated/projects/$projectId/documents': typeof AuthenticatedProjectsProjectIdDocumentsRoute
   '/_authenticated/projects/$projectId/integrations': typeof AuthenticatedProjectsProjectIdIntegrationsRoute
   '/_authenticated/projects/$projectId/messages': typeof AuthenticatedProjectsProjectIdMessagesRoute
@@ -241,6 +251,7 @@ export interface FileRouteTypes {
     | '/organizations/$organizationId/settings'
     | '/projects/$projectId/activity'
     | '/projects/$projectId/agents'
+    | '/projects/$projectId/decisions'
     | '/projects/$projectId/documents'
     | '/projects/$projectId/integrations'
     | '/projects/$projectId/messages'
@@ -263,6 +274,7 @@ export interface FileRouteTypes {
     | '/organizations/$organizationId/settings'
     | '/projects/$projectId/activity'
     | '/projects/$projectId/agents'
+    | '/projects/$projectId/decisions'
     | '/projects/$projectId/documents'
     | '/projects/$projectId/integrations'
     | '/projects/$projectId/messages'
@@ -287,6 +299,7 @@ export interface FileRouteTypes {
     | '/_authenticated/organizations/$organizationId/settings'
     | '/_authenticated/projects/$projectId/activity'
     | '/_authenticated/projects/$projectId/agents'
+    | '/_authenticated/projects/$projectId/decisions'
     | '/_authenticated/projects/$projectId/documents'
     | '/_authenticated/projects/$projectId/integrations'
     | '/_authenticated/projects/$projectId/messages'
@@ -420,6 +433,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedProjectsProjectIdAgentsRouteImport
       parentRoute: typeof AuthenticatedProjectsProjectIdRoute
     }
+    '/_authenticated/projects/$projectId/decisions': {
+      id: '/_authenticated/projects/$projectId/decisions'
+      path: '/decisions'
+      fullPath: '/projects/$projectId/decisions'
+      preLoaderRoute: typeof AuthenticatedProjectsProjectIdDecisionsRouteImport
+      parentRoute: typeof AuthenticatedProjectsProjectIdRoute
+    }
     '/_authenticated/projects/$projectId/documents': {
       id: '/_authenticated/projects/$projectId/documents'
       path: '/documents'
@@ -468,6 +488,7 @@ declare module '@tanstack/react-router' {
 interface AuthenticatedProjectsProjectIdRouteChildren {
   AuthenticatedProjectsProjectIdActivityRoute: typeof AuthenticatedProjectsProjectIdActivityRoute
   AuthenticatedProjectsProjectIdAgentsRoute: typeof AuthenticatedProjectsProjectIdAgentsRoute
+  AuthenticatedProjectsProjectIdDecisionsRoute: typeof AuthenticatedProjectsProjectIdDecisionsRoute
   AuthenticatedProjectsProjectIdDocumentsRoute: typeof AuthenticatedProjectsProjectIdDocumentsRoute
   AuthenticatedProjectsProjectIdIntegrationsRoute: typeof AuthenticatedProjectsProjectIdIntegrationsRoute
   AuthenticatedProjectsProjectIdMessagesRoute: typeof AuthenticatedProjectsProjectIdMessagesRoute
@@ -483,6 +504,8 @@ const AuthenticatedProjectsProjectIdRouteChildren: AuthenticatedProjectsProjectI
       AuthenticatedProjectsProjectIdActivityRoute,
     AuthenticatedProjectsProjectIdAgentsRoute:
       AuthenticatedProjectsProjectIdAgentsRoute,
+    AuthenticatedProjectsProjectIdDecisionsRoute:
+      AuthenticatedProjectsProjectIdDecisionsRoute,
     AuthenticatedProjectsProjectIdDocumentsRoute:
       AuthenticatedProjectsProjectIdDocumentsRoute,
     AuthenticatedProjectsProjectIdIntegrationsRoute:

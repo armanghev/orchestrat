@@ -197,7 +197,8 @@ export function BranchesSettingsSection({
     defaultBranch,
     canManage,
     projectArchived,
-    openCreateBranch
+    openCreateBranch,
+    openImport
   } = useBranch();
   const [showArchived, setShowArchived] = useState(false);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
@@ -293,6 +294,12 @@ export function BranchesSettingsSection({
                       canManage && !archived && active.length > 1;
                     const canArchive =
                       canManage && !branch.is_default && !archived;
+                    // Members can import anywhere but the default.
+                    const canImport =
+                      !projectArchived &&
+                      !archived &&
+                      branches.length > 1 &&
+                      (canManage || !branch.is_default);
                     return (
                       <TableRow key={branch.id}>
                         <TableCell className="pl-3">
@@ -319,7 +326,7 @@ export function BranchesSettingsSection({
                           </time>
                         </TableCell>
                         <TableCell className="pr-3 text-right">
-                          {canDefault || canMerge || canArchive ? (
+                          {canDefault || canMerge || canArchive || canImport ? (
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
                                 <Button
@@ -345,6 +352,19 @@ export function BranchesSettingsSection({
                                     onSelect={() => setMergeSource(branch)}
                                   >
                                     Merge into…
+                                  </DropdownMenuItem>
+                                ) : null}
+                                {canImport ? (
+                                  <DropdownMenuItem
+                                    onSelect={() =>
+                                      openImport({
+                                        targetId: branch.id,
+                                        lock: "target",
+                                        preselect: "none"
+                                      })
+                                    }
+                                  >
+                                    Import into this branch
                                   </DropdownMenuItem>
                                 ) : null}
                                 {canArchive ? (

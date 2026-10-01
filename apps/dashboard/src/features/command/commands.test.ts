@@ -46,6 +46,7 @@ describe("buildCommands", () => {
       "navigate:documents",
       "navigate:messages",
       "navigate:activity",
+      "navigate:decisions",
       "navigate:settings",
       "theme:system",
       "theme:light",

@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { ChevronDown, Plus, Search, Settings } from "lucide-react";
+import { ChevronDown, Plus, Scale, Search, Settings } from "lucide-react";
 import type { Branch } from "@orchestrat/protocol";
 import { Button } from "@/components/ui/button";
 import {
@@ -105,6 +105,19 @@ export function BranchSelector({ api }: { api: ApiClient }) {
           <DropdownMenuItem onSelect={openAllBranches}>
             <Search />
             All branches…
+          </DropdownMenuItem>
+        ) : null}
+        {branch.open_decision_count > 0 ? (
+          <DropdownMenuItem
+            onSelect={() =>
+              void navigate({
+                to: "/projects/$projectId/decisions",
+                params: { projectId }
+              })
+            }
+          >
+            <Scale />
+            Needs your decision ({branch.open_decision_count})
           </DropdownMenuItem>
         ) : null}
         {!projectArchived ? (

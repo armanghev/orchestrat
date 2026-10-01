@@ -15,6 +15,9 @@ export const branchKeys = {
     [...branchKeys.project(projectId), "list"] as const,
   merges: (projectId: string) =>
     [...branchKeys.project(projectId), "merges"] as const,
+  /** Open decisions targeting a branch, or every branch's. */
+  decisions: (projectId: string, branchId: string | "all") =>
+    [...branchKeys.project(projectId), "decisions", branchId] as const,
   preview: (
     projectId: string,
     kind: "import" | "merge",
@@ -58,4 +61,18 @@ export const mergeRunsQueryOptions = (api: ApiClient, projectId: string) =>
     queryFn: ({ pageParam }) =>
       api.listMergeRuns(projectId, { limit: 25, cursor: pageParam }),
     getNextPageParam: (page) => page.next_cursor ?? undefined
+  });
+
+export const decisionsQueryOptions = (
+  api: ApiClient,
+  projectId: string,
+  branchId: string | "all"
+) =>
+  queryOptions({
+    queryKey: branchKeys.decisions(projectId, branchId),
+    queryFn: () =>
+      api.listDecisions(projectId, {
+        status: "open",
+        ...(branchId === "all" ? {} : { branch_id: branchId })
+      })
   });
