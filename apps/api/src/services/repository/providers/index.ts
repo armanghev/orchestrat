@@ -3,6 +3,7 @@ import type { SecretBox } from "../secrets.js";
 import type { ProviderAdapter } from "../types.js";
 import { GithubAdapter } from "./github.js";
 import { GitlabAdapter } from "./gitlab.js";
+import { OriginAdapter } from "./origin.js";
 
 /** The adapters for every fully configured provider (setup guide §0.4). */
 export function providerAdapters(
@@ -16,5 +17,6 @@ export function providerAdapters(
     adapters.push(
       new GitlabAdapter(config.gitlab, secrets, config.publicApiUrl)
     );
+  if (config.origin) adapters.push(new OriginAdapter(config.origin));
   return adapters;
 }
