@@ -318,10 +318,83 @@ test(
           );
         }
       );
+
+      await t.test(
+        "attention waits wake only for the pinned branch",
+        async () => {
+          const s = await space();
+          const { agent, call } = await s.createAgent("codex");
+          const session = (
+            await call("POST", "/sessions", {
+              runtime: "codex",
+              integration: "codex",
+              branch_id: s.feature
+            })
+          ).json().session;
+          const pinned = { "x-orchestrat-session-id": session.id };
+          const dm = async (branchId?: string) =>
+            (
+              await s.alice(
+                "POST",
+                `/projects/${s.project.id}/chats${branchId ? `?branch_id=${branchId}` : ""}`,
+                {
+                  kind: "direct",
+                  participants: [{ type: "agent", id: agent.id }]
+                },
+                key()
+              )
+            ).json();
+          const mainChat = await dm();
+          const featureChat = await dm(s.feature);
+          const cursor = (
+            await call("GET", "/attention", undefined, pinned)
+          ).json().cursor;
+          const waiting = call(
+            "GET",
+            `/attention/wait?after=${cursor}&timeout_ms=10000`,
+            undefined,
+            pinned
+          );
+          const pause = () =>
+            new Promise((resolve) => setTimeout(resolve, 300));
+          await pause();
+          // Main-branch news must not end a wait pinned to the feature branch.
+          await s.alice(
+            "POST",
+            `/chats/${mainChat.id}/messages`,
+            { body_markdown: "main news" },
+            key()
+          );
+          await pause();
+          await s.alice(
+            "POST",
+            `/chats/${featureChat.id}/messages`,
+            { body_markdown: "feature news" },
+            key()
+          );
+          const woke = (await waiting).json();
+          assert.equal(woke.status, "updates", JSON.stringify(woke));
+          assert.ok(woke.events.length > 0);
+          for (const event of woke.events) {
+            assert.notEqual(event.chat_id, mainChat.id);
+            assert.ok(
+              event.branch_id === s.feature || event.branch_id === null
+            );
+          }
+          assert.ok(
+            woke.events.some(
+              (event: { chat_id?: string }) => event.chat_id === featureChat.id
+            )
+          );
+          assert.equal(woke.attention.branch_id, s.feature);
+        }
+      );
     } finally {
       await app.close();
       await pool.end();
-      await admin.pool.query(`DROP DATABASE "${name}" WITH (FORCE)`);
+      // Not FORCE: pool.end() resolves before its sockets close, and a plain
+      // DROP waits for those sessions instead of killing them mid-close.
+      await admin.pool.query(`DROP DATABASE "${name}"`);
       await admin.pool.end();
     }
   }
