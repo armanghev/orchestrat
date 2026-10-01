@@ -99,7 +99,8 @@ export function TopToolbar({
   collapsed,
   onOpenCommands,
   routeActions,
-  commandTriggerRef
+  commandTriggerRef,
+  branchMenu
 }: {
   catalog: ProjectCatalog;
   context?: ProjectContext;
@@ -109,6 +110,8 @@ export function TopToolbar({
   onOpenCommands: () => void;
   routeActions?: ReactNode;
   commandTriggerRef?: RefObject<HTMLButtonElement | null>;
+  /** Organization › Project › Branch › Page (docs/project-branches.md §11.2). */
+  branchMenu?: ReactNode;
 }) {
   const navigate = useNavigate();
   const dragHandlers = useWindowDragHandlers();
@@ -124,9 +127,7 @@ export function TopToolbar({
       className={cn(
         "relative flex h-14 shrink-0 select-none items-center gap-3 border-b px-4 sm:px-6",
         desktop && "md:h-12 md:bg-sidebar",
-        desktop &&
-          collapsed &&
-          "md:-ml-12 md:w-[calc(100%+3rem)] md:pl-18"
+        desktop && collapsed && "md:-ml-12 md:w-[calc(100%+3rem)] md:pl-18"
       )}
       onMouseDown={(event) => {
         if (
@@ -328,6 +329,14 @@ export function TopToolbar({
                     </DropdownMenu>
                   </BreadcrumbItem>
                   <BreadcrumbSeparator className="hidden sm:block" />
+                  {branchMenu ? (
+                    <>
+                      <BreadcrumbItem className="hidden min-w-0 sm:inline-flex">
+                        {branchMenu}
+                      </BreadcrumbItem>
+                      <BreadcrumbSeparator className="hidden sm:block" />
+                    </>
+                  ) : null}
                 </>
               ) : null}
               <BreadcrumbItem>

@@ -50,7 +50,8 @@ function setup(
   const listProjectEvents = vi.fn<
     (
       projectId: string,
-      query?: { after?: string; limit?: number }
+      query?: { after?: string; limit?: number },
+      scope?: { branchId?: string; allBranches?: boolean }
     ) => Promise<ProjectEventsResponse>
   >(async () => ({ events: [], next_cursor: null }));
   const api = {
@@ -66,7 +67,9 @@ function setup(
   const queryClient = {
     invalidateQueries,
     getQueryData: vi.fn(() => undefined),
+    getQueriesData: vi.fn(() => []),
     setQueryData: vi.fn(),
+    setQueriesData: vi.fn(),
     removeQueries: vi.fn()
   };
   const controller = new ProjectRealtimeController(
@@ -125,10 +128,13 @@ describe("ProjectRealtimeController", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(f.api.getTask).toHaveBeenCalledWith(taskId);
     expect(f.api.listProjectEvents).toHaveBeenCalledTimes(1);
-    expect(f.api.listProjectEvents).toHaveBeenCalledWith(projectId, {
-      after: "1",
-      limit: 1
-    });
+    // Durable events are read across branches: the envelope's branch is
+    // whatever the event happened on.
+    expect(f.api.listProjectEvents).toHaveBeenCalledWith(
+      projectId,
+      { after: "1", limit: 1 },
+      { allBranches: true }
+    );
     expect(notify).toHaveBeenCalledTimes(3);
     expect(notify.mock.calls).toEqual([
       [

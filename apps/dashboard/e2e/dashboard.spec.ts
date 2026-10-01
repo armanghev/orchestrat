@@ -26,6 +26,8 @@ type HierarchyState = {
   attention?: Record<string, unknown>;
   taskAttention?: Array<Record<string, unknown>>;
   agentAttention?: Array<Record<string, unknown>>;
+  /** Branches per project id; each project otherwise has only `main`. */
+  branches?: Record<string, Array<Record<string, unknown>>>;
   failingOrganizationId?: string;
   abortOrganizations?: boolean;
   unauthorized?: "once" | "always";
@@ -56,6 +58,25 @@ function project(
     created_at: now,
     updated_at: now,
     archived_at: null
+  };
+}
+function defaultBranch(projectId: string) {
+  return {
+    id: `${projectId.slice(0, -4)}b000`,
+    project_id: projectId,
+    name: "main",
+    is_default: true,
+    name_source: "fallback",
+    created_via: "migration",
+    created_by: null,
+    onboarding_state: "completed",
+    onboarding_choice: null,
+    archived_at: null,
+    archived_reason: null,
+    provider: null,
+    open_decision_count: 0,
+    created_at: now,
+    updated_at: now
   };
 }
 function populatedState(): HierarchyState {
@@ -277,6 +298,15 @@ async function mockHierarchy(page: Page, state: HierarchyState) {
     if (/^\/api\/v1\/projects\/[^/]+\/message-candidates$/.test(path))
       return route.fulfill({
         json: { candidates: state.messageCandidates ?? [] }
+      });
+    const branches = path.match(/^\/api\/v1\/projects\/([^/]+)\/branches$/);
+    if (branches && method === "GET")
+      return route.fulfill({
+        json: {
+          branches: state.branches?.[branches[1]!] ?? [
+            defaultBranch(branches[1]!)
+          ]
+        }
       });
     if (/^\/api\/v1\/projects\/[^/]+\/inbox$/.test(path))
       return route.fulfill({ json: { unread_chats: [] } });
@@ -1574,7 +1604,9 @@ test("compact shell collapses and restores sidebar without horizontal overflow",
         return rect.y + rect.height / 2;
       })
     );
-  expect(centers).toHaveLength(6);
+  // Organization, project and branch menus, the appearance menu, plus the
+  // trigger, separator and breadcrumb (docs/project-branches.md §11.2).
+  expect(centers).toHaveLength(7);
   expect(Math.max(...centers) - Math.min(...centers)).toBeLessThanOrEqual(1);
 });
 

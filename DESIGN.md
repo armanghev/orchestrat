@@ -371,10 +371,10 @@ On mobile, the sidebar becomes a 288 px sheet and closes after navigation.
 The left side of the toolbar shows context as:
 
 ```text
-Organization  ›  Project  ›  Page
+Organization  ›  Project  ›  Branch  ›  Page
 ```
 
-Organization and project names are full-width content controls, not fixed-width truncation slots. They may truncate only when the window genuinely lacks space.
+Organization, project and branch names are full-width content controls, not fixed-width truncation slots. They may truncate only when the window genuinely lacks space.
 
 Clicking the organization name opens an organization switcher with:
 
@@ -387,6 +387,16 @@ Clicking the project name opens projects from the selected organization with:
 - available projects;
 - New project;
 - Project settings.
+
+Clicking the branch name opens the project's branches with:
+
+- the default branch first, then the most recently updated, up to 12 active branches;
+- a dot plus "Unread messages" text on branches with unread messages, never the dot alone;
+- **All branches…**, a searchable dialog with Active and Archived groups, when there are more branches or any archived ones;
+- New branch, unless the project is archived;
+- Branch settings.
+
+The branch selector copies the organization and project selectors exactly: muted text that turns orange only while hovered or open. Every project page shows the selected branch's work. The branch lives in the `?branch=` search parameter, and the default branch has none. An archived branch keeps its pages readable: the shell shows one archived notice and every write control is hidden, not disabled.
 
 The current page name is plain orange text and is not a dropdown.
 
@@ -514,7 +524,7 @@ The editor supports rich Markdown and source mode, including headings, links, li
 Revision history is a date-grouped timeline:
 
 - newest revisions appear first;
-- a vertical branch connects revision nodes;
+- a vertical connector links revision nodes;
 - selected nodes use the theme accent;
 - each entry shows revision number, time, and actor type;
 - older pages append below the current timeline;
@@ -546,7 +556,7 @@ Connectivity problems appear in the shared shell banner. Do not repeat the same 
 The dashboard is desktop-first but must remain functional on smaller windows.
 
 - Persistent sidebar becomes a sheet below the medium breakpoint.
-- Organization and project breadcrumb controls hide on compact widths; the page name remains.
+- Organization, project and branch breadcrumb controls hide on compact widths; the page name remains. Search's **Branches** group switches branches there.
 - Toolbar actions stay to the right and may reduce to icons when their meaning remains clear.
 - Metric grids progress from one column to two and then four.
 - Dense two-column page sections collapse to one column.
@@ -585,7 +595,7 @@ Use concise, direct language.
 - Empty states describe the situation before suggesting an action.
 - Errors explain what the user can do next.
 - Prefer **Search** over **Command palette** in user-facing shell copy.
-- Use **organization**, **project**, **task**, **agent**, **document**, and **revision** consistently.
+- Use **organization**, **project**, **branch**, **task**, **agent**, **document**, and **revision** consistently. "Branch" always means a project branch; revision history says "connector" for the line between revisions.
 - Avoid implementation terms in the product interface unless they help a developer make a decision.
 
 ## Implementation rules

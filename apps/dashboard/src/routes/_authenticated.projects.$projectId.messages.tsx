@@ -47,6 +47,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { MarkdownContent } from "@/features/coordination/markdown-content";
 import { usePlatform } from "@/platform/provider";
 import { documentsQueryOptions } from "@/features/coordination/query-options";
+import { useBranch } from "@/features/branches/branch-context";
+import { OtherBranchNotice } from "@/features/branches/other-branch-notice";
 import { DashboardApiError } from "@/lib/api/client";
 import {
   chatsQueryOptions,
@@ -286,6 +288,7 @@ function MessagesRoute() {
   const { projectId } = Route.useParams();
   const { api } = Route.useRouteContext();
   const { chat } = Route.useSearch();
+  const { branchId } = useBranch();
   const [search, setSearch] = useState("");
   const [detailsOpen, setDetailsOpen] = useState(false);
   const profile = useQuery({
@@ -294,7 +297,7 @@ function MessagesRoute() {
   });
   return (
     <MessagesWorkspace
-      key={`${profile.data?.user_id ?? ""}:${projectId}:${chat ?? ""}`}
+      key={`${profile.data?.user_id ?? ""}:${projectId}:${branchId}:${chat ?? ""}`}
       search={search}
       setSearch={setSearch}
       detailsOpen={detailsOpen}
@@ -317,6 +320,7 @@ function MessagesWorkspace({
   const { projectId } = Route.useParams();
   const { api } = Route.useRouteContext();
   const { chat: selectedChatId } = Route.useSearch();
+  const { branchId, branchParam, branchArchived, readOnly } = useBranch();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const platform = usePlatform();
@@ -328,13 +332,28 @@ function MessagesWorkspace({
   const activeContextKey = `${currentUserId ?? ""}:${projectId}:${selectedChatId ?? ""}`;
   const activeContextRef = useRef(activeContextKey);
   activeContextRef.current = activeContextKey;
-  const chatsQuery = useQuery(chatsQueryOptions(api, projectId));
+  const chatsQuery = useQuery(chatsQueryOptions(api, projectId, branchId));
   const candidatesQuery = useQuery(
     messageCandidatesQueryOptions(api, projectId)
   );
-  const documentsQuery = useQuery(documentsQueryOptions(api, projectId));
+  // Only this branch's documents can be attached (spec §11.3).
+  const documentsQuery = useQuery(
+    documentsQueryOptions(api, projectId, branchId)
+  );
   const chats = chatsQuery.data?.chats ?? [];
   const selectedChat = chats.find(({ id }) => id === selectedChatId);
+  // A deep link to a chat this branch doesn't list may name another
+  // branch's chat; its record says which (spec §11.1).
+  const linkedChat = useQuery({
+    queryKey: messagingKeys.chat(selectedChatId ?? ""),
+    queryFn: () => api.getChat(selectedChatId as string),
+    enabled: Boolean(selectedChatId && chatsQuery.isSuccess && !selectedChat),
+    retry: false
+  });
+  const elsewhereBranchId =
+    linkedChat.data?.branch_id && linkedChat.data.branch_id !== branchId
+      ? linkedChat.data.branch_id
+      : undefined;
   const candidates = candidatesQuery.data?.candidates ?? [];
   const documents = documentsQuery.data?.documents ?? [];
   const [createOpen, setCreateOpen] = useState(false);
@@ -406,7 +425,9 @@ function MessagesWorkspace({
 
   const createMutation = useMutation({
     mutationFn: (attempt: PendingChat) =>
-      api.createChat(projectId, attempt.input, attempt.idempotencyKey),
+      api.createChat(projectId, attempt.input, attempt.idempotencyKey, {
+        branchId
+      }),
     onSuccess: async (chat) => {
       setCreateError(null);
       setCreateAttempt(null);
@@ -594,8 +615,8 @@ function MessagesWorkspace({
     setMessages([]);
     setOlderBefore(null);
     setHistorySyncReady(false);
-    queryClient.setQueryData<{ chats: Chat[] }>(
-      messagingKeys.chats(projectId),
+    queryClient.setQueriesData<{ chats: Chat[] }>(
+      { queryKey: messagingKeys.chats(projectId) },
       (current) =>
         current && {
           ...current,
@@ -1092,9 +1113,10 @@ function MessagesWorkspace({
     (participant) =>
       participant.type !== "human" || participant.id !== profile.data?.user_id
   );
-  const canCompose = Boolean(selectedChat?.is_participant);
+  // An archived project or branch keeps its conversations readable only.
+  const canCompose = !readOnly && Boolean(selectedChat?.is_participant);
   const canManageMembers =
-    selectedChat?.kind === "group" && selectedChat.can_manage;
+    !readOnly && selectedChat?.kind === "group" && selectedChat.can_manage;
   const selectedTitle = selectedChat
     ? chatTitle(selectedChat, currentUserId)
     : "";
@@ -1178,12 +1200,14 @@ function MessagesWorkspace({
 
   return (
     <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-      <TopToolbarActions>
-        <Button onClick={openCreate}>
-          <SquarePen data-icon="inline-start" />
-          New message
-        </Button>
-      </TopToolbarActions>
+      {!readOnly ? (
+        <TopToolbarActions>
+          <Button onClick={openCreate}>
+            <SquarePen data-icon="inline-start" />
+            New message
+          </Button>
+        </TopToolbarActions>
+      ) : null}
       <div className="relative flex h-full min-h-[32rem] overflow-hidden">
         <aside
           className={cn(
@@ -1233,7 +1257,7 @@ function MessagesWorkspace({
                     ? "Try another name or clear the search."
                     : "Start a direct message or group chat with a project member or agent."}
                 </p>
-                {!search.trim() ? (
+                {!search.trim() && !readOnly ? (
                   <Button
                     className="mt-4"
                     variant="outline"
@@ -1356,6 +1380,23 @@ function MessagesWorkspace({
                 Choose a conversation from the list, or select New message to
                 start one.
               </p>
+            </div>
+          ) : !selectedChat && elsewhereBranchId ? (
+            <div className="m-auto px-6">
+              <OtherBranchNotice
+                item="conversation"
+                branchId={elsewhereBranchId}
+                onSwitch={() =>
+                  void navigate({
+                    to: "/projects/$projectId/messages",
+                    params: { projectId },
+                    search: {
+                      chat: selectedChatId,
+                      branch: branchParam(elsewhereBranchId)
+                    }
+                  })
+                }
+              />
             </div>
           ) : !selectedChat ? (
             <div
@@ -1869,11 +1910,15 @@ function MessagesWorkspace({
                       aria-hidden="true"
                     />
                     <p className="min-w-0 flex-1 text-sm">
-                      {selectedChat.can_join
-                        ? `You are viewing ${selectedChat.has_human ? "this conversation" : "a conversation between agents"}. Join to reply; its participants will see your messages.`
-                        : "Read-only observer. You can read this conversation but not reply."}
+                      {readOnly
+                        ? branchArchived
+                          ? "This branch is archived. Its conversations are read-only."
+                          : "This project is archived. Its conversations are read-only."
+                        : selectedChat.can_join
+                          ? `You are viewing ${selectedChat.has_human ? "this conversation" : "a conversation between agents"}. Join to reply; its participants will see your messages.`
+                          : "Read-only observer. You can read this conversation but not reply."}
                     </p>
-                    {selectedChat.can_join ? (
+                    {selectedChat.can_join && !readOnly ? (
                       <Button
                         onClick={() => joinMutation.mutate()}
                         disabled={joinMutation.isPending}

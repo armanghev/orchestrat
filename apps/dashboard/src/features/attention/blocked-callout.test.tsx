@@ -189,10 +189,10 @@ describe("BlockedCallout", () => {
     });
   });
 
-  it("disables Resolve blocker in archived projects", () => {
+  it("hides Resolve blocker in read-only views", () => {
     renderCallout(taskBlock(), { archived: true });
     expect(
-      screen.getByRole("button", { name: "Resolve blocker" })
-    ).toBeDisabled();
+      screen.queryByRole("button", { name: "Resolve blocker" })
+    ).not.toBeInTheDocument();
   });
 });

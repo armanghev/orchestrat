@@ -17,6 +17,7 @@ import {
 
 const groups: AppCommand["group"][] = [
   "Projects",
+  "Branches",
   "Navigate",
   "Appearance",
   "Application"

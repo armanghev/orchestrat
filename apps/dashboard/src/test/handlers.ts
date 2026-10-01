@@ -1,6 +1,11 @@
 import { expect } from "vitest";
 import { http, HttpResponse } from "msw";
-import { attentionSummary, organization, project } from "@/test/factories";
+import {
+  attentionSummary,
+  branch,
+  organization,
+  project
+} from "@/test/factories";
 
 const apiUrl = "http://localhost:8801/api/v1";
 
@@ -58,6 +63,11 @@ export const handlers = [
     assertAuthorization(request);
     assertBodylessRequest(request);
     return HttpResponse.json({ members: [] });
+  }),
+  http.get(`${apiUrl}/projects/:projectId/branches`, ({ request }) => {
+    assertAuthorization(request);
+    assertBodylessRequest(request);
+    return HttpResponse.json({ branches: [branch()] });
   }),
   http.get(`${apiUrl}/projects/:projectId`, ({ request }) => {
     assertAuthorization(request);

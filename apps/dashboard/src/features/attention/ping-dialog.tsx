@@ -29,6 +29,7 @@ import {
   messagingKeys
 } from "@/features/messaging/query-options";
 import type { ApiClient } from "@/lib/api/client";
+import { useOptionalBranch } from "@/features/branches/branch-context";
 import { handoffErrorMessage } from "./attention-copy";
 import { invalidateAttentionQueries } from "./query-options";
 
@@ -63,6 +64,8 @@ export function PingDialog({
 }: PingDialogProps) {
   const formId = useId();
   const queryClient = useQueryClient();
+  // The handoff's direct message lives on the branch on screen.
+  const branchId = useOptionalBranch()?.branchId;
   const [open, setOpen] = useState(false);
   const [recipient, setRecipient] = useState("");
   const [body, setBody] = useState("");
@@ -83,7 +86,7 @@ export function PingDialog({
       input: CreateHandoffRequest;
       key: string;
       name: string;
-    }) => api.createHandoff(projectId, input, key),
+    }) => api.createHandoff(projectId, input, key, { branchId }),
     onSuccess: (_result, { name }) => {
       attempt.current = null;
       setBody("");

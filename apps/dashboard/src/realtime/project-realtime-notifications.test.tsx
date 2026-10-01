@@ -248,7 +248,12 @@ describe("project chat realtime notifications", () => {
       screen.getByRole("button", { name: "Open chat" }).click();
     });
 
-    expect(harness.navigateToChat).toHaveBeenCalledWith(projectTwo, chatTwoId);
+    // These chats carry no branch_id (an older server): the default branch.
+    expect(harness.navigateToChat).toHaveBeenCalledWith(
+      projectTwo,
+      chatTwoId,
+      undefined
+    );
   });
 
   it("silences the sender, observers, and the chat currently in view", async () => {
@@ -746,7 +751,8 @@ describe("project chat realtime notifications", () => {
 
     expect(harness.navigateToChat).toHaveBeenLastCalledWith(
       projectOne,
-      chatTwoId
+      chatTwoId,
+      undefined
     );
   });
 });

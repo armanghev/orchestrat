@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { buildCommands } from "./commands";
 import type { ProjectCatalog } from "@/features/hierarchy/catalog";
-import { organization, project } from "@/test/factories";
+import { branch, organization, project } from "@/test/factories";
 
 const alpha = project({ name: "Alpha" });
 const beta = project({ name: "Beta" });
@@ -79,5 +79,74 @@ describe("buildCommands", () => {
     );
     commands.find((command) => command.id === "navigate:tasks")?.run();
     expect(navigateToRoute).toHaveBeenCalledWith("tasks", "alpha");
+  });
+
+  it("switches branches and creates one from the Branches group", () => {
+    const main = branch();
+    const feature = branch({
+      id: "00000000-0000-4000-8000-000000000051",
+      name: "feat/checkout",
+      is_default: false
+    });
+    const archived = branch({
+      id: "00000000-0000-4000-8000-000000000052",
+      name: "feat/old",
+      is_default: false,
+      archived_at: "2026-09-27T00:00:00.000Z",
+      archived_reason: "manual"
+    });
+    const selectBranch = vi.fn();
+    const openCreateBranch = vi.fn();
+    const commands = buildCommands({
+      catalog,
+      activeProjectId: "alpha",
+      navigateToProject: vi.fn(),
+      navigateToRoute: vi.fn(),
+      setTheme: vi.fn(),
+      toggleSidebar: vi.fn(),
+      openPreferences: vi.fn(),
+      signOut: vi.fn(),
+      branches: {
+        branches: [main, feature, archived],
+        currentBranchId: main.id,
+        canCreate: true,
+        selectBranch,
+        openCreateBranch
+      }
+    });
+    const branchCommands = commands.filter(
+      (command) => command.group === "Branches"
+    );
+    // The current and archived branches aren't offered.
+    expect(branchCommands.map((command) => command.id)).toEqual([
+      `branch:${feature.id}`,
+      "branch:new"
+    ]);
+    expect(branchCommands[0]?.label).toBe("Switch to branch feat/checkout");
+    branchCommands[0]?.run();
+    expect(selectBranch).toHaveBeenCalledWith(feature.id);
+    branchCommands[1]?.run();
+    expect(openCreateBranch).toHaveBeenCalledOnce();
+
+    const archivedProject = buildCommands({
+      catalog,
+      activeProjectId: "alpha",
+      navigateToProject: vi.fn(),
+      navigateToRoute: vi.fn(),
+      setTheme: vi.fn(),
+      toggleSidebar: vi.fn(),
+      openPreferences: vi.fn(),
+      signOut: vi.fn(),
+      branches: {
+        branches: [main, feature],
+        currentBranchId: main.id,
+        canCreate: false,
+        selectBranch,
+        openCreateBranch
+      }
+    });
+    expect(archivedProject.some((command) => command.id === "branch:new")).toBe(
+      false
+    );
   });
 });

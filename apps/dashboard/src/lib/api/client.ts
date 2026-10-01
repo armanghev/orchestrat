@@ -102,7 +102,12 @@ import {
   type AgentAttentionResponse,
   type TaskBlock,
   type CreateHandoffRequest,
-  type CreateHandoffResponse
+  type CreateHandoffResponse,
+  branchResponseSchema,
+  branchesResponseSchema,
+  type Branch,
+  type BranchesResponse,
+  type CreateBranchRequest
 } from "@orchestrat/protocol";
 import { z, type ZodType } from "zod";
 
@@ -153,6 +158,14 @@ const queryString = (
   const result = params.toString();
   return result ? `?${result}` : "";
 };
+
+/** Branch-scoped collection reads and creates name their branch with
+ * `?branch_id=`; without it the API uses the default branch. */
+export type BranchScope = { branchId?: string; allBranches?: boolean };
+const branchQuery = ({ branchId, allBranches }: BranchScope = {}) => ({
+  branch_id: branchId,
+  all_branches: allBranches ? true : undefined
+});
 
 export class ApiClient {
   private readonly baseUrl: string;
@@ -388,6 +401,49 @@ export class ApiClient {
     );
   }
 
+  listBranches(
+    projectId: string,
+    query: { include_archived?: boolean } = {}
+  ): Promise<BranchesResponse> {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/branches${queryString(query)}`,
+      { method: "GET" },
+      branchesResponseSchema
+    );
+  }
+
+  createBranch(projectId: string, input: CreateBranchRequest): Promise<Branch> {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/branches`,
+      { method: "POST", body: input },
+      branchResponseSchema
+    ).then(({ branch }) => branch);
+  }
+
+  setDefaultBranch(projectId: string, branchId: string): Promise<Branch> {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/branches/${encodeURIComponent(branchId)}/default`,
+      { method: "POST", body: {} },
+      branchResponseSchema
+    ).then(({ branch }) => branch);
+  }
+
+  archiveBranch(projectId: string, branchId: string): Promise<Branch> {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/branches/${encodeURIComponent(branchId)}/archive`,
+      { method: "POST", body: {} },
+      branchResponseSchema
+    ).then(({ branch }) => branch);
+  }
+
+  startBranchBlank(projectId: string, branchId: string): Promise<Branch> {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/branches/${encodeURIComponent(branchId)}/onboarding`,
+      { method: "POST", body: { choice: "blank" } },
+      branchResponseSchema
+    ).then(({ branch }) => branch);
+  }
+
   listMessageCandidates(
     projectId: string
   ): Promise<{ candidates: MessageCandidate[] }> {
@@ -398,17 +454,23 @@ export class ApiClient {
     );
   }
 
-  listChats(projectId: string): Promise<{ chats: Chat[] }> {
+  listChats(
+    projectId: string,
+    scope: BranchScope = {}
+  ): Promise<{ chats: Chat[] }> {
     return this.request(
-      `/api/v1/projects/${encodeURIComponent(projectId)}/chats`,
+      `/api/v1/projects/${encodeURIComponent(projectId)}/chats${queryString(branchQuery(scope))}`,
       { method: "GET" },
       chatsResponseSchema
     );
   }
 
-  getProjectInbox(projectId: string): Promise<InboxSummary> {
+  getProjectInbox(
+    projectId: string,
+    scope: BranchScope = {}
+  ): Promise<InboxSummary> {
     return this.request(
-      `/api/v1/projects/${encodeURIComponent(projectId)}/inbox`,
+      `/api/v1/projects/${encodeURIComponent(projectId)}/inbox${queryString(branchQuery(scope))}`,
       { method: "GET" },
       inboxSummarySchema
     );
@@ -425,10 +487,11 @@ export class ApiClient {
   createChat(
     projectId: string,
     input: CreateChatRequest,
-    idempotencyKey: string
+    idempotencyKey: string,
+    scope: BranchScope = {}
   ): Promise<Chat> {
     return this.request(
-      `/api/v1/projects/${encodeURIComponent(projectId)}/chats`,
+      `/api/v1/projects/${encodeURIComponent(projectId)}/chats${queryString(branchQuery(scope))}`,
       {
         method: "POST",
         body: input,
@@ -532,10 +595,11 @@ export class ApiClient {
 
   listTasks(
     projectId: string,
-    query: Partial<TaskListQuery> = {}
+    query: Partial<TaskListQuery> = {},
+    scope: BranchScope = {}
   ): Promise<TaskListResponse> {
     return this.request(
-      `/api/v1/projects/${encodeURIComponent(projectId)}/tasks${queryString(query)}`,
+      `/api/v1/projects/${encodeURIComponent(projectId)}/tasks${queryString({ ...query, ...branchQuery(scope) })}`,
       { method: "GET" },
       taskListResponseSchema
     );
@@ -544,10 +608,11 @@ export class ApiClient {
   createTask(
     projectId: string,
     input: CreateTaskRequest,
-    idempotencyKey: string
+    idempotencyKey: string,
+    scope: BranchScope = {}
   ): Promise<Task> {
     return this.request(
-      `/api/v1/projects/${encodeURIComponent(projectId)}/tasks`,
+      `/api/v1/projects/${encodeURIComponent(projectId)}/tasks${queryString(branchQuery(scope))}`,
       {
         method: "POST",
         body: input,
@@ -666,10 +731,11 @@ export class ApiClient {
   createHandoff(
     projectId: string,
     input: CreateHandoffRequest,
-    idempotencyKey: string
+    idempotencyKey: string,
+    scope: BranchScope = {}
   ): Promise<CreateHandoffResponse> {
     return this.request(
-      `/api/v1/projects/${encodeURIComponent(projectId)}/handoffs`,
+      `/api/v1/projects/${encodeURIComponent(projectId)}/handoffs${queryString(branchQuery(scope))}`,
       {
         method: "POST",
         body: input,
@@ -728,10 +794,11 @@ export class ApiClient {
 
   listProjectEvents(
     projectId: string,
-    query: Partial<PaginationQuery> = {}
+    query: Partial<PaginationQuery> = {},
+    scope: BranchScope = {}
   ): Promise<ProjectEventsResponse> {
     return this.request(
-      `/api/v1/projects/${encodeURIComponent(projectId)}/events${queryString(query)}`,
+      `/api/v1/projects/${encodeURIComponent(projectId)}/events${queryString({ ...query, ...branchQuery(scope) })}`,
       { method: "GET" },
       projectEventsResponseSchema
     );
@@ -757,10 +824,11 @@ export class ApiClient {
 
   listDocuments(
     projectId: string,
-    query: Partial<DocumentListQuery> = {}
+    query: Partial<DocumentListQuery> = {},
+    scope: BranchScope = {}
   ): Promise<DocumentsResponse> {
     return this.request(
-      `/api/v1/projects/${encodeURIComponent(projectId)}/documents${queryString(query)}`,
+      `/api/v1/projects/${encodeURIComponent(projectId)}/documents${queryString({ ...query, ...branchQuery(scope) })}`,
       { method: "GET" },
       documentsResponseSchema
     );
@@ -768,10 +836,11 @@ export class ApiClient {
 
   createDocument(
     projectId: string,
-    input: CreateDocumentRequest
+    input: CreateDocumentRequest,
+    scope: BranchScope = {}
   ): Promise<DocumentDetail> {
     return this.request(
-      `/api/v1/projects/${encodeURIComponent(projectId)}/documents`,
+      `/api/v1/projects/${encodeURIComponent(projectId)}/documents${queryString(branchQuery(scope))}`,
       { method: "POST", body: input },
       documentDetailSchema
     );
@@ -779,10 +848,11 @@ export class ApiClient {
 
   createDocumentFolder(
     projectId: string,
-    input: CreateDocumentFolderRequest
+    input: CreateDocumentFolderRequest,
+    scope: BranchScope = {}
   ): Promise<{ folder: z.infer<typeof documentFolderSchema> }> {
     return this.request(
-      `/api/v1/projects/${encodeURIComponent(projectId)}/document-folders`,
+      `/api/v1/projects/${encodeURIComponent(projectId)}/document-folders${queryString(branchQuery(scope))}`,
       { method: "POST", body: input },
       documentFolderResponseSchema
     );

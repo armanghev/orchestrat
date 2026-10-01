@@ -25,21 +25,26 @@ export type LocalIntegrationStatus = {
   error?: string;
 };
 
+// branchId opens the branch the event happened on; absent means the default
+// branch (docs/project-branches.md §11.1).
 export const nativeNotificationDestinationSchema = z.discriminatedUnion(
   "kind",
   [
     z.object({
       kind: z.literal("task"),
       projectId: z.string().uuid(),
+      branchId: z.string().uuid().optional(),
       taskId: z.string().uuid()
     }),
     z.object({
       kind: z.literal("activity"),
-      projectId: z.string().uuid()
+      projectId: z.string().uuid(),
+      branchId: z.string().uuid().optional()
     }),
     z.object({
       kind: z.literal("chat"),
       projectId: z.string().uuid(),
+      branchId: z.string().uuid().optional(),
       chatId: z.string().uuid()
     })
   ]

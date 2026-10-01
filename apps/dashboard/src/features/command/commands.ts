@@ -1,9 +1,10 @@
+import type { Branch } from "@orchestrat/protocol";
 import type { ProjectCatalog } from "@/features/hierarchy/catalog";
 import type { Theme } from "@/features/theme/theme";
 
 export type AppCommand = {
   id: string;
-  group: "Projects" | "Navigate" | "Appearance" | "Application";
+  group: "Projects" | "Branches" | "Navigate" | "Appearance" | "Application";
   label: string;
   keywords: string[];
   destructive?: boolean;
@@ -33,6 +34,15 @@ export type BuildCommandsOptions = {
   toggleSidebar: () => void | Promise<void>;
   openPreferences: () => void | Promise<void>;
   signOut: () => void | Promise<void>;
+  /** The active project's branches; the breadcrumb menu is hidden on phones,
+   * so ⌘K switches branches there (docs/project-branches.md §11.2). */
+  branches?: {
+    branches: Branch[];
+    currentBranchId: string;
+    canCreate: boolean;
+    selectBranch: (branchId: string) => void;
+    openCreateBranch: () => void;
+  };
 };
 
 const title = (route: string) => route[0].toUpperCase() + route.slice(1);
@@ -45,7 +55,8 @@ export function buildCommands({
   setTheme,
   toggleSidebar,
   openPreferences,
-  signOut
+  signOut,
+  branches
 }: BuildCommandsOptions): AppCommand[] {
   return [
     ...catalog.projects.map(({ project, organization }) => ({
@@ -55,6 +66,29 @@ export function buildCommands({
       keywords: ["project", "organization", project.name, organization.name],
       run: () => navigateToProject(project.id)
     })),
+    ...(branches?.branches ?? [])
+      .filter(
+        (branch) =>
+          !branch.archived_at && branch.id !== branches?.currentBranchId
+      )
+      .map((branch) => ({
+        id: `branch:${branch.id}`,
+        group: "Branches" as const,
+        label: `Switch to branch ${branch.name}`,
+        keywords: ["branch", "switch", branch.name],
+        run: () => branches?.selectBranch(branch.id)
+      })),
+    ...(branches?.canCreate
+      ? [
+          {
+            id: "branch:new",
+            group: "Branches" as const,
+            label: "New branch",
+            keywords: ["branch", "create", "new"],
+            run: branches.openCreateBranch
+          }
+        ]
+      : []),
     ...navigationDestinations.map((route) => ({
       id: `navigate:${route}`,
       group: "Navigate" as const,

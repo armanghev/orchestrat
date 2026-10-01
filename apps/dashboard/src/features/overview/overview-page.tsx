@@ -17,7 +17,8 @@ import {
   projectEventsQueryOptions,
   tasksQueryOptions
 } from "@/features/coordination/query-options";
-import { derivePresence } from "@/features/agents/presence";
+import { derivePresence, onBranch } from "@/features/agents/presence";
+import { useBranch } from "@/features/branches/branch-context";
 import { DashboardApiError } from "@/lib/api/client";
 import { PageState, StatusBadge } from "@/components/dashboard/page";
 import { Button } from "@/components/ui/button";
@@ -51,10 +52,11 @@ import {
 export function OverviewPage({ context }: { context: ProjectContext }) {
   const { project } = context;
   const { api } = useRouter().options.context;
-  const tasks = useQuery(tasksQueryOptions(api, project.id));
+  const { branchId } = useBranch();
+  const tasks = useQuery(tasksQueryOptions(api, project.id, branchId));
   const agents = useQuery(agentsQueryOptions(api, project.id));
   const presence = useQuery(agentPresenceQueryOptions(api, project.id));
-  const events = useQuery(projectEventsQueryOptions(api, project.id));
+  const events = useQuery(projectEventsQueryOptions(api, project.id, branchId));
   const loading =
     tasks.isPending ||
     agents.isPending ||
@@ -90,8 +92,11 @@ export function OverviewPage({ context }: { context: ProjectContext }) {
   const agentById = new Map(
     agents.data!.agents.map((agent) => [agent.id, agent])
   );
+  // Only agents working on this branch (docs/project-branches.md §11.3).
   const online = presence.data!.agents.filter(
-    (item) => derivePresence(item.status, item.last_heartbeat_at) === "online"
+    (item) =>
+      derivePresence(item.status, item.last_heartbeat_at) === "online" &&
+      onBranch(item, branchId)
   );
   const working = online.filter((item) => item.current_task_id !== null);
   const active = taskCards.filter(
@@ -137,7 +142,7 @@ export function OverviewPage({ context }: { context: ProjectContext }) {
           {
             label: "Completed tasks",
             value: completed,
-            detail: `${taskCards.length} tasks in this project`,
+            detail: `${taskCards.length} tasks on this branch`,
             icon: CheckCheck
           }
         ].map(({ label, value, detail, icon: Icon }) => (

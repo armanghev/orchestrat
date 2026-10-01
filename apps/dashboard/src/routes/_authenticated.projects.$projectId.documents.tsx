@@ -17,7 +17,11 @@ import {
   useState
 } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import {
+  createFileRoute,
+  useBlocker,
+  useNavigate
+} from "@tanstack/react-router";
 import { z } from "zod";
 import type { MDXEditorMethods } from "@mdxeditor/editor";
 import type { Document as ProjectDocument } from "@orchestrat/protocol";
@@ -42,6 +46,16 @@ import {
   DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
 import { DocumentHistory } from "@/features/documents/document-history";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle
+} from "@/components/ui/dialog";
+import { useBranch } from "@/features/branches/branch-context";
+import { OtherBranchNotice } from "@/features/branches/other-branch-notice";
 import {
   coordinationKeys,
   documentQueryOptions,
@@ -451,7 +465,8 @@ function DocumentTreeItem({
 function DocumentsRoute() {
   const { projectId } = Route.useParams();
   const { document: documentId } = Route.useSearch();
-  const { api, project } = Route.useRouteContext();
+  const { api } = Route.useRouteContext();
+  const { branchId, branchParam, projectArchived, readOnly } = useBranch();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(
@@ -462,7 +477,19 @@ function DocumentsRoute() {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [newFolderPath, setNewFolderPath] = useState("");
   const [creatingFolder, setCreatingFolder] = useState(false);
-  const documents = useQuery(documentsQueryOptions(api, projectId));
+  const documents = useQuery(documentsQueryOptions(api, projectId, branchId));
+  // A deep link to a document this branch doesn't have may name another
+  // branch's document; its own record says which (spec §11.1).
+  const linkedElsewhere = useQuery({
+    ...documentQueryOptions(api, documentId ?? ""),
+    enabled: Boolean(
+      documentId &&
+      documents.data &&
+      !documents.data.documents.some(({ id }) => id === documentId)
+    ),
+    retry: false
+  });
+  const elsewhereBranchId = linkedElsewhere.data?.document.branch_id;
   useEffect(() => {
     if (!documentId || !documents.data) return;
     const linkedDocument = documents.data.documents.find(
@@ -486,7 +513,7 @@ function DocumentsRoute() {
   };
   const create = useMutation({
     mutationFn: (path: string) =>
-      api.createDocument(projectId, { path, content: "" }),
+      api.createDocument(projectId, { path, content: "" }, { branchId }),
     onSuccess: async (result) => {
       setNewFileParent(null);
       selectDocument(result.document.id);
@@ -496,7 +523,8 @@ function DocumentsRoute() {
     }
   });
   const createFolder = useMutation({
-    mutationFn: (path: string) => api.createDocumentFolder(projectId, { path }),
+    mutationFn: (path: string) =>
+      api.createDocumentFolder(projectId, { path }, { branchId }),
     onSuccess: async () => {
       setNewFolderPath("");
       setCreatingFolder(false);
@@ -570,7 +598,6 @@ function DocumentsRoute() {
   const selected = documentId
     ? (visible.find((item) => item.id === documentId) ?? null)
     : (visible.find((item) => item.id === selectedId) ?? visible[0] ?? null);
-  const projectArchived = project?.project.status === "archived";
   const treeError = create.error ?? renameDocument.error;
   const treeErrorMessage =
     treeError instanceof Error ? treeError.message : undefined;
@@ -609,7 +636,7 @@ function DocumentsRoute() {
               <div className="space-y-2 border-b p-3">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-sm font-medium">Documents</span>
-                  {!projectArchived && !showArchived ? (
+                  {!readOnly && !showArchived ? (
                     <div className="flex items-center gap-1">
                       <Button
                         type="button"
@@ -712,7 +739,7 @@ function DocumentsRoute() {
                     pending={create.isPending || renameDocument.isPending}
                     error={treeErrorMessage}
                     onCreateDocument={
-                      !showArchived && !projectArchived
+                      !showArchived && !readOnly
                         ? startCreatingDocument
                         : undefined
                     }
@@ -720,9 +747,7 @@ function DocumentsRoute() {
                       create.mutate(folderPath ? `${folderPath}/${name}` : name)
                     }
                     onStartRename={
-                      !showArchived && !projectArchived
-                        ? startRenaming
-                        : undefined
+                      !showArchived && !readOnly ? startRenaming : undefined
                     }
                     onRename={(document, name) => {
                       const slash = document.path.lastIndexOf("/");
@@ -750,9 +775,29 @@ function DocumentsRoute() {
               api={api}
               projectId={projectId}
               documentId={selected.id}
-              projectArchived={projectArchived}
+              readOnly={readOnly}
               queryClient={queryClient}
             />
+          ) : documentId &&
+            !linkedDocument &&
+            elsewhereBranchId &&
+            elsewhereBranchId !== branchId ? (
+            <div className="m-auto p-6">
+              <OtherBranchNotice
+                item="document"
+                branchId={elsewhereBranchId}
+                onSwitch={() =>
+                  void navigate({
+                    to: "/projects/$projectId/documents",
+                    params: { projectId },
+                    search: {
+                      document: documentId,
+                      branch: branchParam(elsewhereBranchId)
+                    }
+                  })
+                }
+              />
+            </div>
           ) : documentId && !linkedDocument ? (
             <Empty className="min-h-80">
               <EmptyHeader>
@@ -795,13 +840,14 @@ function DocumentEditor({
   api,
   projectId,
   documentId,
-  projectArchived,
+  readOnly,
   queryClient
 }: {
   api: Parameters<typeof documentsQueryOptions>[0];
   projectId: string;
   documentId: string;
-  projectArchived: boolean;
+  /** An archived project or branch. */
+  readOnly: boolean;
   queryClient: ReturnType<typeof useQueryClient>;
 }) {
   const document = useQuery(documentQueryOptions(api, documentId));
@@ -907,7 +953,7 @@ function DocumentEditor({
         remoteRef.current !== null ||
         awaitingRemoteRef.current ||
         editorError !== null ||
-        projectArchived
+        readOnly
       )
         return;
       savingRef.current = true;
@@ -917,7 +963,7 @@ function DocumentEditor({
         ...(saveKind ? { save_kind: saveKind } : {})
       });
     },
-    [editorError, projectArchived, save]
+    [editorError, readOnly, save]
   );
   useEffect(() => {
     const next = document.data;
@@ -961,7 +1007,7 @@ function DocumentEditor({
     setRemote(target);
   }, [document.data]);
   const archived =
-    projectArchived ||
+    readOnly ||
     Boolean(
       (document.data?.document as { archived_at?: string | null } | undefined)
         ?.archived_at
@@ -996,6 +1042,43 @@ function DocumentEditor({
     save.isPending,
     saveNow
   ]);
+  // Switching branches saves a pending draft first. If it can't be saved
+  // (a conflict, a merge or an error), the person decides (spec §11.9).
+  const flushDraft = async () => {
+    if (
+      draftRef.current === baseContentRef.current ||
+      savingRef.current ||
+      remoteRef.current !== null ||
+      awaitingRemoteRef.current ||
+      merging ||
+      editorError !== null ||
+      archived ||
+      baseRevisionRef.current === null
+    )
+      return draftRef.current === baseContentRef.current;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    savingRef.current = true;
+    try {
+      await save.mutateAsync({
+        content: draftRef.current,
+        base_revision: baseRevisionRef.current,
+        save_kind: "autosave"
+      });
+      return draftRef.current === baseContentRef.current;
+    } catch {
+      return false;
+    }
+  };
+  const blocker = useBlocker({
+    shouldBlockFn: async ({ current, next }) => {
+      const branchOf = (location: { search: unknown }) =>
+        (location.search as { branch?: string }).branch;
+      if (branchOf(current) === branchOf(next)) return false;
+      return !(await flushDraft());
+    },
+    enableBeforeUnload: false,
+    withResolver: true
+  });
   const uploadImage = useCallback(
     (file: File) => uploadDocumentImage(api, documentId, file),
     [api, documentId]
@@ -1098,7 +1181,7 @@ function DocumentEditor({
               {save.isPending ? "Saving…" : "Save now"}
             </Button>
           ) : null}
-          {!archived || !projectArchived ? (
+          {!readOnly ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -1283,6 +1366,27 @@ function DocumentEditor({
         <p role="alert" className="shrink-0 px-5 py-3 text-sm text-destructive">
           Markdown could not be rendered. Switch to Source mode to recover it.
         </p>
+      ) : null}
+      {blocker.status === "blocked" ? (
+        <Dialog open onOpenChange={(open) => !open && blocker.reset()}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Unsaved changes</DialogTitle>
+              <DialogDescription>
+                You have unsaved changes in {current.document.path}. They
+                couldn’t be saved before switching branches.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => blocker.reset()}>
+                Keep editing
+              </Button>
+              <Button variant="destructive" onClick={() => blocker.proceed()}>
+                Discard and switch
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       ) : null}
       {merging && !remote && !archived ? (
         <div className="flex shrink-0 items-center gap-2 px-5 py-3">
