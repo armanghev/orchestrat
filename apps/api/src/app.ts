@@ -27,6 +27,7 @@ import {
   publicRepositoryRoutes
 } from "./routes/repository.js";
 import { BranchSync } from "./services/repository/branch-sync.js";
+import { ProviderMerges } from "./services/repository/provider-merges.js";
 import { RepositoryService } from "./services/repository/connection-service.js";
 import type { SecretBox } from "./services/repository/secrets.js";
 import { RepositorySyncWorker } from "./services/repository/sync-worker.js";
@@ -197,7 +198,21 @@ export function buildApp(options: AppOptions) {
       adapter
     ])
   );
-  const branchSync = new BranchSync(db, branches, providerAdapters);
+  const branchSync = new BranchSync(
+    db,
+    branches,
+    providerAdapters,
+    repositoryOptions.now
+  );
+  const mergeEngine = new MergeEngine(db, branches, attachments.mergeObjects());
+  const providerMerges = new ProviderMerges(
+    db,
+    mergeEngine,
+    branchSync,
+    repositoryOptions.now
+  );
+  branchSync.onMerged = (connection, change) =>
+    providerMerges.handle(connection, change);
   const repositoryWorker = new RepositorySyncWorker(
     db,
     branchSync,
@@ -229,11 +244,7 @@ export function buildApp(options: AppOptions) {
     app.addHook("onListen", async () => repositoryWorker.start());
     app.addHook("preClose", () => repositoryWorker.stop());
   }
-  const merges = new MergeService(
-    db,
-    new MergeEngine(db, branches, attachments.mergeObjects()),
-    branches
-  );
+  const merges = new MergeService(db, mergeEngine, branches);
   const cliAuthorization = new CliAuthorizationService(db);
   const cliSetup = new CliSetupService(db);
   const rateLimits = {

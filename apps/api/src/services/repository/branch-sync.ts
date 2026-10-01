@@ -40,7 +40,8 @@ export class BranchSync {
   constructor(
     private readonly db: Database,
     private readonly branches: BranchService,
-    private readonly adapters: Map<ProviderName, ProviderAdapter>
+    private readonly adapters: Map<ProviderName, ProviderAdapter>,
+    private readonly now: () => Date = () => new Date()
   ) {}
 
   private adapter(connection: ConnectionRow) {
@@ -90,7 +91,7 @@ export class BranchSync {
         await this.update(connection.id, {
           status: "disconnected",
           statusReason: "The app was uninstalled.",
-          disconnectedAt: new Date()
+          disconnectedAt: this.now()
         });
       else if (event.type === "authorization_revoked")
         await this.update(connection.id, {
@@ -110,7 +111,7 @@ export class BranchSync {
         await this.reconcile({ ...connection, status: "active" });
       } else if (event.type === "reconcile") await this.reconcile(connection);
     }
-    await this.update(connection.id, { lastEventAt: new Date() });
+    await this.update(connection.id, { lastEventAt: this.now() });
   }
 
   private async update(
@@ -119,7 +120,7 @@ export class BranchSync {
   ) {
     await this.db
       .update(repositoryConnections)
-      .set({ ...values, updatedAt: new Date() })
+      .set({ ...values, updatedAt: this.now() })
       .where(eq(repositoryConnections.id, connectionId));
   }
 
@@ -162,7 +163,7 @@ export class BranchSync {
         const moved = sha !== null && sha !== ref.headSha;
         await tx
           .update(repositoryRefs)
-          .set({ headSha: sha ?? ref.headSha, lastSeenAt: new Date() })
+          .set({ headSha: sha ?? ref.headSha, lastSeenAt: this.now() })
           .where(eq(repositoryRefs.id, ref.id));
         // Branches only snapshotted at connect get one on their first push.
         if (
@@ -302,7 +303,7 @@ export class BranchSync {
       .update(repositoryRefs)
       .set({
         state: "deleted",
-        deletedAt: new Date(),
+        deletedAt: this.now(),
         deletedDeliveryId: deliveryId
       })
       .where(eq(repositoryRefs.id, ref.id));
@@ -373,7 +374,7 @@ export class BranchSync {
     const since = new Date(
       new Date(state.merged_since ?? connection.createdAt).getTime() - 3_600_000
     );
-    const started = new Date();
+    const started = this.now();
     for (const change of await adapter.listMergedChanges(connection, since))
       await this.onMerged?.(connection, change, null);
     const maintained = (await adapter.maintain?.(connection)) ?? {};
@@ -382,7 +383,7 @@ export class BranchSync {
       status: connection.status === "error" ? "active" : connection.status,
       statusReason:
         connection.status === "error" ? null : connection.statusReason,
-      lastReconciledAt: new Date(),
+      lastReconciledAt: this.now(),
       reconcileState: {
         ...(connection.reconcileState as Record<string, unknown>),
         merged_since: started.toISOString()
@@ -415,7 +416,7 @@ export class BranchSync {
               ...(connection.reconcileState as Record<string, unknown>),
               default_notice: { from: previous, to: next }
             },
-            updatedAt: new Date()
+            updatedAt: this.now()
           })
           .where(eq(repositoryConnections.id, connection.id));
         return;
@@ -428,11 +429,11 @@ export class BranchSync {
       if (renamed) {
         await tx
           .update(repositoryRefs)
-          .set({ name: next, lastSeenAt: new Date() })
+          .set({ name: next, lastSeenAt: this.now() })
           .where(eq(repositoryRefs.id, oldRef.id));
         await tx
           .update(projectBranches)
-          .set({ name: next, nameSource: "provider", updatedAt: new Date() })
+          .set({ name: next, nameSource: "provider", updatedAt: this.now() })
           .where(eq(projectBranches.id, current.id));
         await insertProjectEvent(tx, {
           projectId: connection.projectId,
@@ -477,7 +478,7 @@ export class BranchSync {
     to: BranchRow
   ) {
     if (from.id === to.id) return;
-    const now = new Date();
+    const now = this.now();
     await tx
       .update(projectBranches)
       .set({ isDefault: false, updatedAt: now })
