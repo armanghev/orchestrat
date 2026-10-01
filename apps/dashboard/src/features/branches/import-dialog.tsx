@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode
+} from "react";
 import {
   keepPreviousData,
   useMutation,
@@ -167,6 +174,7 @@ function ConflictRow({
   targetName,
   choice,
   changed,
+  disabled,
   onChoose
 }: {
   item: MergePreviewItem;
@@ -174,6 +182,7 @@ function ConflictRow({
   targetName: string;
   choice: MergeChoice | undefined;
   changed: boolean;
+  disabled: boolean;
   onChoose: (choice: MergeChoice) => void;
 }) {
   const name = `${item.task_key ? `${item.task_key} ` : ""}${item.label}`;
@@ -197,6 +206,7 @@ function ConflictRow({
         aria-label={`Version to keep for ${name}`}
         className="flex flex-wrap gap-x-5 gap-y-2"
         value={choice ?? ""}
+        disabled={disabled}
         onValueChange={(value) => onChoose(value as MergeChoice)}
       >
         <label className="flex items-center gap-2 text-sm">
@@ -215,7 +225,10 @@ function ConflictRow({
           </summary>
           <dl className="mt-2 grid gap-2">
             {item.fields.map((field) => (
-              <div key={field} className="grid gap-1 sm:grid-cols-[8rem_1fr_1fr]">
+              <div
+                key={field}
+                className="grid gap-1 sm:grid-cols-[8rem_1fr_1fr]"
+              >
                 <dt className="text-xs text-muted-foreground">{field}</dt>
                 <dd className="rounded bg-muted/50 p-2 text-xs whitespace-pre-wrap">
                   <span className="sr-only">{sourceName}: </span>
@@ -270,7 +283,14 @@ export function ImportDialog({
   const [changed, setChanged] = useState<ReadonlySet<string>>(new Set());
   const [result, setResult] = useState<MergeRun | null>(null);
   const attempt = useRef<{ fingerprint: string; key: string } | null>(null);
-  const previewKey = branchKeys.preview(projectId, "import", sourceId, targetId);
+  // The plan the person last saw, which their choices were made against.
+  const seen = useRef<MergePreview | undefined>(undefined);
+  const previewKey = branchKeys.preview(
+    projectId,
+    "import",
+    sourceId,
+    targetId
+  );
   // A preview of everything lists what can be chosen and what each task
   // requires.
   const catalog = useQuery({
@@ -339,6 +359,36 @@ export function ImportDialog({
     plan.data && !plan.isPlaceholderData && debouncedKey === rootsKey
       ? plan.data
       : undefined;
+  // The plan changes without asking: realtime events refetch it, a new
+  // selection replaces it and a stale import returns a fresh one. Whenever
+  // its fingerprint changes, choices carry over from the plan the person last
+  // saw: unchanged conflicts keep theirs, changed ones are cleared and
+  // highlighted, new ones have none yet (spec §11.6). A layout effect, so
+  // Import never paints enabled with a choice made against old values.
+  useLayoutEffect(() => {
+    if (!current) return;
+    const before = seen.current;
+    seen.current = current;
+    if (!before || before.fingerprint === current.fingerprint) return;
+    const carried = carryChoices(before, current, choices);
+    const stillConflicts = new Set(
+      current.items
+        .filter((item) => item.outcome === "conflict")
+        .map((item) => item.lineage_key)
+    );
+    setChoices(carried.choices);
+    // An earlier highlight stays until its conflict gets a choice.
+    setChanged(
+      (previous) =>
+        new Set([
+          ...carried.changed,
+          ...[...previous].filter(
+            (key) => stillConflicts.has(key) && !carried.choices[key]
+          )
+        ])
+    );
+    // Only a new plan runs this, reading `choices` as of that render.
+  }, [current]);
   const conflicts = (current ?? plan.data)?.items.filter(
     (item) => item.outcome === "conflict"
   );
@@ -385,10 +435,8 @@ export function ImportDialog({
         return;
       const fresh = mergePreviewStaleDetailsSchema.safeParse(error.details);
       if (!fresh.success) return;
-      // Keep selections and still-valid choices; highlight what changed.
-      const carried = carryChoices(current, fresh.data.preview, choices);
-      setChoices(carried.choices);
-      setChanged(carried.changed);
+      // The fresh plan replaces the old one. Selections stay, and choices
+      // carry over like on any other change of plan.
       queryClient.setQueryData(planKey, fresh.data.preview);
       void catalog.refetch();
     }
@@ -429,6 +477,8 @@ export function ImportDialog({
     setSelection(null);
     setChoices({});
     setChanged(new Set());
+    // Another pair of branches: nothing carries over from its plans.
+    seen.current = undefined;
     apply.reset();
   };
   const pending = apply.isPending;
@@ -478,6 +528,7 @@ export function ImportDialog({
           <label className="flex items-center gap-2 px-1 text-sm">
             <Checkbox
               checked={allChecked}
+              disabled={pending}
               onCheckedChange={(on) =>
                 toggle(
                   type,
@@ -530,7 +581,7 @@ export function ImportDialog({
                     <Checkbox
                       className="mt-0.5"
                       checked={checked(item)}
-                      disabled={disabled}
+                      disabled={disabled || pending}
                       onCheckedChange={(on) =>
                         toggle(type, [item.lineage_key], on === true)
                       }
@@ -656,8 +707,8 @@ export function ImportDialog({
           {stale ? (
             <Alert role="status">
               <AlertDescription>
-                Things changed while you were choosing. The preview is
-                refreshed and your selections were kept.
+                Things changed while you were choosing. The preview is refreshed
+                and your selections were kept.
               </AlertDescription>
             </Alert>
           ) : null}
@@ -678,11 +729,14 @@ export function ImportDialog({
             </p>
           ) : (
             <>
+              {/* Locked while importing: the request went out with this
+                  selection and these choices. */}
               <Input
                 type="search"
                 aria-label="Search items"
                 placeholder="Search items"
                 value={search}
+                disabled={pending}
                 onChange={(event) => setSearch(event.target.value)}
               />
               <Tabs defaultValue="task" className="gap-3">
@@ -690,7 +744,8 @@ export function ImportDialog({
                   {tabs.map(({ type, label }) => (
                     <TabsTrigger key={type} value={type}>
                       {label} (
-                      {type === "task" ? includedTasks.size : chosen[type].size})
+                      {type === "task" ? includedTasks.size : chosen[type].size}
+                      )
                     </TabsTrigger>
                   ))}
                 </TabsList>
@@ -724,6 +779,7 @@ export function ImportDialog({
                           type="button"
                           size="xs"
                           variant="outline"
+                          disabled={pending}
                           onClick={() => chooseAll("use_target")}
                         >
                           Use target for all
@@ -732,6 +788,7 @@ export function ImportDialog({
                           type="button"
                           size="xs"
                           variant="outline"
+                          disabled={pending}
                           onClick={() => chooseAll("use_source")}
                         >
                           Use source for all
@@ -739,8 +796,8 @@ export function ImportDialog({
                       </div>
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      Both branches changed these. Choose which version to
-                      keep for each; nothing is chosen for you.
+                      Both branches changed these. Choose which version to keep
+                      for each; nothing is chosen for you.
                     </p>
                     <ul className="flex flex-col gap-2">
                       {conflicts.map((item) => (
@@ -751,6 +808,7 @@ export function ImportDialog({
                           targetName={targetName}
                           choice={choices[item.lineage_key]}
                           changed={changed.has(item.lineage_key)}
+                          disabled={pending}
                           onChoose={(choice) =>
                             choose(item.lineage_key, choice)
                           }

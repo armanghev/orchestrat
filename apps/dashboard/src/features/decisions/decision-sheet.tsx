@@ -46,7 +46,7 @@ export function DecisionSheet({
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
-  const { branchName, canManage } = useBranch();
+  const { branches, branchName, canManage } = useBranch();
   const [decision, setDecision] = useState(initial);
   const [stale, setStale] = useState(false);
   const sourceName = branchName(decision.source_branch_id) ?? "Source";
@@ -84,7 +84,8 @@ export function DecisionSheet({
         const refreshed = decisionSchema.safeParse(error.details.decision);
         if (refreshed.success) {
           setDecision(refreshed.data);
-          setStale(true);
+          // Nothing to review again once it's settled.
+          setStale(refreshed.data.status === "open");
         }
         void queryClient.invalidateQueries({
           queryKey: branchKeys.project(projectId)
@@ -93,22 +94,31 @@ export function DecisionSheet({
     }
   });
   const error = resolve.error;
-  const failure =
-    error instanceof DashboardApiError
-      ? error.kind === "BRANCH_DECISION_STALE"
-        ? null
-        : error.kind === "TASK_ALREADY_CLAIMED"
-          ? claimedNotice
-          : error.kind === "CONFLICT"
-            ? "This decision was already settled."
-            : error.kind === "BRANCH_ARCHIVED"
-              ? `${targetName} is archived, so nothing can change there.`
-              : error.kind === "NETWORK_ERROR"
-                ? "We couldn’t reach the Dashboard API. Check your connection and try again."
-                : error.message
-      : error
-        ? "We couldn’t save your choice. Try again."
-        : null;
+  const apiError = error instanceof DashboardApiError ? error : undefined;
+  // No dead buttons. A decision can be settled already (a stale response
+  // returns it, or the API refuses with decision_closed) and an archived
+  // target can't change; the footer says so instead.
+  const settled =
+    decision.status !== "open" ||
+    (apiError?.kind === "CONFLICT" &&
+      apiError.details.reason === "decision_closed");
+  const targetArchived =
+    apiError?.kind === "BRANCH_ARCHIVED" ||
+    Boolean(
+      branches.find((branch) => branch.id === decision.target_branch_id)
+        ?.archived_at
+    );
+  const failure = apiError
+    ? apiError.kind === "BRANCH_DECISION_STALE" || settled || targetArchived
+      ? null
+      : apiError.kind === "TASK_ALREADY_CLAIMED"
+        ? claimedNotice
+        : apiError.kind === "NETWORK_ERROR"
+          ? "We couldn’t reach the Dashboard API. Check your connection and try again."
+          : apiError.message
+    : error
+      ? "We couldn’t save your choice. Try again."
+      : null;
   const fields = decision.fields.length
     ? decision.fields
     : Object.keys(decision.source_values);
@@ -173,7 +183,15 @@ export function DecisionSheet({
           ) : null}
         </div>
         <SheetFooter>
-          {canManage ? (
+          {settled ? (
+            <p role="status" className="text-sm text-muted-foreground">
+              This decision is settled.
+            </p>
+          ) : targetArchived ? (
+            <p role="status" className="text-sm text-muted-foreground">
+              {targetName} is archived, so nothing can change there.
+            </p>
+          ) : canManage ? (
             <div className="flex flex-wrap justify-end gap-2">
               <Button
                 type="button"

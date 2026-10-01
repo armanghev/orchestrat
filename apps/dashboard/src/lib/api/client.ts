@@ -115,6 +115,8 @@ import {
   githubInstallationResponseSchema,
   repositoryAuthorizationResponseSchema,
   repositoryCandidatesResponseSchema,
+  pendingRepositoryAuthorizationResponseSchema,
+  type PendingRepositoryAuthorizationResponse,
   repositoryConnectionResponseSchema,
   repositoryDeliveriesResponseSchema,
   repositoryDeliveryResponseSchema,
@@ -574,10 +576,24 @@ export class ApiClient {
     );
   }
 
+  /** The person's newest authorized attempt, wherever it was started. */
+  getPendingRepositoryAuthorization(
+    provider: RepositoryProvider
+  ): Promise<PendingRepositoryAuthorizationResponse> {
+    return this.request(
+      `/api/v1/repository/authorizations/pending${queryString({ provider })}`,
+      { method: "GET" },
+      pendingRepositoryAuthorizationResponseSchema
+    );
+  }
+
   listRepositoryCandidates(
     projectId: string,
     authorizationId: string
-  ): Promise<{ repositories: RepositoryCandidate[] }> {
+  ): Promise<{
+    repositories: RepositoryCandidate[];
+    install_url?: string | null;
+  }> {
     return this.request(
       `/api/v1/projects/${encodeURIComponent(projectId)}/repository/authorizations/${encodeURIComponent(authorizationId)}/repositories`,
       { method: "GET" },

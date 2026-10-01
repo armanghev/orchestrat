@@ -22,6 +22,8 @@ import {
 import { chatsQueryOptions } from "@/features/messaging/query-options";
 import { DashboardApiError, type ApiClient } from "@/lib/api/client";
 import { cn } from "@/lib/cn";
+import { usePlatform } from "@/platform/provider";
+import { goTo } from "./redirect";
 import { REPOSITORY_ATTEMPT_KEY, mappingCase } from "./repository-copy";
 import {
   repositoryCandidatesQueryOptions,
@@ -56,6 +58,7 @@ export function ConnectWizard({
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
+  const platform = usePlatform();
   const { branches } = useBranch();
   const [step, setStep] = useState<"pick" | "map">("pick");
   const [search, setSearch] = useState("");
@@ -66,6 +69,12 @@ export function ConnectWizard({
     repositoryCandidatesQueryOptions(api, projectId, authorizationId)
   );
   const repositories = candidates.data?.repositories ?? [];
+  // GitHub lists only repositories where the app is installed (§8.3).
+  const installUrl = candidates.data?.install_url ?? null;
+  const install = (url: string) =>
+    platform.kind === "desktop"
+      ? void platform.openExternal(new URL(url))
+      : goTo(url);
   const chosen = repositories.find(
     (repository) => repository.provider_repository_id === repositoryId
   );
@@ -198,12 +207,30 @@ export function ConnectWizard({
                   ))}
                 </RadioGroup>
               </>
+            ) : installUrl ? (
+              <p className="text-sm text-muted-foreground">
+                The GitHub App isn’t installed where you have repositories yet.
+              </p>
             ) : (
               <p className="text-sm text-muted-foreground">
                 This authorization can’t see any repositories. Grant access to
                 one on the provider and start again.
               </p>
             )}
+            {installUrl ? (
+              <p className="text-sm text-muted-foreground">
+                {repositories.length ? "Don’t see your repository? " : ""}
+                <Button
+                  type="button"
+                  variant="link"
+                  className="h-auto p-0"
+                  onClick={() => install(installUrl)}
+                >
+                  Install the GitHub App
+                </Button>{" "}
+                on the account that owns it, then come back here.
+              </p>
+            ) : null}
           </div>
         ) : plan ? (
           <div className="flex flex-col gap-4 text-sm">

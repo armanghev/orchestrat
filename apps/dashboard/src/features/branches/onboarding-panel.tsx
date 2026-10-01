@@ -72,9 +72,7 @@ function OnboardingPanel({ api }: { api: ApiClient }) {
       })
   });
   const existing = [
-    tasks.data?.tasks.length
-      ? plural(tasks.data.tasks.length, "task")
-      : null,
+    tasks.data?.tasks.length ? plural(tasks.data.tasks.length, "task") : null,
     documents.data?.documents.length
       ? plural(documents.data.documents.length, "document")
       : null

@@ -31,7 +31,9 @@ export function readGithubAttempt(): Attempt | null {
 
 // GitHub's Setup URL lands here after an app install (docs/project-branches.md
 // §8.3, §11.8). Its installation_id is untrusted: the API accepts it only
-// when the authorizing user's token lists that installation.
+// when the authorizing user's token lists that installation. The attempt
+// comes from this tab, or from the server when the install opened in
+// another browser (the desktop app sends people to their own browser).
 export function GithubSetup({
   api,
   installationId
@@ -41,9 +43,32 @@ export function GithubSetup({
 }) {
   const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
-  const [attempt] = useState(readGithubAttempt);
+  // undefined while the server is asked; null when there's none.
+  const [attempt, setAttempt] = useState<Attempt | null | undefined>(
+    () => readGithubAttempt() ?? undefined
+  );
   const started = useRef(false);
   const validInstallation = /^[1-9][0-9]{0,19}$/.test(installationId ?? "");
+  useEffect(() => {
+    if (attempt !== undefined) return;
+    let active = true;
+    api
+      .getPendingRepositoryAuthorization("github")
+      .then((pending) => {
+        if (active)
+          setAttempt({
+            authorization_id: pending.authorization_id,
+            project_id: pending.project_id,
+            provider: "github"
+          });
+      })
+      .catch(() => {
+        if (active) setAttempt(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [api, attempt]);
   useEffect(() => {
     if (started.current || !attempt || !validInstallation) return;
     started.current = true;
@@ -78,8 +103,8 @@ export function GithubSetup({
   }, [api, attempt, installationId, navigate, validInstallation]);
   const failure =
     error ??
-    (!attempt
-      ? "This browser didn’t start a GitHub connection, or it expired. Start again from the project’s settings."
+    (attempt === null
+      ? "There’s no GitHub connection in progress for your account, or it expired. Start again from the project’s settings."
       : !validInstallation
         ? "GitHub didn’t say which installation to use. Start again from the project’s settings."
         : null);

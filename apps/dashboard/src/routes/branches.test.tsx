@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { forwardRef, useImperativeHandle, useState } from "react";
 import { http, HttpResponse } from "msw";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { branchKeys } from "@/features/branches/query-options";
 import { branch, documentDetail, project, taskCard } from "@/test/factories";
 import {
   apiUrl,
@@ -485,6 +486,147 @@ describe("project branches in the dashboard", () => {
       })
     );
   });
+
+  it("waits for an autosave on its way before switching", async () => {
+    const document = documentDetail();
+    const saved: Array<{ content: string }> = [];
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const view = await render(`/projects/${projectId}/documents`, [
+      http.get(`${apiUrl}/projects/:projectId/documents`, ({ request }) =>
+        HttpResponse.json({
+          documents: branchOf(request) === main.id ? [document.document] : [],
+          folders: [],
+          next_cursor: null
+        })
+      ),
+      http.get(`${apiUrl}/documents/${document.document.id}`, () =>
+        HttpResponse.json(document)
+      ),
+      http.get(`${apiUrl}/documents/${document.document.id}/revisions`, () =>
+        HttpResponse.json({ revisions: [], next_cursor: null })
+      ),
+      http.patch(
+        `${apiUrl}/documents/${document.document.id}`,
+        async ({ request }) => {
+          const body = (await request.json()) as { content: string };
+          saved.push(body);
+          await held;
+          return HttpResponse.json({
+            ...document,
+            document: { ...document.document, current_revision: 2 },
+            revision: {
+              ...document.revision,
+              revision_number: 2,
+              content: body.content
+            }
+          });
+        }
+      ),
+      ...branchHandlers()
+    ]);
+    const editor = await screen.findByLabelText("Markdown content");
+    fireEvent.change(editor, { target: { value: "Saving on its own" } });
+    // The autosave is still on its way when the person switches.
+    await waitFor(() => expect(saved).toHaveLength(1), { timeout: 3_000 });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Branch: main" }));
+    await user.click(
+      screen.getByRole("menuitemradio", { name: /feat\/checkout/ })
+    );
+    release();
+    await waitFor(() =>
+      expect(view.router.state.location.search).toEqual({
+        branch: feature.id
+      })
+    );
+    expect(
+      screen.queryByRole("dialog", { name: "Unsaved changes" })
+    ).not.toBeInTheDocument();
+    expect(saved).toEqual([
+      expect.objectContaining({ content: "Saving on its own" })
+    ]);
+  });
+
+  it("stays on the branch it showed when the default moves", async () => {
+    const document = documentDetail();
+    const seen: string[] = [];
+    let branches = [main, feature, old];
+    const view = await render(`/projects/${projectId}/documents`, [
+      http.get(`${apiUrl}/projects/:projectId/branches`, () =>
+        HttpResponse.json({ branches })
+      ),
+      http.get(`${apiUrl}/projects/:projectId/documents`, ({ request }) => {
+        seen.push(branchOf(request));
+        return HttpResponse.json({
+          documents: branchOf(request) === main.id ? [document.document] : [],
+          folders: [],
+          next_cursor: null
+        });
+      }),
+      http.get(`${apiUrl}/documents/${document.document.id}`, () =>
+        HttpResponse.json(document)
+      ),
+      http.get(`${apiUrl}/documents/${document.document.id}/revisions`, () =>
+        HttpResponse.json({ revisions: [], next_cursor: null })
+      ),
+      http.patch(
+        `${apiUrl}/documents/${document.document.id}`,
+        async ({ request }) => {
+          const { content } = (await request.json()) as { content: string };
+          return HttpResponse.json({
+            ...document,
+            document: { ...document.document, current_revision: 2 },
+            revision: { ...document.revision, revision_number: 2, content }
+          });
+        }
+      ),
+      ...branchHandlers()
+    ]);
+    const editor = await screen.findByLabelText("Markdown content");
+    fireEvent.change(editor, { target: { value: "Draft on main" } });
+    editor.focus();
+    const entries = view.router.history.length;
+
+    // Another admin makes feat/checkout the default.
+    branches = [
+      { ...feature, is_default: true },
+      { ...main, is_default: false },
+      old
+    ];
+    await act(() =>
+      view.queryClient.invalidateQueries({
+        queryKey: branchKeys.list(projectId)
+      })
+    );
+    // The URL now names the branch on screen, in place of the old entry.
+    await waitFor(() =>
+      expect(view.router.state.location.search).toEqual({ branch: main.id })
+    );
+    expect(view.router.history.length).toBe(entries);
+    expect(screen.getByRole("button", { name: "Branch: main" })).toBeVisible();
+    // Not a new page, so focus stays in the editor.
+    await act(() => new Promise((resolve) => requestAnimationFrame(resolve)));
+    expect(screen.getByLabelText("Markdown content")).toHaveFocus();
+    expect(screen.getByLabelText("Markdown content")).toHaveValue(
+      "Draft on main"
+    );
+    expect(seen).not.toContain(feature.id);
+    expect(
+      screen.queryByRole("dialog", { name: "Unsaved changes" })
+    ).not.toBeInTheDocument();
+
+    // Choosing the new default drops ?branch= again.
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Branch: main" }));
+    await user.click(
+      screen.getByRole("menuitemradio", { name: /feat\/checkout/ })
+    );
+    await waitFor(() => expect(view.router.state.location.search).toEqual({}));
+    expect(
+      await screen.findByRole("button", { name: "Branch: feat/checkout" })
+    ).toBeVisible();
+  });
 });
 
 describe("branch settings", () => {
@@ -612,12 +754,22 @@ describe("branch settings", () => {
 
   it("asks owners before setting the default or archiving", async () => {
     const posted: string[] = [];
+    let branches = [main, feature, old];
     const view = await render(`/projects/${projectId}/settings`, [
       ...settingsHandlers("owner"),
+      http.get(`${apiUrl}/projects/:projectId/branches`, () =>
+        HttpResponse.json({ branches })
+      ),
       http.post(
         `${apiUrl}/projects/:projectId/branches/:branchId/:action`,
         ({ params }) => {
           posted.push(`${params.action}:${params.branchId}`);
+          if (params.action === "default")
+            branches = [
+              { ...feature, is_default: true },
+              { ...main, is_default: false },
+              old
+            ];
           return HttpResponse.json({ branch: feature });
         }
       ),
@@ -648,19 +800,19 @@ describe("branch settings", () => {
     await waitFor(() =>
       expect(view.router.state.location.search).toEqual({ branch: main.id })
     );
+    expect(screen.getByRole("button", { name: "Branch: main" })).toBeVisible();
 
-    await user.click(
-      screen.getByRole("button", { name: "Actions for feat/checkout" })
-    );
+    // main stays as a regular branch, so it can be archived now.
+    await user.click(screen.getByRole("button", { name: "Actions for main" }));
     await user.click(screen.getByRole("menuitem", { name: "Archive" }));
     expect(
-      await screen.findByRole("dialog", { name: "Archive feat/checkout?" })
+      await screen.findByRole("dialog", { name: "Archive main?" })
     ).toHaveTextContent(
       "It becomes read-only and hidden. Nothing is deleted. Active agent sessions on it will be closed."
     );
     await user.click(screen.getByRole("button", { name: "Archive branch" }));
     await waitFor(() =>
-      expect(posted).toEqual([`default:${feature.id}`, `archive:${feature.id}`])
+      expect(posted).toEqual([`default:${feature.id}`, `archive:${main.id}`])
     );
   });
 

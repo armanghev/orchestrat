@@ -375,6 +375,54 @@ function ProjectLayout() {
   });
   const location = useLocation();
   const route = location.pathname.split("/").at(-1) as NavigationDestination;
+  // Without ?branch= a page shows the default branch. When the default moves
+  // (another admin, a repository connect), the page keeps the branch it
+  // showed and names it in the URL, instead of switching under the person
+  // and past the editor's unsaved-draft check (spec §11.1, §11.9).
+  const shownDefault = useRef<{ projectId: string; branchId: string }>(null);
+  const keptBranchId =
+    !requestedBranchId &&
+    shownDefault.current?.projectId === projectId &&
+    shownDefault.current.branchId !== defaultBranchOf(branches)?.id &&
+    branches.some((item) => item.id === shownDefault.current?.branchId)
+      ? shownDefault.current.branchId
+      : undefined;
+  // Naming the branch on screen isn't a new page, so focus stays put.
+  const namingBranch = useRef(false);
+  useEffect(() => {
+    if (requestedBranchId) {
+      shownDefault.current = null;
+      return;
+    }
+    if (keptBranchId) {
+      if (namingBranch.current) return;
+      namingBranch.current = true;
+      void navigate({
+        to: location.pathname as never,
+        search: ((previous: Record<string, unknown>) => ({
+          ...previous,
+          branch: keptBranchId
+        })) as never,
+        hash: true,
+        replace: true,
+        resetScroll: false,
+        hashScrollIntoView: false,
+        ignoreBlocker: true
+      });
+      return;
+    }
+    const defaultId = defaultBranchOf(branches)?.id;
+    shownDefault.current = defaultId
+      ? { projectId, branchId: defaultId }
+      : null;
+  }, [
+    branches,
+    keptBranchId,
+    location.pathname,
+    navigate,
+    projectId,
+    requestedBranchId
+  ]);
   useEffect(() => {
     if (!project) return;
     const ordered = orderProjects(
@@ -393,6 +441,10 @@ function ProjectLayout() {
       });
   }, [catalog.projects, preferences, project, update]);
   useEffect(() => {
+    if (namingBranch.current) {
+      namingBranch.current = false;
+      return;
+    }
     const frame = requestAnimationFrame(() => {
       if (location.hash) return;
       document
@@ -410,7 +462,7 @@ function ProjectLayout() {
         catalog={catalog}
       />
     );
-  const branch = resolveBranch(branches, requestedBranchId);
+  const branch = resolveBranch(branches, requestedBranchId ?? keptBranchId);
   if (!branch)
     return (
       <BranchUnavailable

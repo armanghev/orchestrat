@@ -199,8 +199,12 @@ export function RepositorySettingsSection({
       if (kind === "reconnect" && provider) start.mutate(provider);
     }
   });
-  const failure =
-    start.error ?? sync.error ?? reenable.error ?? disconnect.error;
+  // A disconnect failure shows in its dialog, which covers the card.
+  const failure = start.error ?? sync.error ?? reenable.error;
+  const confirm = (next: Confirmation) => {
+    disconnect.reset();
+    setConfirmation(next);
+  };
   if (repository.isPending)
     return (
       <Card>
@@ -404,14 +408,14 @@ export function RepositorySettingsSection({
           <Button
             type="button"
             variant="outline"
-            onClick={() => setConfirmation("reconnect")}
+            onClick={() => confirm("reconnect")}
           >
             Reconnect
           </Button>
           <Button
             type="button"
             variant="outline"
-            onClick={() => setConfirmation("disconnect")}
+            onClick={() => confirm("disconnect")}
           >
             Disconnect
           </Button>
@@ -437,6 +441,11 @@ export function RepositorySettingsSection({
                   : `This disconnects the repository and connects it again with a fresh ${providerLabels[connection.provider]} authorization. Branches and their work are kept.`}
               </DialogDescription>
             </DialogHeader>
+            {disconnect.isError ? (
+              <p role="alert" className="text-sm text-destructive">
+                {actionError(disconnect.error)}
+              </p>
+            ) : null}
             <DialogFooter>
               <Button
                 type="button"

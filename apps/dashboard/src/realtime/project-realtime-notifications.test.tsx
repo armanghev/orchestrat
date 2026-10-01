@@ -8,7 +8,9 @@ import type {
 } from "@orchestrat/protocol";
 import type { ApiClient } from "@/lib/api/client";
 import type { Platform } from "@/platform/contract";
+import { branchKeys } from "@/features/branches/query-options";
 import { messagingKeys } from "@/features/messaging/query-options";
+import { branch } from "@/test/factories";
 import {
   ProjectRealtimeProvider,
   useProjectRealtimeStatus,
@@ -575,10 +577,125 @@ describe("project chat realtime notifications", () => {
         "connected"
       )
     );
-    expect(observerInboxHarness.api.getProjectInbox).not.toHaveBeenCalled();
+    // The all-branches inbox lists only chats the person takes part in, so
+    // an observed chat's messages never surface.
+    await waitFor(() =>
+      expect(observerInboxHarness.api.getProjectInbox).toHaveBeenCalledWith(
+        projectOne,
+        { allBranches: true }
+      )
+    );
+    await act(async () => Promise.resolve());
     expect(
       screen.queryByRole("button", { name: "Open chat" })
     ).not.toBeInTheDocument();
+  });
+
+  it("summarizes missed messages on a branch whose chats were never loaded", async () => {
+    const featureBranchId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const elsewhereChatId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    let eventPage = 0;
+    // Only the default branch's chats are cached; the DM is on feat/x.
+    const harness = await connectedHarness({
+      chatsByProject: { [projectOne]: [makeChat(chatOneId, projectOne)] },
+      inboxByProject: {
+        [projectOne]: {
+          unread_chats: [
+            {
+              chat_id: elsewhereChatId,
+              branch_id: featureBranchId,
+              unread_count: 1,
+              mention_count: 0
+            }
+          ]
+        }
+      },
+      listProjectEvents: async () => {
+        eventPage += 1;
+        return eventPage === 1
+          ? { events: [], next_cursor: null }
+          : {
+              events: [
+                {
+                  id: 1,
+                  type: "chat.message_created",
+                  entity_id: elsewhereChatId,
+                  actor_user_id: null,
+                  actor_agent_id: agentId,
+                  payload: {}
+                }
+              ],
+              next_cursor: null
+            };
+      }
+    });
+
+    TestSocket.instances[0]!.close();
+    await waitFor(() => expect(TestSocket.instances).toHaveLength(2), {
+      timeout: 2_000
+    });
+    await act(async () => TestSocket.instances[1]!.open());
+    expect(
+      await screen.findByText("Messages arrived while you were away")
+    ).toBeVisible();
+    expect(screen.getByText("1 unread message across 1 chat.")).toBeVisible();
+    await act(async () => {
+      screen.getByRole("button", { name: "Open chat" }).click();
+    });
+    expect(harness.navigateToChat).toHaveBeenCalledWith(
+      projectOne,
+      elsewhereChatId,
+      featureBranchId
+    );
+  });
+
+  it("names another branch in mention notices", async () => {
+    const mainBranch = branch({ project_id: projectOne });
+    const featureBranch = branch({
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      project_id: projectOne,
+      name: "feat/x",
+      is_default: false
+    });
+    const chat = {
+      ...makeChat(chatOneId, projectOne),
+      branch_id: featureBranch.id
+    };
+    const notify = vi.fn(async () => undefined);
+    const platform = desktopPlatform({
+      notify,
+      isBackgrounded: vi.fn(async () => true)
+    });
+    const harness = await connectedHarness({
+      chatsByProject: { [projectOne]: [chat] },
+      platform
+    });
+    // The default branch is on screen; the chat is on feat/x.
+    window.history.replaceState({}, "", `/projects/${projectOne}/tasks`);
+    harness.queryClient.setQueryData(branchKeys.list(projectOne), {
+      branches: [mainBranch, featureBranch]
+    });
+
+    await act(async () => {
+      TestSocket.instances[0]!.emit({
+        ...event(projectOne, 1, chatOneId, "chat.message_created", undefined, [
+          { type: "human", id: userId }
+        ]),
+        branch_id: featureBranch.id
+      });
+    });
+    expect(await screen.findByText("Mentioned you in feat/x")).toBeVisible();
+    await waitFor(() => expect(notify).toHaveBeenCalledOnce());
+    expect(notify).toHaveBeenCalledWith({
+      title: "You were mentioned in feat/x",
+      body: "Builder mentioned you.",
+      destination: {
+        kind: "chat",
+        projectId: projectOne,
+        chatId: chatOneId,
+        branchId: featureBranch.id
+      }
+    });
   });
 
   it("stays silent when reconnect replay contains only the current user's messages", async () => {

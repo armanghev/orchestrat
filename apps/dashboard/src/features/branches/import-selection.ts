@@ -43,7 +43,7 @@ export function withRequiredTasks(
 ) {
   const tasks = items.filter((item) => item.item_type === "task");
   const included = new Set(chosen);
-  for (let changed = true; changed; ) {
+  for (let changed = true; changed;) {
     changed = false;
     for (const task of tasks)
       if (
@@ -92,8 +92,7 @@ export function pruneSelection(
   const kept = emptySelection();
   for (const type of ["task", "document", "chat"] as const)
     for (const key of selection[type])
-      if (present.has(`${type}:${key}`))
-        (kept[type] as Set<string>).add(key);
+      if (present.has(`${type}:${key}`)) (kept[type] as Set<string>).add(key);
   return kept;
 }
 
@@ -106,9 +105,11 @@ const conflictSignature = (item: MergePreviewItem) =>
   ]);
 
 /**
- * After a stale preview, keeps the choices for conflicts that are still the
- * same and reports the conflicts that are new or changed, which lose their
- * choice and are highlighted (spec §11.6).
+ * Carries choices from the preview the person last saw to a newer one
+ * (spec §11.6). A conflict that is still the same keeps its choice. One whose
+ * values changed loses it and is reported in `changed`, to be highlighted.
+ * One that wasn't a conflict before, say because an item was added to the
+ * selection, is reported in `added`: it simply has no choice yet.
  */
 export function carryChoices(
   before: MergePreview | undefined,
@@ -122,12 +123,15 @@ export function carryChoices(
   );
   const kept: Record<string, MergeChoice> = {};
   const changed = new Set<string>();
+  const added = new Set<string>();
   for (const item of after.items) {
     if (item.outcome !== "conflict") continue;
+    const signature = previous.get(item.lineage_key);
     const choice = choices[item.lineage_key];
-    if (previous.get(item.lineage_key) === conflictSignature(item)) {
-      if (choice) kept[item.lineage_key] = choice;
-    } else changed.add(item.lineage_key);
+    if (signature === undefined) added.add(item.lineage_key);
+    else if (signature !== conflictSignature(item))
+      changed.add(item.lineage_key);
+    else if (choice) kept[item.lineage_key] = choice;
   }
-  return { choices: kept, changed };
+  return { choices: kept, changed, added };
 }

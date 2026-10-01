@@ -490,6 +490,41 @@ describe("repository settings", () => {
     );
   });
 
+  it("shows a failed disconnect inside its dialog", async () => {
+    await render(
+      `/projects/${projectId}/settings`,
+      settings({
+        repository: connection(),
+        extra: [
+          http.delete(`${apiUrl}/projects/:projectId/repository`, () =>
+            HttpResponse.json(
+              {
+                error: {
+                  code: "INTERNAL_ERROR",
+                  message: "The provider didn't answer. Try again.",
+                  request_id: "req_1",
+                  details: {}
+                }
+              },
+              { status: 502 }
+            )
+          )
+        ]
+      })
+    );
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Disconnect" }));
+    const confirm = await screen.findByRole("dialog", {
+      name: "Disconnect acme/app?"
+    });
+    await user.click(
+      within(confirm).getByRole("button", { name: "Disconnect" })
+    );
+    expect(await within(confirm).findByRole("alert")).toHaveTextContent(
+      "The provider didn't answer. Try again."
+    );
+  });
+
   it("reconnects by disconnecting and authorizing again", async () => {
     let current: RepositoryConnection | null = connection({
       status: "needs_reauthorization",
@@ -590,12 +625,5 @@ describe("GitHub Setup URL", () => {
         "https://github.com/login/oauth/authorize?z=3"
       )
     );
-  });
-
-  it("refuses without an attempt from this browser", async () => {
-    await render("/repository/github/setup?installation_id=4242", settings());
-    expect(
-      await screen.findByText(/This browser didn’t start a GitHub connection/)
-    ).toBeVisible();
   });
 });

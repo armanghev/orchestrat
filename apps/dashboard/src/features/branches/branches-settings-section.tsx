@@ -4,7 +4,6 @@ import {
   useMutation,
   useQueryClient
 } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
 import { MoreHorizontal, Plus } from "lucide-react";
 import type { Branch, MergeRun } from "@orchestrat/protocol";
 import { StatusBadge } from "@/components/dashboard/page";
@@ -190,10 +189,8 @@ export function BranchesSettingsSection({
   projectId: string;
 }) {
   const queryClient = useQueryClient();
-  const navigate = useNavigate();
   const {
     branches,
-    branch: current,
     defaultBranch,
     canManage,
     projectArchived,
@@ -208,17 +205,10 @@ export function BranchesSettingsSection({
       kind === "default"
         ? api.setDefaultBranch(projectId, branch.id)
         : api.archiveBranch(projectId, branch.id),
-    onSuccess: async (_, { kind }) => {
+    // A page without ?branch= stays on the branch it showed when the
+    // default moves; the project layout sees to that.
+    onSuccess: async () => {
       setConfirmation(null);
-      // Without ?branch= a page shows the default, so stay on the branch
-      // on screen when the default moves.
-      if (kind === "default" && current.id === defaultBranch?.id)
-        await navigate({
-          to: "/projects/$projectId/settings",
-          params: { projectId },
-          search: { branch: current.id },
-          hash: "branches"
-        });
       await queryClient.invalidateQueries({
         queryKey: branchKeys.project(projectId)
       });

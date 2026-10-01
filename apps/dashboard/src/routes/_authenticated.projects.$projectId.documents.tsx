@@ -1045,6 +1045,9 @@ function DocumentEditor({
   // Switching branches saves a pending draft first. If it can't be saved
   // (a conflict, a merge or an error), the person decides (spec §11.9).
   const flushDraft = async () => {
+    // An autosave already on its way settles first, for up to about 5 s.
+    for (let waited = 0; savingRef.current && waited < 5_000; waited += 50)
+      await new Promise((resolve) => setTimeout(resolve, 50));
     if (
       draftRef.current === baseContentRef.current ||
       savingRef.current ||

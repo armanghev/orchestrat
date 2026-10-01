@@ -89,7 +89,7 @@ describe("import selection", () => {
     ).toEqual({ tasks: [key(2)], documents: [], chats: [] });
   });
 
-  it("keeps choices for unchanged conflicts and clears changed ones", () => {
+  describe("carrying choices to a newer preview", () => {
     const conflict = (n: number, target: string) =>
       item(n, {
         item_type: "document",
@@ -99,18 +99,47 @@ describe("import selection", () => {
         source_values: { body: "source" },
         target_values: { body: target }
       });
-    const before = preview([conflict(1, "a"), conflict(2, "b")]);
-    const after = preview([
-      conflict(1, "a"),
-      conflict(2, "c"),
-      conflict(3, "d")
-    ]);
-    const { choices, changed } = carryChoices(before, after, {
-      [key(1)]: "use_source",
-      [key(2)]: "use_target"
+
+    it("keeps choices for unchanged conflicts and clears changed ones", () => {
+      const before = preview([conflict(1, "a"), conflict(2, "b")]);
+      const after = preview([
+        conflict(1, "a"),
+        conflict(2, "c"),
+        conflict(3, "d")
+      ]);
+      const { choices, changed, added } = carryChoices(before, after, {
+        [key(1)]: "use_source",
+        [key(2)]: "use_target",
+        // A choice for a conflict that's gone doesn't carry.
+        [key(4)]: "use_source"
+      });
+      expect(choices).toEqual({ [key(1)]: "use_source" });
+      // Only changed values call for a highlight; a new conflict just has
+      // no choice yet.
+      expect(changed).toEqual(new Set([key(2)]));
+      expect(added).toEqual(new Set([key(3)]));
     });
-    expect(choices).toEqual({ [key(1)]: "use_source" });
-    // Changed and new conflicts both need a fresh look.
-    expect(changed).toEqual(new Set([key(2), key(3)]));
+
+    it("treats a conflict that used to be a plain copy as new", () => {
+      const before = preview([item(1, { item_type: "document" })]);
+      const after = preview([conflict(1, "a")]);
+      const { choices, changed, added } = carryChoices(before, after, {
+        [key(1)]: "use_target"
+      });
+      expect(choices).toEqual({});
+      expect(changed).toEqual(new Set());
+      expect(added).toEqual(new Set([key(1)]));
+    });
+
+    it("finds nothing changed without an earlier preview", () => {
+      const { choices, changed, added } = carryChoices(
+        undefined,
+        preview([conflict(1, "a")]),
+        {}
+      );
+      expect(choices).toEqual({});
+      expect(changed).toEqual(new Set());
+      expect(added).toEqual(new Set([key(1)]));
+    });
   });
 });

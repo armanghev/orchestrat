@@ -107,12 +107,18 @@ type ChatNotice = {
   chatId: string;
   /** The chat's branch, when it isn't the one on screen (spec §11.4). */
   branchId?: string;
+  /** The chat branch's name when it isn't the one on screen, so even a
+   * short mention notice says where. */
+  otherBranch?: string;
   /** Lets a handoff notice replace the plain notice for the same message. */
   messageId?: string;
   title: string;
   body: string;
   mentioned: boolean;
 };
+
+/** " in feat/x" for a chat on another branch than the one on screen. */
+const inBranch = (name: string | undefined) => (name ? ` in ${name}` : "");
 
 /** What a task.status_changed notification needs from its durable event. */
 export type TaskStatusChangeNotice = {
@@ -415,15 +421,6 @@ export class ProjectRealtimeController {
       } while (events.next_cursor !== null);
       if (this.socket !== socket || this.catchUpSocket !== socket) return;
       if (!(await this.refreshMessageAccess(socket))) return;
-      const participantChatIds = new Set(
-        cachedChatLists(this.queryClient, this.projectId)
-          .flatMap(([, cached]) => cached?.chats ?? [])
-          .filter((chat) => chat.is_participant)
-          .map((chat) => chat.id)
-      );
-      const authorizedMissedChatMessages = missedChatMessages.filter(
-        ({ chatId }) => participantChatIds.has(chatId)
-      );
       await invalidateCoordinationQueries(this.queryClient, this.projectId);
       if (
         this.socket !== socket ||
@@ -432,10 +429,13 @@ export class ProjectRealtimeController {
       )
         return;
       this.lastSequence = nextSequence;
-      if (this.connectedBefore && authorizedMissedChatMessages.length > 0)
+      // Every branch's missed messages go on, including branches whose chats
+      // were never loaded here. The summary asks the all-branches inbox, which
+      // lists only the person's own chats with unread messages.
+      if (this.connectedBefore && missedChatMessages.length > 0)
         void Promise.resolve(
           this.onReconnectSummary?.(
-            authorizedMissedChatMessages,
+            missedChatMessages,
             () => this.socket === socket && !this.stopped
           )
         ).catch(() => undefined);
@@ -914,7 +914,7 @@ export function ProjectRealtimeProvider({
         )
       );
       // Notices for another branch say which one (spec §11.4).
-      const where = otherBranch ? ` in ${otherBranch}` : "";
+      const where = inBranch(otherBranch);
       const title = isHandoff
         ? `Handoff from ${actor?.name ?? "an agent"}${where}`
         : isAdded
@@ -938,6 +938,7 @@ export function ProjectRealtimeProvider({
         projectId: event.project_id,
         chatId: chat.id,
         ...(chatBranchId ? { branchId: chatBranchId } : {}),
+        ...(otherBranch ? { otherBranch } : {}),
         ...(event.message_id ? { messageId: event.message_id } : {}),
         title,
         body,
@@ -965,7 +966,7 @@ export function ProjectRealtimeProvider({
           )
             return;
           await platform.notify({
-            title: mentioned ? "You were mentioned" : title,
+            title: mentioned ? `You were mentioned${where}` : title,
             body,
             destination: {
               kind: "chat",
@@ -1180,7 +1181,9 @@ export function ProjectRealtimeProvider({
               <div className="flex items-start gap-3">
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium">
-                    {notice.mentioned ? "Mentioned you" : notice.title}
+                    {notice.mentioned
+                      ? `Mentioned you${inBranch(notice.otherBranch)}`
+                      : notice.title}
                   </p>
                   <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
                     {notice.body}

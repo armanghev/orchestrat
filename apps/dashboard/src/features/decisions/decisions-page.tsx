@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Scale } from "lucide-react";
 import type { Decision, MergeRun } from "@orchestrat/protocol";
@@ -28,8 +28,11 @@ const dateFormat = new Intl.DateTimeFormat(undefined, {
   timeStyle: "short"
 });
 
-function MergeSource({ run }: { run: MergeRun | undefined }) {
-  if (!run) return null;
+// How far back merge history is read to find each decision's merge: five
+// pages of 25 runs.
+const maxRunPages = 5;
+
+function MergeSource({ run }: { run: MergeRun }) {
   if (!run.provider) return <>Merged in Orchestrat</>;
   const label = `${run.provider.provider === "gitlab" ? "MR" : "PR"} #${run.provider.change_number ?? ""}`;
   return (
@@ -40,7 +43,7 @@ function MergeSource({ run }: { run: MergeRun | undefined }) {
           href={run.provider.change_url}
           target="_blank"
           rel="noreferrer"
-          className="underline underline-offset-4"
+          className="relative z-10 underline underline-offset-4"
         >
           {label}
         </a>
@@ -72,6 +75,35 @@ export function DecisionsPage({
       .flatMap((page) => page.runs)
       .map((run) => [run.id, run])
   );
+  // A decision's merge can be older than the first page of history, so read
+  // further back until every one is found.
+  const runMissing = (decisions.data?.decisions ?? []).some(
+    (decision) => !runById.has(decision.run_id)
+  );
+  const pagesLoaded = runs.data?.pages.length ?? 0;
+  const {
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isFetchNextPageError
+  } = runs;
+  useEffect(() => {
+    if (
+      runMissing &&
+      hasNextPage &&
+      !isFetchingNextPage &&
+      !isFetchNextPageError &&
+      pagesLoaded < maxRunPages
+    )
+      void fetchNextPage();
+  }, [
+    fetchNextPage,
+    hasNextPage,
+    isFetchNextPageError,
+    isFetchingNextPage,
+    pagesLoaded,
+    runMissing
+  ]);
   if (decisions.isPending)
     return <PageState title="Decisions" message="Loading decisions…" />;
   if (decisions.isError)
@@ -106,35 +138,44 @@ export function DecisionsPage({
       </TopToolbarActions>
       {items.length ? (
         <ul className="flex flex-col divide-y rounded-xl border bg-card">
-          {items.map((decision) => (
-            <li key={decision.id}>
-              <button
-                type="button"
-                className="flex w-full flex-col gap-1 px-4 py-3 text-left hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:outline-none"
-                onClick={() => setOpen(decision)}
+          {items.map((decision) => {
+            const run = runById.get(decision.run_id);
+            // The button stretches over the whole row. The PR link is its
+            // sibling, above the stretch, so it's never inside the button
+            // and opening it doesn't open the sheet.
+            return (
+              <li
+                key={decision.id}
+                className="relative flex flex-col gap-1 px-4 py-3 hover:bg-muted/50 has-[>button:focus-visible]:bg-muted/50"
               >
-                <span className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="font-medium">{decision.label}</span>
-                  <time
-                    dateTime={decision.created_at}
-                    className="text-xs text-muted-foreground"
-                  >
-                    {dateFormat.format(new Date(decision.created_at))}
-                  </time>
-                </span>
-                <span className="text-sm text-muted-foreground">
-                  {name(decision.source_branch_id)} →{" "}
-                  {name(decision.target_branch_id)} ·{" "}
-                  {decisionReasons[decision.reason]}
-                </span>
-                {runById.get(decision.run_id) ? (
-                  <span className="text-xs text-muted-foreground">
-                    <MergeSource run={runById.get(decision.run_id)} />
+                <button
+                  type="button"
+                  className="flex w-full flex-col gap-1 text-left after:absolute after:inset-0 focus-visible:outline-none"
+                  onClick={() => setOpen(decision)}
+                >
+                  <span className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-medium">{decision.label}</span>
+                    <time
+                      dateTime={decision.created_at}
+                      className="text-xs text-muted-foreground"
+                    >
+                      {dateFormat.format(new Date(decision.created_at))}
+                    </time>
                   </span>
+                  <span className="text-sm text-muted-foreground">
+                    {name(decision.source_branch_id)} →{" "}
+                    {name(decision.target_branch_id)} ·{" "}
+                    {decisionReasons[decision.reason]}
+                  </span>
+                </button>
+                {run ? (
+                  <p className="text-xs text-muted-foreground">
+                    <MergeSource run={run} />
+                  </p>
                 ) : null}
-              </button>
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ul>
       ) : (
         <Empty className="min-h-72 border">

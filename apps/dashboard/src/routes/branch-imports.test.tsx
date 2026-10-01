@@ -1,14 +1,16 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Decision, MergePreviewItem } from "@orchestrat/protocol";
+import { branchKeys } from "@/features/branches/query-options";
 import { branch, project } from "@/test/factories";
 import {
   apiUrl,
   branchHandlers,
   feature,
   main,
+  old,
   projectId,
   render
 } from "@/test/branch-routes";
@@ -90,9 +92,9 @@ const standup = item(106, {
 type Selection = { tasks: string[]; documents: string[]; chats: string[] };
 
 /** A preview API: everything for `"all"`, otherwise the chosen items plus
- * the tasks they require. */
+ * the tasks they require. A function catalog can change between previews. */
 function previewHandler(
-  catalog: MergePreviewItem[],
+  items: MergePreviewItem[] | (() => MergePreviewItem[]),
   fingerprint: (selection: Selection) => string
 ) {
   return http.post(
@@ -101,6 +103,7 @@ function previewHandler(
       const body = (await request.json()) as {
         selection: Selection | { tasks: "all" };
       };
+      const catalog = typeof items === "function" ? items() : items;
       const all = body.selection.tasks === "all";
       const selection = body.selection as Selection;
       const chosen = (candidate: MergePreviewItem) =>
@@ -382,6 +385,202 @@ describe("branch onboarding and imports", () => {
       preview_fingerprint: "b".repeat(64)
     });
   });
+
+  it("clears a choice whose conflict changed while the plan refreshed on its own", async () => {
+    let notesTarget = "Ours";
+    const bodies: Array<Record<string, unknown>> = [];
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const view = await render(
+      `/projects/${projectId}/tasks?branch=${pending.id}`,
+      [
+        previewHandler(
+          () => [
+            schema,
+            endpoint,
+            readme,
+            conflict(104, "notes.md", notesTarget),
+            standup
+          ],
+          () => (notesTarget === "Ours" ? "a" : "b").repeat(64)
+        ),
+        http.post(
+          `${apiUrl}/projects/:projectId/merges`,
+          async ({ request }) => {
+            bodies.push((await request.json()) as Record<string, unknown>);
+            await held;
+            return HttpResponse.json({ run: run() }, { status: 201 });
+          }
+        ),
+        ...branchHandlers({ branches: [main, feature, pending] })
+      ]
+    );
+    const user = userEvent.setup();
+    const panel = await screen.findByRole("region", {
+      name: "Set up feat/search"
+    });
+    await user.click(
+      within(panel).getByRole("radio", { name: "Import everything from" })
+    );
+    await user.click(within(panel).getByRole("button", { name: "Continue" }));
+    const dialog = await screen.findByRole("dialog", {
+      name: "Import into feat/search"
+    });
+    expect(await within(dialog).findByText("Conflicts (2)")).toBeVisible();
+    const versions = (name: string) =>
+      within(dialog).getByRole("radiogroup", {
+        name: `Version to keep for ${name}`
+      });
+    await user.click(
+      within(versions("README.md")).getByRole("radio", { name: /Use source/ })
+    );
+    await user.click(
+      within(versions("notes.md")).getByRole("radio", { name: /Use target/ })
+    );
+    expect(
+      within(dialog).getByRole("button", { name: "Import" })
+    ).toBeEnabled();
+
+    // notes.md changes on the target and a realtime event refetches the
+    // plan, with no stale import in between.
+    notesTarget = "Ours, edited";
+    await act(() =>
+      view.queryClient.invalidateQueries({
+        queryKey: branchKeys.project(projectId)
+      })
+    );
+    await waitFor(() =>
+      expect(versions("notes.md").closest("li")).toHaveAttribute(
+        "data-changed",
+        "true"
+      )
+    );
+    expect(dialog).toHaveTextContent("Changed since you looked");
+    expect(
+      within(versions("notes.md")).getByRole("radio", { name: /Use target/ })
+    ).not.toBeChecked();
+    expect(
+      within(versions("README.md")).getByRole("radio", { name: /Use source/ })
+    ).toBeChecked();
+    expect(versions("README.md").closest("li")).not.toHaveAttribute(
+      "data-changed"
+    );
+    expect(
+      within(dialog).getByRole("button", { name: "Import" })
+    ).toBeDisabled();
+
+    await user.click(
+      within(versions("notes.md")).getByRole("radio", { name: /Use source/ })
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Import" }));
+    // The selection and choices are locked while the import is on its way.
+    expect(
+      await within(dialog).findByRole("button", { name: "Importing…" })
+    ).toBeDisabled();
+    expect(
+      within(dialog).getByRole("searchbox", { name: "Search items" })
+    ).toBeDisabled();
+    for (const box of within(dialog).getAllByRole("checkbox"))
+      expect(box).toBeDisabled();
+    for (const radio of within(versions("notes.md")).getAllByRole("radio"))
+      expect(radio).toBeDisabled();
+    expect(
+      within(dialog).getByRole("button", { name: "Use source for all" })
+    ).toBeDisabled();
+    release();
+    expect(
+      await screen.findByText("Imported into feat/search from main.")
+    ).toBeVisible();
+    expect(bodies).toEqual([
+      expect.objectContaining({
+        choices: {
+          [readme.lineage_key]: "use_source",
+          [notes.lineage_key]: "use_source"
+        },
+        preview_fingerprint: "b".repeat(64)
+      })
+    ]);
+  });
+
+  it("doesn't flag a conflict that's only new to the selection", async () => {
+    let applied: Record<string, unknown> | undefined;
+    await render(`/projects/${projectId}/tasks?branch=${pending.id}`, [
+      // A different selection, a different plan.
+      previewHandler([schema, endpoint, readme, notes, standup], (selection) =>
+        String(selection.documents.length).repeat(64)
+      ),
+      http.post(`${apiUrl}/projects/:projectId/merges`, async ({ request }) => {
+        applied = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({ run: run() }, { status: 201 });
+      }),
+      ...branchHandlers({ branches: [main, feature, pending] })
+    ]);
+    const user = userEvent.setup();
+    const panel = await screen.findByRole("region", {
+      name: "Set up feat/search"
+    });
+    await user.click(within(panel).getByRole("radio", { name: "Pick items…" }));
+    await user.click(within(panel).getByRole("button", { name: "Continue" }));
+    const dialog = await screen.findByRole("dialog", {
+      name: "Import into feat/search"
+    });
+    await user.click(
+      await within(dialog).findByRole("tab", { name: /Documents/ })
+    );
+    await user.click(
+      within(dialog).getByRole("checkbox", { name: /README\.md/ })
+    );
+    expect(await within(dialog).findByText("Conflicts (1)")).toBeVisible();
+    const versions = (name: string) =>
+      within(dialog).getByRole("radiogroup", {
+        name: `Version to keep for ${name}`
+      });
+    await user.click(
+      within(versions("README.md")).getByRole("radio", { name: /Use source/ })
+    );
+
+    await user.click(
+      within(dialog).getByRole("checkbox", { name: /notes\.md/ })
+    );
+    expect(await within(dialog).findByText("Conflicts (2)")).toBeVisible();
+    await waitFor(() =>
+      expect(
+        within(dialog).getByRole("button", { name: "Import" })
+      ).toBeDisabled()
+    );
+    // notes.md has no choice yet, but nothing about it changed.
+    for (const name of ["README.md", "notes.md"])
+      expect(versions(name).closest("li")).not.toHaveAttribute("data-changed");
+    expect(dialog).not.toHaveTextContent("Changed since you looked");
+    expect(
+      within(versions("README.md")).getByRole("radio", { name: /Use source/ })
+    ).toBeChecked();
+    for (const radio of within(versions("notes.md")).getAllByRole("radio"))
+      expect(radio).not.toBeChecked();
+    expect(dialog).toHaveTextContent(
+      "Choose a version for 1 more conflict to import."
+    );
+
+    await user.click(
+      within(versions("notes.md")).getByRole("radio", { name: /Use target/ })
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Import" }));
+    expect(
+      await screen.findByText("Imported into feat/search from main.")
+    ).toBeVisible();
+    expect(applied).toMatchObject({
+      selection: {
+        tasks: [],
+        documents: [readme.lineage_key, notes.lineage_key].sort(),
+        chats: []
+      },
+      choices: {
+        [readme.lineage_key]: "use_source",
+        [notes.lineage_key]: "use_target"
+      },
+      preview_fingerprint: "2".repeat(64)
+    });
+  });
 });
 
 describe("decisions", () => {
@@ -554,6 +753,142 @@ describe("decisions", () => {
     expect(await within(claimedSheet).findByRole("alert")).toHaveTextContent(
       "An agent is working on this task. You can choose once the claim ends."
     );
+  });
+
+  it("finds a decision's merge further back and keeps its link out of the row's button", async () => {
+    const cursors: Array<string | null> = [];
+    const merged = run({
+      source_branch_id: feature.id,
+      target_branch_id: main.id,
+      kind: "merge",
+      trigger: "provider_merge",
+      provider: {
+        provider: "github",
+        change_number: "42",
+        change_url: "https://github.com/acme/app/pull/42",
+        head_sha: null,
+        merge_sha: null
+      }
+    });
+    await render(`/projects/${projectId}/decisions`, [
+      // The decisions' merge is on the second page of history.
+      http.get(`${apiUrl}/projects/:projectId/merges`, ({ request }) => {
+        const cursor = new URL(request.url).searchParams.get("cursor");
+        cursors.push(cursor);
+        return HttpResponse.json(
+          cursor
+            ? { runs: [merged], next_cursor: null }
+            : { runs: [run({ id: key(302) })], next_cursor: "page-2" }
+        );
+      }),
+      ...handlers("owner")
+    ]);
+    const links = await screen.findAllByRole("link", { name: "PR #42" });
+    expect(cursors).toEqual([null, "page-2"]);
+    const row = screen.getByRole("button", { name: /DASH-7 Checkout copy/ });
+    expect(row).not.toHaveTextContent("PR #42");
+    for (const link of links) expect(link.closest("button")).toBeNull();
+    // Following the link leaves the sheet closed.
+    const user = userEvent.setup();
+    links[0]!.addEventListener("click", (event) => event.preventDefault());
+    await user.click(links[0]!);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await user.click(row);
+    expect(
+      await screen.findByRole("dialog", { name: "DASH-7 Checkout copy" })
+    ).toBeVisible();
+  });
+
+  it("reads at most five pages of merge history looking for merges", async () => {
+    const cursors: Array<string | null> = [];
+    await render(`/projects/${projectId}/decisions`, [
+      http.get(`${apiUrl}/projects/:projectId/merges`, ({ request }) => {
+        cursors.push(new URL(request.url).searchParams.get("cursor"));
+        return HttpResponse.json({
+          runs: [run({ id: key(310 + cursors.length) })],
+          next_cursor: `page-${cursors.length + 1}`
+        });
+      }),
+      ...handlers("owner")
+    ]);
+    expect(await screen.findByText("DASH-7 Checkout copy")).toBeVisible();
+    await waitFor(() => expect(cursors).toHaveLength(5));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(cursors).toHaveLength(5);
+    expect(
+      screen.queryByRole("link", { name: "PR #42" })
+    ).not.toBeInTheDocument();
+  });
+
+  it("says why nothing can be chosen instead of offering dead buttons", async () => {
+    const onArchived = decision({
+      id: key(406),
+      label: "DASH-9 Old copy",
+      target_branch_id: old.id
+    });
+    await render(`/projects/${projectId}/decisions`, [
+      http.get(`${apiUrl}/projects/:projectId/branches`, () =>
+        HttpResponse.json({ branches: [withDecisions, feature, old] })
+      ),
+      http.get(`${apiUrl}/projects/:projectId/decisions`, () =>
+        HttpResponse.json({ decisions: [onArchived, decision()] })
+      ),
+      http.post(
+        `${apiUrl}/projects/:projectId/decisions/:decisionId/resolve`,
+        () =>
+          HttpResponse.json(
+            {
+              error: {
+                code: "CONFLICT",
+                message: "This decision is already settled.",
+                request_id: "req_3",
+                details: {
+                  reason: "decision_closed",
+                  status: "resolved_source"
+                }
+              }
+            },
+            { status: 409 }
+          )
+      ),
+      ...handlers("owner")
+    ]);
+    const user = userEvent.setup();
+    await user.click(
+      await screen.findByRole("button", { name: /DASH-9 Old copy/ })
+    );
+    const archivedSheet = await screen.findByRole("dialog", {
+      name: "DASH-9 Old copy"
+    });
+    expect(archivedSheet).toHaveTextContent(
+      "feat/old is archived, so nothing can change there."
+    );
+    expect(
+      within(archivedSheet).queryByRole("button", { name: /Use / })
+    ).not.toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "DASH-9 Old copy" })
+      ).not.toBeInTheDocument()
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /DASH-7 Checkout copy/ })
+    );
+    const sheet = await screen.findByRole("dialog", {
+      name: "DASH-7 Checkout copy"
+    });
+    await user.click(
+      within(sheet).getByRole("button", { name: "Use source (feat/checkout)" })
+    );
+    expect(
+      await within(sheet).findByText("This decision is settled.")
+    ).toBeVisible();
+    expect(
+      within(sheet).queryByRole("button", { name: /Use / })
+    ).not.toBeInTheDocument();
+    expect(within(sheet).queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("lets members read decisions without choosing", async () => {
