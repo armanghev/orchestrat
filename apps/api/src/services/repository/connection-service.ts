@@ -22,12 +22,33 @@ import type { BranchService } from "../branch-service.js";
 import { PermissionService } from "../permission-service.js";
 import type { BranchSync } from "./branch-sync.js";
 import { aad, type SecretBox } from "./secrets.js";
-import type {
-  AttemptRow,
-  ConnectionRow,
-  ProviderAdapter,
-  ProviderName
+import {
+  ProviderAuthorizationError,
+  type AttemptRow,
+  type ConnectionRow,
+  type ProviderAdapter,
+  type ProviderName
 } from "./types.js";
+
+/** Provider calls on behalf of a person: lost access is a 409, the rest 502. */
+async function provider<T>(work: () => Promise<T>): Promise<T> {
+  try {
+    return await work();
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    if (error instanceof ProviderAuthorizationError)
+      throw new ApiError(
+        409,
+        "REPOSITORY_AUTHORIZATION_INVALID",
+        error.message
+      );
+    throw new ApiError(
+      502,
+      "INTERNAL_ERROR",
+      "The provider didn't answer. Try again."
+    );
+  }
+}
 
 // Connecting a project to one repository (docs/project-branches.md §6.7,
 // §8.7, §12): single-use authorization attempts, a repository picker, the
@@ -346,11 +367,9 @@ export class RepositoryService {
         "VALIDATION_ERROR",
         "Not a GitHub authorization."
       );
-    const result = await adapter.confirmInstallation({
-      attempt,
-      userToken,
-      installationId
-    });
+    const result = await provider(() =>
+      adapter.confirmInstallation!({ attempt, userToken, installationId })
+    );
     if ("authorizeUrl" in result)
       return { next: "authorize" as const, authorize_url: result.authorizeUrl };
     await this.mark(attempt.id, { installationId: result.installationId });
@@ -365,7 +384,9 @@ export class RepositoryService {
       attemptId
     );
     return {
-      repositories: await adapter.listCandidates({ attempt, userToken })
+      repositories: await provider(() =>
+        adapter.listCandidates({ attempt, userToken })
+      )
     };
   }
 
@@ -381,12 +402,14 @@ export class RepositoryService {
       input.authorization_id
     );
     const connectionId = randomUUID();
-    const prepared = await adapter.prepareConnection({
-      attempt,
-      userToken,
-      providerRepositoryId: input.provider_repository_id,
-      connectionId
-    });
+    const prepared = await provider(() =>
+      adapter.prepareConnection({
+        attempt,
+        userToken,
+        providerRepositoryId: input.provider_repository_id,
+        connectionId
+      })
+    );
     if (prepared.repository.ineligibleReason)
       throw new ApiError(
         409,
@@ -428,7 +451,7 @@ export class RepositoryService {
       disconnectedAt: null
     };
     // Snapshot the provider's branches before the transaction (§8.7).
-    const remote = await adapter.listBranches(draft);
+    const remote = await provider(() => adapter.listBranches(draft));
     const connection = await this.db.transaction(async (tx) => {
       await this.branches.lockActiveProject(tx, projectId);
       const [taken] = await tx

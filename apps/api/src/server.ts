@@ -5,6 +5,7 @@ import { createDatabase } from "@orchestrat/db";
 import { logger } from "@orchestrat/logger";
 import { buildApp } from "./app.js";
 import { readDocumentStorageConfig } from "./document-storage-config.js";
+import { providerAdapters } from "./services/repository/providers/index.js";
 import { SecretBox } from "./services/repository/secrets.js";
 import { createShutdownHandler } from "./services/shutdown.js";
 
@@ -50,6 +51,7 @@ const app = buildApp({
   documentStorage,
   repository: {
     config: repositoryConfig,
+    adapters: providerAdapters(repositoryConfig),
     secrets: repositoryConfig.secretKey
       ? new SecretBox(
           repositoryConfig.secretKey,
