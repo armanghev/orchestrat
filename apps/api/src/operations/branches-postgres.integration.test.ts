@@ -7,6 +7,7 @@ import {
   branchItemBaselines,
   branchMergeRuns,
   createDatabase,
+  documentAttachments,
   projectBranches,
   taskClaims,
   tasks
@@ -15,7 +16,7 @@ import { and, eq } from "drizzle-orm";
 import { buildApp } from "../app.js";
 import { AgentService } from "../services/agent-service.js";
 import { BranchService } from "../services/branch-service.js";
-import { MergeEngine } from "../services/merges/engine.js";
+import { MergeEngine, type AttachmentKey } from "../services/merges/engine.js";
 import { workspaceOn } from "../test/workspace.js";
 
 // Branch concurrency needs real row locks (docs/project-branches.md §13.2).
@@ -540,6 +541,69 @@ test(
             final!.title,
             applyOk ? "Changed on main" : "Changed on the feature"
           );
+        }
+      );
+
+      await t.test(
+        "a failed apply deletes the attachment objects it copied",
+        async () => {
+          const s = await space();
+          const copied: AttachmentKey[] = [];
+          const removed: AttachmentKey[] = [];
+          const withStorage = new MergeEngine(
+            db,
+            new BranchService(db, new AgentService(db)),
+            {
+              copy: async (_from, to) => {
+                copied.push(to);
+              },
+              remove: async (key) => {
+                removed.push(key);
+              }
+            }
+          );
+          const document = (
+            await s.alice("POST", `/projects/${s.project.id}/documents`, {
+              path: "notes.md",
+              content: "notes"
+            })
+          ).json().document;
+          await db.insert(documentAttachments).values({
+            projectId: s.project.id,
+            branchId: s.main,
+            documentId: document.id,
+            filename: "a.png",
+            mimeType: "image/png",
+            sizeBytes: 3,
+            addedByType: "human",
+            addedByUserId: s.aliceUser.id
+          });
+          const [task] = await createTasks(s, ["Copies after documents"]);
+          await db.insert(tasks).values({
+            projectId: s.project.id,
+            branchId: s.feature,
+            taskKey: "THIEF-1",
+            taskNumber: Number(task.key.split("-").at(-1)),
+            title: "Number thief",
+            createdByType: "human",
+            createdByUserId: s.aliceUser.id
+          });
+          await assert.rejects(
+            withStorage.apply(s.project.id, {
+              sourceBranchId: s.main,
+              targetBranchId: s.feature,
+              kind: "merge",
+              trigger: "dashboard",
+              userId: s.aliceUser.id
+            })
+          );
+          assert.equal(copied.length, 1);
+          assert.deepEqual(removed, copied, "the orphaned copy is deleted");
+          const rows = await db
+            .select()
+            .from(documentAttachments)
+            .where(eq(documentAttachments.branchId, s.feature));
+          assert.equal(rows.length, 0);
         }
       );
     } finally {

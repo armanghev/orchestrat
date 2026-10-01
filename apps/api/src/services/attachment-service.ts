@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   AbortMultipartUploadCommand,
   CompleteMultipartUploadCommand,
+  CopyObjectCommand,
   CreateMultipartUploadCommand,
   type CreateMultipartUploadCommandOutput,
   DeleteObjectCommand,
@@ -35,6 +36,7 @@ import { assertEntityBranch, type BranchSelector } from "./branch-context.js";
 import { PermissionService } from "./permission-service.js";
 import type { DocumentStorageConfig } from "./document-service.js";
 import { AttachmentDownloadTicketStore } from "../realtime/realtime.js";
+import type { AttachmentObjects } from "./merges/engine.js";
 
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 /**
@@ -117,6 +119,41 @@ export class AttachmentService {
   }
   private key(projectId: string, documentId: string, attachmentId: string) {
     return `document-attachments/v1/${projectId}/${documentId}/${attachmentId}`;
+  }
+  /**
+   * Server-side object copies for branch imports and merges
+   * (docs/project-branches.md §9.7); undefined without storage.
+   */
+  mergeObjects(): AttachmentObjects | undefined {
+    if (!this.storage || !this.config) return undefined;
+    const { storage, config } = { storage: this.storage, config: this.config };
+    return {
+      copy: async (from, to) => {
+        try {
+          await storage.send(
+            new CopyObjectCommand({
+              Bucket: config.bucket,
+              CopySource: `${config.bucket}/${this.key(from.projectId, from.documentId, from.attachmentId)}`,
+              Key: this.key(to.projectId, to.documentId, to.attachmentId)
+            })
+          );
+        } catch {
+          throw new ApiError(
+            502,
+            "STORAGE_UPLOAD_FAILED",
+            "Storage could not copy an attachment."
+          );
+        }
+      },
+      remove: async (key) => {
+        await storage.send(
+          new DeleteObjectCommand({
+            Bucket: config.bucket,
+            Key: this.key(key.projectId, key.documentId, key.attachmentId)
+          })
+        );
+      }
+    };
   }
   private async document(
     projectId: string,
