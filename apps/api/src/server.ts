@@ -13,6 +13,12 @@ loadEnv({ path: "../../.env" });
 
 const config = loadApiConfig();
 const repositoryConfig = loadRepositoryConfig();
+const repositorySecrets = repositoryConfig.secretKey
+  ? new SecretBox(
+      repositoryConfig.secretKey,
+      repositoryConfig.previousSecretKeys
+    )
+  : null;
 const { db, pool } = createDatabase({
   connectionString: config.ORCHESTRAT_DATABASE_URL,
   connectionTimeoutMillis: 2_000
@@ -51,13 +57,8 @@ const app = buildApp({
   documentStorage,
   repository: {
     config: repositoryConfig,
-    adapters: providerAdapters(repositoryConfig),
-    secrets: repositoryConfig.secretKey
-      ? new SecretBox(
-          repositoryConfig.secretKey,
-          repositoryConfig.previousSecretKeys
-        )
-      : null
+    adapters: providerAdapters(repositoryConfig, repositorySecrets),
+    secrets: repositorySecrets
   },
   trustProxyHops: config.ORCHESTRAT_TRUST_PROXY_HOPS
 });

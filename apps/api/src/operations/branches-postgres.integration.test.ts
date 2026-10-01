@@ -16,7 +16,9 @@ import {
 } from "@orchestrat/db";
 import { and, eq } from "drizzle-orm";
 import { buildApp, repositoryWorkerOf } from "../app.js";
-import { SecretBox } from "../services/repository/secrets.js";
+import { GitlabAdapter } from "../services/repository/providers/gitlab.js";
+import { SecretBox, aad } from "../services/repository/secrets.js";
+import { FakeGitLab } from "../services/repository/testing/fake-gitlab.js";
 import { FakeProvider } from "../services/repository/testing/fake-provider.js";
 import { AgentService } from "../services/agent-service.js";
 import { BranchService } from "../services/branch-service.js";
@@ -731,6 +733,72 @@ test(
         await worker.tick();
         assert.equal((await deliveries())[0]!.status, "applied");
       });
+
+      await t.test(
+        "concurrent GitLab token users refresh once and share the new token",
+        async () => {
+          const s = await space();
+          const now = () => clock;
+          const gitlab = new FakeGitLab(now);
+          const box = new SecretBox({ id: "gl", key: Buffer.alloc(32, 6) });
+          const adapter = new GitlabAdapter(
+            { clientId: gitlab.clientId, clientSecret: gitlab.clientSecret },
+            box,
+            "https://api.example.test",
+            { fetch: gitlab.fetch, sleep: async () => undefined, now }
+          );
+          adapter.bind({ db });
+          gitlab.refresh.set("glrt-original", 7);
+          const id = randomUUID();
+          const [row] = await db
+            .insert(repositoryConnections)
+            .values({
+              id,
+              projectId: s.project.id,
+              provider: "gitlab",
+              providerRepositoryId: `gl-${id}`,
+              repositoryFullName: "acme/app",
+              providerDefaultBranch: "main",
+              accessTokenCiphertext: box.seal(
+                "glpat-expired",
+                aad("repository_connections", id, "access_token")
+              ),
+              refreshTokenCiphertext: box.seal(
+                "glrt-original",
+                aad("repository_connections", id, "refresh_token")
+              ),
+              tokenExpiresAt: new Date(clock.getTime() - 60_000)
+            })
+            .returning();
+          const tokens = await Promise.all([
+            adapter.accessToken(row!),
+            adapter.accessToken(row!),
+            adapter.accessToken(row!)
+          ]);
+          assert.equal(gitlab.refreshes, 1, "one refresh for every caller");
+          assert.equal(new Set(tokens).size, 1, "everyone uses the new token");
+
+          gitlab.refresh.clear();
+          await db
+            .update(repositoryConnections)
+            .set({ tokenExpiresAt: new Date(clock.getTime() - 60_000) })
+            .where(eq(repositoryConnections.id, id));
+          const [expired] = await db
+            .select()
+            .from(repositoryConnections)
+            .where(eq(repositoryConnections.id, id));
+          await assert.rejects(adapter.accessToken(expired!));
+          const [after] = await db
+            .select()
+            .from(repositoryConnections)
+            .where(eq(repositoryConnections.id, id));
+          assert.equal(
+            after!.status,
+            "needs_reauthorization",
+            "kept even though the refresh transaction failed"
+          );
+        }
+      );
     } finally {
       await app.close();
       await pool.end();

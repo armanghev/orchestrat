@@ -1,4 +1,5 @@
 import type {
+  Database,
   repositoryConnectionAttempts,
   repositoryConnections
 } from "@orchestrat/db";
@@ -79,6 +80,8 @@ export type PreparedConnection = {
 
 export interface ProviderAdapter {
   readonly provider: ProviderName;
+  /** Called once by buildApp with the database the app uses. */
+  bind?(context: { db: Database }): void;
   /** GitLab verifies with a per-connection secret named in the URL. */
   readonly verifiesPerConnection?: boolean;
 

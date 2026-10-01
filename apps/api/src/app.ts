@@ -198,6 +198,7 @@ export function buildApp(options: AppOptions) {
       adapter
     ])
   );
+  for (const adapter of providerAdapters.values()) adapter.bind?.({ db });
   const branchSync = new BranchSync(
     db,
     branches,
