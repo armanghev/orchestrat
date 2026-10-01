@@ -1055,7 +1055,8 @@ export class MergeEngine {
           sourceSnapshot: {
             values: { path: values.path, archived: values.archived },
             revision_id: plan.sourceDocuments.current.get(item.source.id)?.id,
-            body_sha256: item.sourceFingerprint.body
+            body_sha256: item.sourceFingerprint.body,
+            baseline_key: item.baselineKey
           },
           targetSnapshot: {
             values: {
@@ -1147,7 +1148,8 @@ export class MergeEngine {
           fields: item.fields,
           sourceSnapshot: {
             values: taskValues(item.source),
-            version: item.source.version
+            version: item.source.version,
+            baseline_key: item.lineage
           },
           targetSnapshot: {
             values: taskValues(targetTask),
@@ -1265,7 +1267,10 @@ export class MergeEngine {
           // Chats conflict only on their name.
           reason: "changed_on_both",
           fields: item.fields,
-          sourceSnapshot: { values: chatValues(item.source) },
+          sourceSnapshot: {
+            values: chatValues(item.source),
+            baseline_key: item.baselineKey
+          },
           targetSnapshot: { values: chatValues(target) },
           targetFingerprint: item.targetFingerprint!
         });

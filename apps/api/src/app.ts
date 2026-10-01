@@ -20,6 +20,9 @@ import { AgentService } from "./services/agent-service.js";
 import { agentBranchSelector } from "./services/branch-context.js";
 import { BranchService } from "./services/branch-service.js";
 import { agentBranchRoutes, humanBranchRoutes } from "./routes/branches.js";
+import { humanMergeRoutes } from "./routes/merges.js";
+import { MergeService } from "./services/merge-service.js";
+import { MergeEngine } from "./services/merges/engine.js";
 import { TaskClaimService } from "./services/task-claim-service.js";
 import { IdentityService } from "./services/identity-service.js";
 import { PermissionService } from "./services/permission-service.js";
@@ -146,6 +149,11 @@ export function buildApp(options: AppOptions) {
     db,
     options.documentStorage,
     attachmentDownloadTickets
+  );
+  const merges = new MergeService(
+    db,
+    new MergeEngine(db, branches, attachments.mergeObjects()),
+    branches
   );
   const cliAuthorization = new CliAuthorizationService(db);
   const cliSetup = new CliSetupService(db);
@@ -319,6 +327,7 @@ export function buildApp(options: AppOptions) {
       });
       api.register(agentManagementRoutes, { agents });
       api.register(humanBranchRoutes, { branches });
+      api.register(humanMergeRoutes, { merges });
       api.register(humanChatRoutes, { chats });
       api.register(projectMemberRoutes, { memberships });
       api.register(humanAttentionRoutes, {
