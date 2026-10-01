@@ -551,7 +551,7 @@ export class BranchService {
     return branch ?? null;
   }
 
-  private async lockBranch(
+  async lockBranch(
     tx: Transaction,
     projectId: string,
     branchId: string
@@ -573,7 +573,7 @@ export class BranchService {
     return branch;
   }
 
-  private async lockActiveProject(tx: Transaction, projectId: string) {
+  async lockActiveProject(tx: Transaction, projectId: string) {
     const [project] = await tx
       .select({ status: projects.status })
       .from(projects)

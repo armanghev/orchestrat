@@ -4,12 +4,18 @@ import { readdir, readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   agentSessions,
+  branchItemBaselines,
+  branchMergeRuns,
   createDatabase,
   projectBranches,
-  taskClaims
+  taskClaims,
+  tasks
 } from "@orchestrat/db";
 import { and, eq } from "drizzle-orm";
 import { buildApp } from "../app.js";
+import { AgentService } from "../services/agent-service.js";
+import { BranchService } from "../services/branch-service.js";
+import { MergeEngine } from "../services/merges/engine.js";
 import { workspaceOn } from "../test/workspace.js";
 
 // Branch concurrency needs real row locks (docs/project-branches.md §13.2).
@@ -387,6 +393,153 @@ test(
             )
           );
           assert.equal(woke.attention.branch_id, s.feature);
+        }
+      );
+
+      const engine = new MergeEngine(
+        db,
+        new BranchService(db, new AgentService(db))
+      );
+      const createTasks = async (
+        s: Awaited<ReturnType<typeof space>>,
+        titles: string[]
+      ) => {
+        const created = [];
+        for (const title of titles)
+          created.push(
+            (
+              await s.alice(
+                "POST",
+                `/projects/${s.project.id}/tasks`,
+                { title },
+                key()
+              )
+            ).json()
+          );
+        return created;
+      };
+      const featureRows = (branchId: string) =>
+        db.select().from(tasks).where(eq(tasks.branchId, branchId));
+
+      await t.test("a failing apply leaves nothing behind", async () => {
+        const s = await space();
+        const [first, second] = await createTasks(s, ["First", "Second"]);
+        // A row that steals the second task's number on the target makes the
+        // second copy fail after the first one was written.
+        await db.insert(tasks).values({
+          projectId: s.project.id,
+          branchId: s.feature,
+          taskKey: "BLOCKER-1",
+          taskNumber: Number(second.key.split("-").at(-1)),
+          title: "Number thief",
+          createdByType: "human",
+          createdByUserId: s.aliceUser.id
+        });
+        await assert.rejects(
+          engine.apply(s.project.id, {
+            sourceBranchId: s.main,
+            targetBranchId: s.feature,
+            kind: "merge",
+            trigger: "dashboard",
+            userId: s.aliceUser.id
+          })
+        );
+        const rows = await featureRows(s.feature);
+        assert.deepEqual(
+          rows.map((row) => row.title),
+          ["Number thief"],
+          `no partial copy of ${first.key}`
+        );
+        const runs = await db
+          .select()
+          .from(branchMergeRuns)
+          .where(eq(branchMergeRuns.targetBranchId, s.feature));
+        assert.equal(runs.length, 0);
+        const baselines = await db
+          .select()
+          .from(branchItemBaselines)
+          .where(eq(branchItemBaselines.projectId, s.project.id));
+        assert.equal(baselines.length, 0);
+      });
+
+      await t.test("concurrent applies with one key make one run", async () => {
+        const s = await space();
+        await createTasks(s, ["Once"]);
+        const request = {
+          sourceBranchId: s.main,
+          targetBranchId: s.feature,
+          kind: "merge" as const,
+          trigger: "dashboard" as const,
+          userId: s.aliceUser.id,
+          idempotencyKey: "same-key"
+        };
+        const results = await Promise.all([
+          engine.apply(s.project.id, request),
+          engine.apply(s.project.id, request),
+          engine.apply(s.project.id, request)
+        ]);
+        assert.equal(
+          new Set(results.map((result) => result.body.run.id)).size,
+          1
+        );
+        assert.equal((await featureRows(s.feature)).length, 1);
+      });
+
+      await t.test(
+        "an apply racing a target edit never loses an update",
+        async () => {
+          const s = await space();
+          const [item] = await createTasks(s, ["Racing"]);
+          await engine.apply(s.project.id, {
+            sourceBranchId: s.main,
+            targetBranchId: s.feature,
+            kind: "merge",
+            trigger: "dashboard",
+            userId: s.aliceUser.id
+          });
+          const [copy] = await featureRows(s.feature);
+          await s.alice("PATCH", `/tasks/${item.id}`, {
+            title: "Changed on main",
+            expected_version: 1
+          });
+          const preview = await engine.preview(s.project.id, {
+            sourceBranchId: s.main,
+            targetBranchId: s.feature,
+            kind: "merge"
+          });
+          const [applied, edited] = await Promise.allSettled([
+            engine.apply(s.project.id, {
+              sourceBranchId: s.main,
+              targetBranchId: s.feature,
+              kind: "merge",
+              trigger: "dashboard",
+              userId: s.aliceUser.id,
+              previewFingerprint: preview.fingerprint
+            }),
+            s.alice("PATCH", `/tasks/${copy!.id}`, {
+              title: "Changed on the feature",
+              expected_version: copy!.version
+            })
+          ]);
+          const editOk =
+            edited.status === "fulfilled" && edited.value.statusCode === 200;
+          const applyOk = applied.status === "fulfilled";
+          assert.notEqual(editOk, applyOk, "exactly one of them wins");
+          if (!applyOk)
+            assert.equal(
+              (applied as PromiseRejectedResult).reason.code,
+              "BRANCH_PREVIEW_STALE"
+            );
+          else
+            assert.equal(
+              (edited as PromiseFulfilledResult<any>).value.json().error.code,
+              "TASK_VERSION_CONFLICT"
+            );
+          const [final] = await featureRows(s.feature);
+          assert.equal(
+            final!.title,
+            applyOk ? "Changed on main" : "Changed on the feature"
+          );
         }
       );
     } finally {
