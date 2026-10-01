@@ -1,6 +1,6 @@
 # Project branches
 
-Status: **spec, not implemented.** Quick review done 2026-09-27: the hotspot function names were checked against the code, the new SQL constructs were probed on pg-mem 3.0.14, and the TanStack Router APIs (`retainSearchParams`, `useBlocker`) were confirmed in the installed version. Written 2026-09-27 against `main` at `e37bd65` (worktree `orchestrat-branches`, branch `feat/project-branches`). Nothing here has been built, migrated, deployed or tested yet.
+Status: **built on `feat/project-branches`, not merged or deployed.** Verified locally against simulated providers; live providers (ORC-44) and the hosted rollout (ORC-45) are pending. `docs/acceptance/2026-09-30-project-branches.md` records what ran and every deviation from this spec. Written 2026-09-27 against `main` at `e37bd65`; quick review the same day (hotspot names checked against the code, new SQL probed on pg-mem 3.0.14, `retainSearchParams` and `useBlocker` confirmed in the installed TanStack Router).
 
 Companion documents:
 

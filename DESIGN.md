@@ -350,11 +350,13 @@ The sidebar is project navigation, not a second settings panel.
 
 Navigation is grouped as:
 
-- **Workspace:** Overview, Tasks, Agents
+- **Workspace:** Overview, Tasks, Agents, Messages
 - **Knowledge:** Documents, Activity
-- **Administration:** Settings
+- **Administration:** Decisions, Settings
 
 Each destination uses a Lucide icon and a text label. The selected destination uses the neutral sidebar accent surface with orange text. Hover states remain subtle.
+
+Decisions carries a small count badge while the current branch has open decisions. The badge has an accessible label such as "2 open decisions".
 
 The lower sidebar hierarchy is fixed:
 
@@ -390,13 +392,14 @@ Clicking the project name opens projects from the selected organization with:
 
 Clicking the branch name opens the project's branches with:
 
-- the default branch first, then the most recently updated, up to 12 active branches;
+- the default branch first, then the most recently updated, up to 12 active branches, plus the current branch when it is archived, labeled "Archived";
 - a dot plus "Unread messages" text on branches with unread messages, never the dot alone;
 - **All branches…**, a searchable dialog with Active and Archived groups, when there are more branches or any archived ones;
+- **Needs your decision (N)**, which opens Decisions, while the current branch has open decisions;
 - New branch, unless the project is archived;
 - Branch settings.
 
-The branch selector copies the organization and project selectors exactly: muted text that turns orange only while hovered or open. Every project page shows the selected branch's work. The branch lives in the `?branch=` search parameter, and the default branch has none. An archived branch keeps its pages readable: the shell shows one archived notice and every write control is hidden, not disabled.
+The branch selector copies the organization and project selectors exactly: muted text that turns orange only while hovered or open. Every project page shows the selected branch's work. The branch lives in the `?branch=` search parameter, and the default branch has none. An archived branch keeps its pages readable: the shell shows one archived notice and every write control is hidden, not disabled. See [Archived branches](#archived-branches).
 
 The current page name is plain orange text and is not a dropdown.
 
@@ -467,7 +470,7 @@ Forms use shadcn fields, labels, inputs, textareas, selects, and validation mess
 - Placeholder text does not replace labels.
 - Save actions expose pending and failure states.
 - Conflicts preserve the user's draft and explain the next choice.
-- Archived projects and documents are visibly read-only.
+- Archived projects, branches and documents are visibly read-only.
 
 ### Dialogs, sheets, and menus
 
@@ -490,6 +493,8 @@ Its hierarchy is:
 3. Current agent work and recent activity.
 
 Use cards, progress, short tables, and focused empty states. Avoid adding page-title chrome above the metrics.
+
+While the current branch has open decisions, a **Needs your decision** card with a **Review decisions** button sits above the metric cards. Branch setup uses the shell's setup panel, so Overview has no setup card of its own.
 
 ### Tasks
 
@@ -535,6 +540,50 @@ Revision history is a date-grouped timeline:
 ### Activity
 
 Activity is chronological and metadata-forward. Filter out implementation noise that does not help a person understand project state. Event type, actor, affected entity, and time should be easy to scan.
+
+### Decisions
+
+Decisions lists the conflicts that merges left for a person to settle. Every member can open it; only owners and admins choose.
+
+- The list shows open decisions that target the current branch. The toolbar holds an "N open" badge and an **All branches** toggle with `aria-pressed`.
+- Rows sit in one bordered list. Each row is a button showing the item name, the time, "source → target · reason", and where the merge came from: "GitHub PR #42" as a link, or "Merged in Orchestrat".
+- Selecting a row opens a right-side sheet with source and target values side by side, field by field, under the two branch names.
+- Owners and admins get **Use source (name)** and **Use target (name)** in the sheet footer. Members see "Only project owners and admins can choose." instead.
+- Notices in the sheet are status alerts: "The target changed since this merge. Review again." after a stale response, and "An agent is working on this task. You can choose once the claim ends." for a claimed task.
+- The empty state says **Nothing to decide** and names the branch.
+
+### Branch setup
+
+A branch whose setup is pending shows a setup panel above the content of every page, below the shell's notices. It is a card, not a modal, and it stays until the branch is set up.
+
+- The title is **Set up *branch***. The description names work agents already made there: "2 tasks and 1 document already here will be kept."
+- A radio group offers **Start blank**, **Import everything from** with a branch select preset to the default branch, and **Pick items…**. **Continue** confirms.
+- Members don't see the import choices on the default branch, because only owners and admins import into it.
+- **Start blank** finishes setup at once. The import choices open the import dialog, and the import finishes setup when it applies.
+- Archived branches and archived projects never show the panel.
+
+### Import dialog
+
+The import dialog copies chosen tasks, documents and chats from one branch into another. It opens from branch setup, from **Import into this branch** in Branch settings, and from the archived-branch notice.
+
+- It is a large dialog on desktop and a bottom sheet on phones. The description says nothing is deleted and the source keeps its copies.
+- **From** and **Into** sit at the top. The side the dialog opened for is fixed; the other is a select.
+- One search field filters the **Tasks**, **Documents** and **Chats** tabs. Each tab label shows how many items are chosen, and **Select all** checks every item that can be chosen in the current tab.
+- Rows are checkboxes with a muted second line: the task status, "Required by ORC-14", "Visible to Arman, codex" for chats, "Already in main", or why the item can't be imported. Task keys use the monospace style.
+- A task that a chosen task requires is checked and locked until its dependent is unchecked. Items that can't be imported stay listed, disabled, with the reason.
+- **Conflicts** lists items changed on both branches. Each row has **Use source** and **Use target** radios with nothing preselected, plus **Use source for all** and **Use target for all**. A **Compare** disclosure shows the differing field values side by side. **Import** stays disabled until every conflict has a choice.
+- If the branches changed while the person was choosing, a status notice says "Things changed while you were choosing. The preview is refreshed and your selections were kept." Conflicts that changed get a warning border and "Changed since you looked", and their choice is cleared.
+- The result lists what was added and updated, what was skipped and why, and "Undo isn't available; nothing was deleted."
+
+### Archived branches
+
+An archived branch keeps every page readable.
+
+- The shell shows one status notice above the page: "**feat/x is archived.** It was deleted on GitHub on Sep 27. Its work is read-only." The middle sentence gives the reason and the date: deleted on the provider, replaced when the repository was connected, or archived by an owner or admin. **Import into another branch** opens the import dialog with the archived branch as the source.
+- Every write control is hidden, not disabled. That covers **New task**, status moves, edits, comments, dependencies, pings, document creation, renaming and editing, and the Messages composer. Values that are normally editable render as text, such as a status badge in place of the status select.
+- Messages replaces its composer with the read-only footer: "This branch is archived. Its conversations are read-only."
+- Archived rows in Branch settings have no row actions.
+- **All branches…** lists archived branches in their own group, in muted text with an "Archived" label. Search's **Branches** group offers active branches only.
 
 ### Settings
 
@@ -654,3 +703,8 @@ The main implementation references are:
 - `apps/dashboard/src/features/documents/document-history.tsx` — revision timeline, comparison, restore.
 - `apps/dashboard/src/routes/_authenticated.projects.$projectId.tasks.tsx` — board/list and task-detail patterns.
 - `apps/dashboard/src/routes/_authenticated.projects.$projectId.documents.tsx` — document tree and editor workspace.
+- `apps/dashboard/src/features/branches/branch-selector.tsx` — branch breadcrumb menu.
+- `apps/dashboard/src/features/branches/onboarding-panel.tsx` — branch setup panel.
+- `apps/dashboard/src/features/branches/import-dialog.tsx` — import dialog, selection and conflicts.
+- `apps/dashboard/src/features/branches/archived-banner.tsx` — archived-branch notice.
+- `apps/dashboard/src/features/decisions/decisions-page.tsx` and `decision-sheet.tsx` — Decisions list and sheet.
