@@ -117,7 +117,17 @@ export class MergeService {
   }
 
   async preview(userId: string, projectId: string, input: MergePreviewRequest) {
-    await this.permissions.projectAccess(userId, projectId);
+    // The same rules as apply: merges and imports into the default need an
+    // owner or admin, and nothing can land on an archived branch (§6.7).
+    const target = await findProjectBranch(
+      this.db,
+      projectId,
+      input.target_branch_id
+    );
+    if (input.kind === "merge" || target?.isDefault)
+      await this.permissions.projectEditor(userId, projectId);
+    else await this.permissions.projectAccess(userId, projectId);
+    if (target) assertBranchWritable(target, { branchId: target.id });
     return {
       preview: await this.engine.preview(projectId, {
         sourceBranchId: input.source_branch_id,

@@ -853,16 +853,19 @@ export class AgentService {
         tx,
         { agentId: session.agentId, projectId, credentialId: "" },
         session,
-        now
+        now,
+        "branch_archived"
       );
     return sessions.length;
   }
 
+  /** `reason` lands on revoked claims and the events (spec §6.2). */
   private async closeSessionInTransaction(
     tx: Transaction,
     principal: AgentPrincipal,
     session: typeof agentSessions.$inferSelect,
-    now: Date
+    now: Date,
+    reason: "session_closed" | "branch_archived" = "session_closed"
   ) {
     if (session.status === "closed") return session;
     const claims = await tx
@@ -888,7 +891,7 @@ export class AgentService {
         .set({
           status: "revoked",
           releasedAt: now,
-          releaseReason: "session_closed"
+          releaseReason: reason
         })
         .where(eq(taskClaims.id, claim.id));
       if (task && resetsToReadyOnClaimEnd(task.status))
@@ -902,7 +905,7 @@ export class AgentService {
         entityId: claim.id,
         branchId: claim.branchId,
         type: "claim.revoked",
-        payload: { task_id: claim.taskId, reason: "session_closed" }
+        payload: { task_id: claim.taskId, reason }
       });
     }
     const [updated] = await tx
@@ -915,7 +918,8 @@ export class AgentService {
       actorAgentId: principal.agentId,
       entityId: session.id,
       branchId: session.branchId,
-      type: "session.closed"
+      type: "session.closed",
+      ...(reason === "branch_archived" ? { payload: { reason } } : {})
     });
     return updated!;
   }

@@ -2,6 +2,7 @@ import {
   connectRepositoryRequestSchema,
   createRepositoryAuthorizationRequestSchema,
   githubInstallationRequestSchema,
+  pendingRepositoryAuthorizationQuerySchema,
   projectTaskParamsSchema,
   repositoryAuthorizationParamsSchema,
   repositoryDeliveriesQuerySchema,
@@ -20,6 +21,12 @@ export async function humanRepositoryRoutes(
 ) {
   const project = (params: unknown) =>
     projectTaskParamsSchema.parse(params).projectId;
+  app.get("/repository/authorizations/pending", (request) =>
+    options.repositories.pending(
+      request.userId,
+      pendingRepositoryAuthorizationQuerySchema.parse(request.query).provider
+    )
+  );
   app.get("/projects/:projectId/repository", (request) =>
     options.repositories.get(request.userId, project(request.params))
   );

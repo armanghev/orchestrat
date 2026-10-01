@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  projectEvents,
   repositoryConnectionAttempts,
   repositoryRefs,
   repositoryWebhookDeliveries
@@ -211,6 +212,24 @@ test("suspension, revocation and disconnect keep every branch", async (t) => {
   assert.equal(
     (await s.alice("GET", `${s.base}/repository`)).json().repository.status,
     "needs_reauthorization"
+  );
+  // Each change tells the project once, so open dashboards refresh.
+  const changes = await s.db
+    .select()
+    .from(projectEvents)
+    .where(eq(projectEvents.type, "repository.status_changed"))
+    .orderBy(asc(projectEvents.id));
+  assert.deepEqual(
+    changes.map((event) => [
+      (event.payload as { from: string }).from,
+      (event.payload as { status: string }).status,
+      event.branchId
+    ]),
+    [
+      ["active", "suspended", null],
+      ["suspended", "active", null],
+      ["active", "needs_reauthorization", null]
+    ]
   );
   const before = (await s.branches()).length;
   const removed = await s.alice("DELETE", `${s.base}/repository`);

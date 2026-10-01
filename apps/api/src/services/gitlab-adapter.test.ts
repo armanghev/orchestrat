@@ -307,12 +307,20 @@ test("merge requests merge, forks don't, and payloads reveal default changes", a
   await s.worker.tick();
   const runs = (await s.alice("GET", `${s.base}/merges`)).json().runs;
   assert.deepEqual(
-    runs.map(
-      (run: { provider: { change_number: string } }) =>
-        run.provider.change_number
-    ),
-    ["1"],
-    "the fork's merge request is skipped"
+    runs
+      .map(
+        (run: {
+          provider: { change_number: string };
+          status: string;
+          skip_reason: string | null;
+        }) => [run.provider.change_number, run.status, run.skip_reason]
+      )
+      .sort(),
+    [
+      ["1", "applied", null],
+      ["2", "skipped", "fork"]
+    ],
+    "the fork's merge request is recorded as skipped"
   );
 
   remote.default_branch = "feat/mr";

@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   documentRevisions,
   documents,
+  projectBranches,
   projectEvents,
   projectMembers,
   tasks
@@ -114,12 +115,31 @@ test("members import into working branches; owners and admins merge", async (t) 
   });
   const imported = await s.apply(importInto(s.feature), s.bob);
   assert.equal(imported.statusCode, 201, imported.body);
+  const merge = {
+    source_branch_id: s.main,
+    target_branch_id: s.feature,
+    kind: "merge"
+  };
+  // Members can't preview what they can't apply.
+  for (const body of [importInto(s.main), merge]) {
+    const preview = await s.bob("POST", `${s.base}/merges/preview`, body);
+    assert.equal(preview.statusCode, 403, JSON.stringify(body));
+  }
   for (const body of [
     importInto(s.main),
     { ...importInto(s.feature), archive_source: true },
-    { source_branch_id: s.main, target_branch_id: s.feature, kind: "merge" }
+    merge
   ]) {
-    const denied = await s.apply(body as Record<string, unknown>, s.bob);
+    // The preview has no archive flag; the owner's fingerprint is valid.
+    const request: Record<string, unknown> = { ...body };
+    delete request.archive_source;
+    const denied = await s.apply(
+      {
+        ...body,
+        preview_fingerprint: (await s.preview(request)).fingerprint
+      },
+      s.bob
+    );
     assert.equal(denied.statusCode, 403, JSON.stringify(body));
   }
   await s.db
@@ -145,6 +165,23 @@ test("members import into working branches; owners and admins merge", async (t) 
     404,
     "agents have no merge routes"
   );
+});
+
+test("nothing previews or lands on an archived target", async (t) => {
+  const s = await setup();
+  t.after(() => s.app.close());
+  await s.db
+    .update(projectBranches)
+    .set({ archivedAt: new Date(), archivedReason: "manual" })
+    .where(eq(projectBranches.id, s.feature));
+  const preview = await s.alice("POST", `${s.base}/merges/preview`, {
+    source_branch_id: s.main,
+    target_branch_id: s.feature,
+    kind: "import",
+    selection: { tasks: "all", documents: "all", chats: "all" }
+  });
+  assert.equal(preview.statusCode, 409, preview.body);
+  assert.equal(preview.json().error.code, "BRANCH_ARCHIVED");
 });
 
 test("stale previews are refused and a lost response replays", async (t) => {

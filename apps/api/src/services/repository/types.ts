@@ -139,6 +139,8 @@ export interface ProviderAdapter {
   maintain?(connection: ConnectionRow): Promise<Partial<ConnectionRow>>;
   /** Settings → Re-enable: wakes a webhook the provider disabled. */
   reenableHook?(connection: ConnectionRow): Promise<void>;
+  /** GitHub: where to install the app when a repository isn't listed. */
+  installUrl?(state: string): string;
 }
 
 /** A provider answered that the connection's authorization is gone. */

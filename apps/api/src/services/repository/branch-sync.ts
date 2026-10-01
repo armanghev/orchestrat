@@ -9,6 +9,7 @@ import { and, desc, eq, isNull, ne } from "drizzle-orm";
 import { insertProjectEvent } from "../agent-service.js";
 import { defaultBranch, type BranchRow } from "../branch-context.js";
 import type { BranchService } from "../branch-service.js";
+import { updateConnection } from "./connection-status.js";
 import type {
   ConnectionRow,
   MergedChange,
@@ -118,10 +119,7 @@ export class BranchSync {
     connectionId: string,
     values: Partial<typeof repositoryConnections.$inferInsert>
   ) {
-    await this.db
-      .update(repositoryConnections)
-      .set({ ...values, updatedAt: this.now() })
-      .where(eq(repositoryConnections.id, connectionId));
+    await updateConnection(this.db, connectionId, values, this.now());
   }
 
   private async locked<T>(

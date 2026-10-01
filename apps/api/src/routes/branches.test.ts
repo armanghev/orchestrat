@@ -186,6 +186,7 @@ test("archiving hides the branch, keeps its data, and closes its agent sessions"
     // task_claims_one_active_per_task index and hides revoked claims.
     .where(eq(taskClaims.sessionId, sessionId));
   assert.equal(claim!.status, "revoked");
+  assert.equal(claim!.releaseReason, "branch_archived");
   const [task] = await db.select().from(tasks).where(eq(tasks.id, taskId));
   assert.equal(task!.status, "ready", "the claim ended, so the task is ready");
 
@@ -272,6 +273,38 @@ test("agents register the checkout branch idempotently and never revive a delete
   assert.equal(
     (await call("GET", "/project")).json().default_branch_id,
     project2.default_branch_id
+  );
+});
+
+test("an agent credential creates at most 10 branches a minute", async (t) => {
+  const { app, createAgent } = await workspace();
+  t.after(() => app.close());
+  const { call } = await createAgent("claude");
+  for (let n = 1; n <= 10; n += 1) {
+    const created = await call("POST", "/branches/register", {
+      name: `feat/burst-${n}`
+    });
+    assert.equal(created.json().created, true, created.body);
+  }
+  const limited = await call("POST", "/branches/register", {
+    name: "feat/burst-11"
+  });
+  assert.equal(limited.statusCode, 429);
+  assert.equal(limited.json().error.code, "RATE_LIMITED");
+  assert.ok(Number(limited.headers["retry-after"]) > 0);
+  // Re-registering an existing branch isn't a creation and still works.
+  const existing = await call("POST", "/branches/register", {
+    name: "feat/burst-1"
+  });
+  assert.equal(existing.statusCode, 200, existing.body);
+  assert.equal(existing.json().created, false);
+  // Another credential has its own budget.
+  const other = await createAgent("codex");
+  assert.equal(
+    (
+      await other.call("POST", "/branches/register", { name: "feat/codex" })
+    ).json().created,
+    true
   );
 });
 

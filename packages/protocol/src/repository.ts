@@ -113,10 +113,30 @@ export const repositoryCandidateSchema = z.object({
 });
 export type RepositoryCandidate = z.infer<typeof repositoryCandidateSchema>;
 export const repositoryCandidatesResponseSchema = z.object({
-  repositories: z.array(repositoryCandidateSchema)
+  repositories: z.array(repositoryCandidateSchema),
+  /** GitHub: where to install the app when a repository isn't listed. */
+  install_url: z.string().url().nullable().optional()
 });
 export type RepositoryCandidatesResponse = z.infer<
   typeof repositoryCandidatesResponseSchema
+>;
+
+/**
+ * The signed-in person's newest authorized attempt for a provider. GitHub's
+ * Setup URL lands in whichever browser installed the app, so the dashboard
+ * finds the attempt on the server rather than in one tab's storage (§11.8).
+ */
+export const pendingRepositoryAuthorizationQuerySchema = z.object({
+  provider: repositoryProviderSchema
+});
+export const pendingRepositoryAuthorizationResponseSchema = z.object({
+  authorization_id: z.string().regex(/^ra_[A-Za-z0-9_-]{20,}$/),
+  project_id: idSchema,
+  provider: repositoryProviderSchema,
+  expires_at: dateSchema
+});
+export type PendingRepositoryAuthorizationResponse = z.infer<
+  typeof pendingRepositoryAuthorizationResponseSchema
 >;
 
 export const defaultBranchMappingSchema = z.discriminatedUnion("mode", [

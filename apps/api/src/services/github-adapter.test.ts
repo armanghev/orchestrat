@@ -207,15 +207,36 @@ test("connecting checks the installation id and mints only narrow tokens", async
   assert.equal(foreign.statusCode, 409);
   assert.equal(foreign.json().error.code, "REPOSITORY_AUTHORIZATION_INVALID");
   assert.deepEqual((await install("10")).json(), { next: "pick_repository" });
-  const candidates = (
+  const listed = (
     await s.alice(
       "GET",
       `${base}/repository/authorizations/${authorization.authorization_id}/repositories`
     )
-  ).json().repositories;
+  ).json();
+  const candidates = listed.repositories;
   assert.deepEqual(
     candidates.map((candidate: { full_name: string }) => candidate.full_name),
     ["acme/app"]
+  );
+  // Missing repositories mean installing the app; the Setup URL then finds
+  // this attempt on the server, whichever browser it opens in.
+  const installUrl = new URL(listed.install_url);
+  assert.equal(
+    installUrl.searchParams.get("state"),
+    authorization.authorization_id
+  );
+  const pending = await s.alice(
+    "GET",
+    "/repository/authorizations/pending?provider=github"
+  );
+  assert.equal(pending.statusCode, 200, pending.body);
+  assert.equal(pending.json().authorization_id, authorization.authorization_id);
+  assert.equal(pending.json().project_id, s.project.id);
+  assert.equal(
+    (await s.bob("GET", "/repository/authorizations/pending?provider=github"))
+      .statusCode,
+    404,
+    "only the person who started it"
   );
   const stolen = await s.alice("POST", `${base}/repository`, {
     authorization_id: authorization.authorization_id,

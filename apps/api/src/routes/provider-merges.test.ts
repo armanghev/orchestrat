@@ -164,18 +164,22 @@ test("a merge the webhooks missed is found by reconcile", async (t) => {
   assert.equal((await s.runs()).length, 1, "the overlap window is idempotent");
 });
 
-test("forks are skipped and unknown heads are recorded as skipped", async (t) => {
+test("forks and unknown heads are recorded as skipped", async (t) => {
   const s = await setup();
   t.after(() => s.app.close());
   await s.deliver(
     "merged",
     s.merged("someone/fork", "trunk", { fromFork: true })
   );
-  assert.equal((await s.runs()).length, 0);
   await s.deliver("merged", s.merged("never-seen", "trunk"));
-  const [run] = await s.runs();
-  assert.equal(run!.status, "skipped");
-  assert.equal(run!.skipReason, "no_source_branch");
+  const runs = await s.runs();
+  assert.deepEqual(
+    runs.map((run) => [run.status, run.skipReason]),
+    [
+      ["skipped", "fork"],
+      ["skipped", "no_source_branch"]
+    ]
+  );
 });
 
 test("stacked branches merge back without false conflicts", async (t) => {

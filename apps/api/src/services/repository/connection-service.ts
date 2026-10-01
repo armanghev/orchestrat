@@ -14,7 +14,7 @@ import type {
   RepositoryConnection,
   RepositoryDelivery
 } from "@orchestrat/protocol";
-import { and, count, desc, eq, isNull } from "drizzle-orm";
+import { and, count, desc, eq, gt, isNull } from "drizzle-orm";
 import { insertProjectEvent } from "../agent-service.js";
 import { ApiError } from "../api-error.js";
 import { defaultBranch } from "../branch-context.js";
@@ -386,7 +386,43 @@ export class RepositoryService {
     return {
       repositories: await provider(() =>
         adapter.listCandidates({ attempt, userToken })
+      ),
+      // GitHub only lists installed repositories; the attempt id is a
+      // harmless state for the Setup URL (§8.3).
+      install_url: adapter.installUrl?.(attempt.id) ?? null
+    };
+  }
+
+  /**
+   * The person's newest authorized attempt for a provider, for GitHub's
+   * Setup URL, which can open in a browser that didn't start the flow.
+   */
+  async pending(userId: string, provider: ProviderName) {
+    const [attempt] = await this.db
+      .select()
+      .from(repositoryConnectionAttempts)
+      .where(
+        and(
+          eq(repositoryConnectionAttempts.userId, userId),
+          eq(repositoryConnectionAttempts.provider, provider),
+          eq(repositoryConnectionAttempts.status, "authorized"),
+          gt(repositoryConnectionAttempts.expiresAt, this.now())
+        )
       )
+      .orderBy(desc(repositoryConnectionAttempts.createdAt))
+      .limit(1);
+    if (!attempt)
+      throw new ApiError(
+        404,
+        "NOT_FOUND",
+        "No connection in progress. Start again from the project’s settings."
+      );
+    await this.permissions.projectEditor(userId, attempt.projectId);
+    return {
+      authorization_id: attempt.id,
+      project_id: attempt.projectId,
+      provider: attempt.provider,
+      expires_at: attempt.expiresAt.toISOString()
     };
   }
 

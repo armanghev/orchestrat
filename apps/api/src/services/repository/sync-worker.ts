@@ -7,6 +7,7 @@ import {
 import { and, asc, eq, isNull, lt, lte } from "drizzle-orm";
 import { ApiError } from "../api-error.js";
 import type { BranchSync } from "./branch-sync.js";
+import { updateConnection } from "./connection-status.js";
 import {
   ProviderAuthorizationError,
   type ConnectionRow,
@@ -236,23 +237,21 @@ export class RepositorySyncWorker {
     try {
       await this.sync.reconcile(connection);
     } catch (error) {
-      await this.db
-        .update(repositoryConnections)
-        .set(
-          error instanceof ProviderAuthorizationError
-            ? {
-                status: "needs_reauthorization",
-                statusReason: "Reconnect to restore access.",
-                updatedAt: this.now()
-              }
-            : {
-                status: "error",
-                statusReason: errorText(error),
-                lastReconciledAt: this.now(),
-                updatedAt: this.now()
-              }
-        )
-        .where(eq(repositoryConnections.id, connection.id));
+      await updateConnection(
+        this.db,
+        connection.id,
+        error instanceof ProviderAuthorizationError
+          ? {
+              status: "needs_reauthorization",
+              statusReason: "Reconnect to restore access."
+            }
+          : {
+              status: "error",
+              statusReason: errorText(error),
+              lastReconciledAt: this.now()
+            },
+        this.now()
+      );
     }
   }
 }

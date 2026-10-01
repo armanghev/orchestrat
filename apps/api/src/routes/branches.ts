@@ -8,7 +8,9 @@ import {
   registerBranchRequestSchema
 } from "@orchestrat/protocol";
 import type { FastifyInstance } from "fastify";
+import { ApiError } from "../services/api-error.js";
 import type { BranchService } from "../services/branch-service.js";
+import { FixedWindowRateLimit } from "../services/rate-limit.js";
 
 // Branch routes (docs/project-branches.md §6.7). Humans manage branches in a
 // project; agents list, look up and register them for their credential's
@@ -87,8 +89,15 @@ export async function humanBranchRoutes(
 
 export async function agentBranchRoutes(
   app: FastifyInstance,
-  options: { branches: BranchService }
+  options: { branches: BranchService; registrationsPerMinute?: number }
 ) {
+  // At most 10 new branches per minute per agent credential (spec §12).
+  // Registering a branch that already exists is free: the CLI does it on
+  // every session start.
+  const creations = new FixedWindowRateLimit(
+    options.registrationsPerMinute ?? 10,
+    60_000
+  );
   app.get("/branches", (request) =>
     options.branches.listForAgent(
       request.agentPrincipal!,
@@ -101,10 +110,30 @@ export async function agentBranchRoutes(
       agentBranchParamsSchema.parse(request.params).branchId
     )
   );
-  app.post("/branches/register", (request) =>
-    options.branches.registerForAgent(
-      request.agentPrincipal!,
-      registerBranchRequestSchema.parse(request.body)
-    )
-  );
+  app.post("/branches/register", async (request, reply) => {
+    const principal = request.agentPrincipal!;
+    try {
+      return await options.branches.registerForAgent(
+        principal,
+        registerBranchRequestSchema.parse(request.body),
+        () => {
+          const retryAfter = creations.check(principal.credentialId);
+          if (retryAfter !== null)
+            throw new ApiError(
+              429,
+              "RATE_LIMITED",
+              "Too many new branches. Try again shortly.",
+              { retry_after_seconds: retryAfter }
+            );
+        }
+      );
+    } catch (error) {
+      if (error instanceof ApiError && error.code === "RATE_LIMITED")
+        reply.header(
+          "retry-after",
+          String(error.details?.retry_after_seconds ?? 60)
+        );
+      throw error;
+    }
+  });
 }

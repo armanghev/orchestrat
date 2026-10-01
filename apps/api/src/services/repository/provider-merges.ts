@@ -24,11 +24,9 @@ export class ProviderMerges {
   ) {}
 
   async handle(connection: ConnectionRow, change: MergedChange) {
-    if (change.fromFork) return;
     const dedupeKey = `${connection.provider}:${connection.providerRepositoryId}:merge:${change.number}:${change.mergedAt}`;
     const target = await this.target(connection, change.baseRef);
     if (!target) return;
-    const source = await this.source(connection, change);
     const provider = {
       provider: connection.provider,
       changeNumber: change.number,
@@ -36,6 +34,10 @@ export class ProviderMerges {
       headSha: change.headSha,
       mergeSha: change.mergeSha
     };
+    // A fork's branch isn't ours; the run records that it was skipped.
+    if (change.fromFork)
+      return this.skip(connection, target, dedupeKey, provider, "fork");
+    const source = await this.source(connection, change);
     if (!source || source === target)
       return this.skip(
         connection,
@@ -140,7 +142,7 @@ export class ProviderMerges {
       headSha: string | null;
       mergeSha: string | null;
     },
-    reason: "no_source_branch" | "same_branch"
+    reason: "no_source_branch" | "same_branch" | "fork"
   ) {
     const [existing] = await this.db
       .select({ id: branchMergeRuns.id })

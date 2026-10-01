@@ -178,9 +178,14 @@ export class BranchService {
    * active branch with that name or creates it. A name whose newest
    * generation was deleted on the provider is refused unless force_new.
    */
+  /**
+   * `beforeCreate` runs only when registration would create a branch; it
+   * throws to refuse (the per-credential rate limit, spec §12).
+   */
   async registerForAgent(
     principal: AgentPrincipal,
-    input: RegisterBranchRequest
+    input: RegisterBranchRequest,
+    beforeCreate: () => void = () => undefined
   ) {
     const actor: Actor = { type: "agent", id: principal.agentId };
     return this.db.transaction(async (tx) => {
@@ -226,6 +231,7 @@ export class BranchService {
             }
           );
       }
+      beforeCreate();
       const branch = await this.insertBranch(
         tx,
         principal.projectId,
@@ -551,11 +557,7 @@ export class BranchService {
     return branch ?? null;
   }
 
-  async lockBranch(
-    tx: Transaction,
-    projectId: string,
-    branchId: string
-  ) {
+  async lockBranch(tx: Transaction, projectId: string, branchId: string) {
     const [branch] = await tx
       .select()
       .from(projectBranches)

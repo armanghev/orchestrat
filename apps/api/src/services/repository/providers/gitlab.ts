@@ -2,6 +2,7 @@ import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { repositoryConnections, type Database } from "@orchestrat/db";
 import type { RepositoryCandidate } from "@orchestrat/protocol";
 import { eq } from "drizzle-orm";
+import { updateConnection } from "../connection-status.js";
 import { aad, type SecretBox } from "../secrets.js";
 import {
   ProviderAuthorizationError,
@@ -214,14 +215,15 @@ export class GitlabAdapter implements ProviderAdapter {
       return { token: tokens.access_token };
     });
     if (result.token) return result.token;
-    await this.db
-      .update(repositoryConnections)
-      .set({
+    await updateConnection(
+      this.db,
+      connection.id,
+      {
         status: "needs_reauthorization",
-        statusReason: "Reconnect GitLab to restore access.",
-        updatedAt: this.now()
-      })
-      .where(eq(repositoryConnections.id, connection.id));
+        statusReason: "Reconnect GitLab to restore access."
+      },
+      this.now()
+    );
     throw new ProviderAuthorizationError(
       "GitLab access was revoked or expired."
     );
