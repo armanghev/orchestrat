@@ -18,24 +18,23 @@ Test the web dashboard instead.
 
 Run these from the `feat/project-branches` checkout unless noted.
 
-1. Start Postgres. The local `.env` uses Homebrew `postgresql@17` on port 5433:
+1. Start Postgres 17 (Homebrew; port 5432, with your Mac user as superuser).
+   Your everyday database is on Postgres 14, port 5433, and is left alone:
 
    ```bash
    brew services start postgresql@17
    ```
 
-2. Create a separate database, so migration `0016` stays out of your everyday
-   one:
+2. Create a separate database for this test:
 
    ```bash
-   createdb -p 5433 orchestrat_branches
+   createdb -p 5432 orchestrat_branches
    ```
 
 3. Copy `.env`, `apps/dashboard/.env` and `apps/dashboard/.env.local` from
    your main checkout into this one. They're gitignored, so the worktree has
    none. In the root `.env`:
-   - change the database name in `ORCHESTRAT_DATABASE_URL` to
-     `orchestrat_branches`;
+   - set `ORCHESTRAT_DATABASE_URL="postgresql://<your Mac user>@localhost:5432/orchestrat_branches"`;
    - add the variables from setup guide §0.3. The provider variables can wait
      until part 4.
 4. Build once, migrate, then start the API and the dashboard in two terminals:
@@ -62,8 +61,6 @@ the hosted API it falls back to today's behavior, but put the old one back when
 you're done (part 6).
 
 ```bash
-mkdir -p ~/.orchestrat-dev
-cp ~/.local/bin/orchestrat ~/.orchestrat-dev/orchestrat.backup
 pnpm cli:install
 ```
 
@@ -214,8 +211,9 @@ ask it to write the section. Leave what you didn't run as **NOT RUN**.
 
 ## 6. Clean up
 
-- Put the old CLI back:
-  `cp ~/.orchestrat-dev/orchestrat.backup ~/.local/bin/orchestrat`.
+- Put the released CLI back by installing from your main checkout:
+  `cd <main checkout> && pnpm cli:install`. (`~/.local/bin/orchestrat` is a
+  symlink into `~/.orchestrat/runtimes`, so don't copy files over it.)
 - Stop the API, the dashboard and the tunnel. Run
   `brew services stop postgresql@17` if you don't need Postgres.
 - Delete the provider apps and the test repositories (setup guide §5).
