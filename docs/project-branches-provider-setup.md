@@ -2,7 +2,7 @@
 
 This is how to register the three provider apps that [project branches](project-branches.md) connects to, and every environment variable the API needs. It's written for **local testing**: a local API and dashboard, a local database, and your own test accounts. Register separate apps for production later.
 
-> The feature isn't built yet. These steps describe the configuration the implementation reads (spec §8). Register the apps once tasks Branches 13–16 land, or earlier if you want the IDs ready.
+> The feature is built on `feat/project-branches` and has run only against simulated providers. To test it by hand, follow [the manual test](project-branches-manual-test.md); it uses this guide for app registration.
 
 Safety rules:
 - Point the tunnel only at your **local** API (port 8801).
@@ -288,22 +288,9 @@ Unverified points to watch during this test:
 
 ---
 
-## 4. Smoke test after setup
+## 4. What to test
 
-Once the implementation exists, run this against each provider with the local API and dashboard running. It is the live-acceptance checklist; record results in `docs/acceptance/<date>-project-branches.md`, and leave anything you didn't run marked **NOT RUN**.
-
-1. **Connect.** The default-branch mapping step shows the right case. After connecting, the Orchestrat default tracks `main`.
-2. `git checkout -b feat/one && git commit --allow-empty -m one && git push -u origin feat/one` → a `feat/one` branch appears in the selector within seconds.
-3. In Orchestrat on `feat/one`: create a task, edit a document, send a chat message.
-4. Change the same document on `main`. Open a PR/MR `feat/one → main` and merge it, with the head branch auto-deleted.
-   - The non-conflicting work appears on `main`.
-   - The document appears under **Decisions** with *Use source* / *Use target*.
-   - `feat/one` is archived and read-only.
-5. `git push origin :feat/two` for a branch that exists → archived.
-6. Push `feat/two` again → a **new** blank `feat/two` branch. The archived one is untouched.
-7. Stop the API, push a branch, start the API → the branch appears after the next reconcile (≤ 60 s with the test interval).
-8. Local CLI: in a checkout of the test repo on an unpushed branch `feat/local`, start an agent → the `feat/local` Orchestrat branch exists and the agent's session is pinned to it.
-9. **Disconnect** → the repository card is gone and branches and work remain. GitLab: the webhook is removed.
+The checks for each provider, plus agents and the dashboard without a provider, are in [the manual test](project-branches-manual-test.md). Record results in `docs/acceptance/2026-09-30-project-branches.md`, and leave anything you didn't run marked **NOT RUN**.
 
 ---
 
