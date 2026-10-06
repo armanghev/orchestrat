@@ -1,7 +1,9 @@
 name: CI
 
 on:
+  # Branches get CI through their pull request; pushes run it only on main.
   push:
+    branches: [main]
   pull_request:
 
 jobs:
