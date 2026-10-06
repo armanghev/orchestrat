@@ -400,12 +400,16 @@ test("document decisions apply the recorded source revision", async (t) => {
   ).json().decisions;
   assert.equal(decision.item_type, "document");
   assert.deepEqual(decision.fields, ["body"]);
+  // The sheet compares the text of both sides.
+  assert.equal(decision.source_values.body, "main's text");
+  assert.equal(decision.target_values.body, "feature's text");
   const settled = await s.alice(
     "POST",
     `${s.base}/decisions/${decision.id}/resolve`,
     { choice: "use_source" }
   );
   assert.equal(settled.statusCode, 200, settled.body);
+  assert.equal(settled.json().decision.target_values.body, "main's text");
   const history = await s.db
     .select()
     .from(documentRevisions)

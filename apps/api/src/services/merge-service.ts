@@ -16,7 +16,7 @@ import type {
   MergePreviewRequest,
   MergeRunsQuery
 } from "@orchestrat/protocol";
-import { and, desc, eq, lt, max, ne, or } from "drizzle-orm";
+import { and, desc, eq, inArray, lt, max, ne, or } from "drizzle-orm";
 import { insertProjectEvent } from "./agent-service.js";
 import { ApiError } from "./api-error.js";
 import { assertBranchWritable, findProjectBranch } from "./branch-context.js";
@@ -91,6 +91,78 @@ export function decisionJson(row: DecisionRow): Decision {
     resolved_at: row.resolvedAt?.toISOString() ?? null,
     created_at: row.createdAt.toISOString()
   };
+}
+
+// Long documents are cut for the side-by-side view; the merge itself always
+// uses the whole revision.
+const BODY_PREVIEW_CHARS = 50_000;
+const preview = (body: string) =>
+  body.length > BODY_PREVIEW_CHARS
+    ? `${body.slice(0, BODY_PREVIEW_CHARS)}\n\n… (cut for display)`
+    : body;
+
+/**
+ * Document decisions store revision ids, not text, so the sheet would have
+ * nothing to compare. Adds `body`: the recorded source revision and the
+ * target document's current text, which is what "use target" keeps.
+ */
+export async function withDocumentBodies(
+  db: Database | Transaction,
+  decisions: Decision[]
+): Promise<Decision[]> {
+  const docs = decisions.filter((item) => item.item_type === "document");
+  if (!docs.length) return decisions;
+  const sourceIds = docs
+    .map((item) => item.source_values.revision_id)
+    .filter((id): id is string => typeof id === "string");
+  const targetIds = docs
+    .map((item) => item.target_item_id)
+    .filter((id): id is string => typeof id === "string");
+  const sources = sourceIds.length
+    ? await db
+        .select({
+          id: documentRevisions.id,
+          body: documentRevisions.contentMarkdown
+        })
+        .from(documentRevisions)
+        .where(inArray(documentRevisions.id, sourceIds))
+    : [];
+  const targets = targetIds.length
+    ? await db
+        .select({
+          id: documents.id,
+          body: documentRevisions.contentMarkdown
+        })
+        .from(documents)
+        .innerJoin(
+          documentRevisions,
+          and(
+            eq(documentRevisions.documentId, documents.id),
+            eq(documentRevisions.revisionNumber, documents.currentRevision)
+          )
+        )
+        .where(inArray(documents.id, targetIds))
+    : [];
+  const sourceBody = new Map(sources.map((row) => [row.id, row.body]));
+  const targetBody = new Map(targets.map((row) => [row.id, row.body]));
+  return decisions.map((item) => {
+    if (item.item_type !== "document") return item;
+    const source = sourceBody.get(String(item.source_values.revision_id));
+    const target = item.target_item_id
+      ? targetBody.get(item.target_item_id)
+      : undefined;
+    return {
+      ...item,
+      source_values: {
+        ...item.source_values,
+        ...(source === undefined ? {} : { body: preview(source) })
+      },
+      target_values: {
+        ...item.target_values,
+        ...(target === undefined ? {} : { body: preview(target) })
+      }
+    };
+  });
 }
 
 /** The source fingerprint a decision was recorded against. */
@@ -230,7 +302,9 @@ export class MergeService {
         desc(branchMergeDecisions.createdAt),
         desc(branchMergeDecisions.id)
       );
-    return { decisions: rows.map(decisionJson) };
+    return {
+      decisions: await withDocumentBodies(this.db, rows.map(decisionJson))
+    };
   }
 
   /**
@@ -320,9 +394,11 @@ export class MergeService {
         409,
         "BRANCH_DECISION_STALE",
         "The target changed since this decision was recorded.",
-        { decision: outcome.stale }
+        { decision: (await withDocumentBodies(this.db, [outcome.stale!]))[0]! }
       );
-    return { decision: outcome.decision };
+    return {
+      decision: (await withDocumentBodies(this.db, [outcome.decision]))[0]!
+    };
   }
 
   private async settle(
