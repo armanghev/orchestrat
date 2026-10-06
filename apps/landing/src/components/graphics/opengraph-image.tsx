@@ -70,7 +70,7 @@ export default async function OpenGraphImage() {
           src={`data:image/png;base64,${screenshot.toString("base64")}`}
           width={612}
           height={400}
-          alt="Orchestrat workspace on macOS"
+          alt="Orchestrat workspace"
         />
       </div>
       <div

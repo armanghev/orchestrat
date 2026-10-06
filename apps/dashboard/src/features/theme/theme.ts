@@ -20,8 +20,15 @@ export function applyTheme(
   storage: Pick<Storage, "setItem">
 ): ResolvedTheme {
   const resolved = resolveTheme(theme, systemDark);
+  // Switch every color at once. Otherwise each element with a color
+  // transition fades on its own schedule and the page briefly mixes themes.
+  const pause = document.createElement("style");
+  pause.textContent = "*,*::before,*::after{transition:none!important}";
+  document.head.append(pause);
   document.documentElement.classList.toggle("dark", resolved === "dark");
   document.documentElement.dataset.theme = resolved;
+  window.getComputedStyle(document.body).getPropertyValue("color");
+  requestAnimationFrame(() => requestAnimationFrame(() => pause.remove()));
   storage.setItem(themeMirrorKey, theme);
   return resolved;
 }

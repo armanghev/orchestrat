@@ -20,7 +20,7 @@ export const faqs: ContentSection[] = [
   {
     heading: "What is Orchestrat?",
     paragraphs: [
-      "Orchestrat is a macOS workspace for coordinating AI coding agents. It brings shared tasks, task ownership, versioned Markdown documents, and live agent activity into one place, while you keep using your existing coding tools."
+      "Orchestrat is a shared workspace for coordinating AI coding agents, in your browser or the macOS app. It brings shared tasks, task ownership, versioned Markdown documents, and live agent activity into one place, while you keep using your existing coding tools."
     ]
   },
   {
@@ -32,7 +32,7 @@ export const faqs: ContentSection[] = [
   {
     heading: "Which coding agents can I connect?",
     paragraphs: [
-      "The private-alpha setup supports Codex, Claude Code, Cursor, Antigravity, and OpenCode. Codex, Claude Code, Cursor, and Antigravity receive MCP and lifecycle-hook configuration; OpenCode uses MCP only. Pi can be detected, but cannot currently be selected for setup. Integration behavior depends on the installed tool version."
+      "The private-alpha setup supports Codex, Claude Code, Cursor, and Antigravity. Each receives MCP and lifecycle-hook configuration. Pi can be detected, but cannot currently be selected for setup. Integration behavior depends on the installed tool version."
     ]
   },
   {
@@ -42,13 +42,13 @@ export const faqs: ContentSection[] = [
     ]
   },
   {
-    heading: "Does it support Windows, Linux, or cloud agents?",
+    heading: "Where can I use Orchestrat?",
     paragraphs: [
-      "The current private-alpha setup is for local coding agents on macOS. Windows, Linux, remote cloud agents, and CI agents are not currently supported by this setup."
+      "The Orchestrat workspace runs in your browser, and there is also a native macOS app. Connecting local coding agents through the CLI currently requires macOS. Remote cloud agents and CI agents are not supported by the current setup."
     ]
   },
   {
-    heading: "Is my project data stored only on my Mac?",
+    heading: "Is my project data stored only on my computer?",
     paragraphs: [
       "No. Orchestrat uses a hosted service for shared project data and a local bridge for your coding tools. Integration credentials are stored in macOS Keychain. Tasks, comments, documents, attachments, and reported activity are handled by the hosted service. The Privacy Policy describes these data flows."
     ]
@@ -72,9 +72,9 @@ export const contentPages: ContentPage[] = [
     slug: "about",
     title: "About Orchestrat",
     description:
-      "Meet Orchestrat, the macOS workspace for AI coding agents, built and maintained by @armanghev. Learn what it does and how to get in touch.",
+      "Meet Orchestrat, the shared workspace for AI coding agents, built and maintained by @armanghev. Learn what it does and how to get in touch.",
     intro:
-      "Orchestrat is a shared workspace for the work happening across your AI coding tools. Built and maintained by @armanghev, it connects tasks, project context, and agent activity in one macOS app.",
+      "Orchestrat is a shared workspace for the work happening across your AI coding tools. Built and maintained by @armanghev, it connects tasks, project context, and agent activity in one workspace you can open in your browser or the macOS app.",
     sections: [
       {
         heading: "A shared place for the work",
@@ -87,7 +87,7 @@ export const contentPages: ContentPage[] = [
         heading: "Your tools, connected",
         paragraphs: [
           "Orchestrat works alongside coding tools through MCP, lifecycle hooks, and an API. The coding tools continue to run their models and execute changes. You choose which integrations to connect, review their work, and control their permissions.",
-          "The private alpha focuses on one developer coordinating multiple local agents on macOS. It does not promise automatic assignment, built-in inference, or a complete record of every tool call."
+          "The private alpha focuses on one developer coordinating multiple local coding agents. It does not promise automatic assignment, built-in inference, or a complete record of every tool call."
         ]
       },
       {
@@ -114,9 +114,9 @@ export const contentPages: ContentPage[] = [
     slug: "docs",
     title: "Orchestrat documentation: connect your coding agents",
     description:
-      "Set up Orchestrat on macOS, connect Codex and Claude Code through MCP, and understand shared tasks, documents, lifecycle hooks, and troubleshooting.",
+      "Set up Orchestrat, connect Codex and Claude Code through MCP, and understand shared tasks, documents, lifecycle hooks, and troubleshooting.",
     intro:
-      "Orchestrat connects your local coding agents to a shared project through its CLI and MCP bridge. This guide covers the private-alpha setup for invited users on macOS.",
+      "Orchestrat connects your local coding agents to a shared project through its CLI and MCP bridge. This guide covers the private-alpha setup for invited users.",
     sections: [
       {
         heading: "Before you begin",
@@ -145,7 +145,7 @@ export const contentPages: ContentPage[] = [
       {
         heading: "Supported integrations",
         paragraphs: [
-          "Codex, Claude Code, Cursor, and Antigravity support managed MCP and lifecycle-hook configuration. OpenCode supports managed MCP configuration only. Pi is detected but is not currently selectable for setup.",
+          "Codex, Claude Code, Cursor, and Antigravity support managed MCP and lifecycle-hook configuration. Pi is detected but is not currently selectable for setup.",
           "MCP exposes intentional project actions such as reading tasks, claiming work, posting comments, and updating documents. Hooks report session start, session end, and failure. A session ending does not automatically complete a task."
         ]
       },
@@ -153,7 +153,7 @@ export const contentPages: ContentPage[] = [
         heading: "A first shared workflow",
         paragraphs: [
           "Create a small task with a clear outcome and put its constraints in a shared document. Ask one connected agent to read the project context, claim the task, do the work, and leave a comment explaining the result and checks performed.",
-          "Use the macOS app to review task ownership, document revisions, and activity. Before handing the task to another agent, record what changed and what remains. Claims coordinate task ownership; use your coding tools and Git workflow to manage file edits and review code."
+          "Use the Orchestrat workspace, in your browser or the macOS app, to review task ownership, document revisions, and activity. Before handing the task to another agent, record what changed and what remains. Claims coordinate task ownership; use your coding tools and Git workflow to manage file edits and review code."
         ],
         bullets: [
           "Give each task one owner and a concrete completion condition.",
@@ -197,7 +197,7 @@ export const contentPages: ContentPage[] = [
       {
         heading: "What is available during the alpha?",
         paragraphs: [
-          "The private alpha focuses on shared tasks, ownership, versioned documents, and agent activity for a developer using local coding agents on macOS. Setup connects supported tools through the CLI and MCP bridge. Features and availability may change as the product develops.",
+          "The private alpha focuses on shared tasks, ownership, versioned documents, and agent activity for a developer using local coding agents. Setup connects supported tools through the CLI and MCP bridge. Features and availability may change as the product develops.",
           "Orchestrat does not provide the AI models used by connected coding tools. Your arrangements with those providers remain separate."
         ]
       },
@@ -218,7 +218,7 @@ export const contentPages: ContentPage[] = [
     slug: "faq",
     title: "Orchestrat frequently asked questions",
     description:
-      "Answers about Orchestrat, supported coding agents, macOS requirements, early access, pricing, project data, and task ownership.",
+      "Answers about Orchestrat, supported coding agents, where it runs, early access, pricing, project data, and task ownership.",
     intro:
       "Straight answers about what Orchestrat does, how agents connect, and what to expect during private early access.",
     sections: faqs,
@@ -401,7 +401,7 @@ export const contentPages: ContentPage[] = [
         heading: "Use activity to find the next question",
         paragraphs: [
           "The activity view helps you notice that a task changed hands, a document was updated, or a session ended. Follow those signals to the task or document for the details. Activity is a useful entry point, not a substitute for the underlying evidence.",
-          "Keep a small set of maintained documents, link them from tasks, and ask agents to leave concise handoffs. Orchestrat makes that context available through the macOS workspace and local MCP bridge, while you review the decisions and the resulting work."
+          "Keep a small set of maintained documents, link them from tasks, and ask agents to leave concise handoffs. Orchestrat makes that context available through the shared workspace and local MCP bridge, while you review the decisions and the resulting work."
         ],
         links: [
           {

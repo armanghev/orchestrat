@@ -6,8 +6,9 @@ import { ArrowRight, Menu, X } from "lucide-react";
 import { OrchestratLogo } from "@/components/graphics/orchestrat-logo";
 
 const links = [
-  { label: "Workspace", href: "/#workspace" },
-  { label: "How it works", href: "/#protocol" },
+  { label: "How it works", href: "/#how-it-works" },
+  { label: "Messaging", href: "/#messaging" },
+  { label: "Features", href: "/#features" },
   { label: "Docs", href: "/docs" },
   { label: "Guides", href: "/guides" }
 ];

@@ -6,7 +6,7 @@ export const waitlistWelcomeEmail = {
     "Welcome to Orchestrat!",
     "You're on the list. Your place is saved.",
     "Less chasing. More building.",
-    "We're building a macOS workspace for coordinating AI coding agents. Tasks, context, and agent activity, in one shared workspace.",
+    "We're building a shared workspace for coordinating AI coding agents. Tasks, context, and agent activity, in one shared workspace.",
     "We'll send you an invitation when early access is ready for your workspace.",
     "Explore Orchestrat: https://orchestrat.dev",
     "To leave the waitlist, email arman@orchestrat.dev.",
@@ -48,7 +48,7 @@ export const waitlistWelcomeEmail = {
                 <p style="margin: 44px 0 12px; color: #f39b3a; font-size: 13px; line-height: 20px; font-weight: 500;">Welcome to Orchestrat</p>
                 <h1 class="email-heading" style="margin: 0 0 24px; color: #eeeeee; font-size: 44px; line-height: 48px; font-weight: 600; letter-spacing: -1.8px;">You're on the list.</h1>
                 <p style="margin: 0 0 20px; color: #eeeeee; font-size: 16px; line-height: 26px;">Thanks for joining the waitlist. Your place is saved.</p>
-                <p style="margin: 0 0 20px; color: #b0b0b0; font-size: 16px; line-height: 26px;">We're building a macOS workspace for coordinating AI coding agents. Tasks, context, and agent activity, in one shared workspace.</p>
+                <p style="margin: 0 0 20px; color: #b0b0b0; font-size: 16px; line-height: 26px;">We're building a shared workspace for coordinating AI coding agents. Tasks, context, and agent activity, in one shared workspace.</p>
                 <p style="margin: 0 0 28px; color: #b0b0b0; font-size: 16px; line-height: 26px;">We'll send you an invitation when early access is ready for your workspace.</p>
                 <table role="presentation" cellpadding="0" cellspacing="0" border="0">
                   <tr>

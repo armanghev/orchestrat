@@ -85,17 +85,17 @@ export function CookiePreferences() {
             id="cookie-preferences"
             aria-labelledby="cookie-preferences-heading"
             tabIndex={-1}
-            className="fixed inset-x-4 bottom-4 z-50 mx-auto max-h-[80dvh] max-w-360 overflow-y-auto rounded-xl border bg-card pb-[env(safe-area-inset-bottom)] text-foreground shadow-xl sm:inset-x-6 sm:bottom-6"
+            className="fixed inset-x-4 bottom-4 z-50 max-h-[80dvh] overflow-y-auto rounded-xl border bg-card pb-[env(safe-area-inset-bottom)] text-foreground shadow-xl sm:right-auto sm:bottom-6 sm:left-6 sm:max-w-sm"
           >
-            <div className="site-container flex flex-col gap-5 py-5 lg:flex-row lg:items-center lg:justify-between">
-              <div className="max-w-3xl">
+            <div className="flex flex-col gap-4 p-5">
+              <div>
                 <h2
                   id="cookie-preferences-heading"
-                  className="text-base font-medium tracking-tight"
+                  className="text-sm font-medium tracking-tight"
                 >
                   Cookies & privacy
                 </h2>
-                <p className="mt-3 text-sm leading-6 text-muted-foreground">
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
                   Optional, cookie-free analytics help us understand site
                   visits. They stay off unless you accept. We save your choice
                   in this browser.{" "}
@@ -118,17 +118,17 @@ export function CookiePreferences() {
                   </p>
                 )}
               </div>
-              <div className="grid grid-cols-2 gap-3 lg:shrink-0">
+              <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
-                  className="button button-outline px-3 text-sm"
+                  className="button button-outline min-h-9 px-3 text-xs"
                   onClick={() => choose("rejected")}
                 >
                   Reject optional
                 </button>
                 <button
                   type="button"
-                  className="button button-outline px-3 text-sm"
+                  className="button button-outline min-h-9 px-3 text-xs"
                   onClick={() => choose("accepted")}
                 >
                   Accept analytics
