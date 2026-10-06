@@ -1048,7 +1048,10 @@ test("@phone a repository connects through the provider redirect", async ({
   await expectNoAxe(page);
   await mapping.getByRole("button", { name: "Connect" }).click();
   await expect(section.getByRole("link", { name: "acme/app" })).toBeVisible();
-  expect(search(page).get("repository_authorization")).toBeNull();
+  // The wizard closes, and drops the param, after the data refreshes.
+  await expect
+    .poll(() => search(page).get("repository_authorization"))
+    .toBeNull();
   // Connecting renamed the default to the provider's default.
   await expect(
     page.locator("#branches").getByText("trunk", { exact: true })
