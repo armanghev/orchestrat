@@ -14,14 +14,33 @@ export function resolveTheme(theme: Theme, systemDark: boolean): ResolvedTheme {
   return theme === "system" ? (systemDark ? "dark" : "light") : theme;
 }
 
+/**
+ * Switches colours at once. Without this every `transition-colors` element
+ * fades between themes, which flickers and lets a contrast check catch
+ * colours from neither theme.
+ */
+function withoutTransitions(change: () => void) {
+  const style = document.createElement("style");
+  style.textContent = "*,*::before,*::after{transition:none!important}";
+  document.head.appendChild(style);
+  change();
+  // Flush styles so the new colours land before transitions come back.
+  void window.getComputedStyle(document.body).color;
+  setTimeout(() => style.remove(), 0);
+}
+
 export function applyTheme(
   theme: Theme,
   systemDark: boolean,
   storage: Pick<Storage, "setItem">
 ): ResolvedTheme {
   const resolved = resolveTheme(theme, systemDark);
-  document.documentElement.classList.toggle("dark", resolved === "dark");
-  document.documentElement.dataset.theme = resolved;
+  const root = document.documentElement;
+  if (root.dataset.theme !== resolved)
+    withoutTransitions(() => {
+      root.classList.toggle("dark", resolved === "dark");
+      root.dataset.theme = resolved;
+    });
   storage.setItem(themeMirrorKey, theme);
   return resolved;
 }

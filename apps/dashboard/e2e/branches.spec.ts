@@ -4,6 +4,10 @@ import AxeBuilder from "@axe-core/playwright";
 // Project branches end to end against a mocked API (docs/project-branches.md
 // §11, §13.4). Tests tagged @phone also run on the phone project.
 
+// Each flow scans with axe in both themes, which takes a while on CI's
+// Linux WebKit.
+test.describe.configure({ timeout: 90_000 });
+
 const ids = {
   organization: "00000000-0000-4000-8000-000000000001",
   project: "00000000-0000-4000-8000-000000000004",

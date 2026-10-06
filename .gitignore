@@ -15,3 +15,5 @@ PRODUCT.md
 DESIGN.md
 deploy/private-alpha.env
 .vercel/
+# Local GitHub Actions runs (act)
+.act/
