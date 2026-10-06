@@ -534,10 +534,9 @@ export function FeaturesSection() {
           title="Branches that follow Git"
           demo={<BranchDemo />}
         >
-          <span className="text-primary-text">Coming soon.</span> Each Git
-          branch gets its own tasks, documents, and chats. Merge the pull
-          request and the work merges with it. Anything changed on both sides
-          waits for your call.
+          Each Git branch gets its own tasks, documents, and chats. Merge the
+          pull request and the work merges with it. Anything changed on both
+          sides waits for your call.
         </FeatureCard>
       </div>
     </section>
