@@ -232,6 +232,8 @@ Don't add a webhook by hand. Orchestrat owns the one it creates and deletes it o
 
 ## 3. Cursor Origin app
 
+> Origin is hidden until its API leaves beta. To test it, set `ORCHESTRAT_ORIGIN_ENABLED=true` as well; without it the API loads no Origin adapter and the dashboard offers no Origin button.
+
 Docs: https://cursor.com/docs/api/origin. The API is labelled Early Beta. You need a Cursor plan that includes Origin (Pro or above) in the namespace that owns the app.
 
 ### 3.1 Create a native test repository

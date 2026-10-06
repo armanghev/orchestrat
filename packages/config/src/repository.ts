@@ -39,6 +39,10 @@ export const repositoryEnvSchema = z.object({
   ),
   ORCHESTRAT_GITLAB_OAUTH_CLIENT_ID: optional,
   ORCHESTRAT_GITLAB_OAUTH_CLIENT_SECRET: optional,
+  // Cursor Origin is in early beta, so it stays hidden unless turned on.
+  ORCHESTRAT_ORIGIN_ENABLED: optional.pipe(
+    z.enum(["true", "false"]).optional()
+  ),
   ORCHESTRAT_ORIGIN_APP_ID: optional,
   ORCHESTRAT_ORIGIN_APP_PRIVATE_KEY_BASE64: optional,
   ORCHESTRAT_ORIGIN_API_BASE: optional.pipe(
@@ -68,6 +72,8 @@ export type RepositoryConfig = {
   origin: { appId: string; privateKeyPem: string; apiBase: string } | null;
   /** Why each provider's Connect button is off, or null when it's on. */
   unavailable: Record<RepositoryProviderName, string | null>;
+  /** Providers the dashboard doesn't offer at all. */
+  hidden: RepositoryProviderName[];
 };
 
 const key = (value: string): Buffer | null => {
@@ -128,10 +134,13 @@ export function loadRepositoryConfig(
     "ORCHESTRAT_ORIGIN_APP_ID",
     "ORCHESTRAT_ORIGIN_APP_PRIVATE_KEY_BASE64"
   ]);
+  const originHidden = parsed.ORCHESTRAT_ORIGIN_ENABLED !== "true";
   const unavailable = {
     github: shared ?? githubMissing,
     gitlab: shared ?? gitlabMissing,
-    origin: shared ?? originMissing
+    origin: originHidden
+      ? "Cursor Origin isn't available yet."
+      : (shared ?? originMissing)
   };
   const anyConfigured = Object.values(unavailable).some((reason) => !reason);
   return {
@@ -171,6 +180,7 @@ export function loadRepositoryConfig(
           privateKeyPem: pem(parsed.ORCHESTRAT_ORIGIN_APP_PRIVATE_KEY_BASE64!),
           apiBase: parsed.ORCHESTRAT_ORIGIN_API_BASE
         },
-    unavailable
+    unavailable,
+    hidden: originHidden ? ["origin"] : []
   };
 }

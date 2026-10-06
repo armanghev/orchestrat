@@ -111,7 +111,7 @@ export class RepositoryService {
     private readonly adapters: Map<ProviderName, ProviderAdapter>,
     private readonly config: Pick<
       RepositoryConfig,
-      "publicApiUrl" | "dashboardUrl" | "unavailable"
+      "publicApiUrl" | "dashboardUrl" | "unavailable" | "hidden"
     >,
     private readonly secrets: SecretBox | null,
     private readonly requestReconcile: (connectionId: string) => void = () =>
@@ -169,7 +169,9 @@ export class RepositoryService {
     const row = await this.active(projectId);
     return {
       repository: row ? await this.json(row) : null,
-      providers: PROVIDERS.map((provider) => {
+      providers: PROVIDERS.filter(
+        (provider) => !this.config.hidden.includes(provider)
+      ).map((provider) => {
         const configured = this.adapters.has(provider) && Boolean(this.secrets);
         return {
           provider,

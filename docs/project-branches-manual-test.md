@@ -195,7 +195,7 @@ GitLab.com:
       applications). After **Sync now**, the status is **Needs
       reauthorization**, and **Reconnect** restores it.
 
-Cursor Origin:
+Cursor Origin (hidden by default; set `ORCHESTRAT_ORIGIN_ENABLED=true` to test it):
 
 - [ ] **Connect** succeeds. If it fails, copy the API's log line. Two things
       are unverified against the live API: the app JWT `kid`, and the endpoint

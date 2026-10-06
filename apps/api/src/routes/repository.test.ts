@@ -9,6 +9,7 @@ import {
 import { asc, eq } from "drizzle-orm";
 import { SecretBox, aad } from "../services/repository/secrets.js";
 import { connected } from "../test/repository.js";
+import { workspace } from "../test/workspace.js";
 
 test("connecting authorizes once, links the default and snapshots branches", async (t) => {
   const s = await connected();
@@ -347,6 +348,20 @@ test("failed deliveries back off and apply once the provider recovers", async (t
       )
     ).json().delivery.status,
     "pending"
+  );
+});
+
+test("hidden providers aren't offered", async (t) => {
+  const s = await workspace({
+    repository: { config: { hidden: ["origin"] } }
+  });
+  t.after(() => s.app.close());
+  const listed = await s.alice("GET", `/projects/${s.project.id}/repository`);
+  assert.deepEqual(
+    listed
+      .json()
+      .providers.map((entry: { provider: string }) => entry.provider),
+    ["github", "gitlab"]
   );
 });
 

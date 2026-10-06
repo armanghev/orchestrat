@@ -96,6 +96,24 @@ test("repository providers count as configured only when complete", () => {
   assert.equal(config.reconcileIntervalSeconds, 900);
   assert.equal(config.secretKey?.id, "k1");
 
+  // Origin stays hidden, even fully configured, until it's turned on.
+  const originEnv = {
+    ...repositoryEnv,
+    ORCHESTRAT_ORIGIN_APP_ID: "app_test",
+    ORCHESTRAT_ORIGIN_APP_PRIVATE_KEY_BASE64:
+      Buffer.from("pem").toString("base64")
+  };
+  const hidden = loadRepositoryConfig(originEnv);
+  assert.deepEqual(hidden.hidden, ["origin"]);
+  assert.equal(hidden.origin, null);
+  const enabled = loadRepositoryConfig({
+    ...originEnv,
+    ORCHESTRAT_ORIGIN_ENABLED: "true"
+  });
+  assert.deepEqual(enabled.hidden, []);
+  assert.equal(enabled.origin?.appId, "app_test");
+  assert.equal(enabled.unavailable.origin, null);
+
   const bare = loadRepositoryConfig({});
   assert.equal(bare.syncEnabled, false);
   assert.match(bare.unavailable.gitlab!, /ORCHESTRAT_PUBLIC_API_URL/);

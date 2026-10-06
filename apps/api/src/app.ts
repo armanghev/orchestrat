@@ -88,6 +88,7 @@ type AppOptions = {
         | "publicApiUrl"
         | "dashboardUrl"
         | "unavailable"
+        | "hidden"
         | "reconcileIntervalSeconds"
         | "syncEnabled"
       >
@@ -190,7 +191,8 @@ export function buildApp(options: AppOptions) {
       github: "Repository connections aren't set up on this server.",
       gitlab: "Repository connections aren't set up on this server.",
       origin: "Repository connections aren't set up on this server."
-    }
+    },
+    hidden: repositoryOptions.config?.hidden ?? []
   };
   const providerAdapters = new Map(
     (repositoryOptions.adapters ?? []).map((adapter) => [
