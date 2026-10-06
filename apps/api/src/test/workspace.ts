@@ -1,11 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { organizationMembers, users, type Database } from "@orchestrat/db";
 import { eq } from "drizzle-orm";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, LightMyRequestResponse } from "fastify";
 import { fixture } from "./fixture.js";
 
 type Method = "GET" | "POST" | "PATCH" | "DELETE";
 type Headers = Record<string, string>;
+// Named through fastify: CI's fresh install can't name light-my-request's
+// type from the inferred return of the helpers below (TS2742).
+type Response = Promise<LightMyRequestResponse>;
 
 /**
  * A project owned by alice with bob as a plain member, plus helpers to call
@@ -20,7 +23,12 @@ export async function workspace(options: Parameters<typeof fixture>[0] = {}) {
 export async function workspaceOn(app: FastifyInstance, db: Database) {
   const human =
     (token: string) =>
-    (method: Method, url: string, payload?: unknown, headers: Headers = {}) =>
+    (
+      method: Method,
+      url: string,
+      payload?: unknown,
+      headers: Headers = {}
+    ): Response =>
       app.inject({
         method,
         url: `/api/v1${url}`,
@@ -75,7 +83,7 @@ export async function workspaceOn(app: FastifyInstance, db: Database) {
       url: string,
       payload?: unknown,
       headers: Headers = {}
-    ) =>
+    ): Response =>
       app.inject({
         method,
         url: `/api/v1/agent${url}`,
