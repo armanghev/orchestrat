@@ -40,6 +40,8 @@ export class FakeGitHub {
     delivered_at: string;
   }[] = [];
   readonly redelivered: number[] = [];
+  /** Delivery ids GitHub answers 404 for when asked to redeliver. */
+  readonly unredeliverable = new Set<number>();
   readonly installationTokens = new Map<string, number>();
   clientSecret = "github-client-secret";
 
@@ -120,6 +122,7 @@ export class FakeGitHub {
     if (path === "/app/hook/deliveries") return paged(this.deliveries);
     match = path.match(/^\/app\/hook\/deliveries\/(\d+)\/attempts$/);
     if (match && method === "POST") {
+      if (this.unredeliverable.has(Number(match[1]))) return reply(404, {});
       this.redelivered.push(Number(match[1]));
       return reply(202, {});
     }

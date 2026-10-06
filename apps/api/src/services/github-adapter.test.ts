@@ -253,10 +253,10 @@ test("connecting checks the installation id and mints only narrow tokens", async
   assert.ok(github.minted.length > 0);
   for (const minted of github.minted) {
     assert.deepEqual(minted.body.repository_ids, [100]);
-    assert.ok(
-      !("contents" in (minted.body.permissions as object)),
-      "never contents"
-    );
+    // One read-only permission per token; Contents only for branch reads.
+    const permissions = Object.entries(minted.body.permissions as object);
+    assert.equal(permissions.length, 1);
+    assert.equal(permissions[0]![1], "read");
   }
   await repositoryWorkerOf(s.app)!.tick();
   const branches = (await s.alice("GET", `${base}/branches`)).json().branches;
@@ -309,11 +309,14 @@ test("deliveries that never succeeded are redelivered once an hour", async () =>
       Date.parse("2026-10-01T00:00:00Z") - minutes * 60_000
     ).toISOString();
   github.deliveries.push(
+    { id: 5, guid: "refused", status_code: 404, delivered_at: at(12) },
     { id: 1, guid: "lost", status_code: 502, delivered_at: at(10) },
     { id: 2, guid: "fine", status_code: 500, delivered_at: at(20) },
     { id: 3, guid: "fine", status_code: 202, delivered_at: at(15) },
     { id: 4, guid: "ancient", status_code: 500, delivered_at: at(5 * 24 * 60) }
   );
+  // GitHub refuses some redeliveries; the rest still go out.
+  github.unredeliverable.add(5);
   await adapter.maintain();
   assert.deepEqual(github.redelivered, [1]);
   await adapter.maintain();

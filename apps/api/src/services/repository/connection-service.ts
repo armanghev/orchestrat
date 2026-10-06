@@ -42,6 +42,12 @@ async function provider<T>(work: () => Promise<T>): Promise<T> {
         "REPOSITORY_AUTHORIZATION_INVALID",
         error.message
       );
+    // The person sees a generic message; the log keeps the cause. Provider
+    // errors name the call and its status, never a token.
+    console.error(
+      "[repository] provider call failed:",
+      error instanceof Error ? error.message : String(error)
+    );
     throw new ApiError(
       502,
       "INTERNAL_ERROR",

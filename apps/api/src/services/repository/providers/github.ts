@@ -12,17 +12,12 @@ import {
   type RemoteBranch,
   type RemoteRepository
 } from "../types.js";
-import {
-  json,
-  nextLink,
-  ProviderHttpError,
-  send,
-  type HttpOptions
-} from "./http.js";
+import { json, nextLink, send, type HttpOptions } from "./http.js";
 
 // The GitHub App adapter (docs/project-branches.md §8.3). Installation tokens
 // are minted per call for one repository with the narrowest permission and
-// kept in memory only; the app never reads file contents or writes.
+// kept in memory only; the app never reads file contents or writes. Branch
+// reads need Contents: GitHub refuses them with Metadata alone.
 
 export type GithubConfig = {
   appId: string;
@@ -33,7 +28,7 @@ export type GithubConfig = {
   webhookSecret: string;
 };
 
-type Permission = "metadata" | "pull_requests";
+type Permission = "metadata" | "contents" | "pull_requests";
 type RepositoryPayload = {
   id: number;
   full_name: string;
@@ -494,7 +489,7 @@ export class GithubAdapter implements ProviderAdapter {
       `${this.repoPath(connection)}/branches/${encodeURIComponent(name)}`,
       {
         headers: this.headers(
-          await this.installationToken(connection, "metadata")
+          await this.installationToken(connection, "contents")
         )
       }
     );
@@ -507,7 +502,7 @@ export class GithubAdapter implements ProviderAdapter {
   }
 
   async listBranches(connection: ConnectionRow): Promise<RemoteBranch[]> {
-    const token = await this.installationToken(connection, "metadata");
+    const token = await this.installationToken(connection, "contents");
     const branches: RemoteBranch[] = [];
     let url: string | null =
       `${this.repoPath(connection)}/branches?per_page=100`;
@@ -599,8 +594,14 @@ export class GithubAdapter implements ProviderAdapter {
         `${API}/app/hook/deliveries/${latest.id}/attempts`,
         { method: "POST", headers: this.headers(jwt) }
       );
-      if (!response.ok && response.status !== 202)
-        throw new ProviderHttpError(response.status, "Redelivering");
+      // Best effort: GitHub refuses some deliveries (an app's first ping,
+      // for one), and one refusal mustn't fail the whole reconcile.
+      if (!response.ok && response.status !== 202) {
+        console.warn(
+          `[repository] GitHub refused to redeliver ${guid} (HTTP ${response.status}).`
+        );
+        continue;
+      }
       this.redelivered.push(guid);
     }
     return {};
