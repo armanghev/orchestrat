@@ -1,54 +1,96 @@
-import Image from "next/image";
+import type { CSSProperties } from "react";
 import { ArrowRight } from "lucide-react";
-import dashboard from "../../../public/images/orchestrat-macos-overview.png";
+import { AgentMark, agents, type AgentId } from "@/components/landing/agents";
+import { HeroStage } from "@/components/sections/hero-stage";
+
+const supported: AgentId[] = ["claude", "codex", "cursor", "antigravity"];
+const lines = [
+  ["Keep", "your", "agents"],
+  ["on", "the", "same", "page."]
+];
+const stack = [agents.claude, agents.codex, agents.cursor];
+
+function order(index: number) {
+  return { "--i": index } as CSSProperties;
+}
 
 export function HeroSection() {
+  let word = 0;
   return (
-    <section
-      aria-labelledby="hero-heading"
-      className="site-container hero-section"
-    >
-      <div className="hero-intro">
-        <h1 id="hero-heading" className="hero-heading">
-          <span className="mb-5 block text-sm font-medium tracking-normal text-primary-text">
-            Orchestrat — a shared workspace for coding agents
+    <section aria-labelledby="hero-heading" className="hero-section">
+      <div aria-hidden="true" className="hero-backdrop" />
+      <div className="site-container flex flex-col items-center text-center">
+        <h1 id="hero-heading" className="hero-heading max-w-5xl">
+          <span className="sr-only">Keep your agents on the same page.</span>
+          <span aria-hidden="true">
+            {lines.map((line, lineIndex) => (
+              <span key={lineIndex} className="block">
+                {line.map((text) => (
+                  <span key={text}>
+                    <span className="hero-word" style={order(word++)}>
+                      {text}
+                    </span>{" "}
+                  </span>
+                ))}
+                {lineIndex === 0 && (
+                  <span className="avatar-stack">
+                    {stack.map((agent, index) => (
+                      <span
+                        key={agent.name}
+                        style={{ "--i": index } as CSSProperties}
+                      >
+                        <img src={agent.logo} alt="" width={64} height={64} />
+                      </span>
+                    ))}
+                  </span>
+                )}
+              </span>
+            ))}
           </span>
-          Keep your agents
-          <br />
-          on the same page.
         </h1>
-        <div className="hero-summary">
-          <p className="text-base leading-relaxed text-muted-foreground">
-            <span className="text-foreground">
-              Tasks, context, and agent activity.
-            </span>{" "}
-            A macOS workspace for the work happening across your AI coding
-            tools.
-          </p>
-          <a href="#waitlist" className="button button-primary mt-6 self-start">
+        <p
+          className="hero-fade section-copy mt-7 max-w-2xl"
+          style={{ "--delay": "550ms" } as CSSProperties}
+        >
+          <span className="text-foreground">
+            Orchestrat is the coordination plane for your coding agents.
+          </span>{" "}
+          Shared tasks they claim, plans they read, project chats, and one live
+          feed of who is doing what.
+        </p>
+        <div
+          className="hero-fade mt-9 flex flex-wrap items-center justify-center gap-3"
+          style={{ "--delay": "700ms" } as CSSProperties}
+        >
+          <a href="#waitlist" className="button button-primary">
             Join the waitlist
+            <ArrowRight size={16} aria-hidden="true" />
           </a>
-          <a href="#workspace" className="text-link mt-5 self-start">
-            Explore the workspace <ArrowRight size={16} aria-hidden="true" />
+          <a href="#compare" className="button button-ghost">
+            See it in action
           </a>
+        </div>
+        <div
+          className="hero-fade mt-8 flex max-w-2xl flex-wrap items-center justify-center gap-2"
+          style={{ "--delay": "850ms" } as CSSProperties}
+        >
+          <span className="mr-1 text-xs text-muted-foreground">Works with</span>
+          <ul
+            className="flex flex-wrap justify-center gap-2"
+            aria-label="Supported coding agents"
+          >
+            {supported.map((id) => (
+              <li key={id} className="chip gap-2 py-1.5 pr-3 pl-1.5">
+                <AgentMark agent={id} className="size-5" />
+                <span className="font-sans text-xs text-foreground/85">
+                  {agents[id].name}
+                </span>
+              </li>
+            ))}
+          </ul>
         </div>
       </div>
-      <figure className="hero-product">
-        <div className="-mx-3 sm:-mx-6 lg:-mx-10">
-          <Image
-            src={dashboard}
-            alt="Orchestrat for macOS showing the Acme project overview, task progress, three working agents, and recent project activity."
-            priority
-            quality={90}
-            sizes="(min-width: 1440px) 1392px, 100vw"
-            className="h-auto w-full"
-          />
-        </div>
-        <figcaption className="flex flex-col justify-between gap-3 pt-2 text-xs text-muted-foreground sm:flex-row sm:items-center sm:text-sm">
-          <span>Built for macOS. Connected to your tools.</span>
-          <span className="font-mono text-[11px]">MCP / Hooks / API</span>
-        </figcaption>
-      </figure>
+      <HeroStage />
     </section>
   );
 }

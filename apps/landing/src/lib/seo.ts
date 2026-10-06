@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 
 export const siteUrl = "https://orchestrat.dev";
 export const siteDescription =
-  "Orchestrat is a macOS workspace for coordinating AI coding agents through shared tasks, versioned documents, and live activity. Join the private waitlist.";
+  "Orchestrat is a shared workspace for coordinating AI coding agents through claimed tasks, versioned plans, project chats, and live activity. Join the private waitlist.";
 
 export function pageMetadata(
   title: string,
@@ -85,7 +85,7 @@ export const homeStructuredData = {
       url: siteUrl,
       description: siteDescription,
       applicationCategory: "DeveloperApplication",
-      operatingSystem: "macOS",
+      operatingSystem: "Web, macOS",
       publisher: { "@id": organization["@id"] },
       image: `${siteUrl}/icon.png`,
       screenshot: `${siteUrl}/images/orchestrat-macos-overview.png`,

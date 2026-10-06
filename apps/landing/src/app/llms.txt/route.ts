@@ -19,7 +19,7 @@ export function GET() {
 
 Built and operated by [${founder.name}](${founder.url}). Contact: arman@orchestrat.dev.
 Private early access; public pricing and a general release date have not been announced.
-Orchestrat coordinates coding tools; it does not run their AI models. The current setup supports local agents on macOS and uses a hosted service for shared project data.
+Orchestrat coordinates coding tools; it does not run their AI models. The workspace runs in the browser and as a macOS app. Local coding agents connect through the CLI, and a hosted service stores shared project data.
 
 ## Product and documentation
 

@@ -1036,15 +1036,11 @@ test("@phone task attention shows unread badges, a New divider, and a watch togg
     page.getByRole("img", { name: "2 unread task comments, 1 mention" })
   ).toBeVisible();
   // Let the mobile sidebar sheet finish its entrance before checking contrast.
-  await page.waitForFunction(() =>
-    document
-      .getAnimations()
-      .every((animation) => animation.playState !== "running")
-  );
+  await settle(page);
   await expectNoAxe(page);
   await page.emulateMedia({ colorScheme: "dark" });
   await expect(page.locator("html")).toHaveClass(/dark/);
-  await page.waitForTimeout(250);
+  await settle(page);
   await expectNoAxe(page);
   if (phone) {
     await page.getByRole("button", { name: /^Tasks/ }).click();
@@ -1068,7 +1064,7 @@ test("@phone task attention shows unread badges, a New divider, and a watch togg
   await expectNoAxe(page);
   await page.emulateMedia({ colorScheme: "light" });
   await expect(page.locator("html")).not.toHaveClass(/dark/);
-  await page.waitForTimeout(250);
+  await settle(page);
   await expectNoAxe(page);
   const toggle = sheet.getByRole("button", { name: "Watch task" });
   await expect(toggle).toHaveAttribute("aria-pressed", "true");
@@ -1653,11 +1649,11 @@ test("has no axe violations on setup, overview, Tasks, profile, and themes", asy
   await expectNoAxe(page);
   await page.getByText("Dark", { exact: true }).click();
   await expect(page.locator("html")).toHaveClass(/dark/);
-  await page.waitForTimeout(250);
+  await settle(page);
   await expectNoAxe(page);
   await page.getByText("Light", { exact: true }).click();
   await expect(page.locator("html")).not.toHaveClass(/dark/);
-  await page.waitForTimeout(250);
+  await settle(page);
   await expectNoAxe(page);
 });
 

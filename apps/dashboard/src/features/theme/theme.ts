@@ -14,33 +14,21 @@ export function resolveTheme(theme: Theme, systemDark: boolean): ResolvedTheme {
   return theme === "system" ? (systemDark ? "dark" : "light") : theme;
 }
 
-/**
- * Switches colours at once. Without this every `transition-colors` element
- * fades between themes, which flickers and lets a contrast check catch
- * colours from neither theme.
- */
-function withoutTransitions(change: () => void) {
-  const style = document.createElement("style");
-  style.textContent = "*,*::before,*::after{transition:none!important}";
-  document.head.appendChild(style);
-  change();
-  // Flush styles so the new colours land before transitions come back.
-  void window.getComputedStyle(document.body).color;
-  setTimeout(() => style.remove(), 0);
-}
-
 export function applyTheme(
   theme: Theme,
   systemDark: boolean,
   storage: Pick<Storage, "setItem">
 ): ResolvedTheme {
   const resolved = resolveTheme(theme, systemDark);
-  const root = document.documentElement;
-  if (root.dataset.theme !== resolved)
-    withoutTransitions(() => {
-      root.classList.toggle("dark", resolved === "dark");
-      root.dataset.theme = resolved;
-    });
+  // Switch every color at once. Otherwise each element with a color
+  // transition fades on its own schedule and the page briefly mixes themes.
+  const pause = document.createElement("style");
+  pause.textContent = "*,*::before,*::after{transition:none!important}";
+  document.head.append(pause);
+  document.documentElement.classList.toggle("dark", resolved === "dark");
+  document.documentElement.dataset.theme = resolved;
+  window.getComputedStyle(document.body).getPropertyValue("color");
+  requestAnimationFrame(() => requestAnimationFrame(() => pause.remove()));
   storage.setItem(themeMirrorKey, theme);
   return resolved;
 }

@@ -35,21 +35,26 @@ export function WaitlistCtaSection() {
   }
 
   return (
-    <section aria-labelledby="waitlist-heading" className="site-container">
-      <div className="section-space grid gap-10 lg:py-24 md:grid-cols-[1.35fr_1fr] md:items-center md:gap-20">
-        <div id="waitlist">
-          <OrchestratIcon className="mb-7 size-12" />
-          <h2 id="waitlist-heading" className="closing-heading">
-            Less chasing.
-            <br />
-            <span className="text-muted-foreground">More building.</span>
-          </h2>
-        </div>
-        <div>
-          <p className="section-copy mb-7 max-w-lg">
-            Join the private waitlist. We’ll send an invite when early access is
-            ready for your workspace.
-          </p>
+    <section
+      aria-labelledby="waitlist-heading"
+      className="site-container section-space"
+    >
+      <div
+        id="waitlist"
+        className="relative mx-auto flex max-w-3xl flex-col items-center text-center"
+      >
+        <div aria-hidden="true" className="hero-glow inset-x-0 top-0 h-full" />
+        <OrchestratIcon className="mb-9 size-16" />
+        <h2 id="waitlist-heading" className="closing-heading">
+          Less chasing.
+          <br />
+          <span className="text-muted-foreground">More building.</span>
+        </h2>
+        <p className="section-copy mt-6 max-w-md">
+          Join the private waitlist. We’ll send an invite when early access is
+          ready for your workspace.
+        </p>
+        <div className="mt-10 w-full max-w-md text-left">
           {submitted ? (
             <div role="status" className="rounded-lg border bg-card p-7">
               <Check
@@ -74,10 +79,10 @@ export function WaitlistCtaSection() {
               className="space-y-4"
               aria-busy={loading}
             >
-              <div className="space-y-2.5">
-                <label htmlFor="waitlist-email" className="block text-sm">
-                  Email address
-                </label>
+              <label htmlFor="waitlist-email" className="block text-sm">
+                Email address
+              </label>
+              <div className="flex flex-col gap-2 rounded-xl border border-input bg-card/60 p-2 sm:flex-row">
                 <input
                   id="waitlist-email"
                   type="email"
@@ -90,8 +95,16 @@ export function WaitlistCtaSection() {
                   placeholder="you@company.com"
                   required
                   disabled={loading}
-                  className="min-h-12 w-full min-w-0 rounded-md border border-input bg-background px-4 text-sm placeholder:text-muted-foreground"
+                  className="min-h-12 w-full min-w-0 flex-1 rounded-lg bg-transparent px-3 text-sm placeholder:text-muted-foreground"
                 />
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="button button-primary min-h-12 shrink-0"
+                >
+                  {loading ? "Joining…" : "Join the waitlist"}
+                  {!loading && <ArrowRight size={16} aria-hidden="true" />}
+                </button>
               </div>
               <div className="hidden" aria-hidden="true">
                 <label htmlFor="waitlist-company">Company</label>
@@ -102,14 +115,6 @@ export function WaitlistCtaSection() {
                   autoComplete="off"
                 />
               </div>
-              <button
-                type="submit"
-                disabled={loading}
-                className="button button-primary min-h-12 w-full"
-              >
-                {loading ? "Joining…" : "Join the waitlist"}
-                {!loading && <ArrowRight size={16} aria-hidden="true" />}
-              </button>
               {error && (
                 <p
                   id="waitlist-error"
