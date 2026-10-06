@@ -147,6 +147,15 @@ pnpm test
 pnpm format:check
 ```
 
+Run the GitHub Actions workflow locally before pushing, in Docker with
+[act](https://github.com/nektos/act) (`brew install act`; settings in `.actrc`):
+
+```bash
+pnpm ci:local              # both jobs, as on a pull request
+act pull_request -j verify # lint, typecheck, tests with Postgres, build
+act pull_request -j browser # Playwright in Linux WebKit
+```
+
 ### Dashboard native auth migration (Task 3)
 
 - ✅ Native desktop auth flow and session ownership model is implemented and validated in Tauri auth service tests.

@@ -31,9 +31,10 @@ import { createFileRoute } from "@tanstack/react-router";
 import {
   agentPresenceQueryOptions,
   agentsQueryOptions,
-  tasksQueryOptions,
-  projectEventsQueryOptions
+  allBranchEventsQueryOptions,
+  tasksQueryOptions
 } from "@/features/coordination/query-options";
+import { useBranch } from "@/features/branches/branch-context";
 import { derivePresence } from "@/features/agents/presence";
 import { agentAttentionQueryOptions } from "@/features/attention/query-options";
 import { AgentAttentionLine } from "@/features/attention/agent-attention-line";
@@ -47,12 +48,14 @@ export const Route = createFileRoute(
 function AgentsRoute() {
   const { projectId } = Route.useParams();
   const [search, setSearch] = useState("");
-  const { api, project } = Route.useRouteContext();
+  const { api } = Route.useRouteContext();
+  const { branchId, branchName, readOnly } = useBranch();
+  // Every project agent is listed whichever branch it works on (spec §11.3).
   const agents = useQuery(agentsQueryOptions(api, projectId));
   const attention = useQuery(agentAttentionQueryOptions(api, projectId));
   const presence = useQuery(agentPresenceQueryOptions(api, projectId));
-  const tasks = useQuery(tasksQueryOptions(api, projectId));
-  const events = useQuery(projectEventsQueryOptions(api, projectId));
+  const tasks = useQuery(tasksQueryOptions(api, projectId, branchId));
+  const events = useQuery(allBranchEventsQueryOptions(api, projectId));
   if (agents.isPending || presence.isPending)
     return <PageState title="Agents" message="Loading agents…" />;
   if (agents.isError || presence.isError)
@@ -86,7 +89,6 @@ function AgentsRoute() {
   const attentionByAgent = new Map(
     (attention.data?.agents ?? []).map((item) => [item.agent_id, item])
   );
-  const archived = project?.project.status === "archived";
   const online = presence.data.agents.filter(
     (item) => derivePresence(item.status, item.last_heartbeat_at) === "online"
   ).length;
@@ -157,6 +159,10 @@ function AgentsRoute() {
             const task = item?.current_task_id
               ? taskById.get(item.current_task_id)
               : null;
+            const elsewhere =
+              item?.branch_id && item.branch_id !== branchId
+                ? (branchName(item.branch_id) ?? "another branch")
+                : null;
             return (
               <Card key={agent.id}>
                 <CardHeader>
@@ -170,7 +176,13 @@ function AgentsRoute() {
                       </span>
                     </h2>
                   </CardTitle>
-                  <CardDescription>Agent runtime</CardDescription>
+                  <CardDescription>
+                    {state === "online" && item?.branch_id
+                      ? elsewhere
+                        ? `Online on ${elsewhere}`
+                        : "Online on this branch"
+                      : "Agent runtime"}
+                  </CardDescription>
                   <CardAction>
                     <StatusBadge status={state} />
                   </CardAction>
@@ -203,6 +215,8 @@ function AgentsRoute() {
                       <dd className="mt-1.5 font-medium">
                         {task ? (
                           `${task.key} · ${task.title}`
+                        ) : item?.current_task_id && elsewhere ? (
+                          `A task on ${elsewhere}`
                         ) : item?.current_task_id ? (
                           <span className="break-all font-mono text-xs">
                             {item.current_task_id}
@@ -232,13 +246,15 @@ function AgentsRoute() {
                       ? heartbeatAge(item.last_heartbeat_at)
                       : "No heartbeat"}
                   </span>
-                  <PingDialog
-                    api={api}
-                    projectId={projectId}
-                    defaultRecipient={{ type: "agent", id: agent.id }}
-                    disabled={archived || agent.status !== "active"}
-                    triggerLabel={`Ping ${agent.name}`}
-                  />
+                  {!readOnly ? (
+                    <PingDialog
+                      api={api}
+                      projectId={projectId}
+                      defaultRecipient={{ type: "agent", id: agent.id }}
+                      disabled={agent.status !== "active"}
+                      triggerLabel={`Ping ${agent.name}`}
+                    />
+                  ) : null}
                 </CardFooter>
               </Card>
             );

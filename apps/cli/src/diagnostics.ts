@@ -13,6 +13,7 @@ import {
 import { attentionPlanOptions, harnessConfigPlan } from "./harness-config.js";
 import { agentAccount, cliAccount, type CredentialStore } from "./keychain.js";
 import { inspectLauncher } from "./setup.js";
+import { checkoutTarget, type CheckoutTarget } from "./branches.js";
 import { access, lstat, rm } from "node:fs/promises";
 import { constants } from "node:fs";
 import { join } from "node:path";
@@ -20,6 +21,13 @@ import { execFile } from "node:child_process";
 import { isDeepStrictEqual, promisify } from "node:util";
 
 const redacted = (ok: boolean, detail: string) => ({ ok, detail });
+const checkoutJson = (target: CheckoutTarget) =>
+  target.checkout && {
+    branch: target.checkout.branch,
+    detached: target.checkout.branch === null,
+    default_branch: target.checkout.defaultBranch,
+    override: target.overridden ? target.name : null
+  };
 const execFileAsync = promisify(execFile);
 
 function diagnosticConnections(
@@ -79,6 +87,7 @@ export async function runStatus(input: {
   const integrations = [
     ...new Set(connections.map((connection) => connection.integration))
   ];
+  const target = await checkoutTarget(input.cwd, input.home);
   const backend: Record<string, unknown> = {};
   for (const connection of connections) {
     const token = await connectionCredential(input.credentials, connection);
@@ -101,6 +110,8 @@ export async function runStatus(input: {
         agent_id: connection.agentId,
         status: agent?.status ?? "missing",
         session_id: agent?.session_id ?? null,
+        // The branch the agent's live session is pinned to.
+        branch_id: agent?.branch_id ?? null,
         last_heartbeat_at: agent?.last_heartbeat_at ?? null
       };
     } catch {
@@ -116,6 +127,7 @@ export async function runStatus(input: {
     cwd: input.cwd,
     project_id: project?.projectId ?? null,
     integrations,
+    ...(target.checkout ? { checkout: checkoutJson(target) } : {}),
     backend
   };
 }
@@ -139,6 +151,23 @@ export async function runDoctor(input: {
   const { project, connections } = config
     ? diagnosticConnections(config, input.cwd, input.api)
     : { project: undefined, connections: [] };
+  const target = await checkoutTarget(input.cwd, input.home);
+  if (target.checkout) {
+    checks.git_head = redacted(
+      target.name !== null,
+      target.checkout.branch
+        ? `on ${target.checkout.branch}`
+        : target.name
+          ? `detached; the override selects ${target.name}`
+          : "detached HEAD; agents use the project's default branch"
+    );
+    checks.git_origin_head = redacted(
+      target.checkout.defaultBranch !== null,
+      target.checkout.defaultBranch
+        ? `origin/HEAD is ${target.checkout.defaultBranch}`
+        : "origin/HEAD is missing; run git remote set-head origin -a"
+    );
+  }
   checks.mapping = redacted(
     connections.length > 0,
     project
@@ -278,6 +307,29 @@ export async function runDoctor(input: {
           false,
           "unreachable or unauthorized"
         );
+      }
+      if (target.name) {
+        try {
+          const { branches } = await new AgentApiClient({
+            baseUrl: connection.api,
+            token,
+            fetch: input.fetch
+          }).branches.list({ name: target.name, include_archived: true });
+          const active = branches.some((branch) => !branch.archived_at);
+          checks[`branch.${connection.key}`] = redacted(
+            active || branches.length === 0,
+            active
+              ? `${target.name} is registered`
+              : branches.length
+                ? `${target.name} is archived; agents use the default branch until you run orchestrat branch select`
+                : `${target.name} registers with the next agent session`
+          );
+        } catch {
+          checks[`branch.${connection.key}`] = redacted(
+            false,
+            "branches unavailable (the API may predate branches)"
+          );
+        }
       }
     }
   }

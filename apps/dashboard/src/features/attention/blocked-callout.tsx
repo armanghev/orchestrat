@@ -180,65 +180,63 @@ export function BlockedCallout({
             </div>
           </dl>
         </div>
-        <Dialog open={open} onOpenChange={changeOpen}>
-          <DialogTrigger asChild>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={archived}
+        {/* Read-only views hide the action rather than disabling it. */}
+        {!archived ? (
+          <Dialog open={open} onOpenChange={changeOpen}>
+            <DialogTrigger asChild>
+              <Button type="button" variant="outline" size="sm">
+                Resolve blocker
+              </Button>
+            </DialogTrigger>
+            <DialogContent
+              showCloseButton={!resolve.isPending}
+              onEscapeKeyDown={(event) =>
+                resolve.isPending && event.preventDefault()
+              }
+              onPointerDownOutside={(event) =>
+                resolve.isPending && event.preventDefault()
+              }
+              onCloseAutoFocus={(event) => {
+                // The trigger unmounts with the resolved block, so the route
+                // decides where focus lands instead.
+                if (!resolvedRef.current || !onResolved) return;
+                event.preventDefault();
+                onResolved();
+              }}
             >
-              Resolve blocker
-            </Button>
-          </DialogTrigger>
-          <DialogContent
-            showCloseButton={!resolve.isPending}
-            onEscapeKeyDown={(event) =>
-              resolve.isPending && event.preventDefault()
-            }
-            onPointerDownOutside={(event) =>
-              resolve.isPending && event.preventDefault()
-            }
-            onCloseAutoFocus={(event) => {
-              // The trigger unmounts with the resolved block, so the route
-              // decides where focus lands instead.
-              if (!resolvedRef.current || !onResolved) return;
-              event.preventDefault();
-              onResolved();
-            }}
-          >
-            <DialogHeader>
-              <DialogTitle>Resolve blocker?</DialogTitle>
-              <DialogDescription>
-                {taskKey} returns to In progress if an agent still has it
-                claimed, otherwise to Ready. {block.created_by.name} will see
-                that the blocker was resolved.
-              </DialogDescription>
-            </DialogHeader>
-            {resolve.isError ? (
-              <p role="alert" className="text-sm text-destructive">
-                {resolveBlockErrorMessage(resolve.error)}
-              </p>
-            ) : null}
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                disabled={resolve.isPending}
-                onClick={() => changeOpen(false)}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="button"
-                disabled={resolve.isPending || archived}
-                onClick={() => resolve.mutate()}
-              >
-                {resolve.isPending ? "Resolving…" : "Resolve blocker"}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+              <DialogHeader>
+                <DialogTitle>Resolve blocker?</DialogTitle>
+                <DialogDescription>
+                  {taskKey} returns to In progress if an agent still has it
+                  claimed, otherwise to Ready. {block.created_by.name} will see
+                  that the blocker was resolved.
+                </DialogDescription>
+              </DialogHeader>
+              {resolve.isError ? (
+                <p role="alert" className="text-sm text-destructive">
+                  {resolveBlockErrorMessage(resolve.error)}
+                </p>
+              ) : null}
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={resolve.isPending}
+                  onClick={() => changeOpen(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  disabled={resolve.isPending}
+                  onClick={() => resolve.mutate()}
+                >
+                  {resolve.isPending ? "Resolving…" : "Resolve blocker"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        ) : null}
       </div>
     </section>
   );

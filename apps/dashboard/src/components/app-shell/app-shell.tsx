@@ -31,6 +31,10 @@ import {
   attentionSummaryQueryOptions,
   taskCommentCounts
 } from "@/features/attention/query-options";
+import { useOptionalBranch } from "@/features/branches/branch-context";
+import { BranchSelector } from "@/features/branches/branch-selector";
+import { ArchivedBranchBanner } from "@/features/branches/archived-banner";
+import { BranchOnboardingPanel } from "@/features/branches/onboarding-panel";
 
 const TopToolbarActionsContext = createContext<
   ((actions: ReactNode | null) => void) | null
@@ -98,9 +102,15 @@ export function AppShell({
   const current = catalog.projects.find(
     ({ project }) => project.id === activeProjectId
   );
+  const branchContext = useOptionalBranch();
+  // The sidebar's Messages badge counts the branch on screen (spec §11.3).
   const inboxQueries = useQueries({
     queries: catalog.projects.map(({ project }) =>
-      inboxQueryOptions(api, project.id)
+      inboxQueryOptions(
+        api,
+        project.id,
+        project.id === activeProjectId ? branchContext?.branchId : undefined
+      )
     )
   });
   const currentInbox =
@@ -148,7 +158,16 @@ export function AppShell({
         setTheme,
         toggleSidebar,
         openPreferences,
-        signOut
+        signOut,
+        branches: branchContext
+          ? {
+              branches: branchContext.branches,
+              currentBranchId: branchContext.branchId,
+              canCreate: !branchContext.projectArchived,
+              selectBranch: branchContext.selectBranch,
+              openCreateBranch: branchContext.openCreateBranch
+            }
+          : undefined
       }),
     [
       catalog,
@@ -158,7 +177,8 @@ export function AppShell({
       navigateToRoute,
       setTheme,
       openPreferences,
-      signOut
+      signOut,
+      branchContext
     ]
   );
   useEffect(() => {
@@ -213,6 +233,7 @@ export function AppShell({
           profile={profile}
           messageCounts={messageCounts}
           taskCounts={taskCounts}
+          decisionCount={branchContext?.branch.open_decision_count}
         />
       </aside>
       <div className="flex w-full min-w-0 flex-1 flex-col">
@@ -225,6 +246,7 @@ export function AppShell({
           collapsed={preferences.contextSidebarCollapsed}
           routeActions={routeActions}
           commandTriggerRef={defaultCommandTriggerRef}
+          branchMenu={branchContext ? <BranchSelector api={api} /> : null}
         />
         <main
           id="main-content"
@@ -232,6 +254,8 @@ export function AppShell({
           className="min-h-0 flex-1 overflow-auto"
         >
           <ConnectivityBanner />
+          <ArchivedBranchBanner />
+          <BranchOnboardingPanel api={api} />
           {catalog.failures.length ? (
             <Alert role="status" className="m-4 w-auto">
               <AlertDescription>

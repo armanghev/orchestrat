@@ -1,4 +1,6 @@
 import {
+  BRANCH_ID_HEADER,
+  SESSION_ID_HEADER,
   agentSessionResponseSchema,
   apiErrorResponseSchema,
   claimResponseSchema,
@@ -87,6 +89,8 @@ import {
 export * from "./documents.js";
 import { AttentionApi } from "./attention.js";
 export * from "./attention.js";
+import { BranchesApi } from "./branches.js";
+export * from "./branches.js";
 
 type Fetch = typeof globalThis.fetch;
 type Sleep = (milliseconds: number) => Promise<void>;
@@ -114,6 +118,13 @@ export type AgentApiClientOptions = {
   token: string;
   fetch?: Fetch;
   sleep?: Sleep;
+  /** Sent as X-Orchestrat-Branch-Id; absent = the project's default branch. */
+  branchId?: string;
+  /**
+   * Sent as X-Orchestrat-Session-Id. The server then works on the session's
+   * pinned branch and refuses a different branch with BRANCH_MISMATCH.
+   */
+  sessionId?: string;
 };
 
 export function validateAgentApiBaseUrl(value: string): string {
@@ -144,14 +155,54 @@ export class AgentApiClient {
   private readonly token: string;
   private readonly fetch: Fetch;
   private readonly sleep: Sleep;
+  private readonly options: AgentApiClientOptions;
+  private readonly branchHeaders: Record<string, string>;
   readonly attention: AttentionApi;
+  readonly branches: BranchesApi;
 
   constructor(options: AgentApiClientOptions) {
     this.baseUrl = validateAgentApiBaseUrl(options.baseUrl);
     this.token = options.token;
     this.fetch = options.fetch ?? globalThis.fetch;
     this.sleep = options.sleep ?? defaultSleep;
+    this.options = options;
+    const branchId = options.branchId
+      ? idParamsSchema.parse({ id: options.branchId }).id
+      : undefined;
+    const sessionId = options.sessionId
+      ? idParamsSchema.parse({ id: options.sessionId }).id
+      : undefined;
+    this.branchHeaders = {
+      ...(branchId ? { [BRANCH_ID_HEADER]: branchId } : {}),
+      ...(sessionId ? { [SESSION_ID_HEADER]: sessionId } : {})
+    };
     this.attention = new AttentionApi(this.request.bind(this));
+    this.branches = new BranchesApi(this.request.bind(this));
+  }
+
+  get branchId() {
+    return this.options.branchId;
+  }
+
+  get sessionId() {
+    return this.options.sessionId;
+  }
+
+  /**
+   * A copy that works on another branch. It drops the session pin, which
+   * belongs to the old branch; open a session on the copy to pin again.
+   */
+  withBranch(branchId: string | undefined): AgentApiClient {
+    return new AgentApiClient({
+      ...this.options,
+      branchId,
+      sessionId: undefined
+    });
+  }
+
+  /** A copy whose requests are pinned to an open session's branch. */
+  withSession(sessionId: string | undefined): AgentApiClient {
+    return new AgentApiClient({ ...this.options, sessionId });
   }
 
   openSession(input: OpenAgentSessionRequest) {
@@ -159,7 +210,10 @@ export class AgentApiClient {
       "POST",
       "/sessions",
       agentSessionResponseSchema,
-      openAgentSessionRequestSchema.parse(input)
+      openAgentSessionRequestSchema.parse({
+        ...(this.options.branchId ? { branch_id: this.options.branchId } : {}),
+        ...input
+      })
     );
   }
 
@@ -685,6 +739,7 @@ export class AgentApiClient {
           method,
           headers: {
             authorization: `Bearer ${this.token}`,
+            ...this.branchHeaders,
             ...extraHeaders,
             ...(body ? { "content-type": "application/json" } : {})
           },

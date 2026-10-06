@@ -17,9 +17,13 @@ import {
   EmptyTitle,
   EmptyDescription
 } from "@/components/ui/empty";
+import { useState } from "react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Link, createFileRoute } from "@tanstack/react-router";
-import { coordinationKeys } from "@/features/coordination/query-options";
+import {
+  ALL_BRANCHES,
+  coordinationKeys
+} from "@/features/coordination/query-options";
 import { groupActivityEvents } from "@/features/coordination/group-activity-events";
 import {
   activitySuffix,
@@ -32,6 +36,7 @@ import {
   tasksQueryOptions
 } from "@/features/coordination/query-options";
 import { organizationMembersQueryOptions } from "@/features/hierarchy/query-options";
+import { useBranch } from "@/features/branches/branch-context";
 import { DashboardApiError } from "@/lib/api/client";
 
 export const Route = createFileRoute(
@@ -41,17 +46,27 @@ export const Route = createFileRoute(
 function ActivityRoute() {
   const { projectId } = Route.useParams();
   const { api, project } = Route.useRouteContext();
-  const tasks = useQuery(tasksQueryOptions(api, projectId));
+  const { branchId, branchName } = useBranch();
+  // This branch plus project-wide events, or every branch (spec §11.3).
+  const [allBranches, setAllBranches] = useState(false);
+  const tasks = useQuery(tasksQueryOptions(api, projectId, branchId));
   const agents = useQuery(agentsQueryOptions(api, projectId));
-  const documents = useQuery(documentsQueryOptions(api, projectId));
+  const documents = useQuery(documentsQueryOptions(api, projectId, branchId));
   const members = useQuery(
     organizationMembersQueryOptions(api, project?.project.organization_id ?? "")
   );
   const activity = useInfiniteQuery({
-    queryKey: coordinationKeys.eventsInfinite(projectId),
+    queryKey: coordinationKeys.eventsInfinite(
+      projectId,
+      allBranches ? ALL_BRANCHES : branchId
+    ),
     initialPageParam: undefined as string | undefined,
     queryFn: ({ pageParam }) =>
-      api.listProjectEvents(projectId, { limit: 50, after: pageParam }),
+      api.listProjectEvents(
+        projectId,
+        { limit: 50, after: pageParam },
+        allBranches ? { allBranches: true } : { branchId }
+      ),
     getNextPageParam: (page) => page.next_cursor ?? undefined
   });
   if (activity.isPending)
@@ -104,6 +119,15 @@ function ActivityRoute() {
     <section className="dashboard-page" aria-label="Project activity">
       <TopToolbarActions>
         <Badge variant="outline">{events.length} events loaded</Badge>
+        <Button
+          type="button"
+          size="sm"
+          variant={allBranches ? "secondary" : "outline"}
+          aria-pressed={allBranches}
+          onClick={() => setAllBranches((current) => !current)}
+        >
+          All branches
+        </Button>
       </TopToolbarActions>
       <Card>
         <CardHeader>
@@ -132,6 +156,10 @@ function ActivityRoute() {
               {groups.map(({ event, events: groupedEvents }) => {
                 const taskId = activityTaskId(event);
                 const task = taskId ? taskById.get(taskId) : undefined;
+                const otherBranch =
+                  event.branch_id && event.branch_id !== branchId
+                    ? (branchName(event.branch_id) ?? "another branch")
+                    : null;
                 const document = event.entity_id
                   ? documentById.get(event.entity_id)
                   : undefined;
@@ -196,12 +224,12 @@ function ActivityRoute() {
                             ? ` (${groupedEvents.length} revisions)`
                             : ""}
                         </h3>
-                        <time
-                          dateTime={event.occurred_at}
-                          className="text-xs text-muted-foreground"
-                        >
-                          {new Date(event.occurred_at).toLocaleString()}
-                        </time>
+                        <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                          {otherBranch ? <span>in {otherBranch}</span> : null}
+                          <time dateTime={event.occurred_at}>
+                            {new Date(event.occurred_at).toLocaleString()}
+                          </time>
+                        </span>
                       </div>
                       {task ? (
                         <p className="mt-1.5 truncate text-xs text-muted-foreground">

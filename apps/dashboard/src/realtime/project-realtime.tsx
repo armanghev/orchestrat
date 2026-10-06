@@ -13,6 +13,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import {
   realtimeEventEnvelopeSchema,
   type AgentsResponse,
+  type Branch,
   type ProjectEvent,
   type RealtimeEventEnvelope,
   type Task
@@ -28,6 +29,7 @@ import { coordinationKeys } from "@/features/coordination/query-options";
 import { messagingKeys } from "@/features/messaging/query-options";
 import { hierarchyKeys } from "@/features/hierarchy/query-options";
 import { attentionKeys } from "@/features/attention/query-options";
+import { branchKeys } from "@/features/branches/query-options";
 import type { NativeNotification, Platform } from "@/platform/contract";
 
 export type RealtimeStatus = "connecting" | "connected" | "disconnected";
@@ -58,17 +60,22 @@ const notificationEventTypes = new Set([
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
+/** Every cached chat list of a project, one per branch viewed. */
+function cachedChatLists(queryClient: QueryClient, projectId: string) {
+  return queryClient.getQueriesData<{ chats: Chat[] }>({
+    queryKey: messagingKeys.chats(projectId)
+  });
+}
+
 function evictProjectMessagingCaches(
   queryClient: QueryClient,
   projectId: string
 ) {
-  const cached = queryClient.getQueryData<{ chats: Chat[] }>(
-    messagingKeys.chats(projectId)
-  );
-  for (const chat of cached?.chats ?? []) {
-    queryClient.removeQueries({ queryKey: messagingKeys.chat(chat.id) });
-    queryClient.removeQueries({ queryKey: messagingKeys.messages(chat.id) });
-  }
+  for (const [, cached] of cachedChatLists(queryClient, projectId))
+    for (const chat of cached?.chats ?? []) {
+      queryClient.removeQueries({ queryKey: messagingKeys.chat(chat.id) });
+      queryClient.removeQueries({ queryKey: messagingKeys.messages(chat.id) });
+    }
   queryClient.removeQueries({ queryKey: messagingKeys.chats(projectId) });
   queryClient.removeQueries({ queryKey: messagingKeys.candidates(projectId) });
   queryClient.removeQueries({ queryKey: messagingKeys.inbox(projectId) });
@@ -81,8 +88,8 @@ function evictChatCache(
 ) {
   queryClient.removeQueries({ queryKey: messagingKeys.chat(chatId) });
   queryClient.removeQueries({ queryKey: messagingKeys.messages(chatId) });
-  queryClient.setQueryData<{ chats: Chat[] }>(
-    messagingKeys.chats(projectId),
+  queryClient.setQueriesData<{ chats: Chat[] }>(
+    { queryKey: messagingKeys.chats(projectId) },
     (current) =>
       current && {
         ...current,
@@ -98,12 +105,20 @@ type ChatNotice = {
   id: string;
   projectId: string;
   chatId: string;
+  /** The chat's branch, when it isn't the one on screen (spec §11.4). */
+  branchId?: string;
+  /** The chat branch's name when it isn't the one on screen, so even a
+   * short mention notice says where. */
+  otherBranch?: string;
   /** Lets a handoff notice replace the plain notice for the same message. */
   messageId?: string;
   title: string;
   body: string;
   mentioned: boolean;
 };
+
+/** " in feat/x" for a chat on another branch than the one on screen. */
+const inBranch = (name: string | undefined) => (name ? ` in ${name}` : "");
 
 /** What a task.status_changed notification needs from its durable event. */
 export type TaskStatusChangeNotice = {
@@ -139,6 +154,29 @@ export function isHumanMentionedInTaskComment(
 }
 
 export function notificationForRealtimeEvent(
+  event: RealtimeEventEnvelope,
+  task?: Pick<Task, "status" | "title">,
+  claimTaskId?: string,
+  currentUserId?: string,
+  statusChange?: TaskStatusChangeNotice
+): NativeNotification | null {
+  const notification = baseNotificationForRealtimeEvent(
+    event,
+    task,
+    claimTaskId,
+    currentUserId,
+    statusChange
+  );
+  // A click opens the branch the event happened on (spec §11.1).
+  return notification && event.branch_id
+    ? {
+        ...notification,
+        destination: { ...notification.destination, branchId: event.branch_id }
+      }
+    : notification;
+}
+
+function baseNotificationForRealtimeEvent(
   event: RealtimeEventEnvelope,
   task?: Pick<Task, "status" | "title">,
   claimTaskId?: string,
@@ -364,7 +402,12 @@ export class ProjectRealtimeController {
       let nextSequence = this.lastSequence;
       let events;
       do {
-        events = await this.api.listProjectEvents(this.projectId, { after });
+        // One monotonic cursor over every branch (spec §11.4).
+        events = await this.api.listProjectEvents(
+          this.projectId,
+          { after },
+          { allBranches: true }
+        );
         for (const event of events.events) {
           nextSequence = Math.max(nextSequence, event.id);
           if (event.type === "chat.message_created" && event.entity_id)
@@ -378,18 +421,6 @@ export class ProjectRealtimeController {
       } while (events.next_cursor !== null);
       if (this.socket !== socket || this.catchUpSocket !== socket) return;
       if (!(await this.refreshMessageAccess(socket))) return;
-      const participantChatIds = new Set(
-        (
-          this.queryClient.getQueryData<{ chats: Chat[] }>(
-            messagingKeys.chats(this.projectId)
-          )?.chats ?? []
-        )
-          .filter((chat) => chat.is_participant)
-          .map((chat) => chat.id)
-      );
-      const authorizedMissedChatMessages = missedChatMessages.filter(
-        ({ chatId }) => participantChatIds.has(chatId)
-      );
       await invalidateCoordinationQueries(this.queryClient, this.projectId);
       if (
         this.socket !== socket ||
@@ -398,10 +429,13 @@ export class ProjectRealtimeController {
       )
         return;
       this.lastSequence = nextSequence;
-      if (this.connectedBefore && authorizedMissedChatMessages.length > 0)
+      // Every branch's missed messages go on, including branches whose chats
+      // were never loaded here. The summary asks the all-branches inbox, which
+      // lists only the person's own chats with unread messages.
+      if (this.connectedBefore && missedChatMessages.length > 0)
         void Promise.resolve(
           this.onReconnectSummary?.(
-            authorizedMissedChatMessages,
+            missedChatMessages,
             () => this.socket === socket && !this.stopped
           )
         ).catch(() => undefined);
@@ -490,22 +524,43 @@ export class ProjectRealtimeController {
   private async refreshMessageAccess(socket: SocketLike) {
     if (this.socket !== socket || this.catchUpSocket !== socket || this.stopped)
       return false;
-    const chatsKey = messagingKeys.chats(this.projectId);
-    const previous = this.queryClient.getQueryData<{ chats: Chat[] }>(chatsKey);
-    const refreshed = await this.api.listChats(this.projectId);
+    // Each branch viewed has its own cached list; refresh every one, or the
+    // default branch's when none is cached yet.
+    const cached = cachedChatLists(this.queryClient, this.projectId);
+    const lists = cached.length
+      ? cached
+      : [[messagingKeys.chats(this.projectId), undefined] as const];
+    const refreshedLists = await Promise.all(
+      lists.map(async ([key, previous]) => {
+        const branchId = key[3] as string | undefined;
+        return {
+          key,
+          previous,
+          refreshed: await this.api.listChats(this.projectId, { branchId })
+        };
+      })
+    );
     if (this.socket !== socket || this.catchUpSocket !== socket || this.stopped)
       return false;
-    this.queryClient.setQueryData(chatsKey, refreshed);
-    const visible = new Set(refreshed.chats.map(({ id }) => id));
-    for (const chat of previous?.chats ?? []) {
-      if (visible.has(chat.id)) continue;
-      this.queryClient.removeQueries({ queryKey: messagingKeys.chat(chat.id) });
-      this.queryClient.removeQueries({
-        queryKey: messagingKeys.messages(chat.id)
-      });
+    const visible = new Set(
+      refreshedLists.flatMap(({ refreshed }) =>
+        refreshed.chats.map(({ id }) => id)
+      )
+    );
+    for (const { key, previous, refreshed } of refreshedLists) {
+      this.queryClient.setQueryData(key, refreshed);
+      for (const chat of previous?.chats ?? []) {
+        if (visible.has(chat.id)) continue;
+        this.queryClient.removeQueries({
+          queryKey: messagingKeys.chat(chat.id)
+        });
+        this.queryClient.removeQueries({
+          queryKey: messagingKeys.messages(chat.id)
+        });
+      }
     }
     await Promise.all(
-      refreshed.chats.map(({ id }) =>
+      [...visible].map((id) =>
         this.queryClient.invalidateQueries({
           queryKey: messagingKeys.messages(id)
         })
@@ -575,10 +630,14 @@ export class ProjectRealtimeController {
   private async durableEvent(
     event: RealtimeEventEnvelope
   ): Promise<ProjectEvent | undefined> {
-    const response = await this.api.listProjectEvents(this.projectId, {
-      after: event.sequence > 1 ? String(event.sequence - 1) : undefined,
-      limit: 1
-    });
+    const response = await this.api.listProjectEvents(
+      this.projectId,
+      {
+        after: event.sequence > 1 ? String(event.sequence - 1) : undefined,
+        limit: 1
+      },
+      { allBranches: true }
+    );
     return response.events.find(
       (candidate) =>
         candidate.id === event.sequence && candidate.type === event.event_type
@@ -660,11 +719,30 @@ export function useProjectRealtimeStatus() {
   return useContext(RealtimeContext);
 }
 
-async function currentChatIsVisible(chatId: string, platform: Platform) {
+/** The branch a project's pages show: `?branch=`, or the default branch. */
+function viewedBranchId(queryClient: QueryClient, projectId: string) {
+  if (typeof window === "undefined") return undefined;
+  const url = new URL(window.location.href);
+  if (!url.pathname.startsWith(`/projects/${projectId}/`)) return undefined;
+  return (
+    url.searchParams.get("branch") ??
+    queryClient
+      .getQueryData<{ branches: Branch[] }>(branchKeys.list(projectId))
+      ?.branches.find((branch) => branch.is_default)?.id
+  );
+}
+
+async function currentChatIsVisible(
+  chatId: string,
+  platform: Platform,
+  branchMatches = true
+) {
   if (typeof window === "undefined" || document.visibilityState !== "visible")
     return false;
   const url = new URL(window.location.href);
+  // Another branch's page shows a "switch" notice, not the chat.
   if (
+    !branchMatches ||
     !url.pathname.endsWith("/messages") ||
     url.searchParams.get("chat") !== chatId
   )
@@ -702,7 +780,11 @@ export function ProjectRealtimeProvider({
   activeProjectId: string;
   currentUserId?: string;
   platform: Platform;
-  navigateToChat: (projectId: string, chatId: string) => void | Promise<void>;
+  navigateToChat: (
+    projectId: string,
+    chatId: string,
+    branchId?: string
+  ) => void | Promise<void>;
   children: ReactNode;
 }) {
   const [notices, setNotices] = useState<ChatNotice[]>([]);
@@ -791,7 +873,21 @@ export function ProjectRealtimeProvider({
         getAccessGeneration() !== accessGeneration
       )
         return;
-      const visible = await currentChatIsVisible(chat.id, platform);
+      const chatBranchId = chat.branch_id ?? event.branch_id ?? undefined;
+      const viewed = viewedBranchId(queryClient, event.project_id);
+      const otherBranch =
+        chatBranchId && viewed && chatBranchId !== viewed
+          ? queryClient
+              .getQueryData<{
+                branches: Branch[];
+              }>(branchKeys.list(event.project_id))
+              ?.branches.find((branch) => branch.id === chatBranchId)?.name
+          : undefined;
+      const visible = await currentChatIsVisible(
+        chat.id,
+        platform,
+        !chatBranchId || !viewed || chatBranchId === viewed
+      );
       if (
         !mountedRef.current ||
         !isControllerCurrent() ||
@@ -817,15 +913,17 @@ export function ProjectRealtimeProvider({
             participant.type === "human" && participant.id === userId
         )
       );
+      // Notices for another branch say which one (spec §11.4).
+      const where = inBranch(otherBranch);
       const title = isHandoff
-        ? `Handoff from ${actor?.name ?? "an agent"}`
+        ? `Handoff from ${actor?.name ?? "an agent"}${where}`
         : isAdded
-          ? `Added to ${name}`
+          ? `Added to ${name}${where}`
           : isCreated
-            ? `New chat from ${actor?.name ?? "an agent"}`
+            ? `New chat from ${actor?.name ?? "an agent"}${where}`
             : mentioned
-              ? `Mentioned in ${name}`
-              : `New message in ${name}`;
+              ? `Mentioned in ${name}${where}`
+              : `New message in ${name}${where}`;
       const body = isHandoff
         ? `${actor?.name ?? "An agent"} handed work to you.`
         : isAdded
@@ -839,6 +937,8 @@ export function ProjectRealtimeProvider({
         id: `${event.project_id}:${event.sequence}`,
         projectId: event.project_id,
         chatId: chat.id,
+        ...(chatBranchId ? { branchId: chatBranchId } : {}),
+        ...(otherBranch ? { otherBranch } : {}),
         ...(event.message_id ? { messageId: event.message_id } : {}),
         title,
         body,
@@ -866,12 +966,13 @@ export function ProjectRealtimeProvider({
           )
             return;
           await platform.notify({
-            title: mentioned ? "You were mentioned" : title,
+            title: mentioned ? `You were mentioned${where}` : title,
             body,
             destination: {
               kind: "chat",
               projectId: event.project_id,
-              chatId: chat.id
+              chatId: chat.id,
+              ...(chatBranchId ? { branchId: chatBranchId } : {})
             }
           });
         }
@@ -912,7 +1013,7 @@ export function ProjectRealtimeProvider({
         (chatAccessGenerationRef.current.get(`${projectId}:${chatId}`) ?? 0) ===
         accessGenerations.get(chatId);
       void api
-        .getProjectInbox(projectId)
+        .getProjectInbox(projectId, { allBranches: true })
         .then(async (inbox) => {
           if (
             !mountedRef.current ||
@@ -926,10 +1027,15 @@ export function ProjectRealtimeProvider({
               replayedChatIds.has(chat_id) && stillHasAccess(chat_id)
           );
           if (!unread.length) return;
+          const viewed = viewedBranchId(queryClient, projectId);
           await Promise.all(
             unread.map(async (item) => ({
               item,
-              visible: await currentChatIsVisible(item.chat_id, platform)
+              visible: await currentChatIsVisible(
+                item.chat_id,
+                platform,
+                !item.branch_id || !viewed || item.branch_id === viewed
+              )
             }))
           ).then(async (visibility) => {
             if (
@@ -954,6 +1060,7 @@ export function ProjectRealtimeProvider({
               id: `${projectId}:reconnect:${Math.max(...relevantMessages.map(({ eventId }) => eventId))}`,
               projectId,
               chatId: first.chat_id,
+              ...(first.branch_id ? { branchId: first.branch_id } : {}),
               title: "Messages arrived while you were away",
               body: `${total || relevantMessages.length} unread message${(total || relevantMessages.length) === 1 ? "" : "s"} across ${notVisible.length} chat${notVisible.length === 1 ? "" : "s"}.`,
               mentioned: notVisible.some((chat) => chat.mention_count > 0)
@@ -976,7 +1083,8 @@ export function ProjectRealtimeProvider({
                   destination: {
                     kind: "chat",
                     projectId,
-                    chatId: first.chat_id
+                    chatId: first.chat_id,
+                    ...(first.branch_id ? { branchId: first.branch_id } : {})
                   }
                 });
               }
@@ -987,7 +1095,7 @@ export function ProjectRealtimeProvider({
         })
         .catch(() => undefined);
     },
-    [addNotice, api, platform]
+    [addNotice, api, platform, queryClient]
   );
   const projectIdsKey = [...new Set(projectIds)].sort().join("\0");
   const controllers = useMemo(
@@ -1073,7 +1181,9 @@ export function ProjectRealtimeProvider({
               <div className="flex items-start gap-3">
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium">
-                    {notice.mentioned ? "Mentioned you" : notice.title}
+                    {notice.mentioned
+                      ? `Mentioned you${inBranch(notice.otherBranch)}`
+                      : notice.title}
                   </p>
                   <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
                     {notice.body}
@@ -1082,7 +1192,11 @@ export function ProjectRealtimeProvider({
                     type="button"
                     className="mt-2 text-xs font-medium underline"
                     onClick={() =>
-                      void navigateToChat(notice.projectId, notice.chatId)
+                      void navigateToChat(
+                        notice.projectId,
+                        notice.chatId,
+                        notice.branchId
+                      )
                     }
                   >
                     Open chat

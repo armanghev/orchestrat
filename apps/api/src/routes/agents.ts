@@ -1,10 +1,12 @@
 import {
+  allBranchesQuerySchema,
   createAgentRequestSchema,
   idParamsSchema,
   paginationQuerySchema,
   projectTaskParamsSchema
 } from "@orchestrat/protocol";
 import type { FastifyInstance } from "fastify";
+import { humanBranchSelector } from "../services/branch-context.js";
 import type { AgentService } from "../services/agent-service.js";
 
 const projectAgentParamsSchema = projectTaskParamsSchema.extend({
@@ -78,7 +80,9 @@ export async function agentManagementRoutes(
     return options.agents.listEventsHuman(
       request.userId,
       params.projectId,
-      paginationQuerySchema.parse(request.query)
+      paginationQuerySchema.parse(request.query),
+      humanBranchSelector(request.query),
+      allBranchesQuerySchema.parse(request.query).all_branches
     );
   });
 }

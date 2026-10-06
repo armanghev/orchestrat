@@ -243,13 +243,15 @@ export function TaskAttentionPanel({
           <li className="text-sm text-muted-foreground">No comments yet.</li>
         )}
       </ol>
-      <TaskCommentComposer
-        api={api}
-        projectId={projectId}
-        disabled={archived || commenting}
-        commenting={commenting}
-        onComment={onComment}
-      />
+      {!archived ? (
+        <TaskCommentComposer
+          api={api}
+          projectId={projectId}
+          disabled={commenting}
+          commenting={commenting}
+          onComment={onComment}
+        />
+      ) : null}
     </section>
   );
 }

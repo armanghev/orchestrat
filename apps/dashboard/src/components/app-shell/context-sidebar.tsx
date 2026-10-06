@@ -9,6 +9,7 @@ import {
   Gauge,
   LogOut,
   MessagesSquare,
+  Scale,
   Search,
   Settings
 } from "lucide-react";
@@ -55,12 +56,13 @@ const routeIcons: Record<NavigationDestination, LucideIcon> = {
   documents: FileText,
   messages: MessagesSquare,
   activity: Activity,
+  decisions: Scale,
   settings: Settings
 };
 const routeGroups: { label: string; routes: NavigationDestination[] }[] = [
   { label: "Workspace", routes: ["overview", "tasks", "agents", "messages"] },
   { label: "Knowledge", routes: ["documents", "activity"] },
-  { label: "Administration", routes: ["settings"] }
+  { label: "Administration", routes: ["decisions", "settings"] }
 ];
 
 function ProfileImage({
@@ -90,7 +92,8 @@ export function ContextSidebar({
   onSignOut,
   profile,
   messageCounts,
-  taskCounts
+  taskCounts,
+  decisionCount
 }: {
   activeRoute?: NavigationDestination;
   onNavigate: (route: NavigationDestination) => void;
@@ -100,6 +103,8 @@ export function ContextSidebar({
   profile?: Profile;
   messageCounts?: { unread: number; mentions: number };
   taskCounts?: { unread: number; mentions: number };
+  /** Open decisions targeting the branch on screen. */
+  decisionCount?: number;
 }) {
   const desktop = usePlatform().kind === "desktop";
   const { setOpenMobile, state } = useSidebar();
@@ -229,6 +234,14 @@ export function ContextSidebar({
                                   @{messageCounts.mentions}
                                 </span>
                               ) : null}
+                            </span>
+                          ) : null}
+                          {route === "decisions" && decisionCount ? (
+                            <span
+                              className="ml-auto rounded-full bg-primary px-1.5 text-[10px] leading-5 font-medium text-primary-foreground"
+                              aria-label={`${decisionCount} open ${decisionCount === 1 ? "decision" : "decisions"}`}
+                            >
+                              {decisionCount}
                             </span>
                           ) : null}
                           {route === "tasks" && taskCounts?.unread ? (

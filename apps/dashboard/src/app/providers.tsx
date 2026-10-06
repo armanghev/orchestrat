@@ -46,20 +46,23 @@ export function watchAuthSessionBoundaries(
   });
 }
 
+// `branch` is the destination's branch; without one the page shows the
+// default branch (docs/project-branches.md §11.1).
 type NotificationNavigation =
   | {
       to: "/projects/$projectId/tasks";
       params: { projectId: string };
-      search: { task: string };
+      search: { task: string; branch: string | undefined };
     }
   | {
       to: "/projects/$projectId/activity";
       params: { projectId: string };
+      search: { branch: string | undefined };
     }
   | {
       to: "/projects/$projectId/messages";
       params: { projectId: string };
-      search: { chat: string };
+      search: { chat: string; branch: string | undefined };
     };
 
 export function watchNotificationActions(
@@ -72,23 +75,25 @@ export function watchNotificationActions(
   void platform
     .onNotificationAction((destination: NativeNotificationDestination) => {
       if (!active) return;
+      const branch = destination.branchId;
       if (destination.kind === "task") {
         void router.navigate({
           to: "/projects/$projectId/tasks",
           params: { projectId: destination.projectId },
-          search: { task: destination.taskId }
+          search: { task: destination.taskId, branch }
         });
       } else {
         if (destination.kind === "chat") {
           void router.navigate({
             to: "/projects/$projectId/messages",
             params: { projectId: destination.projectId },
-            search: { chat: destination.chatId }
+            search: { chat: destination.chatId, branch }
           });
         } else {
           void router.navigate({
             to: "/projects/$projectId/activity",
-            params: { projectId: destination.projectId }
+            params: { projectId: destination.projectId },
+            search: { branch }
           });
         }
       }

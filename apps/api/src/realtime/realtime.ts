@@ -25,7 +25,11 @@ const entityTypes = new Set([
   "document",
   "hook",
   "run",
-  "chat"
+  "chat",
+  "branch",
+  "merge",
+  "decision",
+  "repository"
 ]);
 const pendingEvents = new WeakMap<object, ProjectEvent[]>();
 const pendingNotices = new WeakMap<object, RealtimeNotice[]>();
@@ -73,6 +77,8 @@ const eventEnvelope = (event: ProjectEvent): RealtimeEventEnvelope | null => {
       : undefined;
   return {
     project_id: event.projectId,
+    // Absent = a project-wide event; dashboards scope invalidation by it.
+    ...(event.branchId ? { branch_id: event.branchId } : {}),
     sequence: event.id,
     event_type: event.type,
     entity_type: entityType as RealtimeEventEnvelope["entity_type"],

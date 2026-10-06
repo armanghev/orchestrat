@@ -6,6 +6,7 @@ import {
 } from "@orchestrat/protocol";
 import type { FastifyInstance } from "fastify";
 import { ApiError } from "../services/api-error.js";
+import { humanBranchSelector } from "../services/branch-context.js";
 import type { AttentionRouteOptions } from "./attention.js";
 
 // Handoffs are retried by agents after ambiguous responses, so the key is
@@ -56,7 +57,8 @@ export async function humanHandoffRoutes(
       request.userId,
       projectTaskParamsSchema.parse(request.params).projectId,
       createHandoffRequestSchema.parse(request.body),
-      key
+      key,
+      humanBranchSelector(request.query)
     );
     return reply.code(result.status).send(result.body);
   });

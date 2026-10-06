@@ -18,6 +18,7 @@ import {
 import type { FastifyInstance, preHandlerHookHandler } from "fastify";
 import type { DocumentService } from "../services/document-service.js";
 import type { AttachmentService } from "../services/attachment-service.js";
+import { humanBranchSelector } from "../services/branch-context.js";
 
 export async function documentRoutes(
   app: FastifyInstance,
@@ -31,7 +32,8 @@ export async function documentRoutes(
     options.documents.list(
       request.userId,
       projectDocumentParamsSchema.parse(request.params).projectId,
-      documentListQuerySchema.parse(request.query)
+      documentListQuerySchema.parse(request.query),
+      humanBranchSelector(request.query)
     )
   );
   app.post("/projects/:projectId/documents", async (request, reply) =>
@@ -41,7 +43,8 @@ export async function documentRoutes(
         await options.documents.create(
           request.userId,
           projectDocumentParamsSchema.parse(request.params).projectId,
-          createDocumentRequestSchema.parse(request.body)
+          createDocumentRequestSchema.parse(request.body),
+          humanBranchSelector(request.query)
         )
       )
   );
@@ -52,7 +55,8 @@ export async function documentRoutes(
         await options.documents.createFolder(
           request.userId,
           projectDocumentParamsSchema.parse(request.params).projectId,
-          createDocumentFolderRequestSchema.parse(request.body)
+          createDocumentFolderRequestSchema.parse(request.body),
+          humanBranchSelector(request.query)
         )
       )
   );

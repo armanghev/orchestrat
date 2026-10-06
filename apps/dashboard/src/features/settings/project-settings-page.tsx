@@ -16,6 +16,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { ConfirmDeleteDialog } from "./confirm-delete-dialog";
 import { LocalIntegrationStatusSection } from "./local-integration-status";
 import { ProjectMembersSection } from "./project-members-section";
+import { BranchesSettingsSection } from "@/features/branches/branches-settings-section";
+import { RepositorySettingsSection } from "@/features/repository/repository-settings-section";
 import type { ProjectContext } from "@/features/hierarchy/catalog";
 import type { ApiClient } from "@/lib/api/client";
 
@@ -27,13 +29,19 @@ export function ProjectSettingsPage({
   api,
   onUpdated,
   onDeleted,
-  onMembershipChanged
+  onMembershipChanged,
+  repository
 }: {
   context: ProjectContext;
   api: ApiClient;
   onUpdated: (project: Project) => void;
   onDeleted: () => void;
   onMembershipChanged: () => Promise<void> | void;
+  repository: {
+    authorizationId?: string;
+    callbackError?: string;
+    onWizardClosed: () => void;
+  };
 }) {
   const { organization, project } = context;
   const canEdit = project.role === "owner" || project.role === "admin";
@@ -211,6 +219,12 @@ export function ProjectSettingsPage({
           </CardContent>
         </Card>
       </div>
+      <BranchesSettingsSection api={api} projectId={project.id} />
+      <RepositorySettingsSection
+        api={api}
+        projectId={project.id}
+        {...repository}
+      />
       <ProjectMembersSection
         project={project}
         organization={organization}

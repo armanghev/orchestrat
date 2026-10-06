@@ -136,6 +136,30 @@ async function mockDocuments(
           avatar_url: null
         }
       });
+    if (pathname === `/api/v1/projects/${ids.project}/branches`)
+      return route.fulfill({
+        json: {
+          branches: [
+            {
+              id: "00000000-0000-4000-8000-00000000b000",
+              project_id: ids.project,
+              name: "main",
+              is_default: true,
+              name_source: "fallback",
+              created_via: "migration",
+              created_by: null,
+              onboarding_state: "completed",
+              onboarding_choice: null,
+              archived_at: null,
+              archived_reason: null,
+              provider: null,
+              open_decision_count: 0,
+              created_at: now,
+              updated_at: now
+            }
+          ]
+        }
+      });
     if (pathname === `/api/v1/projects/${ids.project}/presence`)
       return route.fulfill({ json: { agents: [] } });
     if (pathname === `/api/v1/projects/${ids.project}/chats`)

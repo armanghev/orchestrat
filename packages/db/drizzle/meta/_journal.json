@@ -106,6 +106,13 @@
       "when": 1790600000000,
       "tag": "0015_agent_attention",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1790700000000,
+      "tag": "0016_project_branches",
+      "breakpoints": true
     }
   ]
 }

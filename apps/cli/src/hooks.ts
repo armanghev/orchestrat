@@ -9,6 +9,9 @@ import { normalizeCursorHook } from "./cursor-hooks.js";
 import { normalizeAntigravityHook } from "./antigravity-hooks.js";
 import type { ConfigurableIntegration } from "./harnesses.js";
 import { clearRewakeLock } from "./stop-hooks.js";
+import { clientForCheckout } from "./branches.js";
+import { deterministicSessionId } from "./hook-types.js";
+import type { GitReader } from "./git.js";
 export type { NormalizedHook } from "./hook-types.js";
 export { deterministicSessionId } from "./hook-types.js";
 
@@ -58,6 +61,7 @@ export async function runHook(input: {
   eventName?: string;
   api: string;
   fetch?: typeof globalThis.fetch;
+  gitReader?: GitReader;
 }) {
   const normalized =
     input.integration === "codex"
@@ -85,13 +89,31 @@ export async function runHook(input: {
     read: input.read ?? (() => readConfig(input.home)),
     credentials: input.credentials
   });
-  const client = new AgentApiClient({
-    baseUrl: resolved.api!,
-    token: resolved.credential!,
-    fetch: input.fetch
-  });
+  // The checkout's branch rides in a header (the lifecycle body is strict) and
+  // is folded into the session id. When registering fails (an old API, a
+  // network error), the hook behaves exactly as before branches.
+  const { client, branch } = await clientForCheckout(
+    new AgentApiClient({
+      baseUrl: resolved.api!,
+      token: resolved.credential!,
+      fetch: input.fetch
+    }),
+    payloadCwd,
+    input.home,
+    input.gitReader
+  );
+  const hook = branch
+    ? {
+        ...normalized,
+        session_id: deterministicSessionId(
+          normalized.integration,
+          normalized.external_session_id,
+          branch.id
+        )
+      }
+    : normalized;
   const idempotencyKey = createHash("sha256")
-    .update(JSON.stringify(normalized))
+    .update(JSON.stringify(hook))
     .digest("hex");
-  return client.ingestLifecycle(normalized, idempotencyKey);
+  return client.ingestLifecycle(hook, idempotencyKey);
 }

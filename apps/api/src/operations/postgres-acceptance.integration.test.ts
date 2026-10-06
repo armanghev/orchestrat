@@ -79,6 +79,14 @@ test(
         project: randomUUID(),
         task: randomUUID()
       };
+      // Rows seeded right before 0016 in every table it moves onto a branch.
+      const beforeBranches = {
+        blocker: randomUUID(),
+        agent: randomUUID(),
+        session: randomUUID(),
+        document: randomUUID(),
+        chat: randomUUID()
+      };
       for (const file of files) {
         if (file.startsWith("0011_")) {
           await pool.query(
@@ -122,8 +130,159 @@ test(
               [legacy.org, userId, role]
             );
         }
+        if (file.startsWith("0016_")) {
+          const seed = [
+            [
+              "INSERT INTO tasks (id,project_id,task_key,task_number,title,created_by_type,created_by_user_id) VALUES ($1,$2,'PRJ-2',2,'Blocker','human',$3)",
+              [beforeBranches.blocker, legacy.project, legacy.user]
+            ],
+            [
+              "INSERT INTO task_dependencies (project_id,task_id,depends_on_task_id) VALUES ($1,$2,$3)",
+              [legacy.project, legacy.task, beforeBranches.blocker]
+            ],
+            [
+              "INSERT INTO agents (id,project_id,name) VALUES ($1,$2,'legacy-agent')",
+              [beforeBranches.agent, legacy.project]
+            ],
+            [
+              "INSERT INTO agent_sessions (id,project_id,agent_id,runtime,integration) VALUES ($1,$2,$3,'codex','codex')",
+              [beforeBranches.session, legacy.project, beforeBranches.agent]
+            ],
+            [
+              "INSERT INTO task_claims (project_id,task_id,agent_id,session_id,token_hash,lease_expires_at) VALUES ($1,$2,$3,$4,'legacy-claim-hash',now() + interval '5 minutes')",
+              [
+                legacy.project,
+                beforeBranches.blocker,
+                beforeBranches.agent,
+                beforeBranches.session
+              ]
+            ],
+            [
+              "INSERT INTO documents (id,project_id,path) VALUES ($1,$2,'notes/legacy.md')",
+              [beforeBranches.document, legacy.project]
+            ],
+            [
+              "INSERT INTO document_revisions (project_id,document_id,revision_number,content_markdown,author_type,author_user_id) VALUES ($1,$2,1,'Legacy body','human',$3)",
+              [legacy.project, beforeBranches.document, legacy.user]
+            ],
+            [
+              "INSERT INTO document_folders (project_id,path) VALUES ($1,'notes')",
+              [legacy.project]
+            ],
+            [
+              "INSERT INTO document_attachments (project_id,document_id,filename,mime_type,size_bytes,added_by_type,added_by_user_id) VALUES ($1,$2,'a.png','image/png',3,'human',$3)",
+              [legacy.project, beforeBranches.document, legacy.user]
+            ],
+            [
+              "INSERT INTO document_attachment_uploads (project_id,document_id,filename,mime_type,reserved_bytes,upload_mode,actor_type,actor_user_id,expires_at) VALUES ($1,$2,'b.png','image/png',3,'single','human',$3,now() + interval '1 hour')",
+              [legacy.project, beforeBranches.document, legacy.user]
+            ],
+            [
+              "INSERT INTO chats (id,project_id,kind,name,has_human,creator_type,creator_user_id,last_sequence) VALUES ($1,$2,'group','Legacy chat',true,'human',$3,1)",
+              [beforeBranches.chat, legacy.project, legacy.user]
+            ],
+            [
+              "INSERT INTO chat_participants (project_id,chat_id,user_id,last_read_sequence) VALUES ($1,$2,$3,1)",
+              [legacy.project, beforeBranches.chat, legacy.user]
+            ],
+            [
+              "INSERT INTO chat_messages (project_id,chat_id,sequence,author_type,author_user_id,author_name,body_markdown) VALUES ($1,$2,1,'human',$3,'Original author','Legacy message')",
+              [legacy.project, beforeBranches.chat, legacy.user]
+            ],
+            [
+              "INSERT INTO project_events (project_id,type,entity_id,payload) VALUES ($1,'task.created',$2,'{}'::jsonb),($1,'agent.created',$3,'{}'::jsonb),($1,'credential.issued',$3,'{}'::jsonb)",
+              [legacy.project, legacy.task, beforeBranches.agent]
+            ]
+          ] as const;
+          for (const [sql, values] of seed) await pool.query(sql, [...values]);
+        }
         await pool.query(await readFile(new URL(file, migrations), "utf8"));
       }
+      await t.test(
+        "0016 moves every existing row onto one default branch with ids intact",
+        async () => {
+          const branches = await pool.query(
+            "SELECT id,name,is_default,name_source,created_via,onboarding_state,archived_at FROM project_branches WHERE project_id=$1",
+            [legacy.project]
+          );
+          assert.equal(branches.rowCount, 1);
+          const [branch] = branches.rows;
+          assert.deepEqual(
+            { ...branch, id: undefined },
+            {
+              id: undefined,
+              name: "main",
+              is_default: true,
+              name_source: "fallback",
+              created_via: "migration",
+              onboarding_state: "completed",
+              archived_at: null
+            }
+          );
+          for (const table of [
+            "tasks",
+            "task_comments",
+            "task_dependencies",
+            "task_claims",
+            "agent_sessions",
+            "documents",
+            "document_folders",
+            "document_revisions",
+            "document_attachments",
+            "document_attachment_uploads",
+            "chats",
+            "chat_participants",
+            "chat_messages"
+          ]) {
+            const counts = (
+              await pool.query(
+                `SELECT count(*)::int AS total, count(*) FILTER (WHERE branch_id = $2)::int AS on_default, count(*) FILTER (WHERE branch_id IS NULL)::int AS missing FROM "${table}" WHERE project_id = $1`,
+                [legacy.project, branch.id]
+              )
+            ).rows[0];
+            assert.ok(counts.total > 0, table);
+            assert.equal(counts.on_default, counts.total, table);
+            assert.equal(counts.missing, 0, table);
+          }
+          const events = await pool.query(
+            "SELECT type, branch_id FROM project_events WHERE project_id=$1 ORDER BY id",
+            [legacy.project]
+          );
+          assert.deepEqual(events.rows, [
+            { type: "task.created", branch_id: branch.id },
+            { type: "agent.created", branch_id: null },
+            { type: "credential.issued", branch_id: null }
+          ]);
+          const task = (
+            await pool.query(
+              "SELECT task_key, origin_id FROM tasks WHERE id=$1",
+              [legacy.task]
+            )
+          ).rows[0];
+          assert.deepEqual(task, { task_key: "PRJ-1", origin_id: null });
+          const chat = (
+            await pool.query(
+              "SELECT last_read_sequence FROM chat_participants WHERE chat_id=$1",
+              [beforeBranches.chat]
+            )
+          ).rows[0];
+          assert.equal(chat.last_read_sequence, 1);
+          // The API that is live while the hosted database is migrated never
+          // sets branch_id; the 0016 shim puts its rows on the default branch.
+          const legacyInsert = await pool.query(
+            "INSERT INTO tasks (id,project_id,task_key,task_number,title,created_by_type,created_by_user_id) VALUES ($1,$2,'PRJ-3',3,'Old API task','human',$3) RETURNING branch_id",
+            [randomUUID(), legacy.project, legacy.user]
+          );
+          assert.equal(legacyInsert.rows[0].branch_id, branch.id);
+          await assert.rejects(
+            pool.query(
+              "INSERT INTO project_branches (project_id,name,is_default,name_source,created_via) VALUES ($1,'second-default',true,'user','dashboard')",
+              [legacy.project]
+            ),
+            /project_branches_one_default/
+          );
+        }
+      );
       await t.test(
         "all migrations preserve existing human task/comment authors",
         async () => {

@@ -77,9 +77,9 @@ test("registers the attention tools alongside the existing ones", async () => {
   const names = tools.map((tool: { name: string }) => tool.name);
   for (const name of ["get_attention", "acknowledge_attention", "watch_task"])
     assert.ok(names.includes(name), name);
-  // 27 bridge tools (no project picker), the three attention tools, and
-  // wait_for_update, set_task_status and handoff.
-  assert.equal(names.length, 33);
+  // 27 bridge tools (no project picker), the three attention tools,
+  // wait_for_update, set_task_status and handoff, and the two branch tools.
+  assert.equal(names.length, 35);
   const watch = tools.find(
     (tool: { name: string }) => tool.name === "watch_task"
   );

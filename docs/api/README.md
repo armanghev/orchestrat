@@ -75,7 +75,7 @@ Agent-only routes use the `/api/v1/agent` prefix:
 
 | Method  | Path                                                | Behavior                                                                   |
 | ------- | --------------------------------------------------- | -------------------------------------------------------------------------- |
-| `GET`   | `/api/v1/agent/project`                             | Get the project fixed by the authenticated agent credential                |
+| `GET`   | `/api/v1/agent/project`                             | Get the project fixed by the agent credential, with `default_branch_id`    |
 | `POST`  | `/api/v1/agent/sessions`                            | Open a session with runtime, integration, and optional external session ID |
 | `POST`  | `/api/v1/agent/sessions/:sessionId/heartbeat`       | Refresh a session and renew its active claim leases                        |
 | `POST`  | `/api/v1/agent/sessions/:sessionId/close`           | Close a session and revoke its active claims                               |
@@ -105,6 +105,10 @@ Agent document attachment routes mirror the human attachment suffixes under
 `/api/v1/agent/documents/:documentId/attachments`. Both surfaces authorize
 through the owning document and project; object bytes use configured
 R2-compatible storage through short-lived signed URLs.
+
+Tasks, documents, chats and agent sessions belong to a project branch. Branch,
+merge, decision and repository routes, and the rules for choosing a branch,
+are under [Branches](#branches).
 
 Names are required. Slugs are optional and derived from names when omitted.
 Project creation also accepts optional `task_key_prefix` (2–8 alphanumeric
@@ -146,8 +150,9 @@ rule applies to comment creation.
 `GET /api/v1/projects/:projectId/tasks` accepts `status`, `priority`, `limit` (1–100,
 default 50), and opaque `cursor`. Results are ordered by `position`, then task
 ID. The response is `{ "tasks": [...], "total": number, "next_cursor": string | null }`;
-`total` is the count for the project and filters, independent of the current
-page. Malformed cursors return `400 VALIDATION_ERROR`.
+`total` is the count for the branch and filters, independent of the current
+page. Malformed cursors return `400 VALIDATION_ERROR`. Task keys are unique
+per branch; a task copied to another branch keeps its key.
 
 `PATCH /api/v1/tasks/:id` accepts at least one of `title`, `description`, or
 `priority`, plus required `expected_version`. `POST /api/v1/tasks/:id/move` accepts a
@@ -161,8 +166,10 @@ status clears that timestamp. Stale versions return
 
 Comments are Markdown in `body_markdown`, with an author profile and
 `created_at`. Comment reads accept `limit` and opaque `cursor` and return
-`{ "comments": [...], "next_cursor": string | null }`. Dependencies are
-project-local; adding a self-edge or cycle returns `409 TASK_DEPENDENCY_CYCLE`.
+`{ "comments": [...], "next_cursor": string | null }`. Dependencies stay within
+one branch; a dependency on another branch's task returns
+`400 VALIDATION_ERROR` with `details.reason = "cross_branch"`. Adding a
+self-edge or cycle returns `409 TASK_DEPENDENCY_CYCLE`.
 Dependency changes also require the task's current `expected_version`.
 Comments are immutable; there are no comment edit or delete endpoints.
 
@@ -184,7 +191,8 @@ membership for the target project. Agent document routes require exactly one
 `Authorization: Bearer orch_agent_...` credential; the credential fixes the
 agent and project scope, and request path/body IDs do not override it.
 
-Documents are project-scoped Markdown. The dashboard uses MDXEditor while the
+Documents are Markdown on one branch of a project, and paths are unique per
+branch. The dashboard uses MDXEditor while the
 API stores Markdown text and immutable revisions. `path` must be a normalized,
 relative POSIX path: 1–1024 characters, with no leading slash, backslash, NUL,
 empty segment, or `.`/`..` segment. `content` is plain text up to 1,000,000
@@ -269,10 +277,12 @@ produce one winner; the loser receives `409 TASK_ALREADY_CLAIMED` with the
 active claim and lease details.
 
 Presence is derived from an active session and a fresh heartbeat, with
-`online`/`offline` status and any current task. Events are ordered by numeric
-event ID and paged with `limit` and `after`; human members and project agents
-can read the same project event stream. Meaningful agent, credential, session,
-claim, and task lifecycle mutations write durable events in their transaction.
+`online`/`offline` status, any current task, and the session's `branch_id`.
+Events are ordered by numeric event ID and paged with `limit` and `after`;
+human members and project agents can read the same project event stream,
+filtered to a branch as described under [Branches](#branches). Meaningful
+agent, credential, session, claim, and task lifecycle mutations write durable
+events in their transaction.
 
 ## Attention and handoffs
 
@@ -329,6 +339,321 @@ Errors:
 | `TASK_COMMENTS_UNREAD`, `WATCH_LIMIT`, `INVALID_STATUS_TRANSITION`, `BLOCKER_CYCLE` | 409    |
 | `WAIT_LIMIT`, `HANDOFF_CHAIN_LIMIT`, `HANDOFF_RATE_LIMITED`, `WAKE_LIMIT`           | 429    |
 
+## Branches
+
+See `docs/project-branches.md` for the design. Every project has branches, and
+exactly one of them is the default branch. These belong to one branch: tasks
+with their comments, dependencies and claims; documents with their folders,
+revisions and attachments; chats with their participants and messages; and
+agent sessions. Organizations, projects, members, agents and agent credentials
+stay project-wide. Project responses include `default_branch_id`.
+
+### Requests that name no branch
+
+A request that names no branch uses the project's default branch. Clients from
+before branches, including the published CLI, keep working unchanged against
+the default branch.
+
+The new branch error codes are returned only to requests that name a branch
+(`?branch_id=`, `X-Orchestrat-Branch-Id` or `X-Orchestrat-Session-Id`) and on
+the branch, merge, decision and repository routes. Older clients parse a closed
+list of codes, so a request without a branch signal gets an existing code with
+a `details.reason` instead:
+
+| Failure                                         | Response                                              |
+| ----------------------------------------------- | ----------------------------------------------------- |
+| Claim a task on another branch than the session | `409 TASK_NOT_CLAIMABLE`, `reason: "branch_mismatch"` |
+| Claim a task on an archived branch              | `409 TASK_NOT_CLAIMABLE`, `reason: "branch_archived"` |
+| Write to an item on an archived branch          | `409 CONFLICT`, `reason: "branch_archived"`           |
+| Reference an item on another branch             | `400 VALIDATION_ERROR`, `reason: "cross_branch"`      |
+
+Cross-branch references are task dependencies, blocking tasks, the task in a
+handoff, and `document_ids` in chat messages.
+
+### Choosing a branch: people
+
+These human routes accept an optional `branch_id` query parameter (a UUID):
+
+- `GET` and `POST /api/v1/projects/:projectId/tasks`
+- `GET` and `POST /api/v1/projects/:projectId/documents`
+- `POST /api/v1/projects/:projectId/document-folders`
+- `GET` and `POST /api/v1/projects/:projectId/chats`
+- `GET /api/v1/projects/:projectId/inbox`
+- `GET /api/v1/projects/:projectId/events`
+- `POST /api/v1/projects/:projectId/handoffs`
+
+Without `branch_id`, the route uses the default branch. A `branch_id` that is
+not a branch of the project returns `404 BRANCH_NOT_FOUND`. Archived branches
+stay readable; a create that names one returns `409 BRANCH_ARCHIVED`.
+
+Entity routes (`/tasks/:id…`, `/documents/:id…`,
+`/documents/:documentId/attachments…`, `/chats/:id…`) take the branch from the
+item and don't read `branch_id`.
+
+Presence, message candidates and the human attention routes
+(`/projects/:projectId/attention…`) stay project-wide. Human attention spans
+every branch.
+
+### Choosing a branch: agents
+
+Agent routes resolve the branch in this order:
+
+1. **Pinned session.** `X-Orchestrat-Session-Id: <session id>` pins the request
+   to that session's branch. A claim pins to the session in its body. If
+   `X-Orchestrat-Branch-Id` names a different branch, the request fails with
+   `409 BRANCH_MISMATCH`. A session ID that isn't one of the agent's sessions
+   returns `404 AGENT_SESSION_NOT_FOUND`.
+2. **Header.** `X-Orchestrat-Branch-Id: <branch id>`.
+3. **The default branch.**
+
+Both headers must be UUIDs. A malformed value returns `400 VALIDATION_ERROR`
+with `details.header` on every agent route.
+
+Agents can read tasks, documents and chats on any branch of their project by
+ID. A write to an item on another branch than the one the agent named, or the
+one its session is pinned to, returns `409 BRANCH_MISMATCH`. A write without a
+branch signal uses the item's branch.
+
+### Sessions, claims and hooks
+
+- `POST /agent/sessions` accepts an optional `branch_id`. Without it, the
+  session opens on the header's branch, else the default branch. The session
+  stores and returns `branch_id`. Opening a session on an archived branch
+  returns `409 BRANCH_ARCHIVED`.
+- A claim's task must be on the session's branch.
+- `POST /agent/hooks/lifecycle` keeps its strict body. The branch travels in
+  `X-Orchestrat-Branch-Id`. `session.started` for a session that already
+  exists on another branch returns `409 AGENT_SESSION_CLOSED` with
+  `reason: "branch_mismatch"`. `session.ended` also closes the agent's other
+  active sessions with the same `external_session_id`.
+- Archiving a branch closes every active session on it and revokes their
+  claims.
+
+### Events, presence and inbox
+
+- Events carry `branch_id`. `null` marks a project-wide event, such as branch,
+  repository, agent and credential events.
+- `GET /projects/:projectId/events` and `GET /agent/events` return the resolved
+  branch's events plus project-wide events. On the human route,
+  `all_branches=true` returns every branch. The dashboard's realtime catch-up
+  uses it to keep one cursor. Cursors stay the global event ID.
+- Presence lists every active agent of the project. Each entry's `branch_id`
+  is its session's branch, or `null` when the agent is offline.
+- `GET /projects/:projectId/inbox` and `GET /agent/inbox` cover the resolved
+  branch. On the human route, `all_branches=true` covers every branch and adds
+  `branch_id` to each unread chat.
+- Messages and comments copied by an import or merge carry `imported_at`.
+  Imported messages never count as unread or as mentions, and imported
+  comments never count as unread in attention or block `complete` and
+  `release` with `TASK_COMMENTS_UNREAD`.
+- Realtime envelopes add `branch_id` when the event has one. The realtime
+  entity types add `branch`, `merge`, `decision` and `repository`.
+- `repository.status_changed` (project-wide) records each change of a
+  connection's status, with `{ provider, from, status, reason }`.
+- A merged pull request from a fork records a run with `status: "skipped"` and
+  `skip_reason: "fork"`, so merge history shows that it was ignored.
+
+### Idempotency
+
+`Idempotency-Key` on task and chat creation is scoped to the branch, so one key
+on two branches creates two items. On the default branch, a key first used
+before branches existed still replays its original response.
+
+`POST /projects/:projectId/merges` requires `Idempotency-Key`. Keys are scoped
+to the user and the target branch.
+
+### Branch routes
+
+Human routes, under `/api/v1`:
+
+| Route                                                     | Who         | Behavior                                                                                                                                           |
+| --------------------------------------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /projects/:projectId/branches`                       | member      | Active branches first, the default first, then the most recently updated. `include_archived=true` adds archived ones; `name` filters by exact name |
+| `POST /projects/:projectId/branches`                      | member      | `{ name }`; `201 { branch }`. `409 BRANCH_NAME_TAKEN` when an active branch has the name                                                           |
+| `GET /projects/:projectId/branches/:branchId`             | member      | `{ branch }`                                                                                                                                       |
+| `POST /projects/:projectId/branches/:branchId/default`    | owner/admin | Makes it the default. `409 BRANCH_ARCHIVED` for an archived branch                                                                                 |
+| `POST /projects/:projectId/branches/:branchId/archive`    | owner/admin | Archives it: read-only, hidden by default, nothing deleted. Closes its agent sessions. `409 CONFLICT`, `reason: "default_branch"` for the default  |
+| `POST /projects/:projectId/branches/:branchId/onboarding` | member      | `{ "choice": "blank" }` finishes the branch's setup. `409 CONFLICT`, `reason: "onboarding_completed"` when it is already done                      |
+
+Agent routes, under `/api/v1/agent`:
+
+| Route                     | Behavior                                                                                                                                   |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET /branches`           | `include_archived`, `name`; `{ branches }`                                                                                                 |
+| `GET /branches/:branchId` | `{ branch }`                                                                                                                               |
+| `POST /branches/register` | `{ name, git_default_branch?, head_sha?, force_new? }`; `200 { branch, created }`. Returns the active branch with that name, or creates it |
+
+`POST /branches/register` refuses to revive a branch the provider deleted:
+when only archived branches have the name and the newest was deleted on the
+provider, it returns `409 BRANCH_ARCHIVED` with `branch_id` and `archived_at`.
+`force_new: true` creates a new branch anyway. `git_default_branch` is the
+checkout's `origin/HEAD` branch. It renames the default branch when that is
+still the fallback `main`, no repository is connected, and no active branch has
+the name.
+
+An agent credential can create at most 10 branches a minute. A registration
+that would create the eleventh gets `429 RATE_LIMITED` with `Retry-After`;
+registering a branch that already exists is never limited.
+
+Agents can't archive, merge, import, set the default or resolve decisions.
+
+The branch object is `{ id, project_id, name, is_default, name_source,
+created_via, created_by, onboarding_state, onboarding_choice, archived_at,
+archived_reason, provider, open_decision_count, created_at, updated_at }`.
+`provider` is `null` without a connected repository, otherwise
+`{ provider, state, head_sha }` with `state` `tracked`, `missing` or
+`untracked`. `archived_reason` is `provider_deleted`, `manual` or
+`replaced_on_connect`.
+
+Branch names are 1–255 characters and follow a subset of
+`git check-ref-format`: no spaces, control characters or `~ ^ : ? * [ \`; no
+leading `-` or `/`; no trailing `/` or `.lock`; no `..`, `//` or `@{`; and not
+`@`. Names are unique among active branches only.
+
+### Imports, merges and decisions
+
+Human routes only, under `/api/v1`:
+
+| Route                                                     | Who                   | Behavior                                                                                                                                                                   |
+| --------------------------------------------------------- | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /projects/:projectId/merges/preview`                | member or owner/admin | `{ source_branch_id, target_branch_id, kind, selection? }`; `{ preview }`. `409 BRANCH_ARCHIVED` when the target is archived                                               |
+| `POST /projects/:projectId/merges`                        | member or owner/admin | `Idempotency-Key` required. `{ source_branch_id, target_branch_id, kind, selection?, choices, preview_fingerprint, archive_source?, complete_onboarding? }`; `201 { run }` |
+| `GET /projects/:projectId/merges`                         | member                | `branch_id` (source or target), `limit` (1–100, default 50), `cursor`; `{ runs, next_cursor }`, newest first                                                               |
+| `GET /projects/:projectId/decisions`                      | member                | `branch_id` (target), `status`; `{ decisions }`, newest first                                                                                                              |
+| `POST /projects/:projectId/decisions/:decisionId/resolve` | owner/admin           | `{ "choice": "use_source" \| "use_target" }`; `{ decision }`                                                                                                               |
+
+`kind` is `import` or `merge`. Members import into any branch except the
+default. A merge, an import into the default branch, and `archive_source: true`
+need an owner or admin, for the preview as well as the apply.
+
+- **Selection.** An import takes `{ tasks, documents, chats }`, each `"all"` or
+  a list of up to 2,000 lineage keys. A merge always takes everything.
+  Selecting a task also brings the tasks it depends on that the target lacks.
+- **Preview.** Each item has `item_type`, `lineage_key`, `source_id`,
+  `target_id`, `outcome` (`copy`, `apply`, `unchanged`, `keep_target`,
+  `conflict` or `skipped`), `reason`, `fields`, `required_by`, `label`,
+  `task_key`, `audience`, `source_values` and `target_values`. `counts` totals
+  outcomes per item type. `fingerprint` covers every version the apply
+  depends on.
+- **Apply.** The apply re-plans under the project lock. If its fingerprint no
+  longer matches `preview_fingerprint`, it returns `409 BRANCH_PREVIEW_STALE`
+  with the new preview in `details.preview`. An import must choose
+  `use_source` or `use_target` in `choices` for every conflict, otherwise
+  `400 VALIDATION_ERROR` with `reason: "missing_choice"` and `lineage_keys`.
+- **Merges never ask.** A conflict keeps the target's version and becomes a
+  decision. A task with an active claim on the target is never changed.
+- **Limits.** A run takes at most 2,000 top-level items, 20,000 comments and
+  messages, and 5 GiB of attachments; beyond that, `400 VALIDATION_ERROR` with
+  `reason: "too_large"`. The source and target must differ
+  (`reason: "same_branch"`), and the default branch can't be archived
+  (`reason: "default_branch"`). Copied attachments count toward the project
+  quota (`409 ATTACHMENT_QUOTA_EXCEEDED`) and need document storage
+  (`503 STORAGE_UPLOAD_FAILED` otherwise).
+- **Events.** A run emits one `merge.import_applied` or `merge.merge_applied`
+  event on the target branch, never one per item, plus `decision.opened` with
+  the count when it created decisions.
+- **Resolving.** `use_target` keeps the target and records the source state as
+  agreed, so the same source won't conflict again. `use_source` applies the
+  recorded source values when the target hasn't changed since the merge. If it
+  has, the response is `409 BRANCH_DECISION_STALE` with the refreshed decision
+  in `details.decision`; if the target already matches the source, the
+  decision settles as `resolved_source`. `use_source` on a claimed task
+  returns `409 TASK_ALREADY_CLAIMED`. A settled decision returns
+  `409 CONFLICT` with `reason: "decision_closed"`.
+
+A run is `{ id, project_id, source_branch_id, target_branch_id, kind, trigger,
+status, skip_reason, provider, counts, skipped, decision_count, created_by,
+created_at, applied_at }`. `trigger` is `dashboard` or `provider_merge`. A
+decision has `reason` `changed_on_both`, `added_on_both`, `path_collision` or
+`target_claimed`, and `status` `open`, `resolved_source`, `resolved_target` or
+`superseded`.
+
+### Repository connections
+
+Human routes, under `/api/v1/projects/:projectId`:
+
+| Route                                                                  | Who                    | Behavior                                                                                                                                                                                                                                                                |
+| ---------------------------------------------------------------------- | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /repository`                                                      | member                 | `{ repository, providers }`. `repository` is the active connection or `null`; each provider has `configured` and `unavailable_reason`                                                                                                                                   |
+| `POST /repository/authorizations`                                      | owner/admin            | `{ provider, return_path? }`; `{ authorization_id, authorize_url, expires_at }`. The authorization expires after 15 minutes                                                                                                                                             |
+| `POST /repository/authorizations/:authorizationId/github-installation` | owner/admin, same user | `{ installation_id }` from the GitHub Setup URL, which is untrusted; `{ "next": "pick_repository" }` once the user's GitHub token lists the installation                                                                                                                |
+| `GET /repository/authorizations/:authorizationId/repositories`         | owner/admin, same user | `{ repositories, install_url }`. Each repository has `provider_repository_id`, `full_name`, `default_branch`, `eligible` and `ineligible_reason`. GitHub sets `install_url`, where people install the app when a repository isn't listed; other providers return `null` |
+| `POST /repository`                                                     | owner/admin, same user | `{ authorization_id, provider_repository_id, default_branch_mapping, create_existing_branches }`; `201 { repository }`                                                                                                                                                  |
+| `POST /repository/sync`                                                | owner/admin            | Queues a reconcile; `202 { "queued": true }`                                                                                                                                                                                                                            |
+| `POST /repository/hook/reenable`                                       | owner/admin            | GitLab sends a test delivery to wake a disabled project hook, then a reconcile refreshes its health; `202 { "queued": true }`. Other providers: `409 CONFLICT`, `reason: "no_hook"`                                                                                     |
+| `GET /repository/deliveries`                                           | owner/admin            | Optional `status`; the newest 100 deliveries                                                                                                                                                                                                                            |
+| `POST /repository/deliveries/:deliveryId/retry`                        | owner/admin            | Puts a failed delivery back in line; `{ delivery }`                                                                                                                                                                                                                     |
+| `DELETE /repository`                                                   | owner/admin            | `204`. Branches and their work are kept. For GitLab, the hook is deleted and the tokens are revoked                                                                                                                                                                     |
+
+`provider` is `github`, `gitlab` or `origin`. `default_branch_mapping` links the
+project's default branch to the provider's default branch `D`:
+
+- `{ "mode": "rename_default" }`, the default: the default branch is renamed
+  to `D`. Another active branch named `D` is archived with reason
+  `replaced_on_connect`; its work stays importable.
+- `{ "mode": "use_existing", "branch_id": "…" }`: the active branch named `D`
+  becomes the default, and the old default stays an ordinary branch.
+
+`create_existing_branches` (default `false`) also creates branches for the
+provider's other branches. Otherwise each one gets a branch on its first push.
+
+`GET /api/v1/repository/authorizations/pending?provider=github` (not under a
+project) returns the signed-in person's newest authorized attempt for that
+provider: `{ authorization_id, project_id, provider, expires_at }`, or
+`404 NOT_FOUND`. GitHub's Setup URL can open in a browser that didn't start
+the flow, so the dashboard looks the attempt up there.
+
+Sync, re-enable, retry and disconnect return `404 NOT_FOUND` when no repository
+is connected. A provider that doesn't answer gives `502 INTERNAL_ERROR`; lost
+provider access gives `409 REPOSITORY_AUTHORIZATION_INVALID`. There is no
+reauthorization route: disconnect and connect again, and branches and their
+work are kept.
+
+Public routes, under `/api/v1`, without authentication:
+
+| Route                                 | Purpose                                                                                                                                                                                              |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /repository/callback/:provider`  | Provider redirect for `github`, `gitlab` or `origin`. Always a `302` to the dashboard, with `repository_authorization=<id>` or `repository_error=invalid_state`, `expired` or `authorization_failed` |
+| `POST /webhooks/github`               | GitHub App webhooks                                                                                                                                                                                  |
+| `POST /webhooks/gitlab/:connectionId` | GitLab project hook, one per connection                                                                                                                                                              |
+| `POST /webhooks/origin`               | Cursor Origin app webhooks                                                                                                                                                                           |
+
+Webhooks are verified on the raw body (up to 10 MiB) and limited to 600
+requests per minute per IP. They answer:
+
+- `202` when the delivery is stored, is a duplicate, or is valid but for no
+  connected repository (stored as `ignored`);
+- `401` for a bad signature or timestamp;
+- `404` when the provider isn't configured, or the GitLab connection is unknown
+  or disconnected;
+- `503` when the database is unavailable.
+
+The sync worker applies stored deliveries later; see the
+[architecture](../architecture/README.md#repository-sync--current).
+
+### Branch errors
+
+| Code                               | Status | When                                                                                                                                                                           |
+| ---------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `BRANCH_NOT_FOUND`                 | 404    | The branch isn't a branch of this project                                                                                                                                      |
+| `BRANCH_ARCHIVED`                  | 409    | A write names an archived branch, including opening a session there, making it the default, or importing or merging into it; or `register` names a branch the provider deleted |
+| `BRANCH_MISMATCH`                  | 409    | The named branch differs from the pinned session's, or an agent writes to an item on another branch                                                                            |
+| `BRANCH_NAME_TAKEN`                | 409    | An active branch already has the name                                                                                                                                          |
+| `BRANCH_PREVIEW_STALE`             | 409    | The branches changed since the preview; `details.preview` holds the new one                                                                                                    |
+| `BRANCH_DECISION_STALE`            | 409    | The target changed since the decision was recorded; `details.decision` holds the refreshed one                                                                                 |
+| `REPOSITORY_NOT_CONFIGURED`        | 400    | The provider isn't set up on this server                                                                                                                                       |
+| `REPOSITORY_AUTHORIZATION_INVALID` | 409    | The authorization is missing, used, expired or another user's; the installation isn't the user's; provider access was revoked; or the repository can't be connected            |
+| `REPOSITORY_CONNECTION_EXISTS`     | 409    | The project already has a repository, or the repository is connected to another project                                                                                        |
+
+Existing codes gain these `details.reason` values:
+
+| Code                       | Reasons                                                                                                 |
+| -------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `400 VALIDATION_ERROR`     | `cross_branch`, `same_branch`, `too_large`, `missing_choice`, `default_branch`                          |
+| `409 CONFLICT`             | `branch_archived`, `default_branch`, `onboarding_completed`, `decision_closed`, `path_taken`, `no_hook` |
+| `409 TASK_NOT_CLAIMABLE`   | `branch_mismatch`, `branch_archived`                                                                    |
+| `409 AGENT_SESSION_CLOSED` | `branch_mismatch`                                                                                       |
+
 ## Deferred or externally unverified
 
 The API does not currently implement:
@@ -343,6 +668,9 @@ These items have no implied timeline.
 
 Hosted deployment, production R2 configuration, native distribution, and
 clean-Mac multi-agent acceptance are not verified by this source checkout.
+Repository connections are tested against simulated providers only; live
+GitHub, GitLab.com and Cursor Origin acceptance has not run. See
+`docs/acceptance/2026-09-30-project-branches.md`.
 
 ## Errors and request IDs
 
@@ -368,4 +696,8 @@ Current codes are `UNAUTHENTICATED`, `PERMISSION_DENIED`, `VALIDATION_ERROR`,
 `CLAIM_TOKEN_INVALID`, `CLAIM_NOT_OWNER`, `DOCUMENT_ARCHIVED`,
 `DOCUMENT_CONFLICT`, `DOCUMENT_CONTENT_UNAVAILABLE`, `DOCUMENT_EDIT_MISMATCH`,
 `ATTACHMENT_QUOTA_EXCEEDED`, `ATTACHMENT_UPLOAD_EXPIRED`,
-`STORAGE_UPLOAD_FAILED`, and `INTERNAL_ERROR`.
+`STORAGE_UPLOAD_FAILED`, and `INTERNAL_ERROR`, plus the attention codes above
+and the branch codes `BRANCH_NOT_FOUND`, `BRANCH_ARCHIVED`, `BRANCH_MISMATCH`,
+`BRANCH_NAME_TAKEN`, `BRANCH_PREVIEW_STALE`, `BRANCH_DECISION_STALE`,
+`REPOSITORY_NOT_CONFIGURED`, `REPOSITORY_AUTHORIZATION_INVALID`, and
+`REPOSITORY_CONNECTION_EXISTS` (see [Branch errors](#branch-errors)).

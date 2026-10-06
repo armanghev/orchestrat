@@ -138,6 +138,7 @@ export class TaskStatusService {
               projectId: principal.projectId,
               actorAgentId: principal.agentId,
               entityId: claim.id,
+              branchId: claim.branchId,
               type: "claim.released",
               payload: {
                 task_id: task.id,
@@ -168,6 +169,7 @@ export class TaskStatusService {
           projectId: principal.projectId,
           actorAgentId: principal.agentId,
           entityId: task.id,
+          branchId: task.branchId,
           type: "task.status_changed",
           payload: {
             from_status: from,
@@ -243,7 +245,12 @@ export class TaskStatusService {
       throw new ApiError(409, "BLOCKER_CYCLE", "A task cannot block itself.");
     if (blockingTaskId) {
       const [blocking] = await tx
-        .select({ id: tasks.id, key: tasks.taskKey, status: tasks.status })
+        .select({
+          id: tasks.id,
+          key: tasks.taskKey,
+          status: tasks.status,
+          branchId: tasks.branchId
+        })
         .from(tasks)
         .where(
           and(
@@ -254,6 +261,14 @@ export class TaskStatusService {
         .limit(1);
       if (!blocking)
         throw new ApiError(404, "NOT_FOUND", "Blocking task not found.");
+      // Blocks stay within a branch, like dependencies.
+      if (blocking.branchId !== task.branchId)
+        throw new ApiError(
+          400,
+          "VALIDATION_ERROR",
+          "A task can only be blocked by a task on its branch.",
+          { reason: "cross_branch", blocking_task_id: blocking.id }
+        );
       // A finished blocker would never resolve the block.
       if (blocking.status === "done" || blocking.status === "cancelled")
         throw new ApiError(

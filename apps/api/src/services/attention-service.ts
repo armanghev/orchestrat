@@ -55,6 +55,7 @@ import {
   watchLimitPerActor,
   type Actor
 } from "./attention-hooks.js";
+import { resolveBranch } from "./branch-context.js";
 import type { ChatService } from "./chat-service.js";
 import { PermissionService } from "./permission-service.js";
 
@@ -228,11 +229,27 @@ export class AttentionService {
     this.permissions = new PermissionService(db);
   }
 
-  // Branch scoping seam (spec §13): a no-op until tasks and chats carry
-  // branch_id, then it filters every attention read.
+  // Branch scoping seam (spec §13). Agents see the branch they work on: the
+  // one they name, else their pinned session's, else the default branch
+  // (docs/project-branches.md §6.1). Humans pass null to span all branches.
   attentionBranchScope(branchId?: string | null): string | null {
-    void branchId;
-    return null;
+    return branchId ?? null;
+  }
+
+  async agentBranchId(
+    principal: AgentPrincipal,
+    requested?: string | null
+  ): Promise<string> {
+    const branch = await resolveBranch(
+      this.db,
+      principal.projectId,
+      {
+        branchId: requested ?? principal.branch?.branchId ?? null,
+        sessionId: principal.branch?.sessionId ?? null
+      },
+      { agentId: principal.agentId }
+    );
+    return branch.id;
   }
 
   async currentCursor(projectId: string): Promise<string> {
@@ -250,13 +267,14 @@ export class AttentionService {
     // The cursor is read first, so a wait resuming from it cannot miss an
     // event that landed while the summary was being assembled.
     const cursor = await this.currentCursor(principal.projectId);
-    const inbox = await this.chats.inboxAgent(principal);
+    const branchId = await this.agentBranchId(principal, opts.branchId);
+    const inbox = await this.chats.inboxAgent(principal, branchId);
     return this.summaryFor(
       { type: "agent", id: principal.agentId },
       principal.projectId,
       cursor,
       inbox.unread_chats,
-      opts.branchId
+      branchId
     );
   }
 
@@ -266,7 +284,13 @@ export class AttentionService {
   ): Promise<AttentionSummary> {
     await this.permissions.projectAccess(userId, projectId);
     const cursor = await this.currentCursor(projectId);
-    const inbox = await this.chats.inboxHuman(userId, projectId);
+    // Human attention spans every branch, like its task items.
+    const inbox = await this.chats.inboxHuman(
+      userId,
+      projectId,
+      undefined,
+      true
+    );
     return this.summaryFor(
       { type: "human", id: userId },
       projectId,
@@ -283,14 +307,15 @@ export class AttentionService {
     unreadChats: UnreadChat[],
     branchId?: string | null
   ): Promise<AttentionSummary> {
+    const scope = this.attentionBranchScope(branchId);
     const [taskPart, handoffPart, blockerPart] = await Promise.all([
-      this.taskItems(actor, projectId),
-      this.handoffItems(actor, projectId),
-      this.blockerItems(actor, projectId)
+      this.taskItems(actor, projectId, scope),
+      this.handoffItems(actor, projectId, scope),
+      this.blockerItems(actor, projectId, scope)
     ]);
     return {
       cursor,
-      branch_id: this.attentionBranchScope(branchId),
+      branch_id: scope,
       unread_chats: unreadChats,
       tasks: taskPart.items,
       handoffs: handoffPart.items,
@@ -302,7 +327,11 @@ export class AttentionService {
 
   // One grouped query over the actor's watches joined to comments above the
   // read position. Muted watches only surface comments that mention the actor.
-  private async unreadAggregates(actor: Actor, projectId: string) {
+  private async unreadAggregates(
+    actor: Actor,
+    projectId: string,
+    branchId: string | null
+  ) {
     const rows = await this.db
       .select({
         taskId: taskWatches.taskId,
@@ -326,14 +355,20 @@ export class AttentionService {
       .from(taskWatches)
       .innerJoin(
         tasks,
-        and(eq(tasks.id, taskWatches.taskId), eq(tasks.projectId, projectId))
+        and(
+          eq(tasks.id, taskWatches.taskId),
+          eq(tasks.projectId, projectId),
+          branchId ? eq(tasks.branchId, branchId) : undefined
+        )
       )
       .innerJoin(
         taskComments,
         and(
           eq(taskComments.taskId, taskWatches.taskId),
           gt(taskComments.sequence, taskWatches.lastReadSequence),
-          notAuthoredBy(actor)
+          notAuthoredBy(actor),
+          // History copied by imports and merges never counts as unread.
+          isNull(taskComments.importedAt)
         )
       )
       .where(and(eq(taskWatches.projectId, projectId), watchActorClause(actor)))
@@ -360,8 +395,12 @@ export class AttentionService {
       .filter((row) => row.unreadCount > 0);
   }
 
-  private async taskItems(actor: Actor, projectId: string) {
-    const aggregates = await this.unreadAggregates(actor, projectId);
+  private async taskItems(
+    actor: Actor,
+    projectId: string,
+    branchId: string | null
+  ) {
+    const aggregates = await this.unreadAggregates(actor, projectId, branchId);
     const claimed = new Set(
       actor.type === "agent"
         ? (
@@ -466,7 +505,11 @@ export class AttentionService {
 
   // A handoff is pending while the recipient's chat read position is below
   // its message sequence; there is no second read state.
-  private async handoffItems(actor: Actor, projectId: string) {
+  private async handoffItems(
+    actor: Actor,
+    projectId: string,
+    branchId: string | null
+  ) {
     const rows = await this.db
       .select({
         handoff: handoffs,
@@ -489,6 +532,7 @@ export class AttentionService {
       .where(
         and(
           eq(handoffs.projectId, projectId),
+          branchId ? eq(chatMessages.branchId, branchId) : undefined,
           actor.type === "agent"
             ? eq(handoffs.toAgentId, actor.id)
             : eq(handoffs.toUserId, actor.id)
@@ -517,7 +561,11 @@ export class AttentionService {
     return { items, truncated: rows.length > listLimit };
   }
 
-  private async blockerItems(actor: Actor, projectId: string) {
+  private async blockerItems(
+    actor: Actor,
+    projectId: string,
+    branchId: string | null
+  ) {
     // Task refs load separately: lookups by task_blocks.task_id hit the
     // one-open-per-task partial index, which pg-mem applies without its
     // predicate (resolved rows would vanish from the join).
@@ -540,7 +588,12 @@ export class AttentionService {
     const refs = new Map(
       (page.length
         ? await this.db
-            .select({ id: tasks.id, key: tasks.taskKey, title: tasks.title })
+            .select({
+              id: tasks.id,
+              key: tasks.taskKey,
+              title: tasks.title,
+              branchId: tasks.branchId
+            })
             .from(tasks)
             .where(
               inArray(
@@ -552,7 +605,9 @@ export class AttentionService {
       ).map((task) => [task.id, task])
     );
     const items: AttentionBlockerItem[] = page.flatMap((block) => {
-      const task = refs.get(block.taskId);
+      const ref = refs.get(block.taskId);
+      if (!ref || (branchId && ref.branchId !== branchId)) return [];
+      const task = { id: ref.id, key: ref.key, title: ref.title };
       return task
         ? [
             {
@@ -803,7 +858,8 @@ export class AttentionService {
         .where(
           and(eq(taskWatches.projectId, projectId), watchActorClause(actor))
         ),
-      this.unreadAggregates(actor, projectId),
+      // Overlays are keyed by task id, so spanning every branch is harmless.
+      this.unreadAggregates(actor, projectId, null),
       this.db
         .select({ claim: taskClaims, agentName: agents.name })
         .from(taskClaims)
@@ -937,11 +993,10 @@ export class AttentionService {
     ]);
     const summaries = [];
     for (const agent of activeAgents) {
-      const inbox = await this.chats.inboxAgent({
-        agentId: agent.id,
-        projectId,
-        credentialId: ""
-      });
+      const inbox = await this.chats.inboxAgent(
+        { agentId: agent.id, projectId, credentialId: "" },
+        null
+      );
       summaries.push({
         agentId: agent.id,
         summary: await this.summaryFor(

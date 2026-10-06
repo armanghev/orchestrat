@@ -1,4 +1,6 @@
 import {
+  branchSchema,
+  type Branch,
   agentAttentionSchema,
   taskBlockSchema,
   attentionSummarySchema,
@@ -47,6 +49,28 @@ export function project(overrides: Partial<Project> = {}): Project {
     created_at: timestamp,
     updated_at: timestamp,
     archived_at: null,
+    ...overrides
+  });
+}
+
+/** The project's default branch unless overridden. */
+export function branch(overrides: Partial<Branch> = {}): Branch {
+  return branchSchema.parse({
+    id: "00000000-0000-4000-8000-000000000050",
+    project_id: project().id,
+    name: "main",
+    is_default: true,
+    name_source: "fallback",
+    created_via: "migration",
+    created_by: null,
+    onboarding_state: "completed",
+    onboarding_choice: null,
+    archived_at: null,
+    archived_reason: null,
+    provider: null,
+    open_decision_count: 0,
+    created_at: timestamp,
+    updated_at: timestamp,
     ...overrides
   });
 }

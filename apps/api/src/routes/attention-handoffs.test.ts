@@ -4,6 +4,7 @@ import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import {
   chatMessages,
+  chats,
   handoffs,
   organizationMembers,
   projectEvents,
@@ -201,11 +202,16 @@ async function setup() {
     recipient: { agentId: string }
   ) => {
     const offset = 10_000 + (await messagesIn(chatId)).length * 1000;
+    const [{ branchId }] = await db
+      .select({ branchId: chats.branchId })
+      .from(chats)
+      .where(eq(chats.id, chatId));
     const messages = await db
       .insert(chatMessages)
       .values(
         Array.from({ length: count }, (_, index) => ({
           projectId: project.id,
+          branchId,
           chatId,
           sequence: offset + index,
           authorType: "agent" as const,

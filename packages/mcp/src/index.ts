@@ -24,6 +24,13 @@ import {
   registerAttentionTools,
   type AttentionToolHost
 } from "./attention-tools.js";
+import {
+  BranchController,
+  registerBranchTools,
+  type BranchNotice,
+  type CheckoutBranch
+} from "./branch-tools.js";
+export type { CheckoutBranch } from "./branch-tools.js";
 
 export const mcpPackage = "@orchestrat/mcp";
 
@@ -61,7 +68,9 @@ type Client = Pick<
   | "acknowledgeMessages"
   | "getInbox"
   | "attention"
->;
+> &
+  // Absent on clients from before branches; the bridge then never switches.
+  Partial<Pick<AgentApiClient, "branches" | "withBranch" | "withSession">>;
 export type BridgeOptions = {
   client?: Client;
   projects?: { id: string; name: string; client: Client }[];
@@ -70,6 +79,8 @@ export type BridgeOptions = {
   heartbeatMs?: number;
   inboxTimeoutMs?: number;
   waitBudgetSeconds?: number;
+  /** Project-scoped CLI only: the branch the Git checkout is on. */
+  resolveCheckoutBranch?: () => Promise<CheckoutBranch | null>;
 };
 type Claim = { task_id: string; [key: string]: unknown };
 
@@ -88,6 +99,9 @@ export class ClaimTokenStore {
   }
   clear() {
     this.tokens.clear();
+  }
+  taskIds() {
+    return [...this.tokens.keys()];
   }
 }
 
@@ -152,10 +166,29 @@ export class McpBridge {
   private sessionId?: string;
   private heartbeatTimer?: ReturnType<typeof setInterval>;
   private stopping?: Promise<void>;
+  // `base` is the project client; `client` is scoped to the session's branch.
+  private base?: Client;
   private client?: Client;
+  private readonly branches: BranchController<Client>;
   private attentionUnsupported = false;
   constructor(private readonly options: BridgeOptions) {
+    this.base = options.client;
     this.client = options.client;
+    this.branches = new BranchController<Client>({
+      base: () => this.base,
+      client: () => this.client,
+      session: () => this.sessionId,
+      adopt: (client, sessionId) => {
+        this.client = client;
+        this.sessionId = sessionId;
+      },
+      claims: this.claims,
+      openInput: () => ({
+        runtime: this.options.runtime ?? this.options.integration,
+        integration: this.options.integration
+      }),
+      resolveCheckout: options.resolveCheckoutBranch
+    });
     this.server = new McpServer({ name: "orchestrat", version: "0.1.0" });
     this.server.server.onclose = () => {
       void this.stop().catch((error) => this.reportCleanupError(error));
@@ -164,11 +197,7 @@ export class McpBridge {
   }
   async start() {
     if (!this.client) return this.server;
-    const opened = await this.client.openSession({
-      runtime: this.options.runtime ?? this.options.integration,
-      integration: this.options.integration
-    });
-    this.sessionId = opened.session.id;
+    await this.branches.start();
     this.startHeartbeat();
     return this.server;
   }
@@ -257,7 +286,11 @@ export class McpBridge {
         description: "Get the selected project for this authenticated agent.",
         inputSchema: {}
       },
-      async () => this.call(() => this.activeClient().getProject())
+      async () =>
+        this.call(async () => ({
+          ...(await this.activeClient().getProject()),
+          ...(await this.branches.describe())
+        }))
     );
     this.server.registerTool(
       "list_tasks",
@@ -660,6 +693,11 @@ export class McpBridge {
         )
     );
     registerAttentionTools(this.attentionHost());
+    registerBranchTools({
+      server: this.server,
+      call: (operation, options) => this.call(operation, options),
+      branches: this.branches
+    });
   }
   private attentionHost(): AttentionToolHost {
     return {
@@ -705,19 +743,24 @@ export class McpBridge {
     if (previousSessionId)
       await this.activeClient().closeSession(previousSessionId);
     this.claims.clear();
+    this.base = project.client;
     this.client = project.client;
-    const opened = await this.client.openSession({
-      runtime: this.options.runtime ?? this.options.integration,
-      integration: this.options.integration
-    });
-    this.sessionId = opened.session.id;
+    await this.branches.reset();
     this.startHeartbeat();
     return { project_id: project.id, name: project.name };
   }
   private async call<T>(
     operation: () => Promise<T>,
-    options: { notifyInbox?: boolean; inboxClient?: Client | null } = {}
+    options: {
+      notifyInbox?: boolean;
+      inboxClient?: Client | null;
+      followCheckout?: boolean;
+    } = {}
   ) {
+    // Follow the checkout before binding this call to a client, so the
+    // operation and its notices use the same branch and session.
+    const branchNotices: BranchNotice[] =
+      options.followCheckout === false ? [] : await this.branches.follow();
     const operationClient = this.client;
     const inboxClient =
       "inboxClient" in options ? options.inboxClient : operationClient;
@@ -728,6 +771,7 @@ export class McpBridge {
       operationSucceeded = true;
     } catch (error) {
       response = mapMcpError(error);
+      branchNotices.push(...(await this.branches.afterError(error)));
     }
     const noticeClient = operationSucceeded ? inboxClient : operationClient;
     if (options.notifyInbox !== false && noticeClient) {
@@ -746,6 +790,8 @@ export class McpBridge {
       if (notice)
         response.content.push({ type: "text", text: JSON.stringify(notice) });
     }
+    for (const notice of branchNotices)
+      response.content.push({ type: "text", text: JSON.stringify({ notice }) });
     return response;
   }
   // One notice read per tool call, bounded by inboxTimeoutMs overall (the

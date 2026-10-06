@@ -491,7 +491,8 @@ withSetup(
       chat_id: direct.id,
       message_id: hello.id,
       excerpt: "hello A",
-      branch_id: null
+      // Chat events carry the chat's branch: the default one here.
+      branch_id: s.project.default_branch_id
     });
     assert.equal(groupMention.message_id, mentioned.id);
     assert.deepEqual(watchedComment.task, {

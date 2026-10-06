@@ -75,20 +75,27 @@ export function PageState({
 }
 
 export function StatusBadge({ status }: { status: string }) {
+  // Archived projects and branches use the neutral tone plus their label.
   const variant =
-    status === "blocked" || status === "cancelled"
-      ? "destructive"
-      : status === "online" || status === "active" || status === "done"
-        ? "success"
-        : status === "review" || status === "stale"
-          ? "warning"
-          : status === "in_progress" || status === "claimed"
-            ? "info"
-            : "secondary";
+    status === "archived"
+      ? "secondary"
+      : status === "blocked" || status === "cancelled" || status === "error"
+        ? "destructive"
+        : status === "online" || status === "active" || status === "done"
+          ? "success"
+          : status === "review" ||
+              status === "stale" ||
+              status === "needs_reauthorization" ||
+              status === "suspended"
+            ? "warning"
+            : status === "in_progress" || status === "claimed"
+              ? "info"
+              : "secondary";
   return (
     <Badge variant={variant}>
       <span className="size-1.5 rounded-full bg-current" aria-hidden="true" />
-      {status.charAt(0).toLocaleUpperCase() + status.slice(1).replaceAll("_", " ")}
+      {status.charAt(0).toLocaleUpperCase() +
+        status.slice(1).replaceAll("_", " ")}
     </Badge>
   );
 }

@@ -618,7 +618,8 @@ test("inbox aggregates unread counts across many participant chats", async (t) =
   const expanded = await measureInbox();
   const inbox = expanded.response;
   assert.equal(inbox.statusCode, 200, inbox.body);
-  assert.equal(baseline.selectCount, 3);
+  // Project lock, membership, default branch, then one inbox query.
+  assert.equal(baseline.selectCount, 4);
   assert.equal(expanded.selectCount, baseline.selectCount);
   const expected = [
     { chat_id: chats[0].id, unread_count: 1, mention_count: 1 },

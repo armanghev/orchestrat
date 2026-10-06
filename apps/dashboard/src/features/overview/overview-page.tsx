@@ -8,6 +8,7 @@ import {
   ListTodo,
   Activity,
   CircleCheck,
+  Scale,
   Timer
 } from "lucide-react";
 import type { ProjectContext } from "@/features/hierarchy/catalog";
@@ -17,7 +18,8 @@ import {
   projectEventsQueryOptions,
   tasksQueryOptions
 } from "@/features/coordination/query-options";
-import { derivePresence } from "@/features/agents/presence";
+import { derivePresence, onBranch } from "@/features/agents/presence";
+import { useBranch } from "@/features/branches/branch-context";
 import { DashboardApiError } from "@/lib/api/client";
 import { PageState, StatusBadge } from "@/components/dashboard/page";
 import { Button } from "@/components/ui/button";
@@ -51,10 +53,11 @@ import {
 export function OverviewPage({ context }: { context: ProjectContext }) {
   const { project } = context;
   const { api } = useRouter().options.context;
-  const tasks = useQuery(tasksQueryOptions(api, project.id));
+  const { branchId, branch } = useBranch();
+  const tasks = useQuery(tasksQueryOptions(api, project.id, branchId));
   const agents = useQuery(agentsQueryOptions(api, project.id));
   const presence = useQuery(agentPresenceQueryOptions(api, project.id));
-  const events = useQuery(projectEventsQueryOptions(api, project.id));
+  const events = useQuery(projectEventsQueryOptions(api, project.id, branchId));
   const loading =
     tasks.isPending ||
     agents.isPending ||
@@ -90,8 +93,11 @@ export function OverviewPage({ context }: { context: ProjectContext }) {
   const agentById = new Map(
     agents.data!.agents.map((agent) => [agent.id, agent])
   );
+  // Only agents working on this branch (docs/project-branches.md §11.3).
   const online = presence.data!.agents.filter(
-    (item) => derivePresence(item.status, item.last_heartbeat_at) === "online"
+    (item) =>
+      derivePresence(item.status, item.last_heartbeat_at) === "online" &&
+      onBranch(item, branchId)
   );
   const working = online.filter((item) => item.current_task_id !== null);
   const active = taskCards.filter(
@@ -112,8 +118,39 @@ export function OverviewPage({ context }: { context: ProjectContext }) {
     .slice(-5)
     .reverse();
 
+  const openDecisions = branch.open_decision_count;
   return (
     <section className="dashboard-page" aria-label="Project overview">
+      {openDecisions ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              <h2 className="flex items-center gap-2">
+                <Scale
+                  className="size-4 text-muted-foreground"
+                  aria-hidden="true"
+                />
+                Needs your decision
+              </h2>
+            </CardTitle>
+            <CardDescription>
+              {openDecisions === 1
+                ? "A merge left 1 conflict on this branch for a person to settle."
+                : `Merges left ${openDecisions} conflicts on this branch for a person to settle.`}
+            </CardDescription>
+            <CardAction>
+              <Button asChild variant="outline" size="sm">
+                <Link
+                  to="/projects/$projectId/decisions"
+                  params={{ projectId: project.id }}
+                >
+                  Review decisions
+                </Link>
+              </Button>
+            </CardAction>
+          </CardHeader>
+        </Card>
+      ) : null}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {[
           {
@@ -137,7 +174,7 @@ export function OverviewPage({ context }: { context: ProjectContext }) {
           {
             label: "Completed tasks",
             value: completed,
-            detail: `${taskCards.length} tasks in this project`,
+            detail: `${taskCards.length} tasks on this branch`,
             icon: CheckCheck
           }
         ].map(({ label, value, detail, icon: Icon }) => (

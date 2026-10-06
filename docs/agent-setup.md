@@ -94,6 +94,7 @@ saved local origins.
 orchestrat setup
 orchestrat status
 orchestrat doctor
+orchestrat branch --integration codex
 orchestrat disconnect codex
 orchestrat disconnect claude-code
 orchestrat disconnect cursor
@@ -179,6 +180,108 @@ with the harness's own CLI when a handoff arrives for an agent that is offline.
 - Runs use your normal harness permission settings.
 - Budgets: at least 5 minutes between wakes per agent, 6 per hour and 20 per
   day locally, plus a server budget.
+
+## Branches
+
+An Orchestrat project has branches, and they follow Git. Tasks, documents and
+chats on one branch are separate from those on another. Agents, members and
+credentials are shared by every branch. See the
+[product overview](product/README.md#branches) for how branches are created,
+merged and archived.
+
+### Following the Git checkout
+
+A project-scoped connection works on the branch of the Git checkout it runs
+in.
+
+- **Reading the checkout.** The CLI reads the `.git` files, including
+  worktrees and packed refs. It never starts a `git` process, so hooks stay
+  fast and macOS never shows the Xcode tools prompt. The remote's default
+  branch comes from `refs/remotes/origin/HEAD`.
+- **Registering.** The CLI registers the checkout's branch with the API. If
+  the Orchestrat branch doesn't exist yet, it is created, even when the Git
+  branch was never pushed. While no repository is connected and the default
+  branch still has its fallback name `main`, the reported `origin/HEAD` name
+  renames it.
+- **MCP.** The bridge opens its session on the checkout's branch. Before each
+  tool call it reads the checkout again; the read is cached until `HEAD`
+  changes. If the checkout moved and the session holds no claims, the bridge
+  closes the session and opens one on the new branch. If it holds claims, it
+  stays and adds a `branch_mismatch` notice.
+- **Hooks.** Lifecycle hooks, the stop hook and `orchestrat document` commands
+  send the checkout's branch in the `X-Orchestrat-Branch-Id` header. Hook
+  session IDs include the branch, so one conversation gets one session per
+  branch.
+- **Attention.** Notices and `wait_for_update` cover the session's branch.
+- **Fallbacks.** Outside a Git checkout, with an API from before branches, or
+  when registering fails, everything works on the default branch as before. A
+  detached HEAD also starts on the default branch; mid-session, the bridge
+  stays on its branch and sends one `checkout_detached` notice.
+- **Archived branches.** If the checkout's branch was deleted on the provider
+  and archived, the bridge works on the default branch and adds a
+  `branch_archived` notice to every tool result until the checkout changes or
+  you call `select_branch`. If the session's branch is archived while you
+  work, a bridge that follows the checkout moves to the default branch with
+  the same notice; otherwise the tool returns the error and asks you to call
+  `select_branch`.
+
+Global connections (`orchestrat mcp --global`) don't follow a checkout. They
+start on the selected project's default branch, and `select_branch` works as
+usual.
+
+### MCP tools
+
+| Tool            | Input                                    | Behavior                                                                                                                                                                                                                                                             |
+| --------------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `list_branches` | `{ include_archived? }`                  | The project's branches. `is_current` marks the session's branch and `is_default` the default. Also returns `follow_checkout`                                                                                                                                         |
+| `select_branch` | `{ branch?, follow_checkout?, create? }` | Pass either `branch` (an ID or a name) or `follow_checkout: true`. `create: true` registers a missing name. Switching closes the session, which releases its claims, then opens one on the target. Returns `branch`, `released_claim_task_ids` and `follow_checkout` |
+
+- `select_branch({ branch })` stops following the checkout until
+  `select_branch({ follow_checkout: true })`. The choice lasts until the MCP
+  connection restarts; use `orchestrat branch select` to keep it.
+- If closing the session fails, nothing changes. The session, its claim tokens
+  and its heartbeat stay, and you can retry.
+- `follow_checkout: true` needs a project-scoped connection.
+- `get_project` adds `branch` (`id`, `name` and `is_default`),
+  `follow_checkout` and `default_branch_id`.
+- A tool call and its notices stay on the branch the call started on.
+
+Branch notices on tool results:
+
+| Notice                 | Meaning                                                                                                                                              |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `branch_switched`      | The session followed the checkout `from` one branch `to` another                                                                                     |
+| `branch_mismatch`      | The checkout is on another branch, but the session holds claims (`active_claims`), so it stayed                                                      |
+| `checkout_detached`    | HEAD is detached, so the session stays where it is. Sent once                                                                                        |
+| `branch_archived`      | The checkout's or session's branch is archived. When following the checkout, the session works on the default branch; otherwise call `select_branch` |
+| `branch_switch_failed` | Following the checkout failed; `error` holds the code                                                                                                |
+
+### The `orchestrat branch` command
+
+Every subcommand needs `--integration <integration>`, because credentials are
+per integration. The output is JSON.
+
+| Command                                       | Behavior                                                                                                                                                                          |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `orchestrat branch` or `branch current`       | The checkout's branch, any pin, the matching Orchestrat branch and the default branch                                                                                             |
+| `orchestrat branch list [--include-archived]` | The project's branches                                                                                                                                                            |
+| `orchestrat branch create <name>`             | Registers the branch, or returns the active one with that name. Unlike automatic registration, it creates a new branch even when the provider deleted the last one with that name |
+| `orchestrat branch select <name>`             | Pins this checkout to an active branch, whatever Git has checked out                                                                                                              |
+| `orchestrat branch select --follow`           | Removes the pin, so the checkout's branch is followed again                                                                                                                       |
+
+`select` writes the pin to `~/.orchestrat/branch-overrides.json`, keyed by the
+real path of the repository root; `config.json` is not touched. Hooks use the
+pin on their next run, and an MCP bridge that follows the checkout picks it up
+at its next tool call. `select` must run inside the checkout.
+
+Local Git never merges, archives or deletes Orchestrat branches. Deleting or
+merging a branch in your checkout changes nothing in Orchestrat. Only a
+connected repository, or an owner or admin in the dashboard, does that.
+
+`status` shows the checkout's branch and each agent's session `branch_id`.
+`doctor` warns about a detached HEAD, a missing `origin/HEAD` (run
+`git remote set-head origin -a`), and a checkout branch that is archived in
+Orchestrat.
 
 ## Safety and recovery
 

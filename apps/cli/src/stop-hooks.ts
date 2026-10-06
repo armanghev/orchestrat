@@ -8,6 +8,7 @@ import {
   rewakeEnabled,
   type OrchestratConfig
 } from "./config.js";
+import { clientForCheckout } from "./branches.js";
 import type { ConfigurableIntegration } from "./harnesses.js";
 import { externalSessionId } from "./hook-types.js";
 import { hookCwd } from "./hooks.js";
@@ -387,12 +388,19 @@ async function attentionClient(
     read: async () => config,
     credentials: input.credentials
   });
-  return new AgentApiClient({
-    baseUrl: resolved.api!,
-    token: resolved.credential!,
-    fetch: input.fetch,
-    sleep: async () => undefined
-  });
+  // Attention follows the branch the checkout works on.
+  return (
+    await clientForCheckout(
+      new AgentApiClient({
+        baseUrl: resolved.api!,
+        token: resolved.credential!,
+        fetch: input.fetch,
+        sleep: async () => undefined
+      }),
+      parsed.cwd,
+      input.home
+    )
+  ).client;
 }
 
 export async function decideStop(input: StopHookInput): Promise<StopDecision> {

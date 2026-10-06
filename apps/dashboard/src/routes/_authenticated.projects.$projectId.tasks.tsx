@@ -83,6 +83,8 @@ import {
   BlockedTaskLine
 } from "@/features/attention/blocked-callout";
 import { PingDialog } from "@/features/attention/ping-dialog";
+import { useBranch } from "@/features/branches/branch-context";
+import { OtherBranchNotice } from "@/features/branches/other-branch-notice";
 import type {
   HumanTaskStatus,
   ParticipantRef,
@@ -118,19 +120,24 @@ function TasksRoute() {
   const { projectId } = Route.useParams();
   const { task: selectedTaskId } = Route.useSearch();
   const navigate = Route.useNavigate();
-  const { api, project } = Route.useRouteContext();
+  const { api } = Route.useRouteContext();
+  const { branchId, branchParam, projectArchived, readOnly } = useBranch();
   const queryClient = useQueryClient();
   const [creating, setCreating] = useState(false);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [notice, setNotice] = useState<string | null>(null);
-  const tasks = useQuery(tasksQueryOptions(api, projectId));
+  const tasks = useQuery(tasksQueryOptions(api, projectId, branchId));
   const taskId = selectedTaskId ?? "00000000-0000-4000-8000-000000000000";
   const selected = useQuery({
     ...taskQueryOptions(api, taskId),
     enabled: Boolean(selectedTaskId)
   });
-  const selectedInProject = selected.data?.project_id === projectId;
+  // A task deep link can name another branch's task (spec §11.1).
+  const selectedBranchId = selected.data?.branch_id;
+  const selectedInProject =
+    selected.data?.project_id === projectId &&
+    (selectedBranchId === undefined || selectedBranchId === branchId);
   const comments = useQuery({
     ...taskCommentsQueryOptions(api, taskId),
     enabled: selectedInProject
@@ -159,7 +166,7 @@ function TasksRoute() {
       description: string | null;
       priority: TaskPriority;
       status: HumanTaskStatus;
-    }) => api.createTask(projectId, input, crypto.randomUUID()),
+    }) => api.createTask(projectId, input, crypto.randomUUID(), { branchId }),
     onSuccess: async (task) => {
       setCreating(false);
       void navigate({ search: { task: task.id } });
@@ -345,7 +352,6 @@ function TasksRoute() {
       status,
       tasks: filtered.filter((task) => task.status === status)
     }));
-  const archived = project?.project.status === "archived";
   const selectTask = (id: string) => {
     setNotice(null);
     void navigate({ search: { task: id } });
@@ -371,19 +377,20 @@ function TasksRoute() {
   );
   return (
     <section className="dashboard-page" aria-label="Project tasks">
-      <TopToolbarActions>
-        <Button
-          disabled={archived}
-          onClick={() => {
-            create.reset();
-            setCreating(true);
-          }}
-        >
-          <Plus data-icon="inline-start" />
-          New task
-        </Button>
-      </TopToolbarActions>
-      {archived ? (
+      {!readOnly ? (
+        <TopToolbarActions>
+          <Button
+            onClick={() => {
+              create.reset();
+              setCreating(true);
+            }}
+          >
+            <Plus data-icon="inline-start" />
+            New task
+          </Button>
+        </TopToolbarActions>
+      ) : null}
+      {projectArchived ? (
         <Alert role="status">
           <AlertDescription>
             This project is archived and read-only.
@@ -593,7 +600,7 @@ function TasksRoute() {
             </DialogDescription>
           </DialogHeader>
           <CreateTaskForm
-            disabled={archived || create.isPending}
+            disabled={readOnly || create.isPending}
             error={create.error ? message(create.error) : null}
             onCreate={(input) => create.mutate(input)}
           />
@@ -629,7 +636,24 @@ function TasksRoute() {
               </AlertDescription>
             </Alert>
           ) : null}
-          {selected.data && !selectedInProject ? (
+          {selected.data &&
+          selected.data.project_id === projectId &&
+          selectedBranchId &&
+          selectedBranchId !== branchId ? (
+            <OtherBranchNotice
+              item="task"
+              branchId={selectedBranchId}
+              className="mx-4"
+              onSwitch={() =>
+                void navigate({
+                  search: (current) => ({
+                    ...current,
+                    branch: branchParam(selectedBranchId)
+                  })
+                })
+              }
+            />
+          ) : selected.data && !selectedInProject ? (
             <Alert variant="destructive" className="mx-4 w-auto">
               <AlertDescription>
                 This task belongs to a different project. Open it from that
@@ -651,7 +675,7 @@ function TasksRoute() {
               comments={comments.data?.comments ?? []}
               dependencies={dependencies.data}
               taskOptions={tasks.data.tasks}
-              archived={archived}
+              readOnly={readOnly}
               saving={update.isPending}
               moving={move.isPending}
               commenting={addComment.isPending}
@@ -817,7 +841,7 @@ function TaskDetail({
   comments,
   dependencies,
   taskOptions,
-  archived,
+  readOnly,
   saving,
   moving,
   commenting,
@@ -836,7 +860,8 @@ function TaskDetail({
   comments: TaskComment[];
   dependencies?: { depends_on: Task[]; blocks: Task[] };
   taskOptions: Task[];
-  archived: boolean;
+  /** An archived project or branch: write controls are hidden. */
+  readOnly: boolean;
   saving: boolean;
   moving: boolean;
   commenting: boolean;
@@ -909,20 +934,24 @@ function TaskDetail({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {!claimed ? (
-            <NativeSelect
-              aria-label="Move task status"
-              value={task.status}
-              disabled={archived || moving}
-              onChange={(event) =>
-                onMove(event.target.value as HumanTaskStatus)
-              }
-            >
-              {statuses.map((status) => (
-                <NativeSelectOption key={status} value={status}>
-                  {status.replace("_", " ")}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
+            readOnly ? (
+              <StatusBadge status={task.status} />
+            ) : (
+              <NativeSelect
+                aria-label="Move task status"
+                value={task.status}
+                disabled={moving}
+                onChange={(event) =>
+                  onMove(event.target.value as HumanTaskStatus)
+                }
+              >
+                {statuses.map((status) => (
+                  <NativeSelectOption key={status} value={status}>
+                    {status.replace("_", " ")}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            )
           ) : claim ? (
             <TaskClaimLine claim={claim} status={task.status} />
           ) : (
@@ -930,13 +959,14 @@ function TaskDetail({
               Claimed by an agent
             </p>
           )}
-          <PingDialog
-            api={api}
-            projectId={projectId}
-            task={{ id: task.id, key: task.key, title: task.title }}
-            defaultRecipient={pingRecipient}
-            disabled={archived}
-          />
+          {!readOnly ? (
+            <PingDialog
+              api={api}
+              projectId={projectId}
+              task={{ id: task.id, key: task.key, title: task.title }}
+              defaultRecipient={pingRecipient}
+            />
+          ) : null}
         </div>
       </div>
       {block ? (
@@ -945,7 +975,7 @@ function TaskDetail({
           projectId={projectId}
           taskKey={task.key}
           block={block}
-          archived={archived}
+          archived={readOnly}
           renderTaskLink={(blocking) => (
             <Link
               to="/projects/$projectId/tasks"
@@ -1014,73 +1044,86 @@ function TaskDetail({
         </Alert>
       ) : null}
       <div className="mt-5 grid gap-4 md:grid-cols-2">
-        <div>
-          <Label htmlFor="detail-title">Title</Label>
-          <Input
-            id="detail-title"
-            value={title}
-            disabled={archived || claimed || saving}
-            onChange={(event) => setTitle(event.target.value)}
-            className="mt-2"
-          />
-          <Label htmlFor="detail-description" className="mt-4">
-            Description (Markdown)
-          </Label>
-          <Textarea
-            id="detail-description"
-            value={description}
-            disabled={archived || claimed || saving}
-            onChange={(event) => setDescription(event.target.value)}
-            rows={5}
-            className="mt-2"
-          />
-          <div className="mt-3 rounded-lg border bg-muted/30 p-3">
-            <p className="mb-2 text-xs font-medium text-muted-foreground">
-              Preview
-            </p>
-            <MarkdownContent content={description} />
+        {readOnly ? (
+          <div>
+            <h3 className="text-sm font-semibold">Description</h3>
+            <div className="mt-2">
+              {task.description ? (
+                <MarkdownContent content={task.description} />
+              ) : (
+                <p className="text-sm text-muted-foreground">None</p>
+              )}
+            </div>
           </div>
-          <Label htmlFor="detail-priority" className="mt-4">
-            Priority
-          </Label>
-          <NativeSelect
-            id="detail-priority"
-            value={priority}
-            disabled={archived || claimed || saving}
-            onChange={(event) =>
-              setPriority(event.target.value as TaskPriority)
-            }
-            className="mt-2 w-full"
-          >
-            {priorities.map((item) => (
-              <NativeSelectOption key={item} value={item}>
-                {item}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-          <Button
-            className="mt-3"
-            disabled={archived || claimed || saving || !title.trim()}
-            onClick={() => {
-              void onUpdate({
-                title: title.trim(),
-                description: description || null,
-                priority,
-                expected_version: base.version
-              })
-                .then((saved) => {
-                  const next = taskSnapshot(saved);
-                  setTitle(next.title);
-                  setDescription(next.description);
-                  setPriority(next.priority);
-                  setBase(next);
+        ) : (
+          <div>
+            <Label htmlFor="detail-title">Title</Label>
+            <Input
+              id="detail-title"
+              value={title}
+              disabled={claimed || saving}
+              onChange={(event) => setTitle(event.target.value)}
+              className="mt-2"
+            />
+            <Label htmlFor="detail-description" className="mt-4">
+              Description (Markdown)
+            </Label>
+            <Textarea
+              id="detail-description"
+              value={description}
+              disabled={claimed || saving}
+              onChange={(event) => setDescription(event.target.value)}
+              rows={5}
+              className="mt-2"
+            />
+            <div className="mt-3 rounded-lg border bg-muted/30 p-3">
+              <p className="mb-2 text-xs font-medium text-muted-foreground">
+                Preview
+              </p>
+              <MarkdownContent content={description} />
+            </div>
+            <Label htmlFor="detail-priority" className="mt-4">
+              Priority
+            </Label>
+            <NativeSelect
+              id="detail-priority"
+              value={priority}
+              disabled={claimed || saving}
+              onChange={(event) =>
+                setPriority(event.target.value as TaskPriority)
+              }
+              className="mt-2 w-full"
+            >
+              {priorities.map((item) => (
+                <NativeSelectOption key={item} value={item}>
+                  {item}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+            <Button
+              className="mt-3"
+              disabled={claimed || saving || !title.trim()}
+              onClick={() => {
+                void onUpdate({
+                  title: title.trim(),
+                  description: description || null,
+                  priority,
+                  expected_version: base.version
                 })
-                .catch(() => undefined);
-            }}
-          >
-            {saving ? "Saving…" : "Save changes"}
-          </Button>
-        </div>
+                  .then((saved) => {
+                    const next = taskSnapshot(saved);
+                    setTitle(next.title);
+                    setDescription(next.description);
+                    setPriority(next.priority);
+                    setBase(next);
+                  })
+                  .catch(() => undefined);
+              }}
+            >
+              {saving ? "Saving…" : "Save changes"}
+            </Button>
+          </div>
+        )}
         <div>
           <h3 className="text-sm font-semibold">Dependencies</h3>
           <div className="mt-2 space-y-2">
@@ -1096,57 +1139,58 @@ function TaskDetail({
                     </span>{" "}
                     {item.title}
                   </span>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    disabled={archived || claimed || changingDependencies}
-                    onClick={() => {
-                      void onRemoveDependency(item.id).catch(() => undefined);
-                    }}
-                  >
-                    Remove
-                  </Button>
+                  {!readOnly ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      disabled={claimed || changingDependencies}
+                      onClick={() => {
+                        void onRemoveDependency(item.id).catch(() => undefined);
+                      }}
+                    >
+                      Remove
+                    </Button>
+                  ) : null}
                 </div>
               ))
             ) : (
               <p className="text-sm text-muted-foreground">None</p>
             )}
           </div>
-          <div className="mt-3 flex gap-2">
-            <NativeSelect
-              aria-label="Add task dependency"
-              value={dependsOnTaskId}
-              disabled={
-                archived ||
-                claimed ||
-                changingDependencies ||
-                !dependencyOptions.length
-              }
-              onChange={(event) => setDependsOnTaskId(event.target.value)}
-            >
-              <NativeSelectOption value="">Add dependency…</NativeSelectOption>
-              {dependencyOptions.map((item) => (
-                <NativeSelectOption key={item.id} value={item.id}>
-                  {item.key} · {item.title}
+          {!readOnly ? (
+            <div className="mt-3 flex gap-2">
+              <NativeSelect
+                aria-label="Add task dependency"
+                value={dependsOnTaskId}
+                disabled={
+                  claimed || changingDependencies || !dependencyOptions.length
+                }
+                onChange={(event) => setDependsOnTaskId(event.target.value)}
+              >
+                <NativeSelectOption value="">
+                  Add dependency…
                 </NativeSelectOption>
-              ))}
-            </NativeSelect>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={
-                archived || claimed || changingDependencies || !dependsOnTaskId
-              }
-              onClick={() => {
-                void onAddDependency(dependsOnTaskId)
-                  .then(() => setDependsOnTaskId(""))
-                  .catch(() => undefined);
-              }}
-            >
-              Add
-            </Button>
-          </div>
+                {dependencyOptions.map((item) => (
+                  <NativeSelectOption key={item.id} value={item.id}>
+                    {item.key} · {item.title}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={claimed || changingDependencies || !dependsOnTaskId}
+                onClick={() => {
+                  void onAddDependency(dependsOnTaskId)
+                    .then(() => setDependsOnTaskId(""))
+                    .catch(() => undefined);
+                }}
+              >
+                Add
+              </Button>
+            </div>
+          ) : null}
           <p className="mt-1 text-sm text-muted-foreground">
             Blocks:{" "}
             {dependencies?.blocks.map((item) => item.key).join(", ") || "None"}
@@ -1156,7 +1200,7 @@ function TaskDetail({
             projectId={projectId}
             taskId={task.id}
             comments={comments}
-            archived={archived}
+            archived={readOnly}
             commenting={commenting}
             onComment={onComment}
           />

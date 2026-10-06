@@ -27,9 +27,15 @@ import { and, asc, desc, eq, gt, isNull, lt, ne, or } from "drizzle-orm";
 import { insertProjectEvent } from "./agent-service.js";
 import type { AgentPrincipal } from "./agent-service.js";
 import { ApiError } from "./api-error.js";
+import {
+  assertEntityBranch,
+  resolveBranch,
+  type BranchSelector
+} from "./branch-context.js";
 import { PermissionService } from "./permission-service.js";
 
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+type Executor = Database | Transaction;
 export type DocumentStorageConfig = {
   endpoint: string;
   region: string;
@@ -47,7 +53,7 @@ const isUniqueViolation = (error: unknown) => {
   const value = error as { code?: string; message?: string };
   return (
     value.code === "23505" ||
-    value.message?.includes("documents_project_path_unique") === true
+    value.message?.includes("_branch_path_unique") === true
   );
 };
 const duplicateDocumentPath = () =>
@@ -95,6 +101,7 @@ const author = (type: "human" | "agent", id: string) => ({ type, id });
 const documentJson = (value: typeof documents.$inferSelect) => ({
   id: value.id,
   project_id: value.projectId,
+  branch_id: value.branchId,
   path: value.path,
   current_revision: value.currentRevision,
   archived_at: value.archivedAt?.toISOString() ?? null,
@@ -111,6 +118,7 @@ const documentJson = (value: typeof documents.$inferSelect) => ({
 const folderJson = (value: typeof documentFolders.$inferSelect) => ({
   id: value.id,
   project_id: value.projectId,
+  branch_id: value.branchId,
   path: value.path,
   created_at: value.createdAt.toISOString()
 });
@@ -347,8 +355,15 @@ export class DocumentService {
       }
     };
   }
-  private async listProject(projectId: string, query: DocumentListQuery) {
-    const clauses = [eq(documents.projectId, projectId)];
+  private async listProject(
+    projectId: string,
+    branchId: string,
+    query: DocumentListQuery
+  ) {
+    const clauses = [
+      eq(documents.projectId, projectId),
+      eq(documents.branchId, branchId)
+    ];
     if (!query.include_archived) clauses.push(isNull(documents.archivedAt));
     if (query.cursor) {
       const cursor = decodeDocumentCursor(query.cursor);
@@ -372,7 +387,12 @@ export class DocumentService {
     const folders = await this.db
       .select()
       .from(documentFolders)
-      .where(eq(documentFolders.projectId, projectId))
+      .where(
+        and(
+          eq(documentFolders.projectId, projectId),
+          eq(documentFolders.branchId, branchId)
+        )
+      )
       .orderBy(asc(documentFolders.path));
     return {
       documents: page.map(documentJson),
@@ -386,25 +406,41 @@ export class DocumentService {
           : null
     };
   }
-  async list(userId: string, projectId: string, query: DocumentListQuery) {
+  async list(
+    userId: string,
+    projectId: string,
+    query: DocumentListQuery,
+    selector?: BranchSelector
+  ) {
     await this.access(userId, projectId);
-    return this.listProject(projectId, query);
+    const branch = await resolveBranch(this.db, projectId, selector);
+    return this.listProject(projectId, branch.id, query);
   }
   async listForAgent(principal: AgentPrincipal, query: DocumentListQuery) {
-    return this.listProject(principal.projectId, query);
+    const branch = await resolveBranch(
+      this.db,
+      principal.projectId,
+      principal.branch,
+      { agentId: principal.agentId }
+    );
+    return this.listProject(principal.projectId, branch.id, query);
   }
   async createFolder(
     userId: string,
     projectId: string,
-    input: CreateDocumentFolderRequest
+    input: CreateDocumentFolderRequest,
+    selector?: BranchSelector
   ) {
     await this.access(userId, projectId, true);
     try {
       return await this.db.transaction(async (tx) => {
         await this.lockActiveProject(tx, projectId);
+        const branch = await resolveBranch(tx, projectId, selector, {
+          write: true
+        });
         const [folder] = await tx
           .insert(documentFolders)
-          .values({ projectId, path: input.path })
+          .values({ projectId, branchId: branch.id, path: input.path })
           .returning();
         return { folder: folderJson(folder!) };
       });
@@ -427,11 +463,37 @@ export class DocumentService {
     return this.getProject(principal.projectId, id);
   }
 
+  /**
+   * Entity writes take the branch from the document (spec §6.1); an agent
+   * that names or is pinned to another branch gets BRANCH_MISMATCH.
+   */
+  private branchGuard(
+    tx: Executor,
+    document: typeof documents.$inferSelect,
+    authorType: "human" | "agent",
+    authorId: string,
+    selector: BranchSelector | undefined
+  ) {
+    return assertEntityBranch(
+      tx,
+      document.projectId,
+      document.branchId,
+      selector,
+      {
+        actor: authorType,
+        write: true,
+        agentId: authorType === "agent" ? authorId : undefined,
+        notFound: "Document not found."
+      }
+    );
+  }
+
   private async createProject(
     projectId: string,
     input: CreateDocumentRequest,
     authorType: "human" | "agent",
-    authorId: string
+    authorId: string,
+    selector: BranchSelector | undefined
   ) {
     const content = this.content(
       Buffer.from(documentContentSchema.parse(input.content), "utf8")
@@ -442,12 +504,16 @@ export class DocumentService {
     try {
       return await this.db.transaction(async (tx) => {
         await this.lockActiveProject(tx, projectId);
+        const branch = await resolveBranch(tx, projectId, selector, {
+          write: true,
+          agentId: authorType === "agent" ? authorId : undefined
+        });
         const [pathConflict] = await tx
           .select({ id: documents.id })
           .from(documents)
           .where(
             and(
-              eq(documents.projectId, projectId),
+              eq(documents.branchId, branch.id),
               eq(documents.path, input.path)
             )
           )
@@ -458,6 +524,7 @@ export class DocumentService {
           .values({
             id: documentId,
             projectId,
+            branchId: branch.id,
             path: input.path,
             createdByType: authorType,
             ...(authorType === "human"
@@ -469,6 +536,7 @@ export class DocumentService {
           .insert(documentRevisions)
           .values({
             projectId,
+            branchId: document!.branchId,
             documentId,
             id: revisionId,
             revisionNumber: 1,
@@ -487,6 +555,7 @@ export class DocumentService {
           .returning();
         await insertProjectEvent(tx, {
           projectId,
+          branchId: document.branchId,
           actorUserId: authorType === "human" ? authorId : null,
           actorAgentId: authorType === "agent" ? authorId : null,
           entityId: document.id,
@@ -516,10 +585,11 @@ export class DocumentService {
   async create(
     userId: string,
     projectId: string,
-    input: CreateDocumentRequest
+    input: CreateDocumentRequest,
+    selector?: BranchSelector
   ) {
     await this.access(userId, projectId, true);
-    return this.createProject(projectId, input, "human", userId);
+    return this.createProject(projectId, input, "human", userId, selector);
   }
   async createForAgent(
     principal: AgentPrincipal,
@@ -529,7 +599,8 @@ export class DocumentService {
       principal.projectId,
       input,
       "agent",
-      principal.agentId
+      principal.agentId,
+      principal.branch
     );
   }
   private async current(projectId: string, id: string) {
@@ -566,9 +637,17 @@ export class DocumentService {
     id: string,
     input: UpdateDocumentRequest | EditDocumentRequest,
     authorType: "human" | "agent",
-    authorId: string
+    authorId: string,
+    selector?: BranchSelector
   ) {
     const base = await this.current(projectId, id);
+    await this.branchGuard(
+      this.db,
+      base.document,
+      authorType,
+      authorId,
+      selector
+    );
     if (base.document.archivedAt)
       throw new ApiError(
         409,
@@ -622,6 +701,7 @@ export class DocumentService {
           .for("update");
         if (!document)
           throw new ApiError(404, "NOT_FOUND", "Document not found.");
+        await this.branchGuard(tx, document, authorType, authorId, selector);
         if (document.archivedAt)
           throw new ApiError(
             409,
@@ -668,6 +748,7 @@ export class DocumentService {
           .insert(documentRevisions)
           .values({
             projectId,
+            branchId: document.branchId,
             documentId: id,
             id: revisionId,
             revisionNumber,
@@ -686,6 +767,7 @@ export class DocumentService {
           .returning();
         await insertProjectEvent(tx, {
           projectId,
+          branchId: document.branchId,
           actorUserId: authorType === "human" ? authorId : null,
           actorAgentId: authorType === "agent" ? authorId : null,
           entityId: id,
@@ -767,7 +849,8 @@ export class DocumentService {
       id,
       input,
       "agent",
-      principal.agentId
+      principal.agentId,
+      principal.branch
     );
   }
   async edit(userId: string, id: string, input: EditDocumentRequest) {
@@ -790,7 +873,8 @@ export class DocumentService {
       id,
       input,
       "agent",
-      principal.agentId
+      principal.agentId,
+      principal.branch
     );
   }
 
@@ -799,7 +883,8 @@ export class DocumentService {
     id: string,
     input: RenameDocumentRequest,
     authorType: "human" | "agent",
-    authorId: string
+    authorId: string,
+    selector?: BranchSelector
   ) {
     try {
       return await this.db.transaction(async (tx) => {
@@ -811,6 +896,7 @@ export class DocumentService {
           .for("update");
         if (!document)
           throw new ApiError(404, "NOT_FOUND", "Document not found.");
+        await this.branchGuard(tx, document, authorType, authorId, selector);
         if (document.archivedAt)
           throw new ApiError(
             409,
@@ -834,7 +920,7 @@ export class DocumentService {
           .from(documents)
           .where(
             and(
-              eq(documents.projectId, projectId),
+              eq(documents.branchId, document.branchId),
               eq(documents.path, input.path),
               // The current document may retain its path through the no-op path
               // above, but never collide with another reserved document path.
@@ -850,6 +936,7 @@ export class DocumentService {
           .returning();
         await insertProjectEvent(tx, {
           projectId,
+          branchId: document.branchId,
           actorUserId: authorType === "human" ? authorId : null,
           actorAgentId: authorType === "agent" ? authorId : null,
           entityId: id,
@@ -887,7 +974,8 @@ export class DocumentService {
       id,
       input,
       "agent",
-      principal.agentId
+      principal.agentId,
+      principal.branch
     );
   }
   private async archiveProject(
@@ -895,7 +983,8 @@ export class DocumentService {
     id: string,
     authorType: "human" | "agent",
     authorId: string,
-    restore: boolean
+    restore: boolean,
+    selector?: BranchSelector
   ) {
     return this.db.transaction(async (tx) => {
       await this.lockActiveProject(tx, projectId);
@@ -906,6 +995,7 @@ export class DocumentService {
         .for("update");
       if (!document)
         throw new ApiError(404, "NOT_FOUND", "Document not found.");
+      await this.branchGuard(tx, document, authorType, authorId, selector);
       if (restore ? !document.archivedAt : Boolean(document.archivedAt))
         return { document: documentJson(document) };
       const [updated] = await tx
@@ -915,6 +1005,7 @@ export class DocumentService {
         .returning();
       await insertProjectEvent(tx, {
         projectId,
+        branchId: document.branchId,
         actorUserId: authorType === "human" ? authorId : null,
         actorAgentId: authorType === "agent" ? authorId : null,
         entityId: id,
@@ -940,7 +1031,8 @@ export class DocumentService {
       id,
       "agent",
       principal.agentId,
-      false
+      false,
+      principal.branch
     );
   }
   async restore(userId: string, id: string) {
@@ -959,7 +1051,8 @@ export class DocumentService {
       id,
       "agent",
       principal.agentId,
-      true
+      true,
+      principal.branch
     );
   }
 

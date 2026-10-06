@@ -35,22 +35,30 @@ impl Drop for NotificationWaitPermit {
     }
 }
 
+// `branchId` opens the branch the event happened on; without it the dashboard
+// shows the default branch (docs/project-branches.md §11.1).
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum NotificationDestination {
     Task {
         #[serde(rename = "projectId")]
         project_id: String,
+        #[serde(rename = "branchId", default, skip_serializing_if = "Option::is_none")]
+        branch_id: Option<String>,
         #[serde(rename = "taskId")]
         task_id: String,
     },
     Activity {
         #[serde(rename = "projectId")]
         project_id: String,
+        #[serde(rename = "branchId", default, skip_serializing_if = "Option::is_none")]
+        branch_id: Option<String>,
     },
     Chat {
         #[serde(rename = "projectId")]
         project_id: String,
+        #[serde(rename = "branchId", default, skip_serializing_if = "Option::is_none")]
+        branch_id: Option<String>,
         #[serde(rename = "chatId")]
         chat_id: String,
     },
@@ -90,18 +98,26 @@ fn is_uuid(value: &str) -> bool {
 fn validate_notification(notification: &NativeNotification) -> Result<(), String> {
     validate_text("title", &notification.title, MAX_TITLE_CHARACTERS)?;
     validate_text("body", &notification.body, MAX_BODY_CHARACTERS)?;
-    let (project_id, resource_id) = match &notification.destination {
+    let (project_id, branch_id, resource_id) = match &notification.destination {
         NotificationDestination::Task {
             project_id,
+            branch_id,
             task_id,
-        } => (project_id, Some(task_id)),
-        NotificationDestination::Activity { project_id } => (project_id, None),
+        } => (project_id, branch_id, Some(task_id)),
+        NotificationDestination::Activity {
+            project_id,
+            branch_id,
+        } => (project_id, branch_id, None),
         NotificationDestination::Chat {
             project_id,
+            branch_id,
             chat_id,
-        } => (project_id, Some(chat_id)),
+        } => (project_id, branch_id, Some(chat_id)),
     };
-    if !is_uuid(project_id) || resource_id.is_some_and(|value| !is_uuid(value)) {
+    if !is_uuid(project_id)
+        || branch_id.as_ref().is_some_and(|value| !is_uuid(value))
+        || resource_id.is_some_and(|value| !is_uuid(value))
+    {
         return Err("Notification destination is invalid.".to_string());
     }
     Ok(())
@@ -194,18 +210,34 @@ mod tests {
     fn accepts_only_bounded_text_and_uuid_destinations() {
         let valid = notification(NotificationDestination::Task {
             project_id: "11111111-1111-4111-8111-111111111111".to_string(),
+            branch_id: None,
             task_id: "22222222-2222-4222-8222-222222222222".to_string(),
         });
         assert!(validate_notification(&valid).is_ok());
 
+        let on_branch = notification(NotificationDestination::Chat {
+            project_id: "11111111-1111-4111-8111-111111111111".to_string(),
+            branch_id: Some("44444444-4444-4444-8444-444444444444".to_string()),
+            chat_id: "33333333-3333-4333-8333-333333333333".to_string(),
+        });
+        assert!(validate_notification(&on_branch).is_ok());
+
+        let bad_branch = notification(NotificationDestination::Activity {
+            project_id: "11111111-1111-4111-8111-111111111111".to_string(),
+            branch_id: Some("feat/x".to_string()),
+        });
+        assert!(validate_notification(&bad_branch).is_err());
+
         let mut too_long = notification(NotificationDestination::Activity {
             project_id: "11111111-1111-4111-8111-111111111111".to_string(),
+            branch_id: None,
         });
         too_long.title = "x".repeat(MAX_TITLE_CHARACTERS + 1);
         assert!(validate_notification(&too_long).is_err());
 
         let invalid = notification(NotificationDestination::Task {
             project_id: "11111111-1111-4111-8111-111111111111".to_string(),
+            branch_id: None,
             task_id: "../../settings".to_string(),
         });
         assert!(validate_notification(&invalid).is_err());
@@ -215,6 +247,7 @@ mod tests {
     fn serializes_only_typed_internal_destinations() {
         let destination = NotificationDestination::Task {
             project_id: "11111111-1111-4111-8111-111111111111".to_string(),
+            branch_id: None,
             task_id: "22222222-2222-4222-8222-222222222222".to_string(),
         };
         assert_eq!(
@@ -228,12 +261,14 @@ mod tests {
         assert_eq!(
             serde_json::to_value(NotificationDestination::Chat {
                 project_id: "11111111-1111-4111-8111-111111111111".to_string(),
+                branch_id: Some("44444444-4444-4444-8444-444444444444".to_string()),
                 chat_id: "33333333-3333-4333-8333-333333333333".to_string(),
             })
             .unwrap(),
             serde_json::json!({
                 "kind": "chat",
                 "projectId": "11111111-1111-4111-8111-111111111111",
+                "branchId": "44444444-4444-4444-8444-444444444444",
                 "chatId": "33333333-3333-4333-8333-333333333333"
             })
         );

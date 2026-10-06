@@ -20,7 +20,8 @@
     "typecheck": "turbo typecheck",
     "test": "turbo test",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "ci:local": "act pull_request"
   },
   "devDependencies": {
     "@eslint/js": "^9.33.0",

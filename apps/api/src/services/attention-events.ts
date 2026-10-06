@@ -20,7 +20,7 @@ import {
   type WaitEvent,
   type WaitEventKind
 } from "@orchestrat/protocol";
-import { and, asc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import type { AgentPrincipal } from "./agent-service.js";
 import { excerpt } from "./attention-guard.js";
 
@@ -107,7 +107,13 @@ export async function classifyEventsSince(
   db: Database,
   principal: AgentPrincipal,
   after: number,
-  opts: { directedOnly: boolean; kinds?: WaitEventKind[]; limit: number }
+  opts: {
+    directedOnly: boolean;
+    kinds?: WaitEventKind[];
+    limit: number;
+    /** The waiting agent's branch; project-wide events always pass. */
+    branchId?: string | null;
+  }
 ): Promise<{ events: WaitEvent[]; cursor: string; more: boolean }> {
   const agentId = principal.agentId;
   const rows = await db
@@ -134,7 +140,13 @@ export async function classifyEventsSince(
     .where(
       and(
         eq(projectEvents.projectId, principal.projectId),
-        gt(projectEvents.id, after)
+        gt(projectEvents.id, after),
+        opts.branchId
+          ? or(
+              eq(projectEvents.branchId, opts.branchId),
+              isNull(projectEvents.branchId)
+            )
+          : undefined
       )
     )
     .orderBy(asc(projectEvents.id))
@@ -472,7 +484,7 @@ export async function classifyEventsSince(
       ...(item.fromStatus ? { from_status: item.fromStatus } : {}),
       ...(item.toStatus ? { to_status: item.toStatus } : {}),
       ...(body !== undefined ? { excerpt: excerpt(body) } : {}),
-      branch_id: null
+      branch_id: event.branchId ?? null
     });
     if (events.length >= opts.limit) {
       stopped = true;

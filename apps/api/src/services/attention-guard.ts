@@ -1,5 +1,16 @@
 import { taskComments, taskWatches } from "@orchestrat/db";
-import { and, count, desc, eq, gt, max, ne, or, sql } from "drizzle-orm";
+import {
+  and,
+  count,
+  desc,
+  eq,
+  gt,
+  isNull,
+  max,
+  ne,
+  or,
+  sql
+} from "drizzle-orm";
 import { ApiError } from "./api-error.js";
 import type { Transaction } from "./agent-service.js";
 import {
@@ -43,7 +54,9 @@ export async function assertCommentsAcknowledged(
   const unreadClause = and(
     eq(taskComments.taskId, input.taskId),
     gt(taskComments.sequence, floor),
-    notAuthoredByAgent(input.agentId)
+    notAuthoredByAgent(input.agentId),
+    // History copied by imports and merges is never "posted since the claim".
+    isNull(taskComments.importedAt)
   );
   const [unread] = await tx
     .select({ total: count(), latest: max(taskComments.sequence) })

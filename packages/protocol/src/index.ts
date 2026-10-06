@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { attentionErrorCodeSchema } from "./attention.js";
+import { branchErrorCodeSchema } from "./branches.js";
 
 export const healthResponseSchema = z.object({ status: z.literal("ok") });
 export type HealthResponse = z.infer<typeof healthResponseSchema>;
@@ -77,7 +78,8 @@ export const errorCodeSchema = z.union([
   taskErrorCodeSchema,
   coordinationErrorCodeSchema,
   documentErrorCodeSchema,
-  attentionErrorCodeSchema
+  attentionErrorCodeSchema,
+  branchErrorCodeSchema
 ]);
 export type ErrorCode = z.infer<typeof errorCodeSchema>;
 
@@ -245,7 +247,8 @@ export const projectSchema = z.object({
   status: projectStatusSchema,
   created_at: dateSchema,
   updated_at: dateSchema,
-  archived_at: dateSchema.nullable()
+  archived_at: dateSchema.nullable(),
+  default_branch_id: idSchema.optional()
 });
 export type Project = z.infer<typeof projectSchema>;
 
@@ -326,6 +329,7 @@ export const idempotencyKeySchema = z.string().trim().min(1).max(128);
 const taskObjectSchema = z.object({
   id: idSchema,
   project_id: idSchema,
+  branch_id: idSchema.optional(),
   key: taskKeySchema,
   title: taskTitleSchema,
   description: z.string().nullable(),
@@ -592,6 +596,7 @@ export const agentSessionSchema = z.object({
   id: idSchema,
   agent_id: idSchema,
   project_id: idSchema,
+  branch_id: idSchema.optional(),
   runtime: runtimeNameSchema,
   integration: integrationNameSchema,
   external_session_id: z.string().trim().min(1).max(255).nullable(),
@@ -605,7 +610,9 @@ export type AgentSession = z.infer<typeof agentSessionSchema>;
 export const openAgentSessionRequestSchema = z.object({
   runtime: runtimeNameSchema,
   integration: integrationNameSchema,
-  external_session_id: z.string().trim().min(1).max(255).nullable().optional()
+  external_session_id: z.string().trim().min(1).max(255).nullable().optional(),
+  // Pins the session to a branch; absent = the header branch or the default.
+  branch_id: idSchema.optional()
 });
 export type OpenAgentSessionRequest = z.infer<
   typeof openAgentSessionRequestSchema
@@ -675,6 +682,7 @@ export type ClaimStatus = z.infer<typeof claimStatusSchema>;
 export const claimSchema = z.object({
   id: idSchema,
   project_id: idSchema,
+  branch_id: idSchema.optional(),
   task_id: idSchema,
   agent_id: idSchema,
   session_id: idSchema,
@@ -714,6 +722,7 @@ export const agentPresenceSchema = z.object({
   agent_id: idSchema,
   project_id: idSchema,
   session_id: idSchema.nullable(),
+  branch_id: idSchema.nullable().optional(),
   status: agentPresenceStatusSchema,
   last_heartbeat_at: dateSchema.nullable(),
   current_task_id: idSchema.nullable()
@@ -724,6 +733,8 @@ const eventTypeSchema = z.string().trim().min(1).max(80);
 export const projectEventSchema = z.object({
   id: z.number().int().positive(),
   project_id: idSchema,
+  // null = a project-wide event (agents, credentials, branches, repository).
+  branch_id: idSchema.nullable().optional(),
   type: eventTypeSchema,
   actor_agent_id: idSchema.nullable(),
   actor_user_id: idSchema.nullable(),
@@ -788,13 +799,18 @@ export const realtimeEntityTypeSchema = z.enum([
   "session",
   "document",
   "hook",
-  "run"
+  "run",
+  "branch",
+  "merge",
+  "decision",
+  "repository"
 ]);
 export type RealtimeEntityType = z.infer<typeof realtimeEntityTypeSchema>;
 
 export const realtimeEventEnvelopeSchema = z
   .object({
     project_id: idSchema,
+    branch_id: idSchema.nullable().optional(),
     sequence: z.number().int().positive(),
     event_type: eventTypeSchema,
     entity_type: realtimeEntityTypeSchema,
@@ -857,6 +873,7 @@ const markdownDocumentPathSchema = documentPathSchema.refine(
 export const documentFolderSchema = z.object({
   id: idSchema,
   project_id: idSchema,
+  branch_id: idSchema.optional(),
   path: documentPathSchema,
   created_at: dateSchema
 });
@@ -881,6 +898,7 @@ const documentAuthorSchema = z.object({
 export const documentSchema = z.object({
   id: idSchema,
   project_id: idSchema,
+  branch_id: idSchema.optional(),
   path: documentPathSchema,
   current_revision: z.number().int().min(1),
   archived_at: dateSchema.nullable(),
@@ -1171,6 +1189,7 @@ export type MessageCandidate = z.infer<typeof messageCandidateSchema>;
 export const chatSchema = z.object({
   id: idSchema,
   project_id: idSchema,
+  branch_id: idSchema.optional(),
   kind: z.enum(["direct", "group"]),
   name: z.string().nullable(),
   has_human: z.boolean(),
@@ -1215,6 +1234,7 @@ export const chatMessageSchema = z.object({
   id: idSchema,
   chat_id: idSchema,
   project_id: idSchema,
+  branch_id: idSchema.optional(),
   sequence: z.number().int().positive(),
   author: participantRefSchema.extend({ name: z.string() }),
   body_markdown: markdownSchema,
@@ -1253,6 +1273,8 @@ export const inboxSummarySchema = z.object({
   unread_chats: z.array(
     z.object({
       chat_id: idSchema,
+      // Set on reads across branches (`all_branches=true`, human attention).
+      branch_id: idSchema.optional(),
       unread_count: z.number().int().nonnegative(),
       mention_count: z.number().int().nonnegative()
     })
@@ -1317,3 +1339,6 @@ export const projectChatParamsSchema = z.object({ projectId: idSchema });
 export const chatParamsSchema = z.object({ id: idSchema });
 
 export * from "./attention.js";
+export * from "./branches.js";
+export * from "./merges.js";
+export * from "./repository.js";
