@@ -203,9 +203,32 @@ Commands ran from the worktree root. The real-Postgres suites used a local scrat
 - The first real-Postgres run right after restarting the local server failed during setup in all four real-Postgres test files. Every later run passed: three times for the branches file alone and twice for each full suite. It did not reproduce, and its cause was not found.
 - The branches real-Postgres suite now drops its database without `FORCE`. `pool.end()` resolves before its sockets close, so a forced drop killed connections mid-close and surfaced as uncaught errors. A plain drop waits for them, as `postgres-acceptance` already does.
 
+## Live providers (ORC-44), 2026-10-05
+
+Arman tested by hand against the local API (`orchestrat_branches` on Postgres 17), the local dashboard, and real GitHub and GitLab.com apps, through a Cloudflare quick tunnel. ngrok was blocked by the home network's security filter (Spectrum Security Shield), which redirects ngrok domains. Checklist: `docs/project-branches-manual-test.md`.
+
+| Check                                                                                               | Result                                                                                                                                           |
+| --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| GitHub: connect, installing the app from the picker's **Install the GitHub App**                    | PASS, after fixing branch reads (below)                                                                                                          |
+| GitHub: push a new branch → Orchestrat branch                                                       | PASS (`create` and `push` deliveries applied)                                                                                                    |
+| GitHub: disconnect keeps branches and work                                                          | PASS                                                                                                                                             |
+| GitLab.com: connect with OAuth; Orchestrat creates its project webhook                              | PASS                                                                                                                                             |
+| GitLab.com: push a new branch → Orchestrat branch                                                   | PASS (`Push Hook` applied)                                                                                                                       |
+| GitLab.com: merge request merged with "Delete source branch"                                        | PASS: a `provider_merge` run; the task copied to `main`; `notes.md` (added on both) became a decision; `feat/two` archived as `provider_deleted` |
+| Task conflicts from a dashboard-triggered merge (`changed_on_both` on title, description, priority) | PASS: two task decisions, shown side by side                                                                                                     |
+| Resolving decisions in the dashboard                                                                | PASS for **Use target** (3 decisions); **Use source** was not tried live                                                                         |
+
+Bugs found and fixed:
+
+- `aa5b146`: GitHub refused to list or read branches with Metadata-only installation tokens (HTTP 403). Branch reads now mint a Contents:read token. And one redelivery GitHub refused (HTTP 404, the app's first ping) failed the whole reconcile and marked the connection **Error**; refusals are now logged and skipped.
+- `8ffb00d`: document decisions showed "—" on both sides, because they store revision ids, not text. Decisions now carry both versions' `body`.
+- `bc11f67`: Cursor Origin is hidden behind `ORCHESTRAT_ORIGIN_ENABLED` (off) until its API leaves beta.
+
+Not run live: a merged GitHub pull request, deleting a branch with `git push --delete`, catching up after downtime (reconcile), a paused GitLab webhook and **Re-enable**, revoked GitLab access and **Reconnect**, a suspended GitHub installation, **Use source** on a decision, agents following the checkout, and Cursor Origin.
+
 ## NOT RUN
 
-- **Live providers** (GitHub, GitLab.com, Cursor Origin): ORC-44. It needs registered apps; see `docs/project-branches-provider-setup.md`. Every provider path so far ran against the fakes in `apps/api/src/services/repository/testing/`.
+- **The rest of the live provider checks** listed under "Not run live" above, and **Cursor Origin** entirely (hidden until its API leaves beta).
 - **Hosted migration and rollout**: ORC-45. The hosted database is not migrated to `0016`, nothing is deployed, and the CLI is not published. Each step needs Arman's approval (spec §16).
 - **The cleanup migration** that drops the rollout trigger: ORC-46, after the rollout.
 - **A VoiceOver screen-reader pass** on the branch selector, the import dialog and the decisions sheet.
