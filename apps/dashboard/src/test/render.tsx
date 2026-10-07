@@ -2,6 +2,7 @@ import { act, render } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, RouterProvider } from "@tanstack/react-router";
 import type { RequestHandler } from "msw";
+import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { createDashboardQueryClient } from "@/app/query-client";
 import { createAppRouter } from "@/app/router";
@@ -52,6 +53,7 @@ export async function renderDashboardRoute({
               </TooltipProvider>
             </QueryClientProvider>
           </AuthContext.Provider>
+          <Toaster />
         </ThemeProvider>
       </PreferencesProvider>
     </PlatformProvider>

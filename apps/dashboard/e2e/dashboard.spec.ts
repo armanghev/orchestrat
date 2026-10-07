@@ -1246,6 +1246,71 @@ test("@phone blocked tasks show the card line and callout, and Resolve blocker c
   await expectNoAxe(page);
 });
 
+test("the task board scrolls sideways and moves a dragged card to its column", async ({
+  page
+}) => {
+  let task: Record<string, unknown> = {
+    id: ids.task,
+    project_id: ids.alpha,
+    key: "ALPHA-1",
+    title: "Wire the API",
+    description: null,
+    priority: "medium",
+    status: "backlog",
+    position: 0,
+    version: 1,
+    created_by: { type: "human", id: ids.user },
+    created_by_user_id: ids.user,
+    created_at: now,
+    updated_at: now,
+    started_at: null,
+    completed_at: null,
+    cancelled_at: null,
+    comment_count: 0,
+    unresolved_blocker_count: 0
+  };
+  const state: HierarchyState = { ...populatedState(), tasks: [task] };
+  const moves: unknown[] = [];
+  await seed(page);
+  await mockHierarchy(page, state);
+  await page.route(
+    `https://api.orchestrat.test/api/v1/tasks/${ids.task}/move`,
+    async (route) => {
+      moves.push(route.request().postDataJSON());
+      task = { ...task, status: "ready", version: 2 };
+      state.tasks = [task];
+      return route.fulfill({ json: task });
+    }
+  );
+  await page.goto(`/projects/${ids.alpha}/tasks`);
+  const card = page.getByRole("button", { name: "ALPHA-1 Wire the API" });
+  await expect(card).toBeVisible();
+  // Eight status columns sit in one row that scrolls, not the page.
+  const board = page.getByTestId("task-board");
+  expect(
+    await board.evaluate((element) => element.scrollWidth > element.clientWidth)
+  ).toBe(true);
+  expect(
+    await page
+      .locator("#main-content")
+      .evaluate((element) => element.scrollWidth <= element.clientWidth)
+  ).toBe(true);
+  const tops = await board
+    .locator(":scope > section")
+    .evaluateAll((columns) =>
+      columns.map((column) => column.getBoundingClientRect().top)
+    );
+  expect(new Set(tops).size).toBe(1);
+  const ready = page.getByRole("region", { name: "ready" });
+  await card.dragTo(ready);
+  await expect(
+    ready.getByRole("button", { name: "ALPHA-1 Wire the API" })
+  ).toBeVisible();
+  expect(moves).toEqual([{ status: "ready", expected_version: 1 }]);
+  await settle(page);
+  await expectNoAxe(page);
+});
+
 test("@phone Agents page shows attention lines and a keyboard Ping flow in both themes", async ({
   page
 }) => {
