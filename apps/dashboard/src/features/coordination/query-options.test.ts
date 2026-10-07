@@ -3,8 +3,10 @@ import type { RealtimeEventEnvelope } from "@orchestrat/protocol";
 import {
   ALL_BRANCHES,
   coordinationKeys,
-  invalidateRealtimeEvent
+  invalidateRealtimeEvent,
+  tasksQueryOptions
 } from "./query-options";
+import type { ApiClient } from "@/lib/api/client";
 import { messagingKeys } from "@/features/messaging/query-options";
 import { branchKeys } from "@/features/branches/query-options";
 
@@ -30,6 +32,42 @@ describe("coordination query keys", () => {
       ...messagingKeys.chats("project-1"),
       "branch-1"
     ]);
+  });
+});
+
+describe("task list query", () => {
+  it("follows the cursor so every task loads, not just the first page", async () => {
+    const card = (n: number) => ({ id: `task-${n}`, key: `ORC-${n}` });
+    const listTasks = vi.fn(
+      async (_projectId: string, query: { cursor?: string }) =>
+        query.cursor === "page-2"
+          ? { tasks: [card(3)], total: 3, next_cursor: null }
+          : { tasks: [card(1), card(2)], total: 3, next_cursor: "page-2" }
+    );
+    const options = tasksQueryOptions(
+      { listTasks } as unknown as ApiClient,
+      "project-1",
+      "branch-1"
+    );
+    const result = await options.queryFn!({} as never);
+    expect(result.tasks.map((task) => task.key)).toEqual([
+      "ORC-1",
+      "ORC-2",
+      "ORC-3"
+    ]);
+    expect(result.next_cursor).toBeNull();
+    expect(listTasks).toHaveBeenNthCalledWith(
+      1,
+      "project-1",
+      { limit: 100 },
+      { branchId: "branch-1" }
+    );
+    expect(listTasks).toHaveBeenNthCalledWith(
+      2,
+      "project-1",
+      { limit: 100, cursor: "page-2" },
+      { branchId: "branch-1" }
+    );
   });
 });
 

@@ -100,7 +100,29 @@ export const tasksQueryOptions = (
 ) =>
   queryOptions({
     queryKey: coordinationKeys.tasks(projectId, branchId),
-    queryFn: () => api.listTasks(projectId, {}, { branchId })
+    // The board, Overview counts and task links need every task, so follow
+    // the cursor instead of stopping at the API's first page.
+    queryFn: async () => {
+      const first = await api.listTasks(
+        projectId,
+        { limit: 100 },
+        { branchId }
+      );
+      const tasks = [...first.tasks];
+      const seen = new Set<string>();
+      let cursor = first.next_cursor;
+      while (cursor && !seen.has(cursor)) {
+        seen.add(cursor);
+        const page = await api.listTasks(
+          projectId,
+          { limit: 100, cursor },
+          { branchId }
+        );
+        tasks.push(...page.tasks);
+        cursor = page.next_cursor;
+      }
+      return { ...first, tasks, next_cursor: null };
+    }
   });
 
 export const taskQueryOptions = (api: ApiClient, taskId: string) =>
