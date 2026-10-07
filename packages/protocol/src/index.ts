@@ -1342,3 +1342,30 @@ export * from "./attention.js";
 export * from "./branches.js";
 export * from "./merges.js";
 export * from "./repository.js";
+
+import {
+  repositoryProviderSchema,
+  repositoryConnectionStatusSchema
+} from "./repository.js";
+
+export const projectSummarySchema = projectSchema.extend({
+  task_key_prefix: z.string(),
+  default_branch_name: z.string().nullable(),
+  member_count: z.number().int().nonnegative(),
+  open_task_count: z.number().int().nonnegative(),
+  last_activity_at: dateSchema.nullable(),
+  repository: z
+    .object({
+      provider: repositoryProviderSchema,
+      full_name: z.string(),
+      status: repositoryConnectionStatusSchema
+    })
+    .nullable()
+});
+export type ProjectSummary = z.infer<typeof projectSummarySchema>;
+export const projectSummariesResponseSchema = z.object({
+  projects: z.array(projectSummarySchema)
+});
+export type ProjectSummariesResponse = z.infer<
+  typeof projectSummariesResponseSchema
+>;

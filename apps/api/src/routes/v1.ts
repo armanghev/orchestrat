@@ -139,6 +139,13 @@ export async function v1Routes(
     )
   );
 
+  app.get("/organizations/:organizationId/project-summaries", (request) =>
+    options.projects.listProjectSummaries(
+      request.userId,
+      organizationParamsSchema.parse(request.params).organizationId
+    )
+  );
+
   app.get("/organizations/:organizationId/projects", (request) =>
     options.projects.listProjects(
       request.userId,

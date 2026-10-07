@@ -816,3 +816,5 @@ const queryString = (query: Record<string, unknown>) => {
   const encoded = params.toString();
   return encoded ? `?${encoded}` : "";
 };
+
+export { ProjectsApi } from "./projects.js";
