@@ -30,7 +30,10 @@ function SettingsRoute() {
   };
   const leaveProject = async () => {
     await queryClient.invalidateQueries({ queryKey: hierarchyKeys.all });
-    await navigate({ to: "/" });
+    await navigate({
+      to: "/organizations/$organizationId",
+      params: { organizationId: project.organization.id }
+    });
   };
   return (
     <ProjectSettingsPage

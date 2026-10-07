@@ -11,7 +11,11 @@ import { ApiClient } from "@/lib/api/client";
 import type { Platform } from "@/platform/contract";
 import { PlatformProvider } from "@/platform/provider";
 import { PreferencesProvider } from "@/platform/preferences-provider";
-import { defaultPreferences, parsePreferences } from "@/platform/preferences";
+import {
+  defaultPreferences,
+  parsePreferences,
+  type Preferences
+} from "@/platform/preferences";
 import { ThemeProvider } from "@/features/theme/theme-provider";
 import { handlers as defaultHandlers } from "@/test/handlers";
 import { server } from "@/test/msw-server";
@@ -20,12 +24,14 @@ export async function renderDashboardRoute({
   path,
   auth,
   platform,
-  handlers = defaultHandlers
+  handlers = defaultHandlers,
+  preferences
 }: {
   path: string;
   auth: AuthClient;
   platform: Platform;
   handlers?: RequestHandler[];
+  preferences?: Partial<Preferences>;
 }) {
   server.use(...handlers);
   const queryClient = createDashboardQueryClient();
@@ -33,7 +39,10 @@ export async function renderDashboardRoute({
   const history = createMemoryHistory({ initialEntries: [path] });
   const context = { api, auth, platform, queryClient };
   const router = createAppRouter(context, history);
-  let storedPreferences = parsePreferences(defaultPreferences);
+  let storedPreferences = parsePreferences({
+    ...defaultPreferences,
+    ...preferences
+  });
   const preferenceStore = {
     load: async () => storedPreferences,
     save: async (value: unknown) => {

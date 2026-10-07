@@ -151,3 +151,29 @@ describe("buildCommands", () => {
     );
   });
 });
+
+describe("buildCommands on organization pages", () => {
+  it("offers organizations and organization destinations instead of project pages", () => {
+    const navigateToOrganization = vi.fn();
+    const acme = catalog.organizations[0];
+    const commands = buildCommands({
+      catalog,
+      activeOrganizationId: acme.id,
+      navigateToOrganization,
+      navigateToProject: vi.fn(),
+      navigateToRoute: vi.fn(),
+      setTheme: vi.fn(),
+      toggleSidebar: vi.fn(),
+      openPreferences: vi.fn(),
+      signOut: vi.fn()
+    });
+    const ids = commands.map((command) => command.id);
+    expect(ids).toContain(`organization:${acme.id}`);
+    expect(ids).toContain("navigate:organization-members");
+    expect(ids).not.toContain("navigate:tasks");
+    void commands
+      .find((command) => command.id === "navigate:organization-settings")
+      ?.run();
+    expect(navigateToOrganization).toHaveBeenCalledWith(acme.id, "settings");
+  });
+});

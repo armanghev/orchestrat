@@ -649,6 +649,30 @@ test("creates organization and project sequentially", async ({ page }) => {
   await expectNoAxe(page);
 });
 
+test("organization home lists projects and links back from a project", async ({
+  page
+}) => {
+  await seed(page);
+  await mockHierarchy(page, populatedState());
+  await page.goto(`/projects/${ids.alpha}/overview`);
+  await page.getByRole("button", { name: /^Organization: / }).click();
+  await expect(page).toHaveURL(
+    new RegExp(`/organizations/${ids.organization}$`)
+  );
+  await expect(
+    page.getByRole("complementary", { name: "Organization navigation" })
+  ).toBeVisible();
+  await expect(page.locator('[data-slot="top-toolbar-page"]')).toHaveText(
+    "Projects"
+  );
+  await page.getByRole("link", { name: /Beta/ }).click();
+  await expect(page).toHaveURL(new RegExp(`/projects/${ids.beta}/overview$`));
+  await page.goto(`/organizations/${ids.organization}`);
+  await expect(page.getByRole("link", { name: /Alpha/ })).toBeVisible();
+  await settle(page);
+  await expectNoAxe(page);
+});
+
 test("project shell switches projects and persists recency", async ({
   page
 }) => {

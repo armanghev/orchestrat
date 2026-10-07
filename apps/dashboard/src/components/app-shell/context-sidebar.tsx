@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
   Activity,
@@ -6,14 +6,19 @@ import {
   ChevronsUpDown,
   FileText,
   FolderKanban,
+  FolderOpen,
   Gauge,
   LogOut,
   MessagesSquare,
   Scale,
   Search,
-  Settings
+  Settings,
+  Users
 } from "lucide-react";
-import type { NavigationDestination } from "@/features/command/commands";
+import type {
+  NavigationDestination,
+  OrganizationDestination
+} from "@/features/command/commands";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -84,30 +89,24 @@ function ProfileImage({
   );
 }
 
-export function ContextSidebar({
-  activeRoute = "overview",
-  onNavigate,
-  onOpenCommands,
-  onOpenPreferences,
-  onSignOut,
-  profile,
-  messageCounts,
-  taskCounts,
-  decisionCount
-}: {
-  activeRoute?: NavigationDestination;
-  onNavigate: (route: NavigationDestination) => void;
+type SidebarChromeProps = {
   onOpenCommands: () => void;
   onOpenPreferences: () => void;
   onSignOut: () => void;
   profile?: Profile;
-  messageCounts?: { unread: number; mentions: number };
-  taskCounts?: { unread: number; mentions: number };
-  /** Open decisions targeting the branch on screen. */
-  decisionCount?: number;
-}) {
+};
+
+/** Sidebar chrome shared by project and organization pages: brand header,
+ * the page's navigation groups, Search, and the profile menu. */
+function ShellSidebar({
+  onOpenCommands,
+  onOpenPreferences,
+  onSignOut,
+  profile,
+  children
+}: SidebarChromeProps & { children: ReactNode }) {
   const desktop = usePlatform().kind === "desktop";
-  const { setOpenMobile, state } = useSidebar();
+  const { state } = useSidebar();
   const [desktopBorderReady, setDesktopBorderReady] = useState(
     state === "expanded"
   );
@@ -194,85 +193,7 @@ export function ContextSidebar({
         <></>
       )}
       <SidebarContent className="gap-2 px-3 py-2 group-data-[collapsible=icon]:px-2">
-        {routeGroups.map((group) => (
-          <SidebarGroup className="px-0 py-0" key={group.label}>
-            <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {group.routes.map((route) => {
-                  const Icon = routeIcons[route];
-                  return (
-                    <SidebarMenuItem key={route}>
-                      <SidebarMenuButton
-                        isActive={route === activeRoute}
-                        asChild
-                        tooltip={route[0].toUpperCase() + route.slice(1)}
-                        className="h-9"
-                      >
-                        <button
-                          type="button"
-                          aria-current={
-                            route === activeRoute ? "page" : undefined
-                          }
-                          onClick={() => {
-                            onNavigate(route);
-                            setOpenMobile(false);
-                          }}
-                        >
-                          <Icon />
-                          <span>{route[0].toUpperCase() + route.slice(1)}</span>
-                          {route === "messages" && messageCounts?.unread ? (
-                            <span
-                              className="ml-auto flex items-center gap-1.5 text-[10px] font-medium"
-                              aria-label={`${messageCounts.unread} unread messages${messageCounts.mentions ? `, ${messageCounts.mentions} mentions` : ""}`}
-                            >
-                              <span className="rounded-full bg-primary px-1.5 leading-5 text-primary-foreground">
-                                {messageCounts.unread}
-                              </span>
-                              {messageCounts.mentions ? (
-                                <span className="text-brand">
-                                  @{messageCounts.mentions}
-                                </span>
-                              ) : null}
-                            </span>
-                          ) : null}
-                          {route === "decisions" && decisionCount ? (
-                            <span
-                              className="ml-auto rounded-full bg-primary px-1.5 text-[10px] leading-5 font-medium text-primary-foreground"
-                              aria-label={`${decisionCount} open ${decisionCount === 1 ? "decision" : "decisions"}`}
-                            >
-                              {decisionCount}
-                            </span>
-                          ) : null}
-                          {route === "tasks" && taskCounts?.unread ? (
-                            <span
-                              role="img"
-                              className="ml-auto flex items-center gap-1.5 text-[10px] font-medium"
-                              aria-label={unreadCommentsLabel(
-                                taskCounts.unread,
-                                taskCounts.mentions,
-                                "unread task comment"
-                              )}
-                            >
-                              <span className="rounded-full bg-primary px-1.5 leading-5 text-primary-foreground">
-                                {taskCounts.unread}
-                              </span>
-                              {taskCounts.mentions ? (
-                                <span className="text-primary-text">
-                                  @{taskCounts.mentions}
-                                </span>
-                              ) : null}
-                            </span>
-                          ) : null}
-                        </button>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  );
-                })}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        ))}
+        {children}
       </SidebarContent>
 
       <SidebarMenu className="shrink-0 p-3 group-data-[collapsible=icon]:p-2">
@@ -354,5 +275,163 @@ export function ContextSidebar({
         </SidebarMenu>
       </SidebarFooter>
     </Sidebar>
+  );
+}
+
+export function ContextSidebar({
+  activeRoute = "overview",
+  onNavigate,
+  messageCounts,
+  taskCounts,
+  decisionCount,
+  ...chrome
+}: SidebarChromeProps & {
+  activeRoute?: NavigationDestination;
+  onNavigate: (route: NavigationDestination) => void;
+  messageCounts?: { unread: number; mentions: number };
+  taskCounts?: { unread: number; mentions: number };
+  /** Open decisions targeting the branch on screen. */
+  decisionCount?: number;
+}) {
+  const { setOpenMobile } = useSidebar();
+  return (
+    <ShellSidebar {...chrome}>
+      {routeGroups.map((group) => (
+        <SidebarGroup className="px-0 py-0" key={group.label}>
+          <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {group.routes.map((route) => {
+                const Icon = routeIcons[route];
+                return (
+                  <SidebarMenuItem key={route}>
+                    <SidebarMenuButton
+                      isActive={route === activeRoute}
+                      asChild
+                      tooltip={route[0].toUpperCase() + route.slice(1)}
+                      className="h-9"
+                    >
+                      <button
+                        type="button"
+                        aria-current={
+                          route === activeRoute ? "page" : undefined
+                        }
+                        onClick={() => {
+                          onNavigate(route);
+                          setOpenMobile(false);
+                        }}
+                      >
+                        <Icon />
+                        <span>{route[0].toUpperCase() + route.slice(1)}</span>
+                        {route === "messages" && messageCounts?.unread ? (
+                          <span
+                            className="ml-auto flex items-center gap-1.5 text-[10px] font-medium"
+                            aria-label={`${messageCounts.unread} unread messages${messageCounts.mentions ? `, ${messageCounts.mentions} mentions` : ""}`}
+                          >
+                            <span className="rounded-full bg-primary px-1.5 leading-5 text-primary-foreground">
+                              {messageCounts.unread}
+                            </span>
+                            {messageCounts.mentions ? (
+                              <span className="text-brand">
+                                @{messageCounts.mentions}
+                              </span>
+                            ) : null}
+                          </span>
+                        ) : null}
+                        {route === "decisions" && decisionCount ? (
+                          <span
+                            className="ml-auto rounded-full bg-primary px-1.5 text-[10px] leading-5 font-medium text-primary-foreground"
+                            aria-label={`${decisionCount} open ${decisionCount === 1 ? "decision" : "decisions"}`}
+                          >
+                            {decisionCount}
+                          </span>
+                        ) : null}
+                        {route === "tasks" && taskCounts?.unread ? (
+                          <span
+                            role="img"
+                            className="ml-auto flex items-center gap-1.5 text-[10px] font-medium"
+                            aria-label={unreadCommentsLabel(
+                              taskCounts.unread,
+                              taskCounts.mentions,
+                              "unread task comment"
+                            )}
+                          >
+                            <span className="rounded-full bg-primary px-1.5 leading-5 text-primary-foreground">
+                              {taskCounts.unread}
+                            </span>
+                            {taskCounts.mentions ? (
+                              <span className="text-primary-text">
+                                @{taskCounts.mentions}
+                              </span>
+                            ) : null}
+                          </span>
+                        ) : null}
+                      </button>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      ))}
+    </ShellSidebar>
+  );
+}
+
+const organizationItems: {
+  destination: OrganizationDestination;
+  label: string;
+  icon: LucideIcon;
+}[] = [
+  { destination: "projects", label: "Projects", icon: FolderOpen },
+  { destination: "members", label: "Members", icon: Users },
+  { destination: "settings", label: "Settings", icon: Settings }
+];
+
+export function OrganizationSidebar({
+  activeDestination,
+  onNavigate,
+  ...chrome
+}: SidebarChromeProps & {
+  /** Undefined on pages outside the three (e.g. New project). */
+  activeDestination?: OrganizationDestination;
+  onNavigate: (destination: OrganizationDestination) => void;
+}) {
+  const { setOpenMobile } = useSidebar();
+  return (
+    <ShellSidebar {...chrome}>
+      <SidebarGroup className="px-0 py-0">
+        <SidebarGroupLabel>Organization</SidebarGroupLabel>
+        <SidebarGroupContent>
+          <SidebarMenu>
+            {organizationItems.map(({ destination, label, icon: Icon }) => (
+              <SidebarMenuItem key={destination}>
+                <SidebarMenuButton
+                  isActive={destination === activeDestination}
+                  asChild
+                  tooltip={label}
+                  className="h-9"
+                >
+                  <button
+                    type="button"
+                    aria-current={
+                      destination === activeDestination ? "page" : undefined
+                    }
+                    onClick={() => {
+                      onNavigate(destination);
+                      setOpenMobile(false);
+                    }}
+                  >
+                    <Icon />
+                    <span>{label}</span>
+                  </button>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            ))}
+          </SidebarMenu>
+        </SidebarGroupContent>
+      </SidebarGroup>
+    </ShellSidebar>
   );
 }

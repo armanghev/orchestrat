@@ -8,6 +8,7 @@ import {
   attentionSummary,
   attentionTaskItem,
   documentDetail,
+  organization,
   project,
   taskAttentionOverlay,
   taskCard
@@ -147,8 +148,7 @@ describe("dashboard routes", () => {
     ).toBeVisible();
   });
 
-  it("redirects an authenticated setup flow to its first project", async () => {
-    const expected = project();
+  it("lands on the organization home when there is no recent project", async () => {
     const view = await renderDashboardRoute({
       path: "/setup",
       auth: new FakeAuthClient({
@@ -159,9 +159,73 @@ describe("dashboard routes", () => {
     });
     await waitFor(() =>
       expect(view.router.state.location.pathname).toBe(
+        `/organizations/${organization().id}`
+      )
+    );
+    expect(
+      await screen.findByRole("complementary", {
+        name: "Organization navigation"
+      })
+    ).toBeVisible();
+    expect(
+      await screen.findByRole("link", { name: /Dashboard/ })
+    ).toHaveAttribute("href", `/projects/${project().id}/overview`);
+  });
+
+  it("lands on the most recent project still in the catalog", async () => {
+    const expected = project();
+    const view = await renderDashboardRoute({
+      path: "/setup",
+      auth: new FakeAuthClient({
+        status: "signedIn",
+        identityKey: "test-user"
+      }),
+      platform: platform(),
+      preferences: {
+        recentProjectIds: ["00000000-0000-4000-8000-0000000000ff", expected.id]
+      }
+    });
+    await waitFor(() =>
+      expect(view.router.state.location.pathname).toBe(
         `/projects/${expected.id}/overview`
       )
     );
+  });
+
+  it("sends old setup links to the new creation pages", async () => {
+    const view = await renderDashboardRoute({
+      path: "/setup?create=project",
+      auth: new FakeAuthClient({
+        status: "signedIn",
+        identityKey: "test-user"
+      }),
+      platform: platform()
+    });
+    await waitFor(() =>
+      expect(view.router.state.location.pathname).toBe(
+        `/organizations/${organization().id}/projects/new`
+      )
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Create a project" })
+    ).toBeVisible();
+  });
+
+  it("shows an unavailable organization without the shell", async () => {
+    await renderDashboardRoute({
+      path: "/organizations/00000000-0000-4000-8000-0000000000ee",
+      auth: new FakeAuthClient({
+        status: "signedIn",
+        identityKey: "test-user"
+      }),
+      platform: platform()
+    });
+    expect(
+      await screen.findByRole("heading", { name: "Organization unavailable" })
+    ).toBeVisible();
+    expect(
+      screen.getByRole("link", { name: "Go to your workspace" })
+    ).toHaveAttribute("href", "/setup");
   });
 
   it("renders project overview metadata", async () => {

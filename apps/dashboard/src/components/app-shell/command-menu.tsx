@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dialog";
 
 const groups: AppCommand["group"][] = [
+  "Organizations",
   "Projects",
   "Branches",
   "Navigate",
