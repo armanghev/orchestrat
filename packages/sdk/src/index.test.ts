@@ -258,6 +258,80 @@ test("maps agent task authoring and comments with stable idempotency keys", asyn
   });
 });
 
+test("maps bulk task routes and agent status updates", async () => {
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const task = {
+    id,
+    project_id: id,
+    key: "AT-1",
+    title: "Follow up",
+    description: null,
+    priority: "none",
+    status: "ready",
+    position: 0,
+    version: 2,
+    created_by: { type: "agent", id },
+    created_by_user_id: null,
+    created_at: timestamp,
+    updated_at: timestamp,
+    started_at: null,
+    completed_at: null,
+    cancelled_at: null
+  };
+  const client = new AgentApiClient({
+    baseUrl: "https://api.test",
+    token,
+    fetch: async (url, init) => {
+      calls.push({ url: String(url), init });
+      return new Response(
+        JSON.stringify(
+          String(url).endsWith("/tasks/bulk") ? { tasks: [task] } : task
+        )
+      );
+    }
+  });
+  await client.updateTask(id, {
+    status: "ready",
+    acknowledged_through: 3,
+    expected_version: 1
+  });
+  const created = await client.createTasks(
+    { tasks: [{ title: "Follow up", status: "ready" }] },
+    "bulk-key"
+  );
+  assert.equal(created.tasks[0]!.key, "AT-1");
+  await client.updateTasks({
+    tasks: [{ task_id: id, status: "done", expected_version: 1 }]
+  });
+  assert.deepEqual(
+    calls.map(({ url, init }) => [init?.method, new URL(url).pathname]),
+    [
+      ["PATCH", `/api/v1/agent/tasks/${id}`],
+      ["POST", "/api/v1/agent/tasks/bulk"],
+      ["PATCH", "/api/v1/agent/tasks/bulk"]
+    ]
+  );
+  assert.equal(
+    (calls[1]!.init?.headers as Record<string, string>)["idempotency-key"],
+    "bulk-key"
+  );
+  assert.deepEqual(JSON.parse(String(calls[0]!.init?.body)), {
+    status: "ready",
+    acknowledged_through: 3,
+    expected_version: 1
+  });
+  assert.throws(() =>
+    client.updateTasks({
+      tasks: [
+        { task_id: id, priority: "high", expected_version: 1 },
+        { task_id: id, status: "done", expected_version: 1 }
+      ]
+    })
+  );
+  assert.throws(() => client.createTasks({ tasks: [] }, "empty"));
+  assert.equal(calls.length, 3);
+});
+
 test("maps typed agent document routes and sends revision preconditions", async () => {
   const document = {
     id,
