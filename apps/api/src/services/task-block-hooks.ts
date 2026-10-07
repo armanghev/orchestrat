@@ -198,7 +198,8 @@ export async function onClaimEnded(
     });
 }
 
-// Called by TaskService.move after task.moved.
+// Called by TaskService after task.moved. Humans move from the board; agents
+// move unclaimed tasks with update_task.
 export async function onTaskMoved(
   tx: Transaction,
   input: {
@@ -206,16 +207,16 @@ export async function onTaskMoved(
     taskId: string;
     fromStatus: TaskStatus;
     toStatus: TaskStatus;
-    userId: string;
+    actor: Actor;
   }
 ) {
-  const human: Actor = { type: "human", id: input.userId };
   if (input.fromStatus === "blocked" && input.toStatus !== "blocked") {
     const own = await openBlock(tx, input.taskId);
     if (own)
       await resolveBlock(tx, own, {
-        resolution: "moved_by_human",
-        resolvedBy: human
+        resolution:
+          input.actor.type === "human" ? "moved_by_human" : "status_changed",
+        resolvedBy: input.actor
       });
   }
   if (input.toStatus === "done" || input.toStatus === "cancelled")
@@ -226,7 +227,7 @@ export async function onTaskMoved(
         input.toStatus === "done"
           ? "blocking_task_done"
           : "blocking_task_cancelled",
-      resolvedBy: human
+      resolvedBy: input.actor
     });
 }
 
