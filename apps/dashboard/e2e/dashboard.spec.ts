@@ -752,6 +752,19 @@ test("organization home lists projects and links back from a project", async ({
   await expect(page.getByRole("link", { name: /Alpha/ })).toBeVisible();
   await settle(page);
   await expectNoAxe(page);
+
+  await page.goto(`/organizations/${ids.organization}/members`);
+  await expect(page.locator('[data-slot="top-toolbar-page"]')).toHaveText(
+    "Members"
+  );
+  await expect(page.getByRole("table")).toBeVisible();
+  await settle(page);
+  await expectNoAxe(page);
+
+  await page.goto(`/organizations/${ids.organization}/settings`);
+  await expect(page.getByLabel("Name")).toBeVisible();
+  await settle(page);
+  await expectNoAxe(page);
 });
 
 test("project shell switches projects and persists recency", async ({

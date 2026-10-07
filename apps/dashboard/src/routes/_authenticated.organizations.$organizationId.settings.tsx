@@ -41,12 +41,10 @@ function OrganizationSettingsRoute() {
     <OrganizationSettingsPage
       organization={organization}
       api={api}
-      currentUserId={profileQuery.data.user_id}
       onUpdated={() => {
         void queryClient.invalidateQueries({ queryKey: hierarchyKeys.all });
       }}
       onDeleted={() => void leaveOrganization()}
-      onLeft={() => void leaveOrganization()}
     />
   );
 }

@@ -100,6 +100,14 @@ function OrganizationLayout() {
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
       if (hash) return;
+      // A page that focused its own field (New project) keeps that focus.
+      if (
+        document.activeElement?.matches("input, textarea, select") &&
+        document
+          .getElementById("main-content")
+          ?.contains(document.activeElement)
+      )
+        return;
       document
         .querySelector<HTMLElement>("[data-slot='top-toolbar-page']")
         ?.focus();

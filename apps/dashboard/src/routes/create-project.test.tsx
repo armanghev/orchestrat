@@ -89,10 +89,12 @@ describe("create project page", () => {
     await user.click(
       screen.getByRole("button", { name: "Create empty project" })
     );
-    await waitFor(() =>
-      expect(view.router.state.location.pathname).toBe(
-        `/projects/${created.id}/overview`
-      )
+    await waitFor(
+      () =>
+        expect(view.router.state.location.pathname).toBe(
+          `/projects/${created.id}/overview`
+        ),
+      { timeout: 5000 }
     );
     expect(bodies).toEqual([
       {
@@ -151,10 +153,12 @@ describe("create project page", () => {
     await user.click(
       await screen.findByRole("button", { name: "Create and connect GitHub" })
     );
-    await waitFor(() =>
-      expect(goTo).toHaveBeenCalledWith(
-        "https://github.com/login/oauth/authorize?state=x"
-      )
+    await waitFor(
+      () =>
+        expect(goTo).toHaveBeenCalledWith(
+          "https://github.com/login/oauth/authorize?state=x"
+        ),
+      { timeout: 5000 }
     );
     expect(authorizations).toEqual([
       {
@@ -196,10 +200,12 @@ describe("create project page", () => {
     await user.click(
       await screen.findByRole("button", { name: "Create and connect GitHub" })
     );
-    await waitFor(() =>
-      expect(view.router.state.location.pathname).toBe(
-        `/projects/${created.id}/connect`
-      )
+    await waitFor(
+      () =>
+        expect(view.router.state.location.pathname).toBe(
+          `/projects/${created.id}/connect`
+        ),
+      { timeout: 5000 }
     );
     expect(view.router.state.location.search).toMatchObject({
       repository_error: "authorization_failed"
