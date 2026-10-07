@@ -18,6 +18,15 @@ const ids = {
   old: "00000000-0000-4000-8000-00000000b003",
   created: "00000000-0000-4000-8000-00000000b004"
 } as const;
+const repositoryProviders = [
+  { provider: "github", configured: true, unavailable_reason: null },
+  {
+    provider: "gitlab",
+    configured: false,
+    unavailable_reason: "GitLab isn’t set up on this server."
+  },
+  { provider: "origin", configured: true, unavailable_reason: null }
+];
 const now = "2026-09-30T00:00:00.000Z";
 const uuid = (n: number) =>
   `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -382,23 +391,25 @@ async function mockBranches(
           }
         ]
       });
+    const alpha = {
+      id: ids.project,
+      organization_id: ids.organization,
+      name: "Alpha",
+      slug: "alpha",
+      description: null,
+      status: "active",
+      role: state.role,
+      created_at: now,
+      updated_at: now,
+      archived_at: null
+    };
     if (path === `/organizations/${ids.organization}/projects`)
-      return json(route, {
-        projects: [
-          {
-            id: ids.project,
-            organization_id: ids.organization,
-            name: "Alpha",
-            slug: "alpha",
-            description: null,
-            status: "active",
-            role: state.role,
-            created_at: now,
-            updated_at: now,
-            archived_at: null
-          }
-        ]
-      });
+      // Creating a project "creates" Alpha, so the flow lands in it.
+      return method === "POST"
+        ? json(route, { ...alpha, ...body(), role: "owner" }, 201)
+        : json(route, { projects: [alpha] });
+    if (path === "/repository/providers")
+      return json(route, { providers: repositoryProviders });
     if (path === `/organizations/${ids.organization}/members`)
       return json(route, { members: [] });
     if (path === "/profile")
@@ -636,21 +647,13 @@ async function mockBranches(
     if (path === `${projectPath}/repository` && method === "GET")
       return json(route, {
         repository: state.repository,
-        providers: [
-          { provider: "github", configured: true, unavailable_reason: null },
-          {
-            provider: "gitlab",
-            configured: false,
-            unavailable_reason: "GitLab isn’t set up on this server."
-          },
-          { provider: "origin", configured: true, unavailable_reason: null }
-        ]
+        providers: repositoryProviders
       });
     if (path === `${projectPath}/repository/authorizations`)
-      // The "provider" sends the browser straight back to settings.
+      // The "provider" sends the browser straight back to the return path.
       return json(route, {
         authorization_id: authorizationId,
-        authorize_url: `http://127.0.0.1:8814/projects/${ids.project}/settings?repository_authorization=${authorizationId}`,
+        authorize_url: `http://127.0.0.1:8814${String(body().return_path ?? `/projects/${ids.project}/settings`)}?repository_authorization=${authorizationId}`,
         expires_at: "2026-09-30T01:00:00.000Z"
       });
     if (
@@ -1069,6 +1072,34 @@ test("@phone a repository connects through the provider redirect", async ({
     section.getByRole("button", { name: "Connect GitHub" })
   ).toBeVisible();
   expect(state.repository).toBeNull();
+});
+
+test("@phone a new project connects its repository from the creation page", async ({
+  page
+}) => {
+  await seed(page);
+  const state = await mockBranches(page);
+  await page.goto(`/organizations/${ids.organization}/projects/new`);
+  await expect(
+    page.getByRole("button", { name: "Create and connect GitLab.com" })
+  ).toBeDisabled();
+  await expect(
+    page.getByText("GitLab isn’t set up on this server.")
+  ).toBeVisible();
+  await expectNoAxe(page);
+  await page.getByLabel("Project name").fill("Alpha");
+  await expect(page.getByLabel("Task key")).toHaveValue("ALP");
+  await page.getByRole("button", { name: "Create and connect GitHub" }).click();
+
+  // The "provider" returns to the connect page with the authorization.
+  await expect(page).toHaveURL(
+    new RegExp(`/projects/${ids.project}/connect\\?repository_authorization=`)
+  );
+  await page.getByRole("radio", { name: /acme\/app/ }).click();
+  await page.getByRole("button", { name: "Next" }).click();
+  await page.getByRole("button", { name: "Connect" }).click();
+  await expect(page).toHaveURL(new RegExp(`/projects/${ids.project}/overview`));
+  expect(state.repository).toMatchObject({ full_name: "acme/app" });
 });
 
 test("switching branches waits for an unsaved document draft", async ({

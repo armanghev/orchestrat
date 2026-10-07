@@ -207,7 +207,7 @@ describe("dashboard routes", () => {
       )
     );
     expect(
-      await screen.findByRole("heading", { name: "Create a project" })
+      await screen.findByRole("heading", { name: "Project details" })
     ).toBeVisible();
   });
 

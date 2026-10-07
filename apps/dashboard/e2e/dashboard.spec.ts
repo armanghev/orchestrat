@@ -470,6 +470,18 @@ async function mockHierarchy(page: Page, state: HierarchyState) {
       return route.fulfill({
         json: { ticket: "e".repeat(32), expires_at: now }
       });
+    if (path === "/api/v1/repository/providers")
+      return route.fulfill({
+        json: {
+          providers: [
+            {
+              provider: "github",
+              configured: false,
+              unavailable_reason: "GitHub isn’t set up on this server."
+            }
+          ]
+        }
+      });
     throw new Error(`Unexpected API request: ${method} ${path}`);
   });
   return {
@@ -642,7 +654,7 @@ test("creates organization and project sequentially", async ({ page }) => {
   await page.getByLabel("Organization name").fill("Acme");
   await page.getByRole("button", { name: "Create organization" }).click();
   await page.getByLabel("Project name").fill("Alpha");
-  await page.getByRole("button", { name: "Create project" }).click();
+  await page.getByRole("button", { name: "Create empty project" }).click();
   await expect(page.locator('[data-slot="top-toolbar-page"]')).toHaveText(
     "Overview"
   );
