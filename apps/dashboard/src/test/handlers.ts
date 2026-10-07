@@ -40,6 +40,27 @@ export const handlers = [
       return HttpResponse.json({ projects: [project()] });
     }
   ),
+  http.get(
+    `${apiUrl}/organizations/:organizationId/project-summaries`,
+    ({ request }) => {
+      assertAuthorization(request);
+      assertBodylessRequest(request);
+      const item = project();
+      return HttpResponse.json({
+        projects: [
+          {
+            ...item,
+            task_key_prefix: "ORC",
+            default_branch_name: "main",
+            member_count: 1,
+            open_task_count: 0,
+            last_activity_at: item.updated_at,
+            repository: null
+          }
+        ]
+      });
+    }
+  ),
   http.post(
     `${apiUrl}/organizations/:organizationId/projects`,
     ({ request }) => {

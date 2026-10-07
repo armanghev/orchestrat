@@ -36,7 +36,8 @@ function clonePreferences(preferences: Preferences): Preferences {
   return {
     ...preferences,
     pinnedProjectIds: [...preferences.pinnedProjectIds],
-    recentProjectIds: [...preferences.recentProjectIds]
+    recentProjectIds: [...preferences.recentProjectIds],
+    organizationProjectsViews: { ...preferences.organizationProjectsViews }
   };
 }
 function createDeferred(): Deferred {

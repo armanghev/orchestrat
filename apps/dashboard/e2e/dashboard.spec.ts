@@ -160,6 +160,33 @@ async function mockHierarchy(page: Page, state: HierarchyState) {
       state.organizations = [created];
       return route.fulfill({ json: created });
     }
+    const summariesMatch = path.match(
+      /^\/api\/v1\/organizations\/([^/]+)\/project-summaries$/
+    );
+    if (summariesMatch && method === "GET") {
+      const organizationId = summariesMatch[1];
+      if (state.failingOrganizationId === organizationId)
+        return route.abort("failed");
+      return route.fulfill({
+        json: {
+          projects: (state.projects[organizationId] ?? []).map((item) => {
+            const name = String(item.name ?? "Project");
+            const prefix = name.replace(/[^a-z0-9]/gi, "").slice(0, 3);
+            return {
+              role: "owner",
+              ...item,
+              task_key_prefix:
+                prefix.length >= 2 ? prefix.toUpperCase() : "PRJ",
+              default_branch_name: "main",
+              member_count: 1,
+              open_task_count: 0,
+              last_activity_at: item.updated_at ?? now,
+              repository: null
+            };
+          })
+        }
+      });
+    }
     const projectMatch = path.match(
       /^\/api\/v1\/organizations\/([^/]+)\/projects$/
     );
