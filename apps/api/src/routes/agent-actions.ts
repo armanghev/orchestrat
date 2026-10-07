@@ -1,4 +1,6 @@
 import {
+  agentBulkCreateTasksRequestSchema,
+  agentBulkUpdateTasksRequestSchema,
   agentSessionParamsSchema,
   agentLifecycleHookRequestSchema,
   claimMutationRequestSchema,
@@ -12,7 +14,7 @@ import {
   paginationQuerySchema,
   taskListQuerySchema,
   taskCommentsQuerySchema,
-  updateTaskRequestSchema
+  agentUpdateTaskRequestSchema
 } from "@orchestrat/protocol";
 import type { FastifyInstance } from "fastify";
 import type { AgentService } from "../services/agent-service.js";
@@ -21,6 +23,44 @@ import type { TaskService } from "../services/task-service.js";
 import { ApiError } from "../services/api-error.js";
 
 const taskParamsSchema = idParamsSchema;
+
+// Bulk bodies report the first invalid item by index (with its task_id or
+// title) so an agent can fix that item; envelope errors keep the generic shape.
+type BulkSchema<T> = {
+  safeParse(value: unknown):
+    | { success: true; data: T }
+    | {
+        success: false;
+        error: Error & {
+          issues: { path: PropertyKey[]; message: string }[];
+        };
+      };
+};
+function parseBulk<T>(schema: BulkSchema<T>, body: unknown): T {
+  const parsed = schema.safeParse(body);
+  if (parsed.success) return parsed.data;
+  const issue = parsed.error.issues.find(
+    (candidate) =>
+      candidate.path[0] === "tasks" && typeof candidate.path[1] === "number"
+  );
+  if (!issue) throw parsed.error;
+  const index = issue.path[1] as number;
+  const item = (body as { tasks?: unknown[] }).tasks?.[index] as
+    { task_id?: unknown; title?: unknown } | undefined;
+  throw new ApiError(
+    400,
+    "VALIDATION_ERROR",
+    `tasks[${index}] is invalid: ${issue.message}`,
+    {
+      index,
+      ...(typeof item?.task_id === "string" ? { task_id: item.task_id } : {}),
+      ...(typeof item?.title === "string" ? { title: item.title } : {}),
+      issues: parsed.error.issues.filter(
+        (candidate) => candidate.path[1] === index
+      )
+    }
+  );
+}
 
 export async function agentActionRoutes(
   app: FastifyInstance,
@@ -83,6 +123,20 @@ export async function agentActionRoutes(
     );
     return reply.code(result.status).send(result.body);
   });
+  app.post("/tasks/bulk", async (request, reply) => {
+    const result = await options.tasks.createManyForAgent(
+      request.agentPrincipal!,
+      parseBulk(agentBulkCreateTasksRequestSchema, request.body),
+      request.headers["idempotency-key"] as string | undefined
+    );
+    return reply.code(result.status).send(result.body);
+  });
+  app.patch("/tasks/bulk", (request) =>
+    options.tasks.updateManyForAgent(
+      request.agentPrincipal!,
+      parseBulk(agentBulkUpdateTasksRequestSchema, request.body)
+    )
+  );
   app.get("/tasks/:id", (request) =>
     options.tasks.getForAgent(
       request.agentPrincipal!,
@@ -93,7 +147,7 @@ export async function agentActionRoutes(
     options.tasks.updateForAgent(
       request.agentPrincipal!,
       taskParamsSchema.parse(request.params).id,
-      updateTaskRequestSchema.parse(request.body)
+      agentUpdateTaskRequestSchema.parse(request.body)
     )
   );
   app.get("/tasks/:id/comments", (request) => {

@@ -9,7 +9,9 @@ import {
   updateDocumentRequestSchema,
   editDocumentRequestSchema,
   agentCreateTaskRequestSchema,
-  updateTaskRequestSchema,
+  agentUpdateTaskRequestSchema,
+  agentBulkCreateTasksRequestSchema,
+  agentBulkUpdateTasksRequestSchema,
   createTaskCommentRequestSchema,
   createChatRequestSchema,
   manageChatMembersRequestSchema,
@@ -44,6 +46,8 @@ type Client = Pick<
   | "getTask"
   | "createTask"
   | "updateTask"
+  | "createTasks"
+  | "updateTasks"
   | "listTaskComments"
   | "addTaskComment"
   | "listAgents"
@@ -105,6 +109,41 @@ export class ClaimTokenStore {
   }
 }
 
+const bulkItemDetailsSchema = z.object({
+  index: z.number().int().min(0),
+  task_id: z.string().optional(),
+  title: z.string().optional()
+});
+
+// Bulk inputs are checked here (duplicate task_ids, per-item rules) so the
+// agent gets the failing index instead of a generic failure.
+function parseBulkInput<T>(
+  schema: { safeParse(value: unknown): z.ZodSafeParseResult<T> },
+  input: unknown
+): T {
+  const parsed = schema.safeParse(input);
+  if (parsed.success) return parsed.data;
+  const issue = parsed.error.issues[0]!;
+  const index =
+    issue.path[0] === "tasks" && typeof issue.path[1] === "number"
+      ? issue.path[1]
+      : undefined;
+  if (index === undefined)
+    throw new AgentApiError(400, "VALIDATION_ERROR", issue.message);
+  const item = (input as { tasks: { task_id?: unknown; title?: unknown }[] })
+    .tasks[index];
+  throw new AgentApiError(
+    400,
+    "VALIDATION_ERROR",
+    `tasks[${index}] is invalid: ${issue.message}`,
+    {
+      index,
+      ...(typeof item?.task_id === "string" ? { task_id: item.task_id } : {}),
+      ...(typeof item?.title === "string" ? { title: item.title } : {})
+    }
+  );
+}
+
 export function mapMcpError(error: unknown) {
   const known = error instanceof AgentApiError;
   const requestId = known ? error.requestId : undefined;
@@ -119,8 +158,20 @@ export function mapMcpError(error: unknown) {
               .safeParse(error.details)
           : known && error.code === "TASK_COMMENTS_UNREAD"
             ? unreadCommentsErrorDetailsSchema.safeParse(error.details)
-            : undefined;
-  const details = parsedDetails?.success ? parsedDetails.data : undefined;
+            : known && error.code === "TASK_NOT_CLAIMABLE"
+              ? z.object({ reason: z.string() }).safeParse(error.details)
+              : undefined;
+  // Bulk tools name the failing item; keep that next to any typed details.
+  const item = known
+    ? bulkItemDetailsSchema.safeParse(error.details)
+    : undefined;
+  const details =
+    parsedDetails?.success || item?.success
+      ? {
+          ...(parsedDetails?.success ? parsedDetails.data : {}),
+          ...(item?.success ? item.data : {})
+        }
+      : undefined;
   return {
     isError: true,
     content: [
@@ -142,6 +193,9 @@ const success = (value: unknown) => ({
   content: [{ type: "text" as const, text: JSON.stringify(value) }]
 });
 const taskIdInput = { task_id: z.string().uuid() };
+// Shared by update_task and update_tasks so the two never disagree.
+const statusRules =
+  "status moves an unclaimed task to any column except claimed (e.g. backlog to ready). A task claimed by another agent is refused with TASK_NOT_CLAIMABLE; for a task this agent has claimed, use set_task_status, complete_task or release_task instead. Moving to review or done applies complete_task's unread-comment check: on TASK_COMMENTS_UNREAD, read the returned comments and retry with acknowledged_through set to details.latest_sequence.";
 const listTasksInput = {
   status: z
     .enum([
@@ -331,18 +385,48 @@ export class McpBridge {
     this.server.registerTool(
       "update_task",
       {
-        description:
-          "Update task title, description, or priority using the current expected_version. Ownership and status transitions require claim/release/complete tools.",
+        description: `Update task title, description, priority, or status using the current expected_version. ${statusRules}`,
         inputSchema: {
           ...taskIdInput,
-          ...updateTaskRequestSchema.shape
+          ...agentUpdateTaskRequestSchema.shape
         }
       },
       async ({ task_id, ...input }) =>
         this.call(() =>
           this.activeClient().updateTask(
             task_id,
-            updateTaskRequestSchema.parse(input)
+            agentUpdateTaskRequestSchema.parse(input)
+          )
+        )
+    );
+    this.server.registerTool(
+      "create_tasks",
+      {
+        description:
+          "Create 1-50 tasks authored by this agent in one all-or-nothing batch; keys are allocated and results returned in input order. Supply a stable idempotency_key and reuse the same key and body after an ambiguous response. On error nothing was created and details.index names the failing item.",
+        inputSchema: {
+          ...agentBulkCreateTasksRequestSchema.shape,
+          idempotency_key: z.string().trim().min(1).max(128)
+        }
+      },
+      async ({ idempotency_key, ...input }) =>
+        this.call(() =>
+          this.activeClient().createTasks(
+            parseBulkInput(agentBulkCreateTasksRequestSchema, input),
+            idempotency_key
+          )
+        )
+    );
+    this.server.registerTool(
+      "update_tasks",
+      {
+        description: `Update 1-50 distinct tasks in one all-or-nothing batch; each item follows update_task's rules and results come back in input order. On error nothing was changed and details.index and details.task_id name the failing item. ${statusRules}`,
+        inputSchema: agentBulkUpdateTasksRequestSchema.shape
+      },
+      async (input) =>
+        this.call(() =>
+          this.activeClient().updateTasks(
+            parseBulkInput(agentBulkUpdateTasksRequestSchema, input)
           )
         )
     );

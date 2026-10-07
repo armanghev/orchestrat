@@ -415,6 +415,72 @@ export const updateTaskRequestSchema = z
   );
 export type UpdateTaskRequest = z.infer<typeof updateTaskRequestSchema>;
 
+// Agents may also move an unclaimed task between columns. Claimed tasks keep
+// the claim tools (set_task_status, complete, release). acknowledged_through
+// is checked only when the move is to review or done.
+const agentTaskEditFields = {
+  title: taskTitleSchema.optional(),
+  description: z.string().trim().max(100000).nullable().optional(),
+  priority: taskPrioritySchema.optional(),
+  status: humanTaskStatusSchema.optional(),
+  acknowledged_through: z.number().int().nonnegative().optional(),
+  expected_version: expectedVersionSchema
+};
+const hasAgentTaskEdit = (value: {
+  title?: unknown;
+  description?: unknown;
+  priority?: unknown;
+  status?: unknown;
+}) =>
+  value.title !== undefined ||
+  value.description !== undefined ||
+  value.priority !== undefined ||
+  value.status !== undefined;
+const agentTaskEditMessage = "At least one task field or status is required.";
+export const agentUpdateTaskRequestSchema = z
+  .object(agentTaskEditFields)
+  .refine(hasAgentTaskEdit, { message: agentTaskEditMessage });
+export type AgentUpdateTaskRequest = z.infer<
+  typeof agentUpdateTaskRequestSchema
+>;
+
+export const bulkTaskLimit = 50;
+export const agentBulkCreateTasksRequestSchema = z.object({
+  tasks: z.array(agentCreateTaskRequestSchema).min(1).max(bulkTaskLimit)
+});
+export type AgentBulkCreateTasksRequest = z.infer<
+  typeof agentBulkCreateTasksRequestSchema
+>;
+export const agentBulkUpdateTaskItemSchema = z
+  .object({ task_id: idSchema, ...agentTaskEditFields })
+  .refine(hasAgentTaskEdit, { message: agentTaskEditMessage });
+export type AgentBulkUpdateTaskItem = z.infer<
+  typeof agentBulkUpdateTaskItemSchema
+>;
+export const agentBulkUpdateTasksRequestSchema = z
+  .object({
+    tasks: z.array(agentBulkUpdateTaskItemSchema).min(1).max(bulkTaskLimit)
+  })
+  .superRefine((value, context) => {
+    const seen = new Set<string>();
+    value.tasks.forEach((item, index) => {
+      if (seen.has(item.task_id))
+        context.addIssue({
+          code: "custom",
+          path: ["tasks", index, "task_id"],
+          message: "Each task_id may appear only once."
+        });
+      seen.add(item.task_id);
+    });
+  });
+export type AgentBulkUpdateTasksRequest = z.infer<
+  typeof agentBulkUpdateTasksRequestSchema
+>;
+export const bulkTasksResponseSchema = z.object({
+  tasks: z.array(taskSchema)
+});
+export type BulkTasksResponse = z.infer<typeof bulkTasksResponseSchema>;
+
 export const moveTaskRequestSchema = z.object({
   status: humanTaskStatusSchema,
   before_task_id: idSchema.nullable().optional(),

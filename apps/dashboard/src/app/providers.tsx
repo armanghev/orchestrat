@@ -17,6 +17,7 @@ import type {
 import { PlatformProvider, usePlatform } from "@/platform/provider";
 import { PreferencesProvider } from "@/platform/preferences-provider";
 import { ThemeProvider } from "@/features/theme/theme-provider";
+import { Toaster } from "@/components/ui/sonner";
 import { createDashboardQueryClient } from "./query-client";
 import { createAppRouter } from "./router";
 
@@ -171,6 +172,7 @@ export function AppProviders({ config }: { config: PublicConfig }) {
       <PreferencesProvider>
         <ThemeProvider>
           <ProviderGraph config={config} />
+          <Toaster position="bottom-right" />
         </ThemeProvider>
       </PreferencesProvider>
     </PlatformProvider>

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/cn";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -83,6 +84,7 @@ import {
   BlockedTaskLine
 } from "@/features/attention/blocked-callout";
 import { PingDialog } from "@/features/attention/ping-dialog";
+import { toast } from "sonner";
 import { useBranch } from "@/features/branches/branch-context";
 import { OtherBranchNotice } from "@/features/branches/other-branch-notice";
 import type {
@@ -115,6 +117,10 @@ const boardStatuses: Task["status"][] = [
   ...statuses.slice(2)
 ];
 const priorities: TaskPriority[] = ["urgent", "high", "medium", "low", "none"];
+const isHumanStatus = (status: Task["status"]): status is HumanTaskStatus =>
+  (statuses as string[]).includes(status);
+// A private drag type, so links or text dropped on the board are ignored.
+const taskDragType = "application/x-orchestrat-task";
 
 function TasksRoute() {
   const { projectId } = Route.useParams();
@@ -206,32 +212,82 @@ function TasksRoute() {
       else setNotice(message(error));
     }
   });
+  const tasksPrefix = coordinationKeys.tasks(projectId);
+  const patchCachedTask = (id: string, patch: (task: Task) => Task) => {
+    queryClient.setQueryData<Task>(coordinationKeys.task(id), (task) =>
+      task ? patch(task) : task
+    );
+    queryClient.setQueriesData<{ tasks: Task[] }>(
+      { queryKey: tasksPrefix },
+      (page) =>
+        page && {
+          ...page,
+          tasks: page.tasks.map((task) => (task.id === id ? patch(task) : task))
+        }
+    );
+  };
+  const cachedTask = (id: string) =>
+    queryClient.getQueryData<Task>(coordinationKeys.task(id)) ??
+    queryClient
+      .getQueriesData<{ tasks: Task[] }>({ queryKey: tasksPrefix })
+      .flatMap(([, page]) => page?.tasks ?? [])
+      .find((task) => task.id === id);
+  // Optimistic: the status changes in every cached copy before the API
+  // answers, and an error puts the previous copies back. Moves run one at a
+  // time and read the version when they start, so a second change right
+  // after the first sends the version the first one returned.
   const move = useMutation({
-    mutationFn: ({
-      id,
-      status,
-      version
-    }: {
-      id: string;
-      status: HumanTaskStatus;
-      version: number;
-    }) => api.moveTask(id, { status, expected_version: version }),
-    onSuccess: async () => {
-      setNotice(null);
-      await refresh();
-      await queryClient.invalidateQueries({
-        queryKey: coordinationKeys.task(taskId)
-      });
+    mutationKey: ["task-move", projectId],
+    scope: { id: `task-move:${projectId}` },
+    mutationFn: ({ id, status }: { id: string; status: HumanTaskStatus }) =>
+      api.moveTask(id, {
+        status,
+        expected_version: cachedTask(id)?.version ?? 0
+      }),
+    onMutate: async ({ id, status }) => {
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: coordinationKeys.task(id) }),
+        queryClient.cancelQueries({ queryKey: tasksPrefix })
+      ]);
+      const previous = {
+        task: queryClient.getQueryData<Task>(coordinationKeys.task(id)),
+        lists: queryClient.getQueriesData<{ tasks: Task[] }>({
+          queryKey: tasksPrefix
+        })
+      };
+      patchCachedTask(id, (task) => ({ ...task, status }));
+      return previous;
     },
-    onError: async (error) => {
-      if (
+    onSuccess: (task) => {
+      setNotice(null);
+      patchCachedTask(task.id, () => task);
+    },
+    onError: async (error, { id }, previous) => {
+      if (previous) {
+        queryClient.setQueryData(coordinationKeys.task(id), previous.task);
+        for (const [key, page] of previous.lists)
+          queryClient.setQueryData(key, page);
+      }
+      toast.error(
         error instanceof DashboardApiError &&
-        error.kind === "TASK_VERSION_CONFLICT"
-      )
-        await conflict();
-      else setNotice(message(error));
+          error.kind === "TASK_VERSION_CONFLICT"
+          ? "This task changed elsewhere, so its status wasn’t changed. The latest version was reloaded."
+          : `Couldn’t change the status: ${message(error)}`
+      );
+    },
+    onSettled: async (_task, _error, { id }) => {
+      // Later queued moves refetch once the last one settles.
+      if (queryClient.isMutating({ mutationKey: ["task-move", projectId] }) > 1)
+        return;
+      await Promise.all([
+        refresh(),
+        queryClient.invalidateQueries({ queryKey: coordinationKeys.task(id) }),
+        invalidateAttentionQueries(queryClient, projectId)
+      ]);
     }
   });
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<Task["status"] | null>(null);
   const addComment = useMutation({
     mutationFn: ({
       id,
@@ -447,12 +503,47 @@ function TasksRoute() {
             emptyState
           ) : (
             <>
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <div
+                className="-mx-1 flex snap-x gap-4 overflow-x-auto px-1 pb-3"
+                data-testid="task-board"
+              >
                 {grouped.map(({ status, tasks: column }) => (
                   <section
                     key={status}
                     aria-labelledby={`status-${status}`}
-                    className="min-w-0 rounded-xl bg-muted/50 p-3"
+                    data-drop-target={
+                      dragging && dropTarget === status ? "" : undefined
+                    }
+                    onDragOver={(event) => {
+                      if (!dragging || !isHumanStatus(status)) return;
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = "move";
+                      if (dropTarget !== status) setDropTarget(status);
+                    }}
+                    onDragLeave={(event) => {
+                      if (
+                        !event.currentTarget.contains(
+                          event.relatedTarget as Node | null
+                        )
+                      )
+                        setDropTarget(null);
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      const id = event.dataTransfer.getData(taskDragType);
+                      setDragging(null);
+                      setDropTarget(null);
+                      const task = tasks.data.tasks.find(
+                        (item) => item.id === id
+                      );
+                      if (
+                        task &&
+                        isHumanStatus(status) &&
+                        task.status !== status
+                      )
+                        move.mutate({ id, status });
+                    }}
+                    className="w-72 shrink-0 snap-start rounded-xl bg-muted/50 p-3 transition-colors data-[drop-target]:bg-muted data-[drop-target]:ring-2 data-[drop-target]:ring-ring/50"
                   >
                     <div className="mb-3 flex items-center justify-between gap-2">
                       <h2
@@ -464,52 +555,74 @@ function TasksRoute() {
                       <Badge variant="outline">{column.length}</Badge>
                     </div>
                     <div className="flex min-h-24 flex-col gap-3">
-                      {column.map((task) => (
-                        <Card
-                          size="sm"
-                          key={task.id}
-                          className="relative transition-shadow hover:ring-foreground/25"
-                        >
-                          <CardHeader>
-                            <CardTitle>
-                              <button
-                                type="button"
-                                onClick={() => selectTask(task.id)}
-                                className="w-full text-left after:absolute after:inset-0"
-                                aria-label={`${task.key} ${task.title}`}
+                      {column.map((task) => {
+                        const movable =
+                          !readOnly &&
+                          task.status !== "claimed" &&
+                          !overlays.get(task.id)?.claim;
+                        return (
+                          <Card
+                            size="sm"
+                            key={task.id}
+                            draggable={movable}
+                            onDragStart={(event) => {
+                              event.dataTransfer.setData(taskDragType, task.id);
+                              event.dataTransfer.effectAllowed = "move";
+                              setDragging(task.id);
+                            }}
+                            onDragEnd={() => {
+                              setDragging(null);
+                              setDropTarget(null);
+                            }}
+                            data-dragging={
+                              dragging === task.id ? "" : undefined
+                            }
+                            className={cn(
+                              "relative transition-shadow hover:ring-foreground/25 data-[dragging]:opacity-50",
+                              movable && "cursor-grab active:cursor-grabbing"
+                            )}
+                          >
+                            <CardHeader>
+                              <CardTitle>
+                                <button
+                                  type="button"
+                                  onClick={() => selectTask(task.id)}
+                                  className="w-full text-left after:absolute after:inset-0"
+                                  aria-label={`${task.key} ${task.title}`}
+                                >
+                                  <span className="block font-mono text-xs font-normal text-muted-foreground">
+                                    {task.key}
+                                  </span>
+                                  <span className="mt-2 block text-sm font-medium leading-relaxed">
+                                    {task.title}
+                                  </span>
+                                </button>
+                              </CardTitle>
+                              <OpenBlockLine overlay={overlays.get(task.id)} />
+                            </CardHeader>
+                            <CardContent className="flex items-center justify-between gap-2">
+                              <Badge
+                                variant={
+                                  task.priority === "urgent"
+                                    ? "destructive"
+                                    : "secondary"
+                                }
                               >
-                                <span className="block font-mono text-xs font-normal text-muted-foreground">
-                                  {task.key}
-                                </span>
-                                <span className="mt-2 block text-sm font-medium leading-relaxed">
-                                  {task.title}
-                                </span>
-                              </button>
-                            </CardTitle>
-                            <OpenBlockLine overlay={overlays.get(task.id)} />
-                          </CardHeader>
-                          <CardContent className="flex items-center justify-between gap-2">
-                            <Badge
-                              variant={
-                                task.priority === "urgent"
-                                  ? "destructive"
-                                  : "secondary"
-                              }
-                            >
-                              {task.priority} priority
-                            </Badge>
-                            <span className="flex items-center gap-2">
-                              <UnreadBadge overlay={overlays.get(task.id)} />
-                              {task.comment_count > 0 ? (
-                                <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                                  <MessageSquare className="size-3" />
-                                  {task.comment_count}
-                                </span>
-                              ) : null}
-                            </span>
-                          </CardContent>
-                        </Card>
-                      ))}
+                                {task.priority} priority
+                              </Badge>
+                              <span className="flex items-center gap-2">
+                                <UnreadBadge overlay={overlays.get(task.id)} />
+                                {task.comment_count > 0 ? (
+                                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                                    <MessageSquare className="size-3" />
+                                    {task.comment_count}
+                                  </span>
+                                ) : null}
+                              </span>
+                            </CardContent>
+                          </Card>
+                        );
+                      })}
                       {!column.length ? (
                         <p className="py-6 text-center text-xs text-muted-foreground">
                           No tasks
@@ -677,7 +790,6 @@ function TasksRoute() {
               taskOptions={tasks.data.tasks}
               readOnly={readOnly}
               saving={update.isPending}
-              moving={move.isPending}
               commenting={addComment.isPending}
               changingDependencies={
                 addDependency.isPending || removeDependency.isPending
@@ -686,11 +798,7 @@ function TasksRoute() {
                 update.mutateAsync({ id: selected.data!.id, input })
               }
               onMove={(status) =>
-                move.mutate({
-                  id: selected.data!.id,
-                  status,
-                  version: selected.data!.version
-                })
+                move.mutate({ id: selected.data!.id, status })
               }
               onComment={(body, mentions) =>
                 addComment.mutateAsync({
@@ -843,7 +951,6 @@ function TaskDetail({
   taskOptions,
   readOnly,
   saving,
-  moving,
   commenting,
   changingDependencies,
   onUpdate,
@@ -863,7 +970,6 @@ function TaskDetail({
   /** An archived project or branch: write controls are hidden. */
   readOnly: boolean;
   saving: boolean;
-  moving: boolean;
   commenting: boolean;
   changingDependencies: boolean;
   onUpdate: (input: {
@@ -940,7 +1046,6 @@ function TaskDetail({
               <NativeSelect
                 aria-label="Move task status"
                 value={task.status}
-                disabled={moving}
                 onChange={(event) =>
                   onMove(event.target.value as HumanTaskStatus)
                 }

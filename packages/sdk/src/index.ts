@@ -19,7 +19,10 @@ import {
   taskCommentsResponseSchema,
   taskCommentSchema,
   agentCreateTaskRequestSchema,
-  updateTaskRequestSchema,
+  agentUpdateTaskRequestSchema,
+  agentBulkCreateTasksRequestSchema,
+  agentBulkUpdateTasksRequestSchema,
+  bulkTasksResponseSchema,
   createTaskCommentRequestSchema,
   claimMutationRequestSchema,
   createDocumentRequestSchema,
@@ -57,7 +60,9 @@ import type {
   TaskListQuery,
   TaskCommentsQuery,
   AgentCreateTaskRequest,
-  UpdateTaskRequest,
+  AgentUpdateTaskRequest,
+  AgentBulkCreateTasksRequest,
+  AgentBulkUpdateTasksRequest,
   CreateTaskCommentRequest,
   CreateDocumentRequest,
   DocumentListQuery,
@@ -363,12 +368,34 @@ export class AgentApiClient {
     );
   }
 
-  updateTask(taskId: string, input: UpdateTaskRequest) {
+  updateTask(taskId: string, input: AgentUpdateTaskRequest) {
     return this.request(
       "PATCH",
       `/tasks/${encodeURIComponent(taskId)}`,
       taskSchema,
-      updateTaskRequestSchema.parse(input)
+      agentUpdateTaskRequestSchema.parse(input)
+    );
+  }
+
+  /** All-or-nothing; tasks come back in input order. */
+  createTasks(input: AgentBulkCreateTasksRequest, idempotencyKey: string) {
+    return this.request(
+      "POST",
+      "/tasks/bulk",
+      bulkTasksResponseSchema,
+      agentBulkCreateTasksRequestSchema.parse(input),
+      false,
+      { "idempotency-key": idempotencyKey }
+    );
+  }
+
+  /** All-or-nothing; tasks come back in input order. */
+  updateTasks(input: AgentBulkUpdateTasksRequest) {
+    return this.request(
+      "PATCH",
+      "/tasks/bulk",
+      bulkTasksResponseSchema,
+      agentBulkUpdateTasksRequestSchema.parse(input)
     );
   }
 
