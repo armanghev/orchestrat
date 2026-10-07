@@ -248,7 +248,10 @@ export function TopToolbar({
                         <DropdownMenuSeparator />
                         <DropdownMenuItem
                           onSelect={() =>
-                            void navigate({ to: "/organizations/new" })
+                            void navigate({
+                              to: "/organizations/new",
+                              search: { fromOrganization: organization.id }
+                            })
                           }
                         >
                           <Plus />

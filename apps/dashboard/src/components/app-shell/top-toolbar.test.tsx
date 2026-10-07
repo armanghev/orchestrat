@@ -112,7 +112,10 @@ it("scopes project choices, links the organization home, and switches organizati
 
   await user.click(screen.getByRole("button", { name: "Switch organization" }));
   await user.click(screen.getByRole("menuitem", { name: "New organization" }));
-  expect(navigate).toHaveBeenLastCalledWith({ to: "/organizations/new" });
+  expect(navigate).toHaveBeenLastCalledWith({
+    to: "/organizations/new",
+    search: { fromOrganization: acme.id }
+  });
 });
 
 it("shows Organization › Page on organization pages", () => {

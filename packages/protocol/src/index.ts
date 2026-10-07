@@ -38,6 +38,7 @@ const baseErrorCodeSchema = z.enum([
   "VALIDATION_ERROR",
   "NOT_FOUND",
   "CONFLICT",
+  "ORGANIZATION_SLUG_TAKEN",
   "RATE_LIMITED",
   "INTERNAL_ERROR"
 ]);
@@ -1369,3 +1370,13 @@ export const projectSummariesResponseSchema = z.object({
 export type ProjectSummariesResponse = z.infer<
   typeof projectSummariesResponseSchema
 >;
+
+export const slugifyName = (value: string) =>
+  value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 63)
+    .replace(/-$/g, "") || `item-${crypto.randomUUID().slice(0, 8)}`;

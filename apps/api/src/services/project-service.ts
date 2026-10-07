@@ -11,6 +11,7 @@ import {
   users,
   type Database
 } from "@orchestrat/db";
+import { slugifyName as slugify } from "@orchestrat/protocol";
 import type {
   CreateOrganizationRequest,
   CreateProjectRequest,
@@ -41,16 +42,6 @@ import {
 import { PermissionService } from "./permission-service.js";
 
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
-
-const slugify = (value: string) =>
-  value
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 63)
-    .replace(/-$/g, "") || `item-${randomUUID().slice(0, 8)}`;
 
 const organizationJson = (
   organization: typeof organizations.$inferSelect,
@@ -131,14 +122,23 @@ export class ProjectService {
 
   async createOrganization(userId: string, input: CreateOrganizationRequest) {
     return this.db.transaction(async (tx) => {
+      const id = randomUUID();
       const [organization] = await tx
         .insert(organizations)
         .values({
-          id: randomUUID(),
+          id,
           name: input.name,
           slug: input.slug ?? slugify(input.name)
         })
+        .onConflictDoNothing({ target: organizations.slug })
         .returning();
+      if (organization?.id !== id)
+        throw new ApiError(
+          409,
+          "ORGANIZATION_SLUG_TAKEN",
+          "This organization slug is already taken.",
+          { field: "slug" }
+        );
       await tx.insert(organizationMembers).values({
         organizationId: organization.id,
         userId,
