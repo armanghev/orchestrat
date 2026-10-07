@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { z } from "zod";
+import { pendingRepositoryAuthorizationResponseSchema } from "@orchestrat/protocol";
 import { DashboardApiError, type ApiClient } from "@/lib/api/client";
 import { goTo } from "./redirect";
 import {
@@ -9,6 +10,7 @@ import {
 } from "./repository-copy";
 
 const attemptSchema = z.object({
+  return_path: pendingRepositoryAuthorizationResponseSchema.shape.return_path,
   authorization_id: z.string().regex(authorizationPattern),
   project_id: z.string().uuid(),
   provider: z.literal("github")
@@ -59,6 +61,7 @@ export function GithubSetup({
           setAttempt({
             authorization_id: pending.authorization_id,
             project_id: pending.project_id,
+            return_path: pending.return_path,
             provider: "github"
           });
       })
@@ -84,10 +87,18 @@ export function GithubSetup({
           return;
         }
         window.sessionStorage.removeItem(REPOSITORY_ATTEMPT_KEY);
+        const target = new URL(
+          result.return_path ??
+            attempt.return_path ??
+            `/projects/${attempt.project_id}/settings`,
+          window.location.origin
+        );
+        target.searchParams.set(
+          "repository_authorization",
+          attempt.authorization_id
+        );
         void navigate({
-          to: "/projects/$projectId/settings",
-          params: { projectId: attempt.project_id },
-          search: { repository_authorization: attempt.authorization_id },
+          href: `${target.pathname}${target.search}`,
           replace: true
         });
       })

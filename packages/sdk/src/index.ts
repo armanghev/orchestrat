@@ -818,3 +818,5 @@ const queryString = (query: Record<string, unknown>) => {
 };
 
 export { ProjectsApi } from "./projects.js";
+
+export { RepositoryApi } from "./repository.js";

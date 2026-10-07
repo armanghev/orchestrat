@@ -21,6 +21,7 @@ export async function humanRepositoryRoutes(
 ) {
   const project = (params: unknown) =>
     projectTaskParamsSchema.parse(params).projectId;
+  app.get("/repository/providers", () => options.repositories.listProviders());
   app.get("/repository/authorizations/pending", (request) =>
     options.repositories.pending(
       request.userId,

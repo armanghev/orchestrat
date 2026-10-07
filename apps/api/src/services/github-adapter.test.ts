@@ -206,7 +206,10 @@ test("connecting checks the installation id and mints only narrow tokens", async
   const foreign = await install("20");
   assert.equal(foreign.statusCode, 409);
   assert.equal(foreign.json().error.code, "REPOSITORY_AUTHORIZATION_INVALID");
-  assert.deepEqual((await install("10")).json(), { next: "pick_repository" });
+  assert.deepEqual((await install("10")).json(), {
+    next: "pick_repository",
+    return_path: `${base}/settings`
+  });
   const listed = (
     await s.alice(
       "GET",

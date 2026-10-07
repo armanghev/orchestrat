@@ -1443,9 +1443,21 @@ export class ApiClient {
       projectSummariesResponseSchema
     );
   }
+  listRepositoryProviders(): Promise<RepositoryProvidersResponse> {
+    return this.request(
+      "/api/v1/repository/providers",
+      { method: "GET" },
+      repositoryProvidersResponseSchema
+    );
+  }
 }
 
 import {
   projectSummariesResponseSchema,
   type ProjectSummariesResponse
+} from "@orchestrat/protocol";
+
+import {
+  repositoryProvidersResponseSchema,
+  type RepositoryProvidersResponse
 } from "@orchestrat/protocol";
