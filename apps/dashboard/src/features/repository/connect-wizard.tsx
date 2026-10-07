@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -10,9 +9,6 @@ import {
   DialogHeader,
   DialogTitle
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { useBranch } from "@/features/branches/branch-context";
 import { branchKeys } from "@/features/branches/query-options";
 import {
@@ -20,29 +16,19 @@ import {
   tasksQueryOptions
 } from "@/features/coordination/query-options";
 import { chatsQueryOptions } from "@/features/messaging/query-options";
-import { DashboardApiError, type ApiClient } from "@/lib/api/client";
-import { cn } from "@/lib/cn";
+import type { ApiClient } from "@/lib/api/client";
 import { usePlatform } from "@/platform/provider";
+import {
+  ConnectWizardMapStep,
+  ConnectWizardPickStep,
+  type Mapping
+} from "./connect-wizard-body";
 import { goTo } from "./redirect";
 import { REPOSITORY_ATTEMPT_KEY, mappingCase } from "./repository-copy";
 import {
   repositoryCandidatesQueryOptions,
   repositoryKeys
 } from "./query-options";
-
-type Mapping = "rename_default" | "use_existing";
-
-function connectErrorMessage(error: unknown) {
-  if (!(error instanceof DashboardApiError))
-    return "We couldn’t connect the repository. Try again.";
-  if (error.kind === "REPOSITORY_AUTHORIZATION_INVALID")
-    return "This authorization expired or was already used. Start again.";
-  if (error.kind === "REPOSITORY_CONNECTION_EXISTS")
-    return "A repository is already connected to this project.";
-  if (error.kind === "NETWORK_ERROR")
-    return "We couldn’t reach the Dashboard API. Check your connection and try again.";
-  return error.message;
-}
 
 // After the provider redirect (docs/project-branches.md §11.8): pick a
 // repository, see how the default branch will be linked, and connect.
@@ -154,155 +140,29 @@ export function ConnectWizard({
           </DialogDescription>
         </DialogHeader>
         {step === "pick" ? (
-          <div className="flex flex-col gap-3">
-            {candidates.isPending ? (
-              <p role="status" className="text-sm text-muted-foreground">
-                Loading repositories…
-              </p>
-            ) : candidates.isError ? (
-              <p role="alert" className="text-sm text-destructive">
-                {connectErrorMessage(candidates.error)}
-              </p>
-            ) : repositories.length ? (
-              <>
-                <Input
-                  type="search"
-                  aria-label="Search repositories"
-                  placeholder="Search repositories"
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                />
-                <RadioGroup
-                  aria-label="Repository"
-                  value={repositoryId ?? ""}
-                  onValueChange={setRepositoryId}
-                  className="max-h-72 gap-0 divide-y overflow-y-auto rounded-lg border"
-                >
-                  {shown.map((repository) => (
-                    <label
-                      key={repository.provider_repository_id}
-                      className={cn(
-                        "flex items-start gap-3 px-3 py-2.5 text-sm",
-                        !repository.eligible && "text-muted-foreground"
-                      )}
-                    >
-                      <RadioGroupItem
-                        className="mt-0.5"
-                        value={repository.provider_repository_id}
-                        disabled={!repository.eligible}
-                      />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate font-medium">
-                          {repository.full_name}
-                        </span>
-                        <span className="block text-xs text-muted-foreground">
-                          {repository.eligible
-                            ? repository.default_branch
-                              ? `Default branch: ${repository.default_branch}`
-                              : "No default branch yet"
-                            : repository.ineligible_reason}
-                        </span>
-                      </span>
-                    </label>
-                  ))}
-                </RadioGroup>
-              </>
-            ) : installUrl ? (
-              <p className="text-sm text-muted-foreground">
-                The GitHub App isn’t installed where you have repositories yet.
-              </p>
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                This authorization can’t see any repositories. Grant access to
-                one on the provider and start again.
-              </p>
-            )}
-            {installUrl ? (
-              <p className="text-sm text-muted-foreground">
-                {repositories.length ? "Don’t see your repository? " : ""}
-                <Button
-                  type="button"
-                  variant="link"
-                  className="h-auto p-0"
-                  onClick={() => install(installUrl)}
-                >
-                  Install the GitHub App
-                </Button>{" "}
-                on the account that owns it, then come back here.
-              </p>
-            ) : null}
-          </div>
+          <ConnectWizardPickStep
+            search={search}
+            onSearchChange={setSearch}
+            repositoryId={repositoryId}
+            onRepositoryIdChange={setRepositoryId}
+            repositories={repositories}
+            shown={shown}
+            candidatesPending={candidates.isPending}
+            candidatesError={candidates.isError ? candidates.error : null}
+            installUrl={installUrl}
+            onInstall={install}
+          />
         ) : plan ? (
-          <div className="flex flex-col gap-4 text-sm">
-            {plan.kind === "link" ? (
-              <p>
-                Your default branch <strong>{plan.name}</strong> will track{" "}
-                {chosen?.full_name}’s <strong>{plan.name}</strong>. Nothing is
-                renamed.
-              </p>
-            ) : plan.kind === "rename" ? (
-              <p>
-                Your default branch <strong>{plan.from}</strong> will be renamed
-                to <strong>{plan.to}</strong> and track it. All existing work
-                stays.
-              </p>
-            ) : (
-              <>
-                <p>
-                  This project already has a branch named{" "}
-                  <strong>{plan.to}</strong>, the repository’s default. Choose
-                  which one becomes the default.
-                </p>
-                <RadioGroup
-                  aria-label="Default branch"
-                  value={mapping}
-                  onValueChange={(value) => setMapping(value as Mapping)}
-                >
-                  <label className="flex items-start gap-2">
-                    <RadioGroupItem value="rename_default" className="mt-0.5" />
-                    <span>
-                      Keep <strong>{plan.from}</strong>’s work as{" "}
-                      <strong>{plan.to}</strong> and archive the other{" "}
-                      <strong>{plan.to}</strong> branch. Its work stays and can
-                      still be imported.
-                      {existingEmpty ? " Recommended: it’s empty." : ""}
-                    </span>
-                  </label>
-                  <label className="flex items-start gap-2">
-                    <RadioGroupItem value="use_existing" className="mt-0.5" />
-                    <span>
-                      Make the existing <strong>{plan.to}</strong> branch the
-                      default and leave <strong>{plan.from}</strong> as an
-                      ordinary branch.
-                    </span>
-                  </label>
-                </RadioGroup>
-              </>
-            )}
-            <div className="flex items-start gap-2">
-              <Checkbox
-                id="repository-create-existing"
-                className="mt-0.5"
-                checked={createExisting}
-                onCheckedChange={(checked) =>
-                  setCreateExisting(checked === true)
-                }
-              />
-              <Label
-                htmlFor="repository-create-existing"
-                className="leading-snug font-normal"
-              >
-                Also create Orchestrat branches for the repository’s other
-                existing branches. Otherwise each one gets a branch the first
-                time it’s pushed.
-              </Label>
-            </div>
-            {connect.isError ? (
-              <p role="alert" className="text-destructive">
-                {connectErrorMessage(connect.error)}
-              </p>
-            ) : null}
-          </div>
+          <ConnectWizardMapStep
+            plan={plan}
+            chosenName={chosen?.full_name}
+            mapping={mapping}
+            onMappingChange={setMapping}
+            createExisting={createExisting}
+            onCreateExistingChange={setCreateExisting}
+            existingEmpty={existingEmpty}
+            connectError={connect.isError ? connect.error : null}
+          />
         ) : null}
         <DialogFooter>
           {step === "pick" ? (
