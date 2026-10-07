@@ -3,6 +3,9 @@ import {
   organizationMembers,
   organizations,
   projectBranches,
+  projectEvents,
+  repositoryConnections,
+  tasks,
   projectMembers,
   projects,
   users,
@@ -15,11 +18,21 @@ import type {
   Organization,
   OrganizationMember,
   Project,
+  ProjectSummary,
   UpdateOrganizationMemberRequest,
   UpdateOrganizationRequest,
   UpdateProjectRequest
 } from "@orchestrat/protocol";
-import { and, asc, count, eq, inArray } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  eq,
+  inArray,
+  isNull,
+  notInArray,
+  sql
+} from "drizzle-orm";
 import { ApiError } from "./api-error.js";
 import {
   defaultBranchId,
@@ -454,6 +467,113 @@ export class ProjectService {
       projects: rows.map((row) =>
         projectJson(row.project, row.role, defaults.get(row.project.id))
       )
+    };
+  }
+
+  async listProjectSummaries(userId: string, organizationId: string) {
+    await this.permissions.organization(userId, organizationId);
+    const members = this.db
+      .select({
+        projectId: projectMembers.projectId,
+        total: count().as("member_count")
+      })
+      .from(projectMembers)
+      .innerJoin(projects, eq(projects.id, projectMembers.projectId))
+      .where(eq(projects.organizationId, organizationId))
+      .groupBy(projectMembers.projectId)
+      .as("members");
+    const openTasks = this.db
+      .select({
+        projectId: tasks.projectId,
+        total: count().as("open_task_count")
+      })
+      .from(tasks)
+      .innerJoin(
+        projectBranches,
+        and(
+          eq(projectBranches.id, tasks.branchId),
+          eq(projectBranches.isDefault, true)
+        )
+      )
+      .innerJoin(projects, eq(projects.id, tasks.projectId))
+      .where(
+        and(
+          eq(projects.organizationId, organizationId),
+          notInArray(tasks.status, ["done", "cancelled"])
+        )
+      )
+      .groupBy(tasks.projectId)
+      .as("open_tasks");
+    const activity = this.db
+      .select({
+        projectId: projectEvents.projectId,
+        latest: sql<Date>`max(${projectEvents.occurredAt})`
+          .mapWith(projectEvents.occurredAt)
+          .as("last_activity_at")
+      })
+      .from(projectEvents)
+      .innerJoin(projects, eq(projects.id, projectEvents.projectId))
+      .where(eq(projects.organizationId, organizationId))
+      .groupBy(projectEvents.projectId)
+      .as("activity");
+    const rows = await this.db
+      .select({
+        project: projects,
+        role: projectMembers.role,
+        defaultBranchId: projectBranches.id,
+        defaultBranchName: projectBranches.name,
+        memberCount: members.total,
+        openTaskCount: openTasks.total,
+        lastActivityAt: activity.latest,
+        repository: {
+          provider: repositoryConnections.provider,
+          fullName: repositoryConnections.repositoryFullName,
+          status: repositoryConnections.status
+        }
+      })
+      .from(projects)
+      .innerJoin(
+        projectMembers,
+        and(
+          eq(projectMembers.projectId, projects.id),
+          eq(projectMembers.userId, userId)
+        )
+      )
+      .leftJoin(
+        projectBranches,
+        and(
+          eq(projectBranches.projectId, projects.id),
+          eq(projectBranches.isDefault, true)
+        )
+      )
+      .leftJoin(members, eq(members.projectId, projects.id))
+      .leftJoin(openTasks, eq(openTasks.projectId, projects.id))
+      .leftJoin(activity, eq(activity.projectId, projects.id))
+      .leftJoin(
+        repositoryConnections,
+        and(
+          eq(repositoryConnections.projectId, projects.id),
+          isNull(repositoryConnections.disconnectedAt)
+        )
+      )
+      .where(eq(projects.organizationId, organizationId))
+      .orderBy(asc(projects.name));
+    return {
+      projects: rows.map((row): ProjectSummary => ({
+        ...projectJson(row.project, row.role, row.defaultBranchId ?? undefined),
+        task_key_prefix: row.project.taskKeyPrefix,
+        default_branch_name: row.defaultBranchName,
+        member_count: Number(row.memberCount ?? 0),
+        open_task_count: Number(row.openTaskCount ?? 0),
+        last_activity_at: row.lastActivityAt?.toISOString() ?? null,
+        repository: row.repository
+          ? {
+              provider: row.repository.provider,
+              full_name: row.repository.fullName,
+              status: row.repository.status
+            }
+          : null
+      }))
     };
   }
 

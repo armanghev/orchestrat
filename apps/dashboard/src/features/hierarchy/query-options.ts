@@ -16,6 +16,13 @@ export const hierarchyKeys = {
     ] as const,
   members: (organizationId: string) =>
     [...hierarchyKeys.all, "organizations", organizationId, "members"] as const,
+  projectSummaries: (organizationId: string) =>
+    [
+      ...hierarchyKeys.all,
+      "organizations",
+      organizationId,
+      "project-summaries"
+    ] as const,
   catalog: () => [...hierarchyKeys.all, "catalog"] as const
 };
 
@@ -50,6 +57,17 @@ export function projectCatalogQueryOptions(api: ApiClient) {
   return queryOptions({
     queryKey: hierarchyKeys.catalog(),
     queryFn: ({ client }) => loadProjectCatalog(client, api),
+    staleTime: hierarchyStaleTime
+  });
+}
+
+export function projectSummariesQueryOptions(
+  api: ApiClient,
+  organizationId: string
+) {
+  return queryOptions({
+    queryKey: hierarchyKeys.projectSummaries(organizationId),
+    queryFn: () => api.listProjectSummaries(organizationId),
     staleTime: hierarchyStaleTime
   });
 }
