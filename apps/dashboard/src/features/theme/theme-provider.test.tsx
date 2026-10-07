@@ -36,7 +36,8 @@ function renderTheme(initial: "system" | "light" | "dark" = "system") {
             railMode: "projects",
             pinnedProjectIds: [],
             recentProjectIds: [],
-            contextSidebarCollapsed: false
+            contextSidebarCollapsed: false,
+            organizationProjectsViews: {}
           }}
         >
           <ThemeProvider>
