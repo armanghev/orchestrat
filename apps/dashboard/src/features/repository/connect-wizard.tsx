@@ -1,3 +1,4 @@
+import { hierarchyKeys } from "@/features/hierarchy/query-options";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -109,6 +110,10 @@ export function ConnectWizard({
         }),
         queryClient.invalidateQueries({
           queryKey: branchKeys.project(projectId)
+        }),
+        queryClient.invalidateQueries({
+          queryKey: hierarchyKeys.all,
+          refetchType: "none"
         })
       ]);
       onClose();

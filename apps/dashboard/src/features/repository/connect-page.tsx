@@ -1,3 +1,4 @@
+import { hierarchyKeys } from "@/features/hierarchy/query-options";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
@@ -250,6 +251,10 @@ export function ConnectPage({
           }),
           queryClient.invalidateQueries({
             queryKey: branchKeys.project(projectId)
+          }),
+          queryClient.invalidateQueries({
+            queryKey: hierarchyKeys.all,
+            refetchType: "none"
           })
         ]);
         goOverview();

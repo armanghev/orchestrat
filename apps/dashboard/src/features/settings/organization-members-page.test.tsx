@@ -81,6 +81,10 @@ describe("OrganizationMembersPage", () => {
     expect(
       screen.queryByRole("button", { name: "Remove Alice" })
     ).not.toBeInTheDocument();
+    // Your own row is read-only; you change your access by leaving.
+    expect(
+      screen.queryByRole("combobox", { name: "Role for alice@example.com" })
+    ).not.toBeInTheDocument();
     // Admins can't promote anyone to owner.
     expect(
       within(

@@ -1,3 +1,4 @@
+import { hierarchyKeys } from "@/features/hierarchy/query-options";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
@@ -149,7 +150,13 @@ export function RepositorySettingsSection({
       queryClient.invalidateQueries({
         queryKey: repositoryKeys.project(projectId)
       }),
-      queryClient.invalidateQueries({ queryKey: branchKeys.project(projectId) })
+      queryClient.invalidateQueries({
+        queryKey: branchKeys.project(projectId)
+      }),
+      queryClient.invalidateQueries({
+        queryKey: hierarchyKeys.all,
+        refetchType: "none"
+      })
     ]);
   const start = useMutation({
     mutationFn: (provider: RepositoryProvider) =>

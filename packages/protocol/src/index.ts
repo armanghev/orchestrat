@@ -1437,7 +1437,8 @@ export type ProjectSummariesResponse = z.infer<
   typeof projectSummariesResponseSchema
 >;
 
-export const slugifyName = (value: string) =>
+/** The slug a name maps to, or "" when it has no letters or digits. */
+export const slugBase = (value: string) =>
   value
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -1445,4 +1446,14 @@ export const slugifyName = (value: string) =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "")
     .slice(0, 63)
-    .replace(/-$/g, "") || `item-${crypto.randomUUID().slice(0, 8)}`;
+    .replace(/-$/g, "");
+
+/** A short random suffix; `crypto.randomUUID` is missing outside secure
+ * contexts (a dashboard served over plain http). */
+export const slugSuffix = () =>
+  (globalThis.crypto?.randomUUID?.() ?? Math.random().toString(16).slice(2))
+    .replace(/-/g, "")
+    .slice(0, 8);
+
+export const slugifyName = (value: string) =>
+  slugBase(value) || `item-${slugSuffix()}`;

@@ -39,4 +39,9 @@ test("organization creation reports slug conflicts without creating partial memb
     (await create("alice", { name: "Invalid", slug: "Bad Slug" })).statusCode,
     400
   );
+  // A derived slug that's taken gets a suffix instead of failing, since
+  // CLI, SDK and MCP callers never send a slug.
+  const again = await create("bob", { name: "Café & Déjà Vu!" });
+  assert.equal(again.statusCode, 201, again.body);
+  assert.match(again.json().slug, /^cafe-deja-vu-[a-z0-9]{8}$/);
 });

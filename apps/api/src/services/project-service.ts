@@ -11,7 +11,7 @@ import {
   users,
   type Database
 } from "@orchestrat/db";
-import { slugifyName as slugify } from "@orchestrat/protocol";
+import { slugifyName as slugify, slugSuffix } from "@orchestrat/protocol";
 import type {
   CreateOrganizationRequest,
   CreateProjectRequest,
@@ -123,21 +123,40 @@ export class ProjectService {
   async createOrganization(userId: string, input: CreateOrganizationRequest) {
     return this.db.transaction(async (tx) => {
       const id = randomUUID();
-      const [organization] = await tx
-        .insert(organizations)
-        .values({
-          id,
-          name: input.name,
-          slug: input.slug ?? slugify(input.name)
-        })
-        .onConflictDoNothing({ target: organizations.slug })
-        .returning();
-      if (organization?.id !== id)
+      const base = input.slug ?? slugify(input.name);
+      let organization: typeof organizations.$inferSelect | undefined;
+      // A chosen slug that's taken is the caller's to fix; a derived one
+      // (CLI, SDK and MCP send none) gets a short suffix instead.
+      const attempts = input.slug === undefined ? 4 : 1;
+      for (
+        let attempt = 0;
+        attempt < attempts && organization?.id !== id;
+        attempt++
+      )
+        [organization] = await tx
+          .insert(organizations)
+          .values({
+            id,
+            name: input.name,
+            slug:
+              attempt === 0
+                ? base
+                : `${base.slice(0, 54).replace(/-$/, "")}-${slugSuffix()}`
+          })
+          .onConflictDoNothing({ target: organizations.slug })
+          .returning();
+      if (input.slug !== undefined && organization?.id !== id)
         throw new ApiError(
           409,
           "ORGANIZATION_SLUG_TAKEN",
           "This organization slug is already taken.",
           { field: "slug" }
+        );
+      if (!organization || organization.id !== id)
+        throw new ApiError(
+          409,
+          "CONFLICT",
+          "Couldn't find a free organization slug. Try again."
         );
       await tx.insert(organizationMembers).values({
         organizationId: organization.id,
@@ -472,6 +491,11 @@ export class ProjectService {
 
   async listProjectSummaries(userId: string, organizationId: string) {
     await this.permissions.organization(userId, organizationId);
+    // Aggregate only the caller's projects; the rest would be discarded.
+    const visible = this.db
+      .select({ id: projectMembers.projectId })
+      .from(projectMembers)
+      .where(eq(projectMembers.userId, userId));
     const members = this.db
       .select({
         projectId: projectMembers.projectId,
@@ -479,7 +503,12 @@ export class ProjectService {
       })
       .from(projectMembers)
       .innerJoin(projects, eq(projects.id, projectMembers.projectId))
-      .where(eq(projects.organizationId, organizationId))
+      .where(
+        and(
+          eq(projects.organizationId, organizationId),
+          inArray(projectMembers.projectId, visible)
+        )
+      )
       .groupBy(projectMembers.projectId)
       .as("members");
     const openTasks = this.db
@@ -499,6 +528,7 @@ export class ProjectService {
       .where(
         and(
           eq(projects.organizationId, organizationId),
+          inArray(tasks.projectId, visible),
           notInArray(tasks.status, ["done", "cancelled"])
         )
       )
@@ -513,7 +543,12 @@ export class ProjectService {
       })
       .from(projectEvents)
       .innerJoin(projects, eq(projects.id, projectEvents.projectId))
-      .where(eq(projects.organizationId, organizationId))
+      .where(
+        and(
+          eq(projects.organizationId, organizationId),
+          inArray(projectEvents.projectId, visible)
+        )
+      )
       .groupBy(projectEvents.projectId)
       .as("activity");
     const rows = await this.db

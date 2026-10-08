@@ -33,7 +33,9 @@ function OrganizationSettingsRoute() {
     );
 
   const leaveOrganization = async () => {
-    await queryClient.invalidateQueries({ queryKey: hierarchyKeys.all });
+    // Drop the cache rather than refetch it: this organization's queries
+    // would now fail, and /setup must decide from a fresh catalog.
+    queryClient.removeQueries({ queryKey: hierarchyKeys.all });
     await navigate({ to: "/setup" });
   };
 

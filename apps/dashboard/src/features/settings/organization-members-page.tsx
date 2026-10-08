@@ -21,7 +21,10 @@ import {
   TableRow
 } from "@/components/ui/table";
 import type { ApiClient } from "@/lib/api/client";
-import { organizationMembersQueryOptions } from "@/features/hierarchy/query-options";
+import {
+  hierarchyKeys,
+  organizationMembersQueryOptions
+} from "@/features/hierarchy/query-options";
 
 const errorMessage = (error: unknown) =>
   error instanceof Error ? error.message : "Request failed.";
@@ -63,10 +66,9 @@ export function OrganizationMembersPage({
     organizationMembersQueryOptions(api, organization.id)
   );
   const [error, setError] = useState<string | null>(null);
+  // Roles and member counts also show in the catalog and the org home.
   const refresh = () =>
-    queryClient.invalidateQueries({
-      queryKey: organizationMembersQueryOptions(api, organization.id).queryKey
-    });
+    queryClient.invalidateQueries({ queryKey: hierarchyKeys.all });
   const changeRole = useMutation({
     mutationFn: ({
       member,
@@ -152,8 +154,10 @@ export function OrganizationMembersPage({
           </TableHeader>
           <TableBody>
             {members.map((member) => {
-              const manageable = canManageMember(organization.role, member);
               const self = member.user_id === currentUserId;
+              // Your own access changes through Leave, not the role select.
+              const manageable =
+                !self && canManageMember(organization.role, member);
               const label = memberName(member);
               return (
                 <TableRow key={member.user_id}>
@@ -218,7 +222,7 @@ export function OrganizationMembersPage({
                     {new Date(member.created_at).toLocaleDateString()}
                   </TableCell>
                   <TableCell className="text-right">
-                    {manageable && !self ? (
+                    {manageable ? (
                       <Button
                         variant="ghost"
                         size="sm"

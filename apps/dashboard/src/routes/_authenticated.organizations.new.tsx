@@ -5,7 +5,7 @@ import { ArrowLeft } from "lucide-react";
 import { z } from "zod";
 import {
   createOrganizationRequestSchema,
-  slugifyName,
+  slugBase,
   type CreateOrganizationRequest
 } from "@orchestrat/protocol";
 import { WindowDragRegion } from "@/components/app-shell/top-toolbar";
@@ -185,8 +185,7 @@ function NewOrganization() {
                   onChange={(event) => {
                     const value = event.target.value;
                     setName(value);
-                    if (!slugEdited)
-                      setSlug(value.trim() ? slugifyName(value) : "");
+                    if (!slugEdited) setSlug(slugBase(value));
                     setErrors((current) => ({
                       ...current,
                       name: undefined,
