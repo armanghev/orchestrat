@@ -1,4 +1,10 @@
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  screen,
+  waitFor,
+  within
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { forwardRef, useImperativeHandle, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -734,6 +740,159 @@ describe("dashboard routes", () => {
       expect(screen.getByDisplayValue("Second")).toBeVisible()
     );
     expect(screen.queryByDisplayValue("First draft")).not.toBeInTheDocument();
+  });
+
+  it("changes task status before the API answers and reverts it with a toast on error", async () => {
+    const expectedProject = project();
+    const current = taskCard({ project_id: expectedProject.id });
+    let release: (() => void) | undefined;
+    const moveAnswered = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let moveBody: unknown;
+    const taskHandlers = [
+      http.get(
+        `http://localhost:8801/api/v1/projects/${expectedProject.id}/tasks`,
+        () =>
+          HttpResponse.json({ tasks: [current], total: 1, next_cursor: null })
+      ),
+      http.get(`http://localhost:8801/api/v1/tasks/${current.id}`, () =>
+        HttpResponse.json(current)
+      ),
+      http.get(`http://localhost:8801/api/v1/tasks/:taskId/comments`, () =>
+        HttpResponse.json({ comments: [], next_cursor: null })
+      ),
+      http.get(`http://localhost:8801/api/v1/tasks/:taskId/dependencies`, () =>
+        HttpResponse.json({ depends_on: [], blocks: [] })
+      ),
+      http.post(
+        `http://localhost:8801/api/v1/tasks/${current.id}/move`,
+        async ({ request }) => {
+          moveBody = await request.json();
+          await moveAnswered;
+          return HttpResponse.json(
+            {
+              error: {
+                code: "TASK_NOT_MOVABLE",
+                message: "That status change isn’t allowed.",
+                request_id: "req_move"
+              }
+            },
+            { status: 422 }
+          );
+        }
+      ),
+      ...handlers
+    ];
+    await renderDashboardRoute({
+      path: `/projects/${expectedProject.id}/tasks?task=${current.id}`,
+      auth: new FakeAuthClient({
+        status: "signedIn",
+        identityKey: "test-user"
+      }),
+      platform: platform(),
+      handlers: taskHandlers
+    });
+    const user = userEvent.setup();
+    const select = await screen.findByRole("combobox", {
+      name: "Move task status"
+    });
+    expect(select).toHaveValue("ready");
+    await user.selectOptions(select, "done");
+    await waitFor(() => expect(moveBody).toBeDefined());
+    // The API hasn't answered yet, but the selector already shows the move.
+    expect(select).toHaveValue("done");
+    expect(select).toBeEnabled();
+    expect(moveBody).toEqual({ status: "done", expected_version: 1 });
+    release?.();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("combobox", { name: "Move task status" })
+      ).toHaveValue("ready")
+    );
+    expect(
+      await screen.findByText(/^Couldn’t change the status:/)
+    ).toBeInTheDocument();
+  });
+
+  it("moves a task by dragging its card to another board column", async () => {
+    const expectedProject = project();
+    let current = taskCard({ project_id: expectedProject.id });
+    const claimed = taskCard({
+      id: "00000000-0000-4000-8000-000000000007",
+      key: "DASH-2",
+      project_id: expectedProject.id,
+      title: "Claimed task",
+      status: "claimed"
+    });
+    let moveBody: unknown;
+    const taskHandlers = [
+      http.get(
+        `http://localhost:8801/api/v1/projects/${expectedProject.id}/tasks`,
+        () =>
+          HttpResponse.json({
+            tasks: [current, claimed],
+            total: 2,
+            next_cursor: null
+          })
+      ),
+      http.post(
+        `http://localhost:8801/api/v1/tasks/${current.id}/move`,
+        async ({ request }) => {
+          moveBody = await request.json();
+          current = { ...current, status: "in_progress", version: 2 };
+          return HttpResponse.json(current);
+        }
+      ),
+      ...handlers
+    ];
+    await renderDashboardRoute({
+      path: `/projects/${expectedProject.id}/tasks`,
+      auth: new FakeAuthClient({
+        status: "signedIn",
+        identityKey: "test-user"
+      }),
+      platform: platform(),
+      handlers: taskHandlers
+    });
+    const card = (
+      await screen.findByRole("button", { name: `${current.key} First task` })
+    ).closest("[draggable]")!;
+    expect(card).toHaveAttribute("draggable", "true");
+    expect(
+      screen
+        .getByRole("button", { name: `${claimed.key} Claimed task` })
+        .closest("[draggable]")
+    ).toHaveAttribute("draggable", "false");
+    const data = new Map<string, string>();
+    const dataTransfer = {
+      setData: (type: string, value: string) => data.set(type, value),
+      getData: (type: string) => data.get(type) ?? "",
+      dropEffect: "none",
+      effectAllowed: "all"
+    };
+    const target = screen.getByRole("region", { name: "in progress" });
+    fireEvent.dragStart(card, { dataTransfer });
+    fireEvent.dragOver(target, { dataTransfer });
+    expect(target).toHaveAttribute("data-drop-target");
+    fireEvent.drop(target, { dataTransfer });
+    fireEvent.dragEnd(card, { dataTransfer });
+    await waitFor(() =>
+      expect(moveBody).toEqual({ status: "in_progress", expected_version: 1 })
+    );
+    await waitFor(() =>
+      expect(
+        within(target).getByRole("button", {
+          name: `${current.key} First task`
+        })
+      ).toBeInTheDocument()
+    );
+    // The claimed column isn't a drop target: humans can't claim tasks.
+    const claimedColumn = screen.getByRole("region", { name: "claimed" });
+    fireEvent.dragStart(card, { dataTransfer });
+    fireEvent.dragOver(claimedColumn, { dataTransfer });
+    expect(claimedColumn).not.toHaveAttribute("data-drop-target");
+    fireEvent.dragEnd(card, { dataTransfer });
   });
 
   it("adds and removes a dependency with the current task version", async () => {

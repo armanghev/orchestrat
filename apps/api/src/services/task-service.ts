@@ -10,9 +10,13 @@ import {
   type Database
 } from "@orchestrat/db";
 import type {
+  AgentBulkCreateTasksRequest,
+  AgentBulkUpdateTasksRequest,
+  AgentUpdateTaskRequest,
   CreateTaskCommentRequest,
   CreateTaskDependencyRequest,
   CreateTaskRequest,
+  HumanTaskStatus,
   MoveTaskRequest,
   TaskListQuery,
   UpdateTaskRequest
@@ -21,6 +25,7 @@ import type { AgentPrincipal } from "./agent-service.js";
 import { idempotencyKeySchema } from "@orchestrat/protocol";
 import { and, asc, count, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import { ApiError } from "./api-error.js";
+import { assertCommentsAcknowledged } from "./attention-guard.js";
 import {
   assertEntityBranch,
   resolveBranch,
@@ -35,6 +40,7 @@ import {
 } from "./attention-hooks.js";
 import { PermissionService } from "./permission-service.js";
 import {
+  activeClaim,
   hasActiveClaim,
   onTaskMoved,
   resolveBlocksOnParticipantResponse
@@ -117,6 +123,16 @@ const actorValues = (actor: Actor) => ({
   userId: actor.type === "human" ? actor.id : null,
   agentId: actor.type === "agent" ? actor.id : null
 });
+const eventActor = (actor: Actor) => ({
+  actorUserId: actor.type === "human" ? actor.id : null,
+  actorAgentId: actor.type === "agent" ? actor.id : null
+});
+// task.updated lists the request's keys; status and acknowledgements are not
+// field edits (a move records its own task.moved).
+const updatedFieldNames = (input: object) =>
+  Object.keys(input).filter(
+    (key) => key !== "status" && key !== "acknowledged_through"
+  );
 const actorClause = (actor: Actor) =>
   actor.type === "human"
     ? and(
@@ -127,6 +143,35 @@ const actorClause = (actor: Actor) =>
         eq(apiIdempotencyKeys.agentId, actor.id),
         isNull(apiIdempotencyKeys.userId)
       )!;
+
+// Bulk operations re-raise an item's error with its index, so the caller can
+// tell which item rolled the batch back. The code stays the single-item one.
+const bulkItem = async <T>(
+  index: number,
+  identity: { task_id?: string; title?: string },
+  run: () => Promise<T>
+) => {
+  try {
+    return await run();
+  } catch (error) {
+    if (!(error instanceof ApiError)) throw error;
+    throw new ApiError(
+      error.statusCode,
+      error.code,
+      `tasks[${index}]: ${error.message}`,
+      { ...error.details, index, ...identity }
+    );
+  }
+};
+type TaskFields = Pick<UpdateTaskRequest, "title" | "description" | "priority">;
+type CheckedEdit = {
+  current: typeof tasks.$inferSelect;
+  move: HumanTaskStatus | undefined;
+};
+const editedFields = (input: TaskFields) =>
+  input.title !== undefined ||
+  input.description !== undefined ||
+  input.priority !== undefined;
 
 export class TaskService {
   private readonly permissions: PermissionService;
@@ -174,15 +219,26 @@ export class TaskService {
     return project;
   }
 
-  private async createAs(
+  // Runs a task-creating operation once per (actor, operation, branch, key).
+  // A replay with the same body returns the stored response; a different body
+  // conflicts. The reservation rolls back with the transaction on failure.
+  private async createIdempotent(
     actor: Actor,
     projectId: string,
-    input: CreateTaskRequest,
-    key?: string,
-    selector?: BranchSelector
+    operation: "create_task" | "create_tasks",
+    input: unknown,
+    key: string | undefined,
+    selector: BranchSelector | undefined,
+    run: (tx: Transaction, branchId: string) => Promise<unknown>
   ) {
     const idempotencyKey = idempotencyKeySchema.parse(key);
     const requestHash = hash(input);
+    const conflict = () =>
+      new ApiError(
+        409,
+        "IDEMPOTENCY_CONFLICT",
+        "The idempotency key was already used with a different request."
+      );
     return this.db.transaction(async (tx) => {
       await this.lockActiveProject(tx, projectId);
       const branch = await resolveBranch(tx, projectId, selector, {
@@ -191,25 +247,20 @@ export class TaskService {
       });
       // Keys are scoped to the branch. Before branches they were scoped to the
       // project, so a retry that spans the deploy still replays on the default.
-      if (branch.isDefault) {
+      if (branch.isDefault && operation === "create_task") {
         const [legacy] = await tx
           .select()
           .from(apiIdempotencyKeys)
           .where(
             and(
               actorClause(actor),
-              eq(apiIdempotencyKeys.operation, "create_task"),
+              eq(apiIdempotencyKeys.operation, operation),
               eq(apiIdempotencyKeys.resourceId, projectId),
               eq(apiIdempotencyKeys.idempotencyKey, idempotencyKey)
             )
           );
         if (legacy) {
-          if (legacy.requestHash !== requestHash)
-            throw new ApiError(
-              409,
-              "IDEMPOTENCY_CONFLICT",
-              "The idempotency key was already used with a different request."
-            );
+          if (legacy.requestHash !== requestHash) throw conflict();
           return { status: legacy.responseStatus, body: legacy.responseBody };
         }
       }
@@ -217,7 +268,7 @@ export class TaskService {
         .insert(apiIdempotencyKeys)
         .values({
           ...actorValues(actor),
-          operation: "create_task",
+          operation,
           resourceId: branch.id,
           idempotencyKey,
           requestHash,
@@ -233,79 +284,101 @@ export class TaskService {
           .where(
             and(
               actorClause(actor),
-              eq(apiIdempotencyKeys.operation, "create_task"),
+              eq(apiIdempotencyKeys.operation, operation),
               eq(apiIdempotencyKeys.resourceId, branch.id),
               eq(apiIdempotencyKeys.idempotencyKey, idempotencyKey)
             )
           );
-        if (!existing || existing.requestHash !== requestHash)
-          throw new ApiError(
-            409,
-            "IDEMPOTENCY_CONFLICT",
-            "The idempotency key was already used with a different request."
-          );
+        if (!existing || existing.requestHash !== requestHash) throw conflict();
         return { status: existing.responseStatus, body: existing.responseBody };
       }
-      const body = await (async () => {
-        const [counter] = await tx
-          .update(projects)
-          .set({
-            taskCounter: sql`${projects.taskCounter} + 1`,
-            updatedAt: new Date()
-          })
-          .where(and(eq(projects.id, projectId), eq(projects.status, "active")))
-          .returning({
-            next: projects.taskCounter,
-            prefix: projects.taskKeyPrefix
-          });
-        if (!counter)
-          throw new ApiError(404, "NOT_FOUND", "Project not found.");
-        const number = counter.next - 1;
-        const [position] = await tx
-          .select({ value: count() })
-          .from(tasks)
-          .where(
-            and(
-              eq(tasks.branchId, branch.id),
-              eq(tasks.status, input.status ?? "backlog")
-            )
-          );
-        const [task] = await tx
-          .insert(tasks)
-          .values({
-            id: randomUUID(),
-            projectId,
-            branchId: branch.id,
-            taskKey: `${counter.prefix}-${number}`,
-            taskNumber: number,
-            title: input.title,
-            description: input.description ?? null,
-            priority: input.priority ?? "none",
-            status: input.status ?? "backlog",
-            position: Number(position?.value ?? 0),
-            createdByType: actor.type,
-            createdByUserId: actor.type === "human" ? actor.id : null,
-            createdByAgentId: actor.type === "agent" ? actor.id : null
-          })
-          .returning();
-        await insertProjectEvent(tx, {
-          projectId,
-          actorUserId: actor.type === "human" ? actor.id : null,
-          actorAgentId: actor.type === "agent" ? actor.id : null,
-          entityId: task.id,
-          branchId: branch.id,
-          type: "task.created",
-          payload: { status: task.status }
-        });
-        await onTaskCreated(tx, { projectId, taskId: task.id, actor });
-        return taskJson(task);
-      })();
+      const body = await run(tx, branch.id);
       await tx
         .update(apiIdempotencyKeys)
         .set({ responseStatus: 201, responseBody: body })
         .where(eq(apiIdempotencyKeys.id, reserved.id));
       return { status: 201, body };
     });
+  }
+
+  // Allocates the next task key, so callers creating several tasks in one
+  // transaction get keys in call order.
+  private async insertTask(
+    tx: Transaction,
+    actor: Actor,
+    projectId: string,
+    branchId: string,
+    input: CreateTaskRequest
+  ) {
+    const [counter] = await tx
+      .update(projects)
+      .set({
+        taskCounter: sql`${projects.taskCounter} + 1`,
+        updatedAt: new Date()
+      })
+      .where(and(eq(projects.id, projectId), eq(projects.status, "active")))
+      .returning({
+        next: projects.taskCounter,
+        prefix: projects.taskKeyPrefix
+      });
+    if (!counter) throw new ApiError(404, "NOT_FOUND", "Project not found.");
+    const number = counter.next - 1;
+    const [position] = await tx
+      .select({ value: count() })
+      .from(tasks)
+      .where(
+        and(
+          eq(tasks.branchId, branchId),
+          eq(tasks.status, input.status ?? "backlog")
+        )
+      );
+    const [task] = await tx
+      .insert(tasks)
+      .values({
+        id: randomUUID(),
+        projectId,
+        branchId,
+        taskKey: `${counter.prefix}-${number}`,
+        taskNumber: number,
+        title: input.title,
+        description: input.description ?? null,
+        priority: input.priority ?? "none",
+        status: input.status ?? "backlog",
+        position: Number(position?.value ?? 0),
+        createdByType: actor.type,
+        createdByUserId: actor.type === "human" ? actor.id : null,
+        createdByAgentId: actor.type === "agent" ? actor.id : null
+      })
+      .returning();
+    await insertProjectEvent(tx, {
+      projectId,
+      actorUserId: actor.type === "human" ? actor.id : null,
+      actorAgentId: actor.type === "agent" ? actor.id : null,
+      entityId: task.id,
+      branchId,
+      type: "task.created",
+      payload: { status: task.status }
+    });
+    await onTaskCreated(tx, { projectId, taskId: task.id, actor });
+    return taskJson(task);
+  }
+
+  private async createAs(
+    actor: Actor,
+    projectId: string,
+    input: CreateTaskRequest,
+    key?: string,
+    selector?: BranchSelector
+  ) {
+    return this.createIdempotent(
+      actor,
+      projectId,
+      "create_task",
+      input,
+      key,
+      selector,
+      (tx, branchId) => this.insertTask(tx, actor, projectId, branchId, input)
+    );
   }
 
   async create(
@@ -336,6 +409,34 @@ export class TaskService {
       input,
       key,
       principal.branch
+    );
+  }
+
+  // All-or-nothing: one transaction, keys allocated in input order, and one
+  // idempotency record for the whole batch.
+  async createManyForAgent(
+    principal: AgentPrincipal,
+    input: AgentBulkCreateTasksRequest,
+    key?: string
+  ) {
+    const actor: Actor = { type: "agent", id: principal.agentId };
+    return this.createIdempotent(
+      actor,
+      principal.projectId,
+      "create_tasks",
+      input,
+      key,
+      principal.branch,
+      async (tx, branchId) => {
+        const created = [];
+        for (const [index, item] of input.tasks.entries())
+          created.push(
+            await bulkItem(index, { title: item.title }, () =>
+              this.insertTask(tx, actor, principal.projectId, branchId, item)
+            )
+          );
+        return { tasks: created };
+      }
     );
   }
 
@@ -463,89 +564,232 @@ export class TaskService {
     return this.getProject(principal.projectId, id);
   }
 
-  private async updateAs(
+  // Edits fields and, for agents, moves an unclaimed task, as one version
+  // bump. The caller holds the project lock inside `tx`.
+  private async editLocked(
+    tx: Transaction,
     actor: Actor,
     projectId: string,
     id: string,
-    input: UpdateTaskRequest,
+    input: UpdateTaskRequest | AgentUpdateTaskRequest,
     selector?: BranchSelector
   ) {
-    return this.db.transaction(async (tx) => {
-      await this.lockActiveProject(tx, projectId);
-      const [current] = await tx
-        .select()
-        .from(tasks)
-        .where(and(eq(tasks.id, id), eq(tasks.projectId, projectId)))
-        .for("update");
-      if (!current) throw new ApiError(404, "NOT_FOUND", "Task not found.");
-      await assertEntityBranch(tx, projectId, current.branchId, selector, {
-        actor: actor.type,
-        write: true,
-        agentId: agentIdOf(actor),
-        notFound: "Task not found."
-      });
-      if (current.version !== input.expected_version)
-        throw new ApiError(
-          409,
-          "TASK_VERSION_CONFLICT",
-          "Task version is stale.",
-          { current_version: current.version }
-        );
-      const [task] = await tx
-        .update(tasks)
-        .set({
-          title: input.title ?? current.title,
-          description:
-            input.description === undefined
-              ? current.description
-              : input.description,
-          priority: input.priority ?? current.priority,
-          version: current.version + 1,
-          updatedAt: new Date()
-        })
-        .where(and(eq(tasks.id, id), eq(tasks.version, input.expected_version)))
-        .returning();
-      if (!task)
-        throw new ApiError(
-          409,
-          "TASK_VERSION_CONFLICT",
-          "Task version is stale."
-        );
-      await insertProjectEvent(tx, {
-        projectId,
-        actorUserId: actor.type === "human" ? actor.id : null,
-        actorAgentId: actor.type === "agent" ? actor.id : null,
-        entityId: task.id,
-        branchId: task.branchId,
-        type: "task.updated",
-        payload: { fields: Object.keys(input) }
-      });
-      return taskJson(task);
+    const checked = await this.checkEdit(
+      tx,
+      actor,
+      projectId,
+      id,
+      input,
+      selector
+    );
+    return this.applyEdit(tx, actor, checked, input);
+  }
+
+  // Every check an edit can fail, before it writes. Bulk updates check all
+  // items first, so a failing item never follows a half-applied batch.
+  private async checkEdit(
+    tx: Transaction,
+    actor: Actor,
+    projectId: string,
+    id: string,
+    input: UpdateTaskRequest | AgentUpdateTaskRequest,
+    selector?: BranchSelector
+  ): Promise<CheckedEdit> {
+    const [current] = await tx
+      .select()
+      .from(tasks)
+      .where(and(eq(tasks.id, id), eq(tasks.projectId, projectId)))
+      .for("update");
+    if (!current) throw new ApiError(404, "NOT_FOUND", "Task not found.");
+    await assertEntityBranch(tx, projectId, current.branchId, selector, {
+      actor: actor.type,
+      write: true,
+      agentId: agentIdOf(actor),
+      notFound: "Task not found."
     });
+    if (current.version !== input.expected_version)
+      throw new ApiError(
+        409,
+        "TASK_VERSION_CONFLICT",
+        "Task version is stale.",
+        { current_version: current.version }
+      );
+    const status = "status" in input ? input.status : undefined;
+    const move =
+      status !== undefined && status !== current.status ? status : undefined;
+    if (move)
+      await this.assertAgentMayMove(tx, actor, projectId, current, {
+        status: move,
+        acknowledged_through:
+          "acknowledged_through" in input
+            ? input.acknowledged_through
+            : undefined
+      });
+    return { current, move };
+  }
+
+  private async applyEdit(
+    tx: Transaction,
+    actor: Actor,
+    { current, move }: CheckedEdit,
+    input: UpdateTaskRequest | AgentUpdateTaskRequest
+  ) {
+    if (editedFields(input))
+      await insertProjectEvent(tx, {
+        projectId: current.projectId,
+        ...eventActor(actor),
+        entityId: current.id,
+        branchId: current.branchId,
+        type: "task.updated",
+        payload: { fields: updatedFieldNames(input) }
+      });
+    if (move)
+      return taskJson(
+        await this.moveLocked(tx, actor, current, { status: move }, input)
+      );
+    // Moving to the current column is not a move; nothing else changed.
+    if (!editedFields(input)) return taskJson(current);
+    const [task] = await tx
+      .update(tasks)
+      .set({
+        title: input.title ?? current.title,
+        description:
+          input.description === undefined
+            ? current.description
+            : input.description,
+        priority: input.priority ?? current.priority,
+        version: current.version + 1,
+        updatedAt: new Date()
+      })
+      .where(
+        and(eq(tasks.id, current.id), eq(tasks.version, input.expected_version))
+      )
+      .returning();
+    if (!task)
+      throw new ApiError(
+        409,
+        "TASK_VERSION_CONFLICT",
+        "Task version is stale."
+      );
+    return taskJson(task);
+  }
+
+  // Agent moves follow the human rules (any column, never a claimed task) plus
+  // two agent ones: the agent's own claim must use the claim tools, and review
+  // or done needs acknowledged comments, like complete_task.
+  private async assertAgentMayMove(
+    tx: Transaction,
+    actor: Actor,
+    projectId: string,
+    task: typeof tasks.$inferSelect,
+    input: { status: HumanTaskStatus; acknowledged_through?: number }
+  ) {
+    const claim = await activeClaim(tx, task.id);
+    if (claim && claim.agentId === actor.id)
+      throw new ApiError(
+        409,
+        "TASK_NOT_CLAIMABLE",
+        "This agent holds the claim on this task. Use set_task_status, complete_task or release_task to change its status.",
+        { reason: "own_claim", claim_id: claim.id, task_id: task.id }
+      );
+    if (claim || task.status === "claimed")
+      throw new ApiError(
+        409,
+        "TASK_NOT_CLAIMABLE",
+        "Claimed tasks can only be changed by their owning agent.",
+        {
+          reason: "claimed",
+          task_id: task.id,
+          ...(claim
+            ? {
+                claim_id: claim.id,
+                agent_id: claim.agentId,
+                session_id: claim.sessionId
+              }
+            : {})
+        }
+      );
+    if (
+      actor.type === "agent" &&
+      (input.status === "review" || input.status === "done")
+    )
+      await assertCommentsAcknowledged(tx, {
+        projectId,
+        taskId: task.id,
+        agentId: actor.id,
+        acknowledgedThrough: input.acknowledged_through
+      });
   }
 
   async update(userId: string, id: string, input: UpdateTaskRequest) {
     const authorized = await this.taskAccess(userId, id, true);
-    return this.updateAs(
-      { type: "human", id: userId },
-      authorized.projectId,
-      id,
-      input
-    );
+    return this.db.transaction(async (tx) => {
+      await this.lockActiveProject(tx, authorized.projectId);
+      return this.editLocked(
+        tx,
+        { type: "human", id: userId },
+        authorized.projectId,
+        id,
+        input
+      );
+    });
   }
 
   async updateForAgent(
     principal: AgentPrincipal,
     id: string,
-    input: UpdateTaskRequest
+    input: AgentUpdateTaskRequest
   ) {
-    return this.updateAs(
-      { type: "agent", id: principal.agentId },
-      principal.projectId,
-      id,
-      input,
-      principal.branch
-    );
+    // Settle lapsed leases first so an expired claim does not block the move.
+    if (input.status !== undefined)
+      await this.claims.reconcileExpired(principal.projectId, id);
+    return this.db.transaction(async (tx) => {
+      await this.lockActiveProject(tx, principal.projectId);
+      return this.editLocked(
+        tx,
+        { type: "agent", id: principal.agentId },
+        principal.projectId,
+        id,
+        input,
+        principal.branch
+      );
+    });
+  }
+
+  // All-or-nothing: every item is checked before any is written, and the
+  // transaction rolls back anything a later failure would leave behind.
+  async updateManyForAgent(
+    principal: AgentPrincipal,
+    input: AgentBulkUpdateTasksRequest
+  ) {
+    if (input.tasks.some((item) => item.status !== undefined))
+      await this.claims.reconcileExpired(principal.projectId);
+    const actor: Actor = { type: "agent", id: principal.agentId };
+    return this.db.transaction(async (tx) => {
+      await this.lockActiveProject(tx, principal.projectId);
+      const checked: CheckedEdit[] = [];
+      for (const [index, { task_id, ...item }] of input.tasks.entries())
+        checked.push(
+          await bulkItem(index, { task_id }, () =>
+            this.checkEdit(
+              tx,
+              actor,
+              principal.projectId,
+              task_id,
+              item,
+              principal.branch
+            )
+          )
+        );
+      const updated = [];
+      for (const [index, { task_id, ...item }] of input.tasks.entries())
+        updated.push(
+          await bulkItem(index, { task_id }, () =>
+            this.applyEdit(tx, actor, checked[index]!, item)
+          )
+        );
+      return { tasks: updated };
+    });
   }
 
   async move(userId: string, id: string, input: MoveTaskRequest) {
@@ -578,100 +822,121 @@ export class TaskService {
           "TASK_NOT_CLAIMABLE",
           "Claimed tasks can only be changed by their owning agent."
         );
-      const statuses = [locked.status, input.status].sort();
-      const lockedColumns = await tx
-        .select()
-        .from(tasks)
-        .where(
-          and(
-            eq(tasks.branchId, locked.branchId),
-            inArray(tasks.status, statuses)
-          )
-        )
-        .orderBy(asc(tasks.status), asc(tasks.position), asc(tasks.id))
-        .for("update");
-      const source = lockedColumns.filter(
-        (task) => task.status === locked.status
+      return taskJson(
+        await this.moveLocked(tx, { type: "human", id: userId }, locked, input)
       );
-      const target =
-        locked.status === input.status
-          ? source
-          : lockedColumns.filter((task) => task.status === input.status);
-      const next = source.filter((task) => task.id !== id);
-      const destination =
-        locked.status === input.status
-          ? next
-          : target.filter((task) => task.id !== id);
-      let index = destination.length;
-      if (input.before_task_id) {
-        index = destination.findIndex(
-          (task) => task.id === input.before_task_id
-        );
-        if (index < 0)
-          throw new ApiError(
-            400,
-            "VALIDATION_ERROR",
-            "The anchor task is not in the target column."
-          );
-      }
-      destination.splice(index, 0, locked);
-      const now = new Date();
-      const timestamp = {
-        startedAt:
-          input.status === "in_progress"
-            ? locked.status === "in_progress"
-              ? locked.startedAt
-              : now
-            : null,
-        completedAt:
-          input.status === "done"
-            ? locked.status === "done"
-              ? locked.completedAt
-              : now
-            : null,
-        cancelledAt:
-          input.status === "cancelled"
-            ? locked.status === "cancelled"
-              ? locked.cancelledAt
-              : now
-            : null
-      };
-      for (const [position, task] of destination.entries())
-        await tx
-          .update(tasks)
-          .set({
-            position,
-            ...(task.id === id
-              ? {
-                  status: input.status,
-                  version: locked.version + 1,
-                  updatedAt: now,
-                  ...timestamp
-                }
-              : {})
-          })
-          .where(eq(tasks.id, task.id));
-      if (locked.status !== input.status)
-        for (const [position, task] of next.entries())
-          await tx.update(tasks).set({ position }).where(eq(tasks.id, task.id));
-      const [moved] = await tx.select().from(tasks).where(eq(tasks.id, id));
-      await insertProjectEvent(tx, {
-        projectId: locked.projectId,
-        actorUserId: userId,
-        entityId: moved.id,
-        branchId: moved.branchId,
-        type: "task.moved",
-        payload: { from_status: locked.status, to_status: input.status }
-      });
-      await onTaskMoved(tx, {
-        projectId: locked.projectId,
-        taskId: id,
-        fromStatus: locked.status,
-        toStatus: input.status,
-        userId
-      });
-      return taskJson(moved);
     });
+  }
+
+  // Reorders the source and target columns and moves the locked task, with
+  // any field edits, in one version bump. Callers have checked the version
+  // and that the task is not claimed.
+  private async moveLocked(
+    tx: Transaction,
+    actor: Actor,
+    locked: typeof tasks.$inferSelect,
+    input: Pick<MoveTaskRequest, "status" | "before_task_id">,
+    fields: TaskFields = {}
+  ) {
+    const id = locked.id;
+    const statuses = [locked.status, input.status].sort();
+    const lockedColumns = await tx
+      .select()
+      .from(tasks)
+      .where(
+        and(
+          eq(tasks.branchId, locked.branchId),
+          inArray(tasks.status, statuses)
+        )
+      )
+      .orderBy(asc(tasks.status), asc(tasks.position), asc(tasks.id))
+      .for("update");
+    const source = lockedColumns.filter(
+      (task) => task.status === locked.status
+    );
+    const target =
+      locked.status === input.status
+        ? source
+        : lockedColumns.filter((task) => task.status === input.status);
+    const next = source.filter((task) => task.id !== id);
+    const destination =
+      locked.status === input.status
+        ? next
+        : target.filter((task) => task.id !== id);
+    let index = destination.length;
+    if (input.before_task_id) {
+      index = destination.findIndex((task) => task.id === input.before_task_id);
+      if (index < 0)
+        throw new ApiError(
+          400,
+          "VALIDATION_ERROR",
+          "The anchor task is not in the target column."
+        );
+    }
+    destination.splice(index, 0, locked);
+    const now = new Date();
+    const timestamp = {
+      startedAt:
+        input.status === "in_progress"
+          ? locked.status === "in_progress"
+            ? locked.startedAt
+            : now
+          : null,
+      completedAt:
+        input.status === "done"
+          ? locked.status === "done"
+            ? locked.completedAt
+            : now
+          : null,
+      cancelledAt:
+        input.status === "cancelled"
+          ? locked.status === "cancelled"
+            ? locked.cancelledAt
+            : now
+          : null
+    };
+    for (const [position, task] of destination.entries())
+      await tx
+        .update(tasks)
+        .set({
+          position,
+          ...(task.id === id
+            ? {
+                status: input.status,
+                ...(fields.title === undefined ? {} : { title: fields.title }),
+                ...(fields.description === undefined
+                  ? {}
+                  : { description: fields.description }),
+                ...(fields.priority === undefined
+                  ? {}
+                  : { priority: fields.priority }),
+                version: locked.version + 1,
+                updatedAt: now,
+                ...timestamp
+              }
+            : {})
+        })
+        .where(eq(tasks.id, task.id));
+    if (locked.status !== input.status)
+      for (const [position, task] of next.entries())
+        await tx.update(tasks).set({ position }).where(eq(tasks.id, task.id));
+    const [moved] = await tx.select().from(tasks).where(eq(tasks.id, id));
+    await insertProjectEvent(tx, {
+      projectId: locked.projectId,
+      ...eventActor(actor),
+      entityId: moved.id,
+      branchId: moved.branchId,
+      type: "task.moved",
+      payload: { from_status: locked.status, to_status: input.status }
+    });
+    await onTaskMoved(tx, {
+      projectId: locked.projectId,
+      taskId: id,
+      fromStatus: locked.status,
+      toStatus: input.status,
+      actor
+    });
+    return moved;
   }
 
   private async commentsProject(

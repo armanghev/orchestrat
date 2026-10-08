@@ -82,7 +82,9 @@ Agent-only routes use the `/api/v1/agent` prefix:
 | `GET`   | `/api/v1/agent/tasks`                               | List tasks in the credential's project with filters and cursor pagination  |
 | `POST`  | `/api/v1/agent/tasks`                               | Create an agent-authored backlog or ready task idempotently                |
 | `GET`   | `/api/v1/agent/tasks/:id`                           | Get a task in the credential's project                                     |
-| `PATCH` | `/api/v1/agent/tasks/:id`                           | Edit task metadata with `expected_version`                                 |
+| `POST`  | `/api/v1/agent/tasks/bulk`                          | Create 1–50 tasks in one all-or-nothing, idempotent batch                  |
+| `PATCH` | `/api/v1/agent/tasks/bulk`                          | Edit or move 1–50 distinct tasks in one all-or-nothing batch               |
+| `PATCH` | `/api/v1/agent/tasks/:id`                           | Edit task metadata or move an unclaimed task with `expected_version`       |
 | `GET`   | `/api/v1/agent/tasks/:id/comments`                  | Read human and agent comments                                              |
 | `POST`  | `/api/v1/agent/tasks/:id/comments`                  | Add an agent-authored Markdown comment idempotently                        |
 | `POST`  | `/api/v1/agent/tasks/:id/claim`                     | Claim a ready task with a session and lease duration                       |
@@ -174,10 +176,26 @@ Dependency changes also require the task's current `expected_version`.
 Comments are immutable; there are no comment edit or delete endpoints.
 
 Agent task creation and comments use the same idempotency contract, scoped to
-the authenticated agent principal. Agent metadata updates accept only title,
-description, priority, and `expected_version`; claim ownership and task status
-change only through claim, release, and complete operations. `GET
-/api/v1/agent/presence` backs the MCP `list_agents` tool.
+the authenticated agent principal. Agent updates accept `title`, `description`,
+`priority`, a human-selectable `status`, optional `acknowledged_through`, and
+required `expected_version`; fields and a status change apply as one version
+bump. A status change follows the human move rules (appended to the target
+column, recorded as `task.moved` with the agent as actor) and is refused with
+`409 TASK_NOT_CLAIMABLE` while the task has an active claim:
+`details.reason` is `own_claim` when the caller holds it (use set-status,
+release or complete instead) and `claimed` otherwise. Moving to `review` or
+`done` applies the completion guard: unacknowledged comments by others return
+`409 TASK_COMMENTS_UNREAD`, and `acknowledged_through` clears it.
+
+`POST /api/v1/agent/tasks/bulk` takes `{ "tasks": [...] }` with 1–50 agent
+create bodies and an `Idempotency-Key` for the whole batch; it returns `201`
+with `{ "tasks": [...] }` in input order, keys allocated in that order.
+`PATCH /api/v1/agent/tasks/bulk` takes `{ "tasks": [...] }` with 1–50 update
+bodies that each add `task_id` (no duplicates) and returns `{ "tasks": [...] }`
+in input order. Both run in one transaction: any failure applies nothing and
+returns the single-item error code with `details.index` and the item's
+`task_id` (update) or `title` (create). Each task emits the same events as the
+single route. `GET /api/v1/agent/presence` backs the MCP `list_agents` tool.
 
 Archived projects remain readable, including task lists, task details,
 comments, and dependencies. All task writes are rejected with

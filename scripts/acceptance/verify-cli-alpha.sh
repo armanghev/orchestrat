@@ -17,8 +17,9 @@ version=$("$cli" --version)
 bundle=$(node -e 'const fs=require("node:fs"); process.stdout.write(fs.realpathSync(process.argv[1]))' "$cli")
 for tool in \
   list_projects select_project get_project list_tasks get_task create_task \
-  update_task claim_task release_task complete_task list_task_comments \
-  add_task_comment list_agents get_recent_activity heartbeat list_documents \
+  update_task create_tasks update_tasks claim_task release_task complete_task \
+  list_task_comments add_task_comment list_agents get_recent_activity \
+  heartbeat list_documents \
   read_document create_document update_document edit_document \
   list_document_revisions read_document_revision \
   list_message_candidates list_chats create_chat manage_chat_members \
@@ -139,7 +140,7 @@ try {
     "create_chat", "manage_chat_members", "send_message", "check_messages",
     "acknowledge_messages", "get_attention", "acknowledge_attention",
     "watch_task", "wait_for_update", "set_task_status", "handoff",
-    "list_branches", "select_branch"
+    "list_branches", "select_branch", "create_tasks", "update_tasks"
   ].sort();
   assert.deepEqual(names, expected);
   const unselected = await request("tools/call", {
