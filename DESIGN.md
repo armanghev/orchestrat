@@ -346,13 +346,15 @@ Animate the sidebar width, toolbar padding, separator width, margin, and opacity
 
 ### Sidebar
 
-The sidebar is project navigation, not a second settings panel.
+The sidebar is navigation for the context on screen, not a second settings panel. Project pages and organization pages share the same sidebar chrome (`ShellSidebar`) and differ only in their groups.
 
-Navigation is grouped as:
+Project pages group navigation as:
 
 - **Workspace:** Overview, Tasks, Agents, Messages
 - **Knowledge:** Documents, Activity
 - **Administration:** Decisions, Settings
+
+Organization pages (`/organizations/$organizationId/*`) show one **Organization** group: Projects, Members, Settings. New project, which lives under the organization, highlights no item.
 
 Each destination uses a Lucide icon and a text label. The selected destination uses the neutral sidebar accent surface with orange text. Hover states remain subtle.
 
@@ -373,14 +375,15 @@ On mobile, the sidebar becomes a 288 px sheet and closes after navigation.
 The left side of the toolbar shows context as:
 
 ```text
-Organization  ›  Project  ›  Branch  ›  Page
+Organization  ›  Project  ›  Branch  ›  Page      (project pages)
+Organization  ›  Page                             (organization pages)
 ```
 
 Organization, project and branch names are full-width content controls, not fixed-width truncation slots. They may truncate only when the window genuinely lacks space.
 
-Clicking the organization name opens an organization switcher with:
+Clicking the organization name opens that organization's home (its project grid). The chevron beside it, labeled "Switch organization", opens the switcher with:
 
-- available organizations;
+- available organizations, each opening its home;
 - New organization;
 - Organization settings.
 
@@ -585,6 +588,26 @@ An archived branch keeps every page readable.
 - Archived rows in Branch settings have no row actions.
 - **All branches…** lists archived branches in their own group, in muted text with an "Archived" label. Search's **Branches** group offers active branches only.
 
+### Organization home
+
+`/organizations/$organizationId` is the organization's project grid. It answers "what is going on in this organization" without opening a project.
+
+- **New project** is the toolbar action. There is no page heading below the toolbar.
+- Search, sort (recent activity or name) and a filter (active or archived) sit above the grid. The sort and filter are remembered per organization in preferences.
+- Each card is one link to the project's overview. It shows the project name with its task key in mono, a one-line description, the repository (provider and full name, default branch) or a quiet **No repository** link to project settings, member and open-task counts, relative last activity, and your role. Archived projects are dimmed, never hidden behind a badge.
+- The empty state offers one action, **Create project**.
+
+Members (`/members`) is a plain table: name and email, role select, joined date, Remove. Owners manage everyone; admins manage everyone but owners and cannot grant Owner. **Leave organization** sits below the table with one sentence on what leaving removes.
+
+### Creation pages
+
+Creation is a full page, not a dialog, because it can leave the app for a Git provider.
+
+- **New organization** (`/organizations/new`) is a narrow centered form with no sidebar: name, then a slug derived from the name until edited, shown with its fixed prefix. A taken slug is reported on the slug field. Success opens New project for that organization.
+- **New project** (`/organizations/$organizationId/projects/new`) has two columns on desktop and one on phones. Left: name, task key (derived like the API, editable, shown as `KEY-1`), description. Right, **Source**: one row per Git provider with **Create and connect** and, when the server lacks that provider, the server's reason in place of an enabled button. **Create empty project** is a quieter final row; it becomes the primary button only when no provider is set up.
+- Choosing a provider creates the project first, then sends the person to the provider with `/projects/$projectId/connect` as the return path. The connect page picks the repository and the default-branch mapping in full page, offers **Skip for now** throughout, and shows **Not connected** with Try again when the provider step fails. A project is never lost because the provider step failed.
+- On desktop the provider opens in the browser and the app moves to the project's repository settings.
+
 ### Settings
 
 Organization and project settings are reached from their toolbar selectors. Profile settings are reached from the sidebar profile menu. Keep settings forms narrow enough to read and separate dangerous operations from routine configuration.
@@ -694,8 +717,12 @@ Before considering a dashboard UI change complete, verify:
 The main implementation references are:
 
 - `apps/dashboard/src/globals.css` — semantic tokens, page layout, Markdown typography, editor theming, reduced motion.
-- `apps/dashboard/src/components/app-shell/app-shell.tsx` — shared shell, sidebar state, route actions, command search.
-- `apps/dashboard/src/components/app-shell/context-sidebar.tsx` — navigation groups, search, profile menu.
+- `apps/dashboard/src/components/app-shell/app-shell.tsx` — shared shell frame, project and organization shells, sidebar state, route actions, command search.
+- `apps/dashboard/src/components/app-shell/context-sidebar.tsx` — sidebar chrome, project and organization navigation groups, search, profile menu.
+- `apps/dashboard/src/features/hierarchy/landing.ts` — where a signed-in person lands (`/setup` only redirects).
+- `apps/dashboard/src/features/hierarchy/organization-home-page.tsx` — organization project grid.
+- `apps/dashboard/src/features/hierarchy/create-project-page.tsx` and `routes/_authenticated.organizations.new.tsx` — creation pages.
+- `apps/dashboard/src/features/repository/connect-page.tsx` — full-page repository connect.
 - `apps/dashboard/src/components/app-shell/top-toolbar.tsx` — hierarchy selectors, route actions, search, appearance, desktop drag behavior.
 - `apps/dashboard/src/components/ui` — shadcn-based primitives and variants.
 - `apps/dashboard/src/features/overview/overview-page.tsx` — overview composition.
