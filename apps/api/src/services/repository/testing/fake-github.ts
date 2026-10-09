@@ -10,6 +10,7 @@ type Repository = {
   default_branch: string;
   branches: Map<string, string>;
   pulls: Record<string, unknown>[];
+  pushed_at?: string | null;
 };
 
 const PAGE = 2;
@@ -27,7 +28,12 @@ export class FakeGitHub {
   readonly users = new Map<string, { id: number; installations: number[] }>();
   readonly installations = new Map<
     number,
-    { suspended: boolean; repositories: number[] }
+    {
+      suspended: boolean;
+      repositories: number[];
+      account?: { id: number; login: string; type: string };
+      selection?: "all" | "selected";
+    }
   >();
   readonly repositories = new Map<number, Repository>();
   readonly codes = new Map<string, string>();
@@ -82,7 +88,12 @@ export class FakeGitHub {
       const user = this.users.get(token);
       if (!user) return reply(401);
       return reply(200, {
-        installations: user.installations.map((id) => ({ id }))
+        installations: user.installations.map((id) => ({
+          id,
+          account: this.installations.get(id)?.account ?? null,
+          repository_selection:
+            this.installations.get(id)?.selection ?? "selected"
+        }))
       });
     }
     let match = path.match(/^\/user\/installations\/(\d+)\/repositories$/);
@@ -106,6 +117,8 @@ export class FakeGitHub {
       if (!installation || token.split(".").length !== 3) return reply(404);
       return reply(200, {
         id: Number(match[1]),
+        account: installation.account ?? null,
+        repository_selection: installation.selection ?? "selected",
         suspended_at: installation.suspended ? "2026-09-01T00:00:00Z" : null
       });
     }
@@ -118,6 +131,28 @@ export class FakeGitHub {
       const minted = `ghs_${randomUUID()}`;
       this.installationTokens.set(minted, Number(match[1]));
       return reply(201, { token: minted, expires_at: "2026-10-01T01:00:00Z" });
+    }
+    if (path === "/installation/repositories") {
+      const installation = this.installationTokens.get(token);
+      if (installation === undefined) return reply(401);
+      const all = this.installations
+        .get(installation)!
+        .repositories.map((repo) => this.repositories.get(repo)!)
+        .map(({ id: repo, full_name, default_branch, pushed_at }) => ({
+          id: repo,
+          full_name,
+          default_branch,
+          pushed_at: pushed_at ?? null,
+          html_url: `https://github.com/${full_name}`
+        }));
+      const slice = all.slice((page - 1) * PAGE, page * PAGE);
+      const next = new URL(url);
+      next.searchParams.set("page", String(page + 1));
+      return reply(
+        200,
+        { total_count: all.length, repositories: slice },
+        all.length > page * PAGE ? { link: `<${next}>; rel="next"` } : {}
+      );
     }
     if (path === "/app/hook/deliveries") return paged(this.deliveries);
     match = path.match(/^\/app\/hook\/deliveries\/(\d+)\/attempts$/);

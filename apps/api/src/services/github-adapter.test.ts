@@ -399,3 +399,71 @@ test("a head deleted before its merge event still merges through the GitHub rout
   assert.equal(runs[0].trigger, "provider_merge");
   assert.equal(runs[0].provider.change_number, "9");
 });
+
+test("organization integrations list installations and reach repositories through an installation-wide token", async () => {
+  const { github, adapter } = world();
+  github.installations.get(10)!.account = {
+    id: 7,
+    login: "acme",
+    type: "Organization"
+  };
+  github.installations.get(10)!.selection = "all";
+  github.repositories.get(100)!.pushed_at = "2026-09-30T00:00:00Z";
+  const person = github.user(42, [10]);
+  const [option] = await adapter.listInstallations(person.token);
+  assert.deepEqual(option, {
+    installationId: "10",
+    accountId: "7",
+    accountName: "acme",
+    accountType: "Organization",
+    repositorySelection: "all",
+    suspended: false
+  });
+  const integration = {
+    installationId: "10",
+    accountName: "acme",
+    accountType: "Organization",
+    providerAccountId: "7"
+  } as never;
+  const repositories = await adapter.listIntegrationRepositories(integration);
+  assert.deepEqual(
+    repositories.map((repository) => [
+      repository.id,
+      repository.fullName,
+      repository.pushedAt?.toISOString()
+    ]),
+    [["100", "acme/app", "2026-09-30T00:00:00.000Z"]]
+  );
+  assert.deepEqual(
+    github.minted.at(-1)!.body,
+    { permissions: { metadata: "read" } },
+    "the listing token is metadata-only and names no repository"
+  );
+  const prepared = await adapter.prepareFromIntegration({
+    integration,
+    providerRepositoryId: "100"
+  });
+  assert.equal(prepared.installationId, "10");
+  assert.equal(prepared.providerAccountId, "7");
+  assert.equal(prepared.repository.fullName, "acme/app");
+  await assert.rejects(
+    adapter.prepareFromIntegration({
+      integration,
+      providerRepositoryId: "200"
+    }),
+    /can't reach/,
+    "another installation's repository isn't importable"
+  );
+  assert.equal(
+    adapter.manageUrl(integration),
+    "https://github.com/organizations/acme/settings/installations/10"
+  );
+  github.installations.get(10)!.suspended = true;
+  await assert.rejects(
+    adapter.prepareFromIntegration({
+      integration,
+      providerRepositoryId: "100"
+    }),
+    /suspended/
+  );
+});
