@@ -1,7 +1,11 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse, type RequestHandler } from "msw";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type {
+  OrganizationIntegration,
+  OrganizationRepository
+} from "@orchestrat/protocol";
 import { organization, project } from "@/test/factories";
 import { handlers } from "@/test/handlers";
 import { renderDashboardRoute } from "@/test/render";
@@ -51,9 +55,9 @@ function createHandler(bodies: unknown[]): RequestHandler {
   );
 }
 
-function render(extra: RequestHandler[]) {
+function render(extra: RequestHandler[], search = "") {
   return renderDashboardRoute({
-    path: `/organizations/${organizationId}/projects/new`,
+    path: `/organizations/${organizationId}/projects/new${search}`,
     auth: new Auth({ status: "signedIn", identityKey: "user" }),
     platform: platform(),
     handlers: [...extra, ...handlers]
@@ -211,5 +215,204 @@ describe("create project page", () => {
       repository_error: "authorization_failed"
     });
     expect(goTo).not.toHaveBeenCalled();
+  });
+});
+
+const integration: OrganizationIntegration = {
+  id: "00000000-0000-4000-8000-000000000701",
+  organization_id: organizationId,
+  provider: "gitlab",
+  account_name: "acme",
+  account_type: "User",
+  repository_selection: "all",
+  selected_repository_ids: [],
+  repository_count: 2,
+  status: "active",
+  status_reason: null,
+  manage_url: null,
+  connected_by_user_id: null,
+  last_synced_at: null,
+  created_at: "2026-10-01T00:00:00.000Z",
+  updated_at: "2026-10-01T00:00:00.000Z"
+};
+
+function repository(
+  overrides: Partial<OrganizationRepository> = {}
+): OrganizationRepository {
+  return {
+    id: "00000000-0000-4000-8000-000000000801",
+    integration_id: integration.id,
+    provider: "gitlab",
+    provider_repository_id: "11",
+    full_name: "acme/mobile-app",
+    url: null,
+    default_branch: "main",
+    pushed_at: "2026-10-05T00:00:00.000Z",
+    first_seen_at: "2026-10-01T00:00:00.000Z",
+    is_new: true,
+    project_id: null,
+    dismissed: false,
+    ...overrides
+  };
+}
+const otherRepository = repository({
+  id: "00000000-0000-4000-8000-000000000802",
+  provider_repository_id: "12",
+  full_name: "acme/website",
+  pushed_at: "2026-10-04T00:00:00.000Z"
+});
+
+function importSources(): RequestHandler[] {
+  return [
+    http.get(`${apiUrl}/organizations/:organizationId/integrations`, () =>
+      HttpResponse.json({ integrations: [integration] })
+    ),
+    http.get(`${apiUrl}/organizations/:organizationId/repositories`, () =>
+      HttpResponse.json({ repositories: [repository(), otherRepository] })
+    )
+  ];
+}
+
+function connection(projectId: string) {
+  return {
+    id: "00000000-0000-4000-8000-000000000501",
+    project_id: projectId,
+    provider: "gitlab",
+    provider_repository_id: "11",
+    full_name: "acme/mobile-app",
+    url: null,
+    provider_default_branch: "main",
+    status: "active",
+    status_reason: null,
+    last_event_at: null,
+    last_reconciled_at: null,
+    connected_by_user_id: null,
+    hook_health: null,
+    failed_delivery_count: 0,
+    created_at: "2026-10-01T00:00:00.000Z",
+    updated_at: "2026-10-01T00:00:00.000Z"
+  };
+}
+
+describe("create project page import mode", () => {
+  it("lists importable repositories as the source and selecting one enters import mode", async () => {
+    const user = userEvent.setup();
+    const view = await render([providers(), ...importSources()]);
+    const list = await screen.findByRole("list", {
+      name: "Repositories to import"
+    });
+    expect(
+      screen.queryByRole("button", { name: "Create and connect GitHub" })
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Connect another account" })
+    ).toHaveAttribute("href", `/organizations/${organizationId}/integrations`);
+    await user.type(screen.getByLabelText("Search repositories"), "web");
+    expect(within(list).queryByText("acme/mobile-app")).not.toBeInTheDocument();
+    await user.click(
+      within(list).getByRole("button", { name: "Import acme/website" })
+    );
+    await waitFor(() =>
+      expect(view.router.state.location.search).toEqual({
+        repository: otherRepository.id
+      })
+    );
+    expect(
+      await screen.findByText(/Importing/, { selector: "p" })
+    ).toHaveTextContent("Importing acme/website from GitLab.com");
+    expect(screen.getByLabelText("Project name")).toHaveValue("website");
+  });
+
+  it("prefills from the repository, keeps edits, and imports", async () => {
+    const user = userEvent.setup();
+    const bodies: unknown[] = [];
+    const view = await render(
+      [
+        providers(),
+        ...importSources(),
+        http.post(
+          `${apiUrl}/organizations/:organizationId/projects/import`,
+          async ({ request }) => {
+            bodies.push(await request.json());
+            return HttpResponse.json(
+              { project: created, repository: connection(created.id) },
+              { status: 201 }
+            );
+          }
+        )
+      ],
+      `?repository=${repository().id}`
+    );
+    expect(
+      await screen.findByText(/Importing/, { selector: "p" })
+    ).toHaveTextContent("Importing acme/mobile-app from GitLab.com");
+    expect(screen.getByLabelText("Project name")).toHaveValue("mobile-app");
+    expect(screen.getByLabelText("Task key")).toHaveValue("MOB");
+    await user.clear(screen.getByLabelText("Project name"));
+    await user.type(screen.getByLabelText("Project name"), "Phone");
+    expect(screen.getByLabelText("Task key")).toHaveValue("PHO");
+    await user.type(
+      screen.getByLabelText("Description (optional)"),
+      "iOS and Android"
+    );
+    await user.click(screen.getByRole("button", { name: "Import" }));
+    await waitFor(
+      () =>
+        expect(view.router.state.location.pathname).toBe(
+          `/projects/${created.id}/overview`
+        ),
+      { timeout: 5000 }
+    );
+    expect(bodies).toEqual([
+      {
+        repository_id: repository().id,
+        name: "Phone",
+        description: "iOS and Android",
+        task_key_prefix: "PHO"
+      }
+    ]);
+  });
+
+  it("says when the repository is already a project", async () => {
+    const user = userEvent.setup();
+    await render(
+      [
+        providers(),
+        ...importSources(),
+        http.post(
+          `${apiUrl}/organizations/:organizationId/projects/import`,
+          () =>
+            HttpResponse.json(
+              {
+                error: {
+                  code: "REPOSITORY_CONNECTION_EXISTS",
+                  message: "Connected already.",
+                  details: {},
+                  request_id: "req_1"
+                }
+              },
+              { status: 409 }
+            )
+        )
+      ],
+      `?repository=${repository().id}`
+    );
+    await screen.findByText(/Importing/, { selector: "p" });
+    await user.click(screen.getByRole("button", { name: "Import" }));
+    const card = screen.getByRole("region", { name: "Repository to import" });
+    expect(await within(card).findByRole("alert")).toHaveTextContent(
+      "That repository is already a project."
+    );
+  });
+
+  it("keeps the provider rows and points to Integrations without integrations", async () => {
+    await render([providers()]);
+    expect(
+      await screen.findByRole("button", { name: "Create and connect GitHub" })
+    ).toBeVisible();
+    expect(screen.getByRole("link", { name: "Integrations" })).toHaveAttribute(
+      "href",
+      `/organizations/${organizationId}/integrations`
+    );
   });
 });

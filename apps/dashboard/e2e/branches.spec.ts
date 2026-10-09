@@ -412,6 +412,11 @@ async function mockBranches(
       return json(route, { providers: repositoryProviders });
     if (path === `/organizations/${ids.organization}/members`)
       return json(route, { members: [] });
+    // No organization Git integrations: New project keeps its provider rows.
+    if (path === `/organizations/${ids.organization}/integrations`)
+      return json(route, { integrations: [] });
+    if (path === `/organizations/${ids.organization}/repositories`)
+      return json(route, { repositories: [] });
     if (path === "/profile")
       return json(route, {
         user_id: ids.user,

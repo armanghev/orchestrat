@@ -1,16 +1,19 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { z } from "zod";
+import { IntegrationsPage } from "@/features/integrations/integrations-page";
 import { useOrganizationRoute } from "./_authenticated.organizations.$organizationId";
 
-// ponytail: placeholder; the integrations UI replaces this page.
 function OrganizationIntegrations() {
   const { organization } = useOrganizationRoute();
+  const { api } = useRouter().options.context;
+  const search = Route.useSearch();
   return (
-    <section className="dashboard-page" aria-label="Integrations">
-      <p className="text-sm text-muted-foreground">
-        Git integrations for {organization.name}.
-      </p>
-    </section>
+    <IntegrationsPage
+      api={api}
+      organization={organization}
+      authorizationId={search.repository_authorization}
+      callbackError={search.repository_error}
+    />
   );
 }
 

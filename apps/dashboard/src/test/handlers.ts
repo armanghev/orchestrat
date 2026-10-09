@@ -69,6 +69,22 @@ export const handlers = [
       return HttpResponse.json(project(), { status: 201 });
     }
   ),
+  http.get(
+    `${apiUrl}/organizations/:organizationId/integrations`,
+    ({ request }) => {
+      assertAuthorization(request);
+      assertBodylessRequest(request);
+      return HttpResponse.json({ integrations: [] });
+    }
+  ),
+  http.get(
+    `${apiUrl}/organizations/:organizationId/repositories`,
+    ({ request }) => {
+      assertAuthorization(request);
+      assertBodylessRequest(request);
+      return HttpResponse.json({ repositories: [] });
+    }
+  ),
   http.get(`${apiUrl}/profile`, ({ request }) => {
     assertAuthorization(request);
     assertBodylessRequest(request);
