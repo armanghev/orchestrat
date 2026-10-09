@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/native-select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { relativeTime } from "@/features/attention/attention-copy";
+import { ImportRepositoriesPanel } from "@/features/integrations/import-repositories-panel";
 import { providerLabels } from "@/features/repository/repository-copy";
 import { cn } from "@/lib/cn";
 import {
@@ -219,6 +220,10 @@ export function OrganizationHomePage({
           New project
         </Button>
       </TopToolbarActions>
+
+      {organization.role !== "member" ? (
+        <ImportRepositoriesPanel api={api} organization={organization} />
+      ) : null}
 
       {summaries.isPending ? (
         <div aria-label="Loading projects" className="space-y-4">
