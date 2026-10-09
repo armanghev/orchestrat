@@ -183,6 +183,16 @@ Don't install from GitHub directly. Start from Orchestrat so the installation ge
 
 To confirm webhooks reach you: the app's **Advanced** tab lists recent deliveries and lets you redeliver them for up to 3 days.
 
+### 1.5 Connect to an organization instead
+
+Owners and admins can connect GitHub once for the whole organization (migration `0017`) and then import repositories as projects:
+
+1. Open the organization's **Integrations → Connect GitHub** and authorize the app.
+2. Pick an account you've already installed the app on, or **Install on another account**. GitHub's install screen is where you choose **All repositories** or **Only select repositories**; change it later from **Manage on GitHub**.
+3. The organization home now lists the repositories that installation reaches, with **Import**. Repositories added to the installation later appear as **New**: GitHub sends `installation_repositories` to the app automatically (no extra event subscription), and the worker re-reads every integration once per `ORCHESTRAT_REPOSITORY_RECONCILE_INTERVAL_SECONDS` as a fallback.
+
+No new app permissions are needed: listing uses a metadata-only installation token.
+
 ---
 
 ## 2. GitLab.com OAuth application
@@ -227,6 +237,16 @@ ORCHESTRAT_GITLAB_OAUTH_CLIENT_SECRET=<Secret>
 3. Use **Recent events** on that webhook to inspect deliveries and **Resend Request** them. GitLab disables a hook temporarily after 4 consecutive failures and permanently after 40; the Orchestrat settings card shows the hook's health.
 
 Don't add a webhook by hand. Orchestrat owns the one it creates and deletes it on disconnect.
+
+---
+
+### 2.4 Connect to an organization instead
+
+**Integrations → Connect GitLab** authorizes as you, then asks for **All projects you maintain** or **Only selected projects**. The organization keeps your tokens (sealed to the integration) and every project imported through it uses them, so:
+
+- Imports need the Maintainer role, as before; the webhook is created per project.
+- GitLab has no event for "new project" without group or instance hooks, so new projects appear on the next refresh (the reconcile interval) or **Refresh**.
+- Removing the integration is refused while imported projects still use it; disconnect their repositories first.
 
 ---
 
