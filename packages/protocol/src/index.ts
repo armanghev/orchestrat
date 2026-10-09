@@ -1409,9 +1409,11 @@ export * from "./attention.js";
 export * from "./branches.js";
 export * from "./merges.js";
 export * from "./repository.js";
+export * from "./integrations.js";
 
 import {
   repositoryProviderSchema,
+  repositoryConnectionSchema,
   repositoryConnectionStatusSchema
 } from "./repository.js";
 
@@ -1457,3 +1459,11 @@ export const slugSuffix = () =>
 
 export const slugifyName = (value: string) =>
   slugBase(value) || `item-${slugSuffix()}`;
+
+export const importRepositoryProjectResponseSchema = z.object({
+  project: projectSchema,
+  repository: repositoryConnectionSchema
+});
+export type ImportRepositoryProjectResponse = z.infer<
+  typeof importRepositoryProjectResponseSchema
+>;

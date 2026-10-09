@@ -72,6 +72,7 @@ export function useOrganizationRoute(): {
 
 function destinationOf(pathname: string): OrganizationDestination | undefined {
   if (pathname.endsWith("/members")) return "members";
+  if (pathname.endsWith("/integrations")) return "integrations";
   if (pathname.endsWith("/settings")) return "settings";
   if (pathname.endsWith("/projects/new")) return undefined;
   return "projects";

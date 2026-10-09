@@ -12,7 +12,9 @@ import {
 const attemptSchema = z.object({
   return_path: pendingRepositoryAuthorizationResponseSchema.shape.return_path,
   authorization_id: z.string().regex(authorizationPattern),
-  project_id: z.string().uuid(),
+  /** A project's attempt, or an organization integration's. */
+  project_id: z.string().uuid().nullable().optional(),
+  organization_id: z.string().uuid().nullable().optional(),
   provider: z.literal("github")
 });
 type Attempt = z.infer<typeof attemptSchema>;
@@ -61,6 +63,7 @@ export function GithubSetup({
           setAttempt({
             authorization_id: pending.authorization_id,
             project_id: pending.project_id,
+            organization_id: pending.organization_id ?? null,
             return_path: pending.return_path,
             provider: "github"
           });
@@ -75,9 +78,40 @@ export function GithubSetup({
   useEffect(() => {
     if (started.current || !attempt || !validInstallation) return;
     started.current = true;
+    // An organization integration: the installation becomes the integration.
+    if (attempt.organization_id) {
+      const organizationId = attempt.organization_id;
+      void api
+        .createOrganizationIntegration(organizationId, {
+          provider: "github",
+          authorization_id: attempt.authorization_id,
+          installation_id: installationId!
+        })
+        .then(() => {
+          window.sessionStorage.removeItem(REPOSITORY_ATTEMPT_KEY);
+          const target = new URL(
+            attempt.return_path ??
+              `/organizations/${organizationId}/integrations`,
+            window.location.origin
+          );
+          void navigate({
+            href: `${target.pathname}${target.search}`,
+            replace: true
+          });
+        })
+        .catch(() => {
+          window.sessionStorage.removeItem(REPOSITORY_ATTEMPT_KEY);
+          setError(
+            "We couldn’t connect this GitHub installation. Start again from the organization’s Integrations."
+          );
+        });
+      return;
+    }
+    if (!attempt.project_id) return;
+    const projectId = attempt.project_id;
     void api
       .submitGithubInstallation(
-        attempt.project_id,
+        projectId,
         attempt.authorization_id,
         installationId!
       )
@@ -90,7 +124,7 @@ export function GithubSetup({
         const target = new URL(
           result.return_path ??
             attempt.return_path ??
-            `/projects/${attempt.project_id}/settings`,
+            `/projects/${projectId}/settings`,
           window.location.origin
         );
         target.searchParams.set(
@@ -127,7 +161,15 @@ export function GithubSetup({
           <p role="alert" className="mt-2 text-sm text-muted-foreground">
             {failure}
           </p>
-          {attempt ? (
+          {attempt?.organization_id ? (
+            <Link
+              to="/organizations/$organizationId/integrations"
+              params={{ organizationId: attempt.organization_id }}
+              className="mt-6 w-fit text-sm font-medium underline"
+            >
+              Back to integrations
+            </Link>
+          ) : attempt?.project_id ? (
             <Link
               to="/projects/$projectId/settings"
               params={{ projectId: attempt.project_id }}

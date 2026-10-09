@@ -12,6 +12,7 @@ import {
   MessagesSquare,
   Scale,
   Search,
+  Plug,
   Settings,
   Users
 } from "lucide-react";
@@ -386,14 +387,18 @@ const organizationItems: {
 }[] = [
   { destination: "projects", label: "Projects", icon: FolderOpen },
   { destination: "members", label: "Members", icon: Users },
+  { destination: "integrations", label: "Integrations", icon: Plug },
   { destination: "settings", label: "Settings", icon: Settings }
 ];
 
 export function OrganizationSidebar({
   activeDestination,
   onNavigate,
+  canManageIntegrations = false,
   ...chrome
 }: SidebarChromeProps & {
+  /** Integrations are for owners and admins. */
+  canManageIntegrations?: boolean;
   /** Undefined on pages outside the three (e.g. New project). */
   activeDestination?: OrganizationDestination;
   onNavigate: (destination: OrganizationDestination) => void;
@@ -405,30 +410,35 @@ export function OrganizationSidebar({
         <SidebarGroupLabel>Organization</SidebarGroupLabel>
         <SidebarGroupContent>
           <SidebarMenu>
-            {organizationItems.map(({ destination, label, icon: Icon }) => (
-              <SidebarMenuItem key={destination}>
-                <SidebarMenuButton
-                  isActive={destination === activeDestination}
-                  asChild
-                  tooltip={label}
-                  className="h-9"
-                >
-                  <button
-                    type="button"
-                    aria-current={
-                      destination === activeDestination ? "page" : undefined
-                    }
-                    onClick={() => {
-                      onNavigate(destination);
-                      setOpenMobile(false);
-                    }}
+            {organizationItems
+              .filter(
+                ({ destination }) =>
+                  destination !== "integrations" || canManageIntegrations
+              )
+              .map(({ destination, label, icon: Icon }) => (
+                <SidebarMenuItem key={destination}>
+                  <SidebarMenuButton
+                    isActive={destination === activeDestination}
+                    asChild
+                    tooltip={label}
+                    className="h-9"
                   >
-                    <Icon />
-                    <span>{label}</span>
-                  </button>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            ))}
+                    <button
+                      type="button"
+                      aria-current={
+                        destination === activeDestination ? "page" : undefined
+                      }
+                      onClick={() => {
+                        onNavigate(destination);
+                        setOpenMobile(false);
+                      }}
+                    >
+                      <Icon />
+                      <span>{label}</span>
+                    </button>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
           </SidebarMenu>
         </SidebarGroupContent>
       </SidebarGroup>

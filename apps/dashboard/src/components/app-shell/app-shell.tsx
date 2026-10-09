@@ -352,6 +352,7 @@ export function AppShell({
 const organizationPageTitles: Record<OrganizationDestination, string> = {
   projects: "Projects",
   members: "Members",
+  integrations: "Integrations",
   settings: "Settings"
 };
 
@@ -392,6 +393,7 @@ export function OrganizationShell({
       sidebar={(openCommands) => (
         <OrganizationSidebar
           activeDestination={activeDestination}
+          canManageIntegrations={organization.role !== "member"}
           onNavigate={(destination) =>
             void navigateToOrganization(organization.id, destination)
           }

@@ -32,6 +32,7 @@ export type NavigationDestination = (typeof navigationDestinations)[number];
 export const organizationDestinations = [
   "projects",
   "members",
+  "integrations",
   "settings"
 ] as const;
 export type OrganizationDestination = (typeof organizationDestinations)[number];

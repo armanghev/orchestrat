@@ -27,7 +27,8 @@ export const branchErrorCodeSchema = z.enum([
   "BRANCH_DECISION_STALE",
   "REPOSITORY_NOT_CONFIGURED",
   "REPOSITORY_AUTHORIZATION_INVALID",
-  "REPOSITORY_CONNECTION_EXISTS"
+  "REPOSITORY_CONNECTION_EXISTS",
+  "INTEGRATION_IN_USE"
 ]);
 export type BranchErrorCode = z.infer<typeof branchErrorCodeSchema>;
 
