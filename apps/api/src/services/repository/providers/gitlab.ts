@@ -1,5 +1,9 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { repositoryConnections, type Database } from "@orchestrat/db";
+import {
+  organizationIntegrations,
+  repositoryConnections,
+  type Database
+} from "@orchestrat/db";
 import type { RepositoryCandidate } from "@orchestrat/protocol";
 import { eq } from "drizzle-orm";
 import { updateConnection } from "../connection-status.js";
@@ -9,6 +13,8 @@ import {
   type AttemptRow,
   type ConnectionRow,
   type Headers,
+  type IntegrationRepository,
+  type IntegrationRow,
   type MergedChange,
   type PreparedConnection,
   type ProviderAdapter,
@@ -34,6 +40,7 @@ type ProjectPayload = {
   web_url?: string;
   default_branch: string | null;
   archived?: boolean;
+  last_activity_at?: string | null;
 };
 type MergeRequestPayload = {
   iid: number;
@@ -157,6 +164,29 @@ export class GitlabAdapter implements ProviderAdapter {
    * rotated refresh token again.
    */
   async accessToken(connection: ConnectionRow): Promise<string> {
+    // Imported through an organization integration: its tokens serve every
+    // connection made from it, so they rotate in one place.
+    if (connection.integrationId) {
+      const [integration] = await this.db
+        .select()
+        .from(organizationIntegrations)
+        .where(eq(organizationIntegrations.id, connection.integrationId));
+      if (!integration) {
+        await updateConnection(
+          this.db,
+          connection.id,
+          {
+            status: "needs_reauthorization",
+            statusReason: "The organization's GitLab integration was removed."
+          },
+          this.now()
+        );
+        throw new ProviderAuthorizationError(
+          "The GitLab integration was removed."
+        );
+      }
+      return this.integrationAccessToken(integration);
+    }
     const open = (row: ConnectionRow, purpose: string, value: string | null) =>
       value
         ? this.secrets.open(
@@ -227,6 +257,167 @@ export class GitlabAdapter implements ProviderAdapter {
     throw new ProviderAuthorizationError(
       "GitLab access was revoked or expired."
     );
+  }
+
+  /** An organization integration's access token, refreshed like a
+   * connection's: under a row lock, persisted before use. */
+  async integrationAccessToken(integration: IntegrationRow): Promise<string> {
+    const open = (
+      row: IntegrationRow,
+      purpose: string,
+      value: string | null
+    ) =>
+      value
+        ? this.secrets.open(
+            value,
+            aad("organization_integrations", row.id, purpose)
+          )
+        : null;
+    const fresh = (row: IntegrationRow) =>
+      row.tokenExpiresAt &&
+      row.tokenExpiresAt.getTime() - 60_000 > this.now().getTime();
+    if (fresh(integration))
+      return open(
+        integration,
+        "access_token",
+        integration.accessTokenCiphertext
+      )!;
+    const result = await this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .select()
+        .from(organizationIntegrations)
+        .where(eq(organizationIntegrations.id, integration.id))
+        .for("update");
+      if (!row) return { revoked: true as const };
+      if (fresh(row))
+        return { token: open(row, "access_token", row.accessTokenCiphertext)! };
+      const refresh = open(row, "refresh_token", row.refreshTokenCiphertext);
+      if (!refresh) return { revoked: true as const };
+      let tokens: Tokens;
+      try {
+        tokens = await this.tokenRequest({
+          grant_type: "refresh_token",
+          refresh_token: refresh
+        });
+      } catch (error) {
+        if (error instanceof ProviderAuthorizationError)
+          return { revoked: true as const };
+        throw error;
+      }
+      await tx
+        .update(organizationIntegrations)
+        .set({
+          accessTokenCiphertext: this.secrets.seal(
+            tokens.access_token,
+            aad("organization_integrations", row.id, "access_token")
+          ),
+          refreshTokenCiphertext: this.secrets.seal(
+            tokens.refresh_token,
+            aad("organization_integrations", row.id, "refresh_token")
+          ),
+          tokenExpiresAt: new Date(tokens.expires_at),
+          updatedAt: this.now()
+        })
+        .where(eq(organizationIntegrations.id, row.id));
+      return { token: tokens.access_token };
+    });
+    if (result.token) return result.token;
+    await this.db
+      .update(organizationIntegrations)
+      .set({
+        status: "needs_reauthorization",
+        statusReason: "Reconnect GitLab to restore access.",
+        updatedAt: this.now()
+      })
+      .where(eq(organizationIntegrations.id, integration.id));
+    throw new ProviderAuthorizationError(
+      "GitLab access was revoked or expired."
+    );
+  }
+
+  async accountForToken(userToken: string | null) {
+    const tokens = this.tokens(userToken);
+    const user = await this.get<{ id: number; username: string }>(
+      "/user",
+      tokens.access_token,
+      "Reading the user"
+    );
+    return { id: String(user.id), name: user.username, tokens };
+  }
+
+  async listIntegrationRepositories(
+    integration: IntegrationRow
+  ): Promise<IntegrationRepository[]> {
+    const projects = await this.pages<ProjectPayload>(
+      "/projects?membership=true&min_access_level=40&simple=true&archived=false",
+      await this.integrationAccessToken(integration),
+      "Listing projects"
+    );
+    return projects.map((project) => ({
+      id: String(project.id),
+      fullName: project.path_with_namespace,
+      url: project.web_url ?? null,
+      defaultBranch: project.default_branch ?? null,
+      pushedAt: project.last_activity_at
+        ? new Date(project.last_activity_at)
+        : null
+    }));
+  }
+
+  /**
+   * Like prepareConnection, but acting as the integration's account. The
+   * connection keeps no tokens of its own: it reads the integration's.
+   */
+  async prepareFromIntegration(input: {
+    integration: IntegrationRow;
+    providerRepositoryId: string;
+    connectionId: string;
+  }): Promise<PreparedConnection> {
+    const token = await this.integrationAccessToken(input.integration);
+    const id = encodeURIComponent(input.providerRepositoryId);
+    const member = await send(
+      this.http,
+      `${API}/projects/${id}/members/all/${encodeURIComponent(input.integration.providerAccountId)}`,
+      { headers: this.headers(token) }
+    );
+    const access = member.ok
+      ? (((await member.json()) as { access_level?: number }).access_level ?? 0)
+      : 0;
+    if (access < 40)
+      throw new ProviderAuthorizationError(
+        "Importing needs the Maintainer role on that project."
+      );
+    const project = await this.get<ProjectPayload>(
+      `/projects/${id}`,
+      token,
+      "Reading the project"
+    );
+    if (!project.default_branch)
+      throw new ProviderAuthorizationError("The project has no branches yet.");
+    const signingToken = `whsec_${randomBytes(32).toString("base64")}`;
+    const hook = await json<{ id: number }>(
+      await send(this.http, `${API}/projects/${id}/hooks`, {
+        method: "POST",
+        headers: { ...this.headers(token), "content-type": "application/json" },
+        body: JSON.stringify({
+          url: `${this.publicApiUrl}/api/v1/webhooks/gitlab/${input.connectionId}`,
+          push_events: true,
+          merge_requests_events: true,
+          tag_push_events: false,
+          branch_filter_strategy: "all_branches",
+          enable_ssl_verification: true,
+          signing_token: signingToken
+        })
+      }),
+      "Creating the webhook"
+    );
+    return {
+      repository: this.remote(project),
+      installationId: null,
+      providerAccountId: input.integration.providerAccountId,
+      gitlabHookId: String(hook.id),
+      webhookSecret: signingToken
+    };
   }
 
   authorizeUrl(input: {
@@ -378,6 +569,8 @@ export class GitlabAdapter implements ProviderAdapter {
         `${API}/projects/${encodeURIComponent(connection.providerRepositoryId)}/hooks/${encodeURIComponent(connection.gitlabHookId)}`,
         { method: "DELETE", headers: this.headers(access) }
       ).catch(() => undefined);
+    // The integration's tokens serve other connections; only the hook goes.
+    if (connection.integrationId) return;
     const refreshed = await this.db
       .select()
       .from(repositoryConnections)

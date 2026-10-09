@@ -1,15 +1,19 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import type { RepositoryCandidate } from "@orchestrat/protocol";
-import type {
-  ConnectionRow,
-  Headers,
-  MergedChange,
-  PreparedConnection,
-  ProviderAdapter,
-  ProviderEvent,
-  ProviderName,
-  RemoteBranch,
-  RemoteRepository
+import {
+  ProviderAuthorizationError,
+  type ConnectionRow,
+  type Headers,
+  type InstallationOption,
+  type IntegrationRepository,
+  type IntegrationRow,
+  type MergedChange,
+  type PreparedConnection,
+  type ProviderAdapter,
+  type ProviderEvent,
+  type ProviderName,
+  type RemoteBranch,
+  type RemoteRepository
 } from "../types.js";
 
 // A generic in-memory provider for scenario tests (docs/project-branches.md
@@ -24,6 +28,7 @@ export type FakeRepository = {
   merged: MergedChange[];
   installation: string;
   ineligibleReason?: string;
+  pushedAt?: Date | null;
 };
 
 const header = (headers: Headers, name: string) => {
@@ -50,7 +55,8 @@ export class FakeProvider implements ProviderAdapter {
         new Map([[value.defaultBranch ?? "main", "sha-main-1"]]),
       merged: value.merged ?? [],
       installation: value.installation ?? "installation-1",
-      ineligibleReason: value.ineligibleReason
+      ineligibleReason: value.ineligibleReason,
+      pushedAt: value.pushedAt ?? null
     };
     this.repositories.set(repository.id, repository);
     return repository;
@@ -114,6 +120,98 @@ export class FakeProvider implements ProviderAdapter {
       installationId: repository.installation,
       providerAccountId: input.attempt.providerUserId ?? "fake-user"
     };
+  }
+
+  // Organization integrations: every installation id among the
+  // repositories is an installation the signed-in person can use.
+  readonly suspendedInstallations = new Set<string>();
+  selection: "all" | "selected" = "selected";
+
+  private installationOption(installationId: string): InstallationOption {
+    return {
+      installationId,
+      accountId: `account-${installationId}`,
+      accountName: `acct-${installationId}`,
+      accountType: "Organization",
+      repositorySelection: this.selection,
+      suspended: this.suspendedInstallations.has(installationId)
+    };
+  }
+
+  private installations() {
+    return [
+      ...new Set(
+        [...this.repositories.values()].map((repo) => repo.installation)
+      )
+    ];
+  }
+
+  async confirmInstallation(input: { installationId: string }) {
+    if (!this.installations().includes(input.installationId))
+      throw new ProviderAuthorizationError("That installation isn't yours.");
+    return { installationId: input.installationId };
+  }
+
+  async listInstallations() {
+    return this.installations().map((id) => this.installationOption(id));
+  }
+
+  async getInstallation(installationId: string) {
+    return this.installationOption(installationId);
+  }
+
+  async accountForToken() {
+    return {
+      id: "fake-user",
+      name: "fake",
+      tokens: {
+        access_token: "integration-access",
+        refresh_token: "integration-refresh",
+        expires_at: Date.now() + 3_600_000
+      }
+    };
+  }
+
+  /** GitHub-style fakes list by installation; GitLab-style ones list all. */
+  async listIntegrationRepositories(
+    integration: IntegrationRow
+  ): Promise<IntegrationRepository[]> {
+    return [...this.repositories.values()]
+      .filter(
+        (repository) =>
+          this.provider !== "github" ||
+          repository.installation === integration.installationId
+      )
+      .map((repository) => ({
+        id: repository.id,
+        fullName: repository.fullName,
+        url: `https://fake.provider.test/${repository.fullName}`,
+        defaultBranch: repository.defaultBranch,
+        pushedAt: repository.pushedAt ?? null
+      }));
+  }
+
+  async prepareFromIntegration(input: {
+    integration: IntegrationRow;
+    providerRepositoryId: string;
+  }): Promise<PreparedConnection> {
+    const repository = this.repositories.get(input.providerRepositoryId);
+    if (
+      !repository ||
+      (this.provider === "github" &&
+        repository.installation !== input.integration.installationId)
+    )
+      throw new ProviderAuthorizationError("Repository not reachable.");
+    return {
+      repository: this.remote(repository),
+      installationId:
+        this.provider === "github" ? repository.installation : null,
+      providerAccountId: input.integration.providerAccountId
+    };
+  }
+
+  manageUrl(integration: IntegrationRow) {
+    return `https://fake.provider.test/installations/${integration.installationId ?? "none"}`;
   }
 
   async disconnect(connection: ConnectionRow) {

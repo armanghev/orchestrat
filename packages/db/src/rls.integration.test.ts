@@ -22,7 +22,9 @@ const protectedTables = [
   "repository_connections",
   "repository_connection_attempts",
   "repository_refs",
-  "repository_webhook_deliveries"
+  "repository_webhook_deliveries",
+  "organization_integrations",
+  "organization_repositories"
 ] as const;
 
 // Tables without created_at get a harmless self-assignment on another column.
@@ -33,7 +35,8 @@ const updateAssignment: Partial<
   chat_participants: '"joined_at" = "joined_at"',
   branch_item_baselines: '"updated_at" = "updated_at"',
   repository_refs: '"last_seen_at" = "last_seen_at"',
-  repository_webhook_deliveries: '"received_at" = "received_at"'
+  repository_webhook_deliveries: '"received_at" = "received_at"',
+  organization_repositories: '"first_seen_at" = "first_seen_at"'
 };
 
 test(
@@ -212,6 +215,21 @@ test(
            (project_id, connection_id, name, head_sha, branch_id, created_signal)
          VALUES ($1, $2, 'main', 'abc1234', $3, 'connect_snapshot')`,
         [projectId, connectionId, defaultBranchId]
+      );
+      const integrationId = randomUUID();
+      await pool.query(
+        `INSERT INTO organization_integrations
+           (id, organization_id, provider, provider_account_id, account_name,
+            repository_selection, access_token_ciphertext)
+         VALUES ($1, $2, 'gitlab', '7', 'acme', 'all', 'v1.k1.iv.ct')`,
+        [integrationId, organizationId]
+      );
+      await pool.query(
+        `INSERT INTO organization_repositories
+           (organization_id, integration_id, provider, provider_repository_id,
+            full_name)
+         VALUES ($1, $2, 'gitlab', '42', 'acme/app')`,
+        [organizationId, integrationId]
       );
       await pool.query(
         `INSERT INTO repository_webhook_deliveries

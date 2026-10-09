@@ -1,5 +1,6 @@
 import type {
   Database,
+  organizationIntegrations,
   repositoryConnectionAttempts,
   repositoryConnections
 } from "@orchestrat/db";
@@ -12,6 +13,26 @@ import type { RepositoryCandidate } from "@orchestrat/protocol";
 export type ProviderName = "github" | "gitlab" | "origin";
 export type ConnectionRow = typeof repositoryConnections.$inferSelect;
 export type AttemptRow = typeof repositoryConnectionAttempts.$inferSelect;
+export type IntegrationRow = typeof organizationIntegrations.$inferSelect;
+
+/** A repository an organization integration reaches. */
+export type IntegrationRepository = {
+  id: string;
+  fullName: string;
+  url: string | null;
+  defaultBranch: string | null;
+  pushedAt: Date | null;
+};
+
+/** A GitHub App installation the signed-in person can use. */
+export type InstallationOption = {
+  installationId: string;
+  accountId: string;
+  accountName: string;
+  accountType: string | null;
+  repositorySelection: "all" | "selected";
+  suspended: boolean;
+};
 export type Headers = Record<string, string | string[] | undefined>;
 
 export type RemoteRepository = {
@@ -141,6 +162,30 @@ export interface ProviderAdapter {
   reenableHook?(connection: ConnectionRow): Promise<void>;
   /** GitHub: where to install the app when a repository isn't listed. */
   installUrl?(state: string): string;
+
+  // Organization integrations (migration 0017).
+  /** GitHub: the installations the person's token lists. */
+  listInstallations?(userToken: string | null): Promise<InstallationOption[]>;
+  /** GitHub: the installation as the app sees it. */
+  getInstallation?(installationId: string): Promise<InstallationOption>;
+  /** Every repository the integration reaches. */
+  listIntegrationRepositories?(
+    integration: IntegrationRow
+  ): Promise<IntegrationRepository[]>;
+  /** The provider side of a connection imported through an integration. */
+  prepareFromIntegration?(input: {
+    integration: IntegrationRow;
+    providerRepositoryId: string;
+    connectionId: string;
+  }): Promise<PreparedConnection>;
+  /** GitLab: the account behind an authorized token. */
+  accountForToken?(userToken: string | null): Promise<{
+    id: string;
+    name: string;
+    tokens: { access_token: string; refresh_token: string; expires_at: number };
+  }>;
+  /** Where to change the integration's repository access on the provider. */
+  manageUrl?(integration: IntegrationRow): string | null;
 }
 
 /** A provider answered that the connection's authorization is gone. */

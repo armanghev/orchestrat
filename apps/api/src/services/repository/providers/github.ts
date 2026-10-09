@@ -5,6 +5,9 @@ import {
   type AttemptRow,
   type ConnectionRow,
   type Headers,
+  type InstallationOption,
+  type IntegrationRepository,
+  type IntegrationRow,
   type MergedChange,
   type PreparedConnection,
   type ProviderAdapter,
@@ -35,7 +38,25 @@ type RepositoryPayload = {
   html_url?: string;
   default_branch: string;
   fork?: boolean;
+  pushed_at?: string | null;
 };
+type InstallationPayload = {
+  id: number;
+  account: { id: number; login: string; type?: string } | null;
+  repository_selection?: "all" | "selected";
+  suspended_at?: string | null;
+};
+const installationOption = (
+  installation: InstallationPayload
+): InstallationOption => ({
+  installationId: String(installation.id),
+  accountId: String(installation.account?.id ?? installation.id),
+  accountName: installation.account?.login ?? `installation-${installation.id}`,
+  accountType: installation.account?.type ?? null,
+  repositorySelection:
+    installation.repository_selection === "selected" ? "selected" : "all",
+  suspended: Boolean(installation.suspended_at)
+});
 type PullPayload = {
   number: number;
   html_url?: string;
@@ -160,6 +181,137 @@ export class GithubAdapter implements ProviderAdapter {
       expiresAt: this.now().getTime() + 55 * 60_000
     });
     return token;
+  }
+
+  /**
+   * A metadata-only token for every repository an installation reaches, for
+   * listing them. Cached like per-repository tokens.
+   */
+  private async installationWideToken(installationId: string) {
+    const key = `${installationId}:*:metadata`;
+    const cached = this.tokens.get(key);
+    if (cached && cached.expiresAt > this.now().getTime()) return cached.token;
+    const response = await send(
+      this.http,
+      `${API}/app/installations/${encodeURIComponent(installationId)}/access_tokens`,
+      {
+        method: "POST",
+        headers: {
+          ...this.headers(this.appJwt()),
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ permissions: { metadata: "read" } })
+      }
+    );
+    if ([401, 403, 404, 422].includes(response.status))
+      throw new ProviderAuthorizationError(
+        "The GitHub App installation is gone or suspended."
+      );
+    const { token } = await json<{ token: string }>(
+      response,
+      "Minting a token"
+    );
+    this.tokens.set(key, {
+      token,
+      expiresAt: this.now().getTime() + 55 * 60_000
+    });
+    return token;
+  }
+
+  async listInstallations(userToken: string | null) {
+    if (!userToken) throw new ProviderAuthorizationError("Authorize again.");
+    const page = await this.get<{ installations: InstallationPayload[] }>(
+      `${API}/user/installations?per_page=100`,
+      userToken,
+      "Listing installations"
+    );
+    return page.installations.map(installationOption);
+  }
+
+  async getInstallation(installationId: string) {
+    const response = await send(
+      this.http,
+      `${API}/app/installations/${encodeURIComponent(installationId)}`,
+      { headers: this.headers(this.appJwt()) }
+    );
+    if (response.status === 404)
+      throw new ProviderAuthorizationError(
+        "The GitHub App isn't installed there anymore."
+      );
+    return installationOption(
+      await json<InstallationPayload>(response, "Reading the installation")
+    );
+  }
+
+  async listIntegrationRepositories(
+    integration: IntegrationRow
+  ): Promise<IntegrationRepository[]> {
+    const token = await this.installationWideToken(
+      integration.installationId ?? ""
+    );
+    const repositories: IntegrationRepository[] = [];
+    let url: string | null = `${API}/installation/repositories?per_page=100`;
+    while (url) {
+      const response = await send(this.http, url, {
+        headers: this.headers(token)
+      });
+      for (const repository of (
+        await json<{ repositories: RepositoryPayload[] }>(
+          response,
+          "Listing repositories"
+        )
+      ).repositories)
+        repositories.push({
+          id: String(repository.id),
+          fullName: repository.full_name,
+          url: repository.html_url ?? null,
+          defaultBranch: repository.default_branch ?? null,
+          pushedAt: repository.pushed_at ? new Date(repository.pushed_at) : null
+        });
+      url = nextLink(response);
+    }
+    return repositories;
+  }
+
+  /**
+   * The installation must still reach the repository and not be suspended;
+   * then the connection reads it like any other.
+   */
+  async prepareFromIntegration(input: {
+    integration: IntegrationRow;
+    providerRepositoryId: string;
+  }): Promise<PreparedConnection> {
+    const installationId = input.integration.installationId ?? "";
+    const installation = await this.getInstallation(installationId);
+    if (installation.suspended)
+      throw new ProviderAuthorizationError(
+        "The app is suspended for that account."
+      );
+    const reachable = await this.listIntegrationRepositories(input.integration);
+    if (
+      !reachable.some(
+        (repository) => repository.id === input.providerRepositoryId
+      )
+    )
+      throw new ProviderAuthorizationError(
+        "The app can't reach that repository anymore."
+      );
+    const draft = {
+      installationId,
+      providerRepositoryId: input.providerRepositoryId
+    } as ConnectionRow;
+    return {
+      repository: await this.getRepository(draft),
+      installationId,
+      providerAccountId: input.integration.providerAccountId
+    };
+  }
+
+  manageUrl(integration: IntegrationRow) {
+    const id = encodeURIComponent(integration.installationId ?? "");
+    return integration.accountType === "Organization"
+      ? `${WEB}/organizations/${encodeURIComponent(integration.accountName)}/settings/installations/${id}`
+      : `${WEB}/settings/installations/${id}`;
   }
 
   authorizeUrl(input: {

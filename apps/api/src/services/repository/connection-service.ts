@@ -26,12 +26,13 @@ import {
   ProviderAuthorizationError,
   type AttemptRow,
   type ConnectionRow,
+  type PreparedConnection,
   type ProviderAdapter,
   type ProviderName
 } from "./types.js";
 
 /** Provider calls on behalf of a person: lost access is a 409, the rest 502. */
-async function provider<T>(work: () => Promise<T>): Promise<T> {
+export async function provider<T>(work: () => Promise<T>): Promise<T> {
   try {
     return await work();
   } catch (error) {
@@ -114,7 +115,7 @@ export class RepositoryService {
     private readonly db: Database,
     private readonly branches: BranchService,
     private readonly sync: BranchSync,
-    private readonly adapters: Map<ProviderName, ProviderAdapter>,
+    readonly adapters: Map<ProviderName, ProviderAdapter>,
     private readonly config: Pick<
       RepositoryConfig,
       "publicApiUrl" | "dashboardUrl" | "unavailable" | "hidden"
@@ -127,7 +128,7 @@ export class RepositoryService {
     this.permissions = new PermissionService(db);
   }
 
-  private adapter(provider: ProviderName) {
+  adapter(provider: ProviderName) {
     const adapter = this.adapters.get(provider);
     if (!adapter || !this.secrets)
       throw new ApiError(
@@ -203,20 +204,31 @@ export class RepositoryService {
     input: CreateRepositoryAuthorizationRequest
   ) {
     await this.permissions.projectEditor(userId, projectId);
-    const { adapter, secrets } = this.adapter(input.provider);
+    this.adapter(input.provider);
     if (await this.active(projectId))
       throw new ApiError(
         409,
         "REPOSITORY_CONNECTION_EXISTS",
         "Disconnect the current repository first."
       );
+    return this.startAttempt({ projectId }, userId, input);
+  }
+
+  /** A single-use authorization attempt for a project or an organization. */
+  async startAttempt(
+    owner: { projectId: string } | { organizationId: string },
+    userId: string,
+    input: CreateRepositoryAuthorizationRequest
+  ) {
+    const { adapter, secrets } = this.adapter(input.provider);
     const id = `ra_${randomBytes(24).toString("base64url")}`;
     const state = randomBytes(32).toString("base64url");
     const verifier = randomBytes(32).toString("base64url");
     const expiresAt = new Date(this.now().getTime() + ATTEMPT_TTL_MS);
     await this.db.insert(repositoryConnectionAttempts).values({
       id,
-      projectId,
+      projectId: "projectId" in owner ? owner.projectId : null,
+      organizationId: "organizationId" in owner ? owner.organizationId : null,
       userId,
       provider: input.provider,
       stateHash: sha256(state),
@@ -321,10 +333,15 @@ export class RepositoryService {
 
   private returnTo(attempt?: AttemptRow) {
     if (!attempt) return "/";
-    return attempt.returnPath ?? `/projects/${attempt.projectId}/settings`;
+    return (
+      attempt.returnPath ??
+      (attempt.projectId
+        ? `/projects/${attempt.projectId}/settings`
+        : `/organizations/${attempt.organizationId}/integrations`)
+    );
   }
 
-  private async mark(
+  async mark(
     id: string,
     values: Partial<typeof repositoryConnectionAttempts.$inferInsert>
   ) {
@@ -335,7 +352,16 @@ export class RepositoryService {
   }
 
   /** An authorized attempt of this user and project, still fresh. */
-  private async attempt(userId: string, projectId: string, attemptId: string) {
+  private attempt(userId: string, projectId: string, attemptId: string) {
+    return this.authorizedAttempt(userId, { projectId }, attemptId);
+  }
+
+  /** An authorized attempt of this user for a project or organization. */
+  async authorizedAttempt(
+    userId: string,
+    owner: { projectId: string } | { organizationId: string },
+    attemptId: string
+  ) {
     const [attempt] = await this.db
       .select()
       .from(repositoryConnectionAttempts)
@@ -344,7 +370,9 @@ export class RepositoryService {
     if (
       !attempt ||
       attempt.userId !== userId ||
-      attempt.projectId !== projectId ||
+      ("projectId" in owner
+        ? attempt.projectId !== owner.projectId
+        : attempt.organizationId !== owner.organizationId) ||
       attempt.status !== "authorized" ||
       attempt.expiresAt <= this.now()
     )
@@ -434,10 +462,17 @@ export class RepositoryService {
         "NOT_FOUND",
         "No connection in progress. Start again from the project’s settings."
       );
-    await this.permissions.projectEditor(userId, attempt.projectId);
+    if (attempt.projectId)
+      await this.permissions.projectEditor(userId, attempt.projectId);
+    else
+      await this.permissions.organizationEditor(
+        userId,
+        attempt.organizationId ?? ""
+      );
     return {
       authorization_id: attempt.id,
       project_id: attempt.projectId,
+      organization_id: attempt.organizationId,
       return_path: this.returnTo(attempt),
       provider: attempt.provider,
       expires_at: attempt.expiresAt.toISOString()
@@ -450,7 +485,7 @@ export class RepositoryService {
     input: ConnectRepositoryRequest
   ) {
     await this.permissions.projectEditor(userId, projectId);
-    const { attempt, adapter, secrets, userToken } = await this.attempt(
+    const { attempt, adapter, userToken } = await this.attempt(
       userId,
       projectId,
       input.authorization_id
@@ -470,29 +505,59 @@ export class RepositoryService {
         "REPOSITORY_AUTHORIZATION_INVALID",
         prepared.repository.ineligibleReason
       );
+    const draft = this.draftConnection({
+      connectionId,
+      projectId,
+      provider: attempt.provider,
+      prepared,
+      userId,
+      integrationId: null
+    });
+    const connection = await this.finishConnection({
+      userId,
+      draft,
+      mapping: input.default_branch_mapping,
+      createExistingBranches: input.create_existing_branches,
+      consumeAttemptId: attempt.id
+    });
+    return { repository: await this.json(connection) };
+  }
+
+  /** A connection row not yet written, its secrets sealed to its id. */
+  draftConnection(input: {
+    connectionId: string;
+    projectId: string;
+    provider: ProviderName;
+    prepared: PreparedConnection;
+    userId: string;
+    integrationId: string | null;
+  }): ConnectionRow {
+    const secrets = this.adapter(input.provider).secrets;
     const seal = (value: string | null | undefined, purpose: string) =>
       value
         ? secrets.seal(
             value,
-            aad("repository_connections", connectionId, purpose)
+            aad("repository_connections", input.connectionId, purpose)
           )
         : null;
     const now = this.now();
-    const draft: ConnectionRow = {
-      id: connectionId,
-      projectId,
-      provider: attempt.provider,
+    const { prepared } = input;
+    return {
+      id: input.connectionId,
+      projectId: input.projectId,
+      provider: input.provider,
       providerRepositoryId: prepared.repository.id,
       repositoryFullName: prepared.repository.fullName,
       repositoryUrl: prepared.repository.url,
       providerDefaultBranch: prepared.repository.defaultBranch,
       installationId: prepared.installationId,
+      integrationId: input.integrationId,
       gitlabHookId: prepared.gitlabHookId ?? null,
       accessTokenCiphertext: seal(prepared.accessToken, "access_token"),
       refreshTokenCiphertext: seal(prepared.refreshToken, "refresh_token"),
       tokenExpiresAt: prepared.tokenExpiresAt ?? null,
       webhookSecretCiphertext: seal(prepared.webhookSecret, "webhook_secret"),
-      connectedByUserId: userId,
+      connectedByUserId: input.userId,
       providerAccountId: prepared.providerAccountId,
       status: "active",
       statusReason: null,
@@ -504,7 +569,24 @@ export class RepositoryService {
       updatedAt: now,
       disconnectedAt: null
     };
-    // Snapshot the provider's branches before the transaction (§8.7).
+  }
+
+  /**
+   * Writes a connection: snapshot the provider's branches, then in one
+   * transaction check nothing else holds the project or repository, insert,
+   * map the default branch and record the refs (§8.7).
+   */
+  async finishConnection(input: {
+    userId: string;
+    draft: ConnectionRow;
+    mapping: ConnectRepositoryRequest["default_branch_mapping"];
+    createExistingBranches: boolean;
+    consumeAttemptId?: string;
+  }) {
+    const { userId, draft } = input;
+    const projectId = draft.projectId;
+    const adapter = this.adapter(draft.provider).adapter;
+    const now = this.now();
     const remote = await provider(() => adapter.listBranches(draft));
     const connection = await this.db.transaction(async (tx) => {
       await this.branches.lockActiveProject(tx, projectId);
@@ -547,7 +629,7 @@ export class RepositoryService {
       await this.mapDefault(
         tx,
         row!,
-        input.default_branch_mapping,
+        input.mapping,
         userId,
         remote.find((branch) => branch.name === row!.providerDefaultBranch)
           ?.sha ?? null
@@ -565,13 +647,18 @@ export class RepositoryService {
             createdSignal: "connect_snapshot"
           })
           .returning();
-        if (input.create_existing_branches)
+        if (input.createExistingBranches)
           await this.sync.linkOrCreate(tx, row!, ref!);
       }
-      await tx
-        .update(repositoryConnectionAttempts)
-        .set({ status: "consumed", consumedAt: now, userTokenCiphertext: null })
-        .where(eq(repositoryConnectionAttempts.id, attempt.id));
+      if (input.consumeAttemptId)
+        await tx
+          .update(repositoryConnectionAttempts)
+          .set({
+            status: "consumed",
+            consumedAt: now,
+            userTokenCiphertext: null
+          })
+          .where(eq(repositoryConnectionAttempts.id, input.consumeAttemptId));
       await insertProjectEvent(tx, {
         projectId,
         actorUserId: userId,
@@ -582,7 +669,11 @@ export class RepositoryService {
       return row!;
     });
     this.requestReconcile(connection.id);
-    return { repository: await this.json(connection) };
+    return connection;
+  }
+
+  connectionJson(row: ConnectionRow) {
+    return this.json(row);
   }
 
   /**
