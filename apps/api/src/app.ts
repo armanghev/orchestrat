@@ -63,6 +63,7 @@ import {
   realtimeTicketRoutes
 } from "./routes/realtime.js";
 import { attachmentDownloadRoutes } from "./routes/attachment-download.js";
+import { avatarRoutes } from "./routes/avatars.js";
 import {
   RealtimeRegistry,
   AttachmentDownloadTicketStore,
@@ -126,6 +127,10 @@ type AppOptions = {
   db: Database;
   avatarStorage?: AvatarStorageConfig;
   documentStorage?: DocumentStorageConfig;
+  /** Per-project attachment bytes; 10 GiB by default. */
+  attachmentQuotaBytes?: number;
+  /** Absolute API URL (ORCHESTRAT_PUBLIC_URL) for stored avatar URLs. */
+  publicApiUrl?: string;
   checkDatabase?: () => Promise<void>;
   trustProxyHops?: number;
   rateLimits?: Partial<{
@@ -187,7 +192,9 @@ export function buildApp(options: AppOptions) {
   });
   const chats = new ChatService(db);
   const identities = new IdentityService(db);
-  const profiles = new ProfileService(db, options.avatarStorage);
+  const profiles = new ProfileService(db, options.avatarStorage, {
+    publicApiUrl: options.publicApiUrl
+  });
   const tasks = new TaskService(db);
   const agents = new AgentService(db);
   const branches = new BranchService(db, agents);
@@ -216,7 +223,8 @@ export function buildApp(options: AppOptions) {
   const attachments = new AttachmentService(
     db,
     options.documentStorage,
-    attachmentDownloadTickets
+    attachmentDownloadTickets,
+    options.attachmentQuotaBytes
   );
   const repositoryOptions = options.repository ?? {};
   const repositoryConfig = {
@@ -242,7 +250,12 @@ export function buildApp(options: AppOptions) {
     providerAdapters,
     repositoryOptions.now
   );
-  const mergeEngine = new MergeEngine(db, branches, attachments.mergeObjects());
+  const mergeEngine = new MergeEngine(
+    db,
+    branches,
+    attachments.mergeObjects(),
+    options.attachmentQuotaBytes
+  );
   const providerMerges = new ProviderMerges(
     db,
     mergeEngine,
@@ -443,6 +456,14 @@ export function buildApp(options: AppOptions) {
   app.register(attachmentDownloadRoutes, {
     prefix: "/api/v1",
     attachments
+  });
+  app.register(avatarRoutes, {
+    prefix: "/api/v1",
+    profiles,
+    rateLimit: rateLimitHook(
+      new FixedWindowRateLimit(1200, 60_000),
+      (request) => clientKey(request.ip)
+    )
   });
   app.register(cliAuthorizationPublicRoutes, {
     prefix: "/api/v1",
