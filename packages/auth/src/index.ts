@@ -84,11 +84,37 @@ export const PASSWORD_MIN_LENGTH = 10;
 export const PASSWORD_MAX_LENGTH = 256;
 
 export type ScryptParams = { logN: number; r: number; p: number };
-const CURRENT_PARAMS: ScryptParams = { logN: 15, r: 8, p: 1 };
+// OWASP's scrypt equivalent of N=2^17, r=8, p=1 at a quarter of the memory.
+const CURRENT_PARAMS: ScryptParams = { logN: 15, r: 8, p: 3 };
 const KEY_LENGTH = 32;
 const SALT_LENGTH = 16;
 
-const scrypt = (password: string, salt: Buffer, { logN, r, p }: ScryptParams) =>
+// scrypt runs on libuv's small thread pool; capping concurrent hashes keeps a
+// burst of logins from starving everything else that uses the pool.
+const MAX_CONCURRENT_HASHES = 2;
+let activeHashes = 0;
+const waitingHashes: (() => void)[] = [];
+async function withHashSlot<T>(work: () => Promise<T>) {
+  if (activeHashes >= MAX_CONCURRENT_HASHES)
+    await new Promise<void>((resolve) => waitingHashes.push(resolve));
+  else activeHashes += 1;
+  try {
+    return await work();
+  } finally {
+    const next = waitingHashes.shift();
+    if (next) next();
+    else activeHashes -= 1;
+  }
+}
+
+const scrypt = (password: string, salt: Buffer, params: ScryptParams) =>
+  withHashSlot(() => rawScrypt(password, salt, params));
+
+const rawScrypt = (
+  password: string,
+  salt: Buffer,
+  { logN, r, p }: ScryptParams
+) =>
   new Promise<Buffer>((resolve, reject) => {
     const N = 2 ** logN;
     const options: ScryptOptions = { N, r, p, maxmem: 256 * N * r };
@@ -130,11 +156,11 @@ function parseHash(stored: string) {
     !Number.isInteger(r) ||
     !Number.isInteger(p) ||
     logN < 10 ||
-    logN > 20 ||
+    logN > 17 ||
     r < 1 ||
-    r > 32 ||
+    r > 16 ||
     p < 1 ||
-    p > 16
+    p > 4
   )
     return null;
   const salt = Buffer.from(parts[4]!, "base64url");

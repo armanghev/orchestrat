@@ -96,7 +96,6 @@ export const users = pgTable(
       table.authSubject
     ),
     uniqueIndex("users_username_unique").on(table.username),
-    index("users_email_idx").on(table.email),
     uniqueIndex("users_email_unique").on(table.email),
     check(
       "users_email_normalized",

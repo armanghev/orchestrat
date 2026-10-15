@@ -7,6 +7,7 @@ export const authErrorCodeSchema = z.enum([
   "INVALID_CREDENTIALS",
   "SIGNUP_CLOSED",
   "INVITE_REQUIRED",
+  "SETUP_TOKEN_REQUIRED",
   "EMAIL_TAKEN",
   "REFRESH_TOKEN_INVALID",
   "PASSWORD_INCORRECT"
@@ -30,7 +31,10 @@ export const signupRequestSchema = z.object({
   email: emailSchema,
   password: passwordSchema,
   full_name: fullNameSchema,
-  invite_token: z.string().min(1).max(512).optional()
+  invite_token: z.string().min(1).max(512).optional(),
+  // Required for the first account on an empty instance; the server prints
+  // it in its log at startup (or reads ORCHESTRAT_SETUP_TOKEN).
+  setup_token: z.string().min(1).max(512).optional()
 });
 export type SignupRequest = z.infer<typeof signupRequestSchema>;
 
@@ -62,6 +66,8 @@ export const authSessionResponseSchema = z.object({
     email: z.string(),
     full_name: z.string(),
     is_instance_admin: z.boolean()
-  })
+  }),
+  // Set when a sign-up accepted a project invite.
+  invited_project_id: z.string().uuid().nullable().optional()
 });
 export type AuthSessionResponse = z.infer<typeof authSessionResponseSchema>;

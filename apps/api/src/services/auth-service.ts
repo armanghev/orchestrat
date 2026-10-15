@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import {
   ACCESS_TOKEN_PREFIX,
   REFRESH_TOKEN_PREFIX,
@@ -15,6 +15,7 @@ import {
 } from "@orchestrat/auth";
 import {
   authSessions,
+  cliCredentials,
   instanceSettings,
   projectInvitations,
   userPasswords,
@@ -30,6 +31,7 @@ import type {
 } from "@orchestrat/protocol";
 import { and, asc, eq, gt, isNull, lt, ne, or } from "drizzle-orm";
 import { ApiError } from "./api-error.js";
+import type { ProjectMembershipService } from "./project-membership-service.js";
 
 type Tx = Parameters<Parameters<Database["transaction"]>[0]>[0];
 type User = typeof users.$inferSelect;
@@ -42,6 +44,13 @@ export type AuthServiceOptions = {
   // A refresh token presented again within this window of its rotation is
   // treated as a race between tabs, not as theft.
   refreshReuseGraceSeconds?: number;
+  // Sessions end this long after sign-in, however often they refresh.
+  sessionMaxAgeSeconds?: number;
+  // Required to create the first account on an empty instance, so a server
+  // reachable from the internet can't be claimed by whoever finds it first.
+  setupToken?: string;
+  // Accepts a project invite as part of sign-up.
+  memberships?: ProjectMembershipService;
 };
 
 const USER_AGENT_MAX_LENGTH = 512;
@@ -64,6 +73,7 @@ export class AuthService implements HumanAuth {
   private readonly accessTtlMs: number;
   private readonly refreshTtlMs: number;
   private readonly reuseGraceMs: number;
+  private readonly sessionMaxAgeMs: number;
 
   constructor(
     private readonly db: Database,
@@ -73,6 +83,8 @@ export class AuthService implements HumanAuth {
     this.accessTtlMs = (options.accessTtlSeconds ?? 3600) * 1000;
     this.refreshTtlMs = (options.refreshTtlSeconds ?? 30 * 24 * 3600) * 1000;
     this.reuseGraceMs = (options.refreshReuseGraceSeconds ?? 60) * 1000;
+    this.sessionMaxAgeMs =
+      (options.sessionMaxAgeSeconds ?? 90 * 24 * 3600) * 1000;
   }
 
   async instance() {
@@ -86,9 +98,14 @@ export class AuthService implements HumanAuth {
     input: SignupRequest,
     userAgent?: string
   ): Promise<AuthSessionResponse> {
+    // Refuse what the policy already rules out before paying for scrypt.
+    if (await this.anyUser(this.db)) this.assertSignupPolicy(input);
+    else this.assertSetupToken(input);
     const passwordHash = await hashPassword(input.password);
     return this.db.transaction(async (tx) => {
       const emptyInstance = !(await this.anyUser(tx));
+      if (emptyInstance) this.assertSetupToken(input);
+      else await this.assertSignupAllowed(tx, input);
       const [taken] = await tx
         .select({ id: users.id })
         .from(users)
@@ -100,7 +117,6 @@ export class AuthService implements HumanAuth {
           "EMAIL_TAKEN",
           "An account with that email already exists."
         );
-      if (!emptyInstance) await this.assertSignupAllowed(tx, input);
 
       const id = randomUUID();
       const [created] = await tx
@@ -135,7 +151,14 @@ export class AuthService implements HumanAuth {
           await this.assertSignupAllowed(tx, input);
         }
       }
-      return this.createSession(tx, user!, userAgent);
+      // An invite is used up by the sign-up it allowed.
+      const invitedProjectId = input.invite_token
+        ? await this.acceptInvite(tx, id, input.invite_token)
+        : null;
+      return {
+        ...(await this.createSession(tx, user!, userAgent)),
+        invited_project_id: invitedProjectId
+      };
     });
   }
 
@@ -184,7 +207,12 @@ export class AuthService implements HumanAuth {
         .where(eq(authSessions.refreshTokenHash, hash))
         .for("update");
       if (current) {
-        if (current.revokedAt || current.refreshExpiresAt <= now) return null;
+        if (
+          current.revokedAt ||
+          current.refreshExpiresAt <= now ||
+          now.getTime() - current.createdAt.getTime() >= this.sessionMaxAgeMs
+        )
+          return null;
         const user = await tx.query.users.findFirst({
           where: eq(users.id, current.userId)
         });
@@ -232,8 +260,27 @@ export class AuthService implements HumanAuth {
       );
   }
 
+  // Ends the session a refresh token belongs to; works after the access
+  // token has expired. Unknown tokens are ignored.
+  async revokeRefreshToken(refreshToken: string) {
+    if (!isTokenWithPrefix(refreshToken, REFRESH_TOKEN_PREFIX)) return;
+    const hash = hashToken(refreshToken);
+    await this.db
+      .update(authSessions)
+      .set({ revokedAt: this.now() })
+      .where(
+        and(
+          or(
+            eq(authSessions.refreshTokenHash, hash),
+            eq(authSessions.previousRefreshTokenHash, hash)
+          ),
+          isNull(authSessions.revokedAt)
+        )
+      );
+  }
+
   async logoutAll(userId: string) {
-    await this.revokeSessions(this.db, userId);
+    await this.db.transaction((tx) => this.revokeSessions(tx, userId));
   }
 
   // Ends every other session, so a stolen session can't outlive the change.
@@ -399,6 +446,61 @@ export class AuthService implements HumanAuth {
     return Boolean(row);
   }
 
+  private assertSetupToken(input: SignupRequest) {
+    const expected = this.options.setupToken;
+    const given = input.setup_token;
+    if (
+      !expected ||
+      !given ||
+      !timingSafeEqual(
+        Buffer.from(hashToken(given), "hex"),
+        Buffer.from(hashToken(expected), "hex")
+      )
+    )
+      throw new ApiError(
+        403,
+        "SETUP_TOKEN_REQUIRED",
+        "Creating the first account needs the setup token from the server log."
+      );
+  }
+
+  // The checks that need no database work.
+  private assertSignupPolicy(input: SignupRequest) {
+    if (this.options.signupMode === "closed")
+      throw new ApiError(
+        403,
+        "SIGNUP_CLOSED",
+        "This server doesn't allow new accounts. Ask an admin to create one."
+      );
+    if (this.options.signupMode === "invite" && !input.invite_token)
+      throw new ApiError(
+        403,
+        "INVITE_REQUIRED",
+        "You need an invite link to create an account on this server."
+      );
+  }
+
+  private async acceptInvite(tx: Tx, userId: string, token: string) {
+    if (!this.options.memberships)
+      throw new Error("Invite acceptance is not configured.");
+    try {
+      const { project } = await this.options.memberships.acceptInvitationIn(
+        tx,
+        userId,
+        token
+      );
+      return project.id as string;
+    } catch (error) {
+      if (error instanceof ApiError && error.statusCode < 500)
+        throw new ApiError(
+          403,
+          "INVITE_REQUIRED",
+          "This invite link is invalid or has expired."
+        );
+      throw error;
+    }
+  }
+
   private async assertSignupAllowed(tx: Tx, input: SignupRequest) {
     if (this.options.signupMode === "open") return;
     if (this.options.signupMode === "closed")
@@ -513,11 +615,19 @@ export class AuthService implements HumanAuth {
     };
   }
 
+  // Ends sessions and the user's CLI credentials: a stolen session could
+  // have approved a CLI login, which would otherwise outlive the recovery.
   private async revokeSessions(
     db: Database | Tx,
     userId: string,
     exceptAccessHash?: string
   ) {
+    await db
+      .update(cliCredentials)
+      .set({ revokedAt: this.now() })
+      .where(
+        and(eq(cliCredentials.userId, userId), isNull(cliCredentials.revokedAt))
+      );
     await db
       .update(authSessions)
       .set({ revokedAt: this.now() })

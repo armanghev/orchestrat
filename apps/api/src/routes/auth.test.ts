@@ -1,8 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { authSessions, users } from "@orchestrat/db";
-import { eq } from "drizzle-orm";
-import { fixture } from "../test/fixture.js";
+import { randomUUID } from "node:crypto";
+import {
+  authSessions,
+  cliCredentials,
+  projectMembers,
+  users
+} from "@orchestrat/db";
+import { and, eq } from "drizzle-orm";
+import { clientKey } from "../services/rate-limit.js";
+import { TEST_SETUP_TOKEN, fixture } from "../test/fixture.js";
 
 type App = Awaited<ReturnType<typeof fixture>>["app"];
 
@@ -13,7 +20,13 @@ const signup = (app: App, email: string, extra: Record<string, unknown> = {}) =>
   app.inject({
     method: "POST",
     url: "/api/v1/auth/signup",
-    payload: { email, password, full_name: email.split("@")[0], ...extra }
+    payload: {
+      email,
+      password,
+      full_name: email.split("@")[0],
+      setup_token: TEST_SETUP_TOKEN,
+      ...extra
+    }
   });
 
 const login = (app: App, email: string, secret = password) =>
@@ -34,6 +47,13 @@ test("the first account on an empty instance becomes its admin", async () => {
     url: "/api/v1/auth/instance"
   });
   assert.deepEqual(before.json(), { needs_setup: true, signup_mode: "invite" });
+
+  // Claiming an empty instance needs the setup token from the server log.
+  for (const setup_token of [undefined, "wrong-token-0123456789"]) {
+    const refused = await signup(app, "mallory@example.com", { setup_token });
+    assert.equal(refused.statusCode, 403);
+    assert.equal(refused.json().error.code, "SETUP_TOKEN_REQUIRED");
+  }
 
   const first = await signup(app, "Ada@Example.com ");
   assert.equal(first.statusCode, 201);
@@ -59,8 +79,8 @@ test("the first account on an empty instance becomes its admin", async () => {
   assert.equal(after.json().needs_setup, false);
 });
 
-test("invite mode needs a usable project invite link", async () => {
-  const { app } = await fixture({ builtinAuth: true });
+test("invite mode needs a usable project invite link, and sign-up uses it up", async () => {
+  const { app, db } = await fixture({ builtinAuth: true });
   const admin = (await signup(app, "ada@example.com")).json();
 
   const missing = await signup(app, "bob@example.com");
@@ -102,6 +122,17 @@ test("invite mode needs a usable project invite link", async () => {
   });
   assert.equal(invited.statusCode, 201);
   assert.equal(invited.json().user.is_instance_admin, false);
+  assert.equal(invited.json().invited_project_id, project.id);
+  const [membership] = await db
+    .select()
+    .from(projectMembers)
+    .where(
+      and(
+        eq(projectMembers.projectId, project.id),
+        eq(projectMembers.userId, invited.json().user.user_id)
+      )
+    );
+  assert.equal(membership?.role, "member");
 
   const accepted = await app.inject({
     method: "POST",
@@ -334,12 +365,14 @@ test("sessions store only token hashes", async () => {
   assert.equal(serialized.includes(session.refresh_token), false);
 });
 
-test("login is rate limited per email", async () => {
+test("only failed logins count toward the per-email limit", async () => {
   const { app } = await fixture({
     builtinAuth: true,
     rateLimits: { authLoginPerEmail: 2 }
   });
   await signup(app, "ada@example.com");
+  for (let attempt = 0; attempt < 3; attempt += 1)
+    assert.equal((await login(app, "ada@example.com")).statusCode, 200);
   assert.equal(
     (await login(app, "ada@example.com", "wrong one!!")).statusCode,
     401
@@ -351,5 +384,155 @@ test("login is rate limited per email", async () => {
   const limited = await login(app, "ADA@example.com");
   assert.equal(limited.statusCode, 429);
   assert.equal(limited.json().error.code, "RATE_LIMITED");
+  assert.ok(Number(limited.headers["retry-after"]) > 0);
   assert.equal((await login(app, "someone@example.com")).statusCode, 401);
+});
+test("an invite can't open two accounts", async () => {
+  const { app } = await fixture({ builtinAuth: true, signupMode: "open" });
+  const admin = (await signup(app, "ada@example.com")).json();
+  const organization = (
+    await app.inject({
+      method: "POST",
+      url: "/api/v1/organizations",
+      headers: bearer(admin.access_token),
+      payload: { name: "Acme" }
+    })
+  ).json();
+  const project = (
+    await app.inject({
+      method: "POST",
+      url: `/api/v1/organizations/${organization.id}/projects`,
+      headers: bearer(admin.access_token),
+      payload: { name: "Rocket" }
+    })
+  ).json();
+  const invite = (
+    await app.inject({
+      method: "POST",
+      url: `/api/v1/projects/${project.id}/invitations`,
+      headers: bearer(admin.access_token)
+    })
+  ).json();
+  assert.equal(
+    (await signup(app, "bob@example.com", { invite_token: invite.token }))
+      .statusCode,
+    201
+  );
+  const second = await signup(app, "carol@example.com", {
+    invite_token: invite.token
+  });
+  assert.equal(second.statusCode, 403);
+  assert.equal(second.json().error.code, "INVITE_REQUIRED");
+  // pg-mem ignores ROLLBACK; auth-postgres.integration.test.ts checks that
+  // the refused sign-up leaves no account behind.
+});
+
+test("closed and invite modes refuse before revealing whether an email exists", async () => {
+  const { app } = await fixture({ builtinAuth: true, signupMode: "closed" });
+  await signup(app, "ada@example.com");
+  const existing = await signup(app, "ada@example.com");
+  const fresh = await signup(app, "zed@example.com");
+  assert.equal(existing.statusCode, 403);
+  assert.equal(fresh.statusCode, 403);
+  assert.equal(existing.json().error.code, fresh.json().error.code);
+});
+
+test("revoke ends a session with only its refresh token", async () => {
+  const { app } = await fixture({ builtinAuth: true });
+  const session = (await signup(app, "ada@example.com")).json();
+  const revoked = await app.inject({
+    method: "POST",
+    url: "/api/v1/auth/revoke",
+    payload: { refresh_token: session.refresh_token }
+  });
+  assert.equal(revoked.statusCode, 204);
+  assert.equal((await profile(app, session.access_token)).statusCode, 401);
+  const unknown = await app.inject({
+    method: "POST",
+    url: "/api/v1/auth/revoke",
+    payload: { refresh_token: `orch_refresh_${"x".repeat(43)}` }
+  });
+  assert.equal(unknown.statusCode, 204);
+});
+
+test("sessions end 90 days after sign-in however often they refresh", async () => {
+  const { app } = await fixture({
+    builtinAuth: true,
+    sessionAuth: { sessionMaxAgeSeconds: 0 }
+  });
+  const session = (await signup(app, "ada@example.com")).json();
+  const refreshed = await app.inject({
+    method: "POST",
+    url: "/api/v1/auth/refresh",
+    payload: { refresh_token: session.refresh_token }
+  });
+  assert.equal(refreshed.statusCode, 401);
+});
+
+test("password changes are rate limited per user", async () => {
+  const { app } = await fixture({
+    builtinAuth: true,
+    rateLimits: { authPassword: 2 }
+  });
+  const session = (await signup(app, "ada@example.com")).json();
+  const attempt = () =>
+    app.inject({
+      method: "POST",
+      url: "/api/v1/auth/password",
+      headers: bearer(session.access_token),
+      payload: {
+        current_password: "guess number one",
+        new_password: "a brand new passphrase"
+      }
+    });
+  assert.equal((await attempt()).statusCode, 403);
+  assert.equal((await attempt()).statusCode, 403);
+  assert.equal((await attempt()).statusCode, 429);
+});
+
+test("signing out everywhere and password changes revoke CLI credentials", async () => {
+  const { app, db } = await fixture({ builtinAuth: true });
+  const session = (await signup(app, "ada@example.com")).json();
+  const insertCliCredential = async () => {
+    const [row] = await db
+      .insert(cliCredentials)
+      .values({
+        userId: session.user.user_id,
+        tokenHash: randomUUID()
+      })
+      .returning();
+    return row!.id;
+  };
+  const revokedAt = async (id: string) =>
+    (await db.select().from(cliCredentials).where(eq(cliCredentials.id, id)))[0]
+      ?.revokedAt;
+
+  const first = await insertCliCredential();
+  await app.inject({
+    method: "POST",
+    url: "/api/v1/auth/password",
+    headers: bearer(session.access_token),
+    payload: {
+      current_password: password,
+      new_password: "a brand new passphrase"
+    }
+  });
+  assert.ok(await revokedAt(first));
+
+  const second = await insertCliCredential();
+  await app.inject({
+    method: "POST",
+    url: "/api/v1/auth/logout-all",
+    headers: bearer(session.access_token)
+  });
+  assert.ok(await revokedAt(second));
+});
+
+test("rate limits group IPv6 clients by /64", () => {
+  assert.equal(clientKey("203.0.113.9"), "203.0.113.9");
+  assert.equal(clientKey("::ffff:203.0.113.9"), "203.0.113.9");
+  assert.equal(clientKey("2001:db8:1:2:3:4:5:6"), "2001:db8:1:2::/64");
+  assert.equal(clientKey("2001:db8:1:2::ffff"), "2001:db8:1:2::/64");
+  assert.equal(clientKey("2001:db8::1"), "2001:db8:0:0::/64");
+  assert.equal(clientKey("::1"), "0:0:0:0::/64");
 });

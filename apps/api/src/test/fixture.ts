@@ -9,6 +9,8 @@ import type { SignupMode } from "@orchestrat/protocol";
 import type { DocumentStorageConfig } from "../services/document-service.js";
 import { isPgMemMigrationStatementSupported } from "./pg-mem-migrations.js";
 
+export const TEST_SETUP_TOKEN = "test-setup-token-0123456789";
+
 export async function fixture(
   options: {
     documentStorage?: DocumentStorageConfig;
@@ -19,6 +21,7 @@ export async function fixture(
     builtinAuth?: boolean;
     signupMode?: SignupMode;
     sessionAuth?: Parameters<typeof buildApp>[0]["sessionAuth"];
+    setupToken?: string;
   } = {}
 ): Promise<{
   app: FastifyInstance;
@@ -121,6 +124,7 @@ export async function fixture(
       auth: options.builtinAuth ? undefined : auth,
       signupMode: options.signupMode,
       sessionAuth: options.sessionAuth,
+      setupToken: options.setupToken ?? TEST_SETUP_TOKEN,
       db,
       documentStorage: options.documentStorage,
       repository: options.repository,

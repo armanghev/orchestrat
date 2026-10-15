@@ -75,7 +75,11 @@ import {
   cliAuthorizationHumanRoutes,
   cliAuthorizationPublicRoutes
 } from "./routes/cli-authorization.js";
-import { FixedWindowRateLimit, rateLimitHook } from "./services/rate-limit.js";
+import {
+  FixedWindowRateLimit,
+  clientKey,
+  rateLimitHook
+} from "./services/rate-limit.js";
 import { ChatService } from "./services/chat-service.js";
 import { ProjectMembershipService } from "./services/project-membership-service.js";
 import { AttentionService } from "./services/attention-service.js";
@@ -109,7 +113,12 @@ type AppOptions = {
   /** Overrides the built-in session auth; tests inject a fake here. */
   auth?: HumanAuth;
   signupMode?: SignupMode;
-  sessionAuth?: Omit<AuthServiceOptions, "signupMode">;
+  sessionAuth?: Omit<
+    AuthServiceOptions,
+    "signupMode" | "setupToken" | "memberships"
+  >;
+  /** Needed to create the first account on an empty instance. */
+  setupToken?: string;
   closeDatabase?: () => Promise<void>;
   db: Database;
   avatarStorage?: AvatarStorageConfig;
@@ -124,6 +133,7 @@ type AppOptions = {
     authLoginPerEmail: number;
     authSignup: number;
     authRefresh: number;
+    authPassword: number;
   }>;
 };
 
@@ -174,11 +184,6 @@ export function buildApp(options: AppOptions) {
   });
   const chats = new ChatService(db);
   const identities = new IdentityService(db);
-  const sessions = new AuthService(db, {
-    ...options.sessionAuth,
-    signupMode: options.signupMode ?? "invite"
-  });
-  const humanAuth = options.auth ?? sessions;
   const profiles = new ProfileService(db, options.avatarStorage);
   const tasks = new TaskService(db);
   const agents = new AgentService(db);
@@ -198,6 +203,13 @@ export function buildApp(options: AppOptions) {
     db,
     chats.assertHumanMayLeaveProject.bind(chats)
   );
+  const sessions = new AuthService(db, {
+    ...options.sessionAuth,
+    signupMode: options.signupMode ?? "invite",
+    setupToken: options.setupToken,
+    memberships
+  });
+  const humanAuth = options.auth ?? sessions;
   const attachments = new AttachmentService(
     db,
     options.documentStorage,
@@ -284,15 +296,16 @@ export function buildApp(options: AppOptions) {
     authLoginPerEmail: 10,
     authSignup: 10,
     authRefresh: 60,
+    authPassword: 5,
     ...options.rateLimits
   };
   const publicCliCreateRateLimit = rateLimitHook(
     new FixedWindowRateLimit(rateLimits.publicCliCreate, 60_000),
-    (request) => request.ip
+    (request) => clientKey(request.ip)
   );
   const publicCliPollRateLimit = rateLimitHook(
     new FixedWindowRateLimit(rateLimits.publicCliPoll, 60_000),
-    (request) => request.ip
+    (request) => clientKey(request.ip)
   );
   const expensiveRateLimit = rateLimitHook(
     new FixedWindowRateLimit(rateLimits.expensive, 60_000),
@@ -301,11 +314,6 @@ export function buildApp(options: AppOptions) {
         ? `agent:${request.agentPrincipal.credentialId}`
         : `user:${request.userId}`
   );
-
-  const loginEmailKey = (request: { body: unknown }) => {
-    const email = (request.body as { email?: unknown } | null)?.email;
-    return `email:${typeof email === "string" ? email.trim().toLowerCase() : ""}`;
-  };
 
   app.register(cors, {
     origin: options.allowedOrigins,
@@ -408,30 +416,27 @@ export function buildApp(options: AppOptions) {
     auth: sessions,
     signupRateLimit: rateLimitHook(
       new FixedWindowRateLimit(rateLimits.authSignup, 60_000),
-      (request) => request.ip
+      (request) => clientKey(request.ip)
     ),
-    loginRateLimits: [
-      rateLimitHook(
-        new FixedWindowRateLimit(rateLimits.authLogin, 60_000),
-        (request) => request.ip
-      ),
-      rateLimitHook(
-        new FixedWindowRateLimit(rateLimits.authLoginPerEmail, 15 * 60_000),
-        loginEmailKey
-      )
-    ],
+    loginRateLimit: rateLimitHook(
+      new FixedWindowRateLimit(rateLimits.authLogin, 60_000),
+      (request) => clientKey(request.ip)
+    ),
+    loginFailures: new FixedWindowRateLimit(
+      rateLimits.authLoginPerEmail,
+      15 * 60_000
+    ),
     refreshRateLimit: rateLimitHook(
       new FixedWindowRateLimit(rateLimits.authRefresh, 60_000),
-      (request) => request.ip
+      (request) => clientKey(request.ip)
     )
   });
   app.register(publicRepositoryRoutes, {
     prefix: "/api/v1",
     repositories,
     ingress: webhookIngress,
-    rateLimit: rateLimitHook(
-      new FixedWindowRateLimit(600, 60_000),
-      (request) => request.ip
+    rateLimit: rateLimitHook(new FixedWindowRateLimit(600, 60_000), (request) =>
+      clientKey(request.ip)
     )
   });
   app.decorateRequest("agentPrincipal", null);
@@ -501,7 +506,13 @@ export function buildApp(options: AppOptions) {
       api.register(cliAuthorizationHumanRoutes, {
         authorization: cliAuthorization
       });
-      api.register(authHumanRoutes, { auth: sessions });
+      api.register(authHumanRoutes, {
+        auth: sessions,
+        passwordRateLimit: rateLimitHook(
+          new FixedWindowRateLimit(rateLimits.authPassword, 15 * 60_000),
+          (request) => `user:${request.userId}`
+        )
+      });
     },
     { prefix: "/api/v1" }
   );

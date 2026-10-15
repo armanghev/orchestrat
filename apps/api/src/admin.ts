@@ -33,6 +33,10 @@ const readStdin = async () => {
 async function password(fromStdin: boolean) {
   if (!fromStdin)
     return { value: randomBytes(15).toString("base64url"), generated: true };
+  if (process.stdin.isTTY)
+    throw new Error(
+      '--password-stdin reads a piped password, e.g. `printf %s "$PASSWORD" | orchestrat-admin ...`. Omit it to generate one.'
+    );
   const value = await readStdin();
   if (value.length < PASSWORD_MIN_LENGTH || value.length > PASSWORD_MAX_LENGTH)
     throw new Error(

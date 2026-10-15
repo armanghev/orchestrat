@@ -2,6 +2,9 @@
 -- are scrypt hashes; sessions hold only SHA-256 hashes of their opaque access
 -- and refresh tokens. instance_settings is a single row that records which
 -- account set up an empty instance (that account becomes the first admin).
+-- Each email now belongs to one account. If this migration fails on the
+-- unique index, find duplicates first:
+--   SELECT email, count(*) FROM users GROUP BY email HAVING count(*) > 1;
 ALTER TABLE "users" ADD COLUMN "is_instance_admin" boolean DEFAULT false NOT NULL;--> statement-breakpoint
 CREATE TABLE "user_passwords" (
 	"user_id" uuid PRIMARY KEY NOT NULL,
@@ -41,6 +44,7 @@ CREATE UNIQUE INDEX "auth_sessions_refresh_token_unique" ON "auth_sessions" USIN
 CREATE INDEX "auth_sessions_previous_refresh_idx" ON "auth_sessions" USING btree ("previous_refresh_token_hash");--> statement-breakpoint
 CREATE INDEX "auth_sessions_user_idx" ON "auth_sessions" USING btree ("user_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "users_email_unique" ON "users" USING btree ("email");--> statement-breakpoint
+DROP INDEX "users_email_idx";--> statement-breakpoint
 ALTER TABLE "user_passwords" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
 ALTER TABLE "auth_sessions" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
 ALTER TABLE "instance_settings" ENABLE ROW LEVEL SECURITY;
