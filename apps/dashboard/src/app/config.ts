@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 const baseSchema = z.object({
-  VITE_API_URL: z.string(),
+  VITE_API_URL: z.string().optional(),
   VITE_E2E_AUTH: z.enum(["0", "1"]).optional()
 });
 
@@ -39,7 +39,14 @@ function isLoopback(hostname: string): boolean {
   );
 }
 
-function isApiRootUrl(value: unknown): value is string {
+function httpOrigin(value: string | undefined) {
+  const url = cleanUrl(value);
+  return url && /^https?:$/.test(url.protocol) ? url.origin : null;
+}
+
+// pageOrigin is where this dashboard was loaded from: plain http is fine
+// for the API when it is that same origin (a self-hosted server on a LAN).
+function isApiRootUrl(value: unknown, pageOrigin?: string): value is string {
   const url = cleanUrl(value);
   if (
     !url ||
@@ -53,20 +60,29 @@ function isApiRootUrl(value: unknown): value is string {
     return false;
   return (
     url.protocol === "https:" ||
-    (url.protocol === "http:" && isLoopback(url.hostname))
+    (url.protocol === "http:" &&
+      (isLoopback(url.hostname) ||
+        (pageOrigin !== undefined && url.origin === httpOrigin(pageOrigin))))
   );
 }
 
+// Without VITE_API_URL the web dashboard talks to the origin it was served
+// from, which is how the self-hosted server ships it.
 export function parsePublicConfig(
   input: Record<string, string | boolean | undefined>,
-  runtime: PublicConfig["runtime"]
+  runtime: PublicConfig["runtime"],
+  pageOrigin?: string
 ): PublicConfig {
   const common = baseSchema.safeParse(input);
-  if (!common.success || !isApiRootUrl(input.VITE_API_URL))
+  const configured = common.success ? common.data.VITE_API_URL : undefined;
+  const apiUrl =
+    configured ||
+    (runtime === "web" ? (httpOrigin(pageOrigin) ?? undefined) : undefined);
+  if (!common.success || !apiUrl || !isApiRootUrl(apiUrl, pageOrigin))
     throw new Error("Dashboard configuration is invalid.");
 
   return {
-    apiUrl: common.data.VITE_API_URL,
+    apiUrl,
     e2eAuth: common.data.VITE_E2E_AUTH === "1",
     runtime
   };

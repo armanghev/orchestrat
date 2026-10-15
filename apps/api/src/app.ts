@@ -6,6 +6,7 @@ import type { Database } from "@orchestrat/db";
 import { logger } from "@orchestrat/logger";
 import type { ApiErrorResponse, ErrorCode } from "@orchestrat/protocol";
 import multipart from "@fastify/multipart";
+import fastifyStatic from "@fastify/static";
 import websocket from "@fastify/websocket";
 import Fastify from "fastify";
 import { healthRoutes } from "./routes/health.js";
@@ -119,6 +120,8 @@ type AppOptions = {
   >;
   /** Needed to create the first account on an empty instance. */
   setupToken?: string;
+  /** A built dashboard to serve on this origin (single-container self-host). */
+  dashboardDir?: string;
   closeDatabase?: () => Promise<void>;
   db: Database;
   avatarStorage?: AvatarStorageConfig;
@@ -317,8 +320,29 @@ export function buildApp(options: AppOptions) {
 
   app.register(cors, {
     origin: options.allowedOrigins,
-    methods: ["GET", "HEAD", "POST", "PATCH", "DELETE"]
+    methods: ["GET", "HEAD", "POST", "PATCH", "DELETE"],
+    exposedHeaders: ["retry-after", "x-request-id"]
   });
+  if (options.dashboardDir) {
+    // Only files that exist get routes (wildcard: false); every other
+    // non-API GET falls back to index.html below, for client-side routes.
+    app.register(fastifyStatic, {
+      root: options.dashboardDir,
+      wildcard: false,
+      index: false,
+      // setHeaders decides caching: hashed assets forever, the rest revalidate.
+      cacheControl: false,
+      setHeaders(response, path) {
+        response.setHeader("x-content-type-options", "nosniff");
+        response.setHeader(
+          "cache-control",
+          /[\\/]assets[\\/]/.test(path)
+            ? "public, max-age=31536000, immutable"
+            : "no-cache"
+        );
+      }
+    });
+  }
   app.register(multipart, {
     limits: { fileSize: 2 * 1024 * 1024, files: 1 }
   });
@@ -389,11 +413,27 @@ export function buildApp(options: AppOptions) {
       .send(errorResponse(request.id, "INTERNAL_ERROR", "The request failed."));
   });
 
-  app.setNotFoundHandler((request, reply) =>
-    reply
+  const isApiPath = (url: string) => /^\/(api|health|ready)(\/|\?|$)/.test(url);
+  // A missing file (e.g. a stale /assets/*.js) must 404, not get index.html.
+  const looksLikeFile = (url: string) =>
+    /\.[A-Za-z0-9]+$/.test(url.split(/[?#]/, 1)[0]!);
+  app.setNotFoundHandler((request, reply) => {
+    if (
+      options.dashboardDir &&
+      (request.method === "GET" || request.method === "HEAD") &&
+      !isApiPath(request.url) &&
+      !looksLikeFile(request.url)
+    )
+      return reply
+        .header("cache-control", "no-cache")
+        .header("x-content-type-options", "nosniff")
+        .header("x-frame-options", "DENY")
+        .header("referrer-policy", "same-origin")
+        .sendFile("index.html");
+    return reply
       .code(404)
-      .send(errorResponse(request.id, "NOT_FOUND", "Route not found."))
-  );
+      .send(errorResponse(request.id, "NOT_FOUND", "Route not found."));
+  });
 
   app.register(healthRoutes, { checkDatabase: options.checkDatabase });
   app.register(healthRoutes, {

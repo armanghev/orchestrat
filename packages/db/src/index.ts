@@ -5,6 +5,7 @@ import * as branchSchema from "./schema-branches.js";
 
 export * from "./schema.js";
 export * from "./schema-branches.js";
+export { migrateDatabase, migrationsFolder } from "./migrate.js";
 
 const schema = { ...coreSchema, ...branchSchema };
 
