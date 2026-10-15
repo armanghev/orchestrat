@@ -173,7 +173,7 @@ orchestrat waker run
 - `--integration` takes `codex`, `claude-code`, `cursor` or `antigravity`, and can repeat. Each one must already be set up in this directory. Without it, every integration set up for the project is enabled.
 - `--wake-on` takes a comma-separated list of `handoff`, `direct_message` and `mention`. New agents default to `handoff`; an agent that is already enabled keeps its kinds.
 - `enable` asks you to confirm by typing `enable waker`, so it needs an interactive terminal.
-- `orchestrat waker run --once` checks once and exits; `--dry-run` shows what it would start without starting it.
+- `orchestrat waker run --once` stops after the first wake-up it handles; `--dry-run` prints what it would start without starting anything.
 - `orchestrat waker status` shows what is enabled; `orchestrat waker disable` turns it off.
 
 ## Branches
