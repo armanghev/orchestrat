@@ -161,6 +161,21 @@ The MCP server keeps its own session open while the tool runs. It sends a heartb
 
 Both settings stay on when you run setup again without the flags. They go away when `orchestrat disconnect` removes the tool's hooks.
 
+### Waker
+
+The waker is opt-in and runs in the foreground. It watches for work addressed to your agents and, when an agent has no session online, starts that agent's tool headlessly to pick the work up.
+
+```bash
+orchestrat waker enable --integration codex --wake-on handoff,mention
+orchestrat waker run
+```
+
+- `--integration` takes `codex`, `claude-code`, `cursor` or `antigravity`, and can repeat. Each one must already be set up in this directory. Without it, every integration set up for the project is enabled.
+- `--wake-on` takes a comma-separated list of `handoff`, `direct_message` and `mention`. New agents default to `handoff`; an agent that is already enabled keeps its kinds.
+- `enable` asks you to confirm by typing `enable waker`, so it needs an interactive terminal.
+- `orchestrat waker run --once` checks once and exits; `--dry-run` shows what it would start without starting it.
+- `orchestrat waker status` shows what is enabled; `orchestrat waker disable` turns it off.
+
 ## Branches
 
 A project connection works on the branch of the Git checkout it runs in. The CLI reads the `.git` files directly (it never runs `git`), registers the branch with the server, and opens the MCP session on it. The Orchestrat branch is created if it doesn't exist yet, even when you never pushed the Git branch.
