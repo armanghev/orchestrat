@@ -5,6 +5,7 @@ import { createDatabase, type Database } from "@orchestrat/db";
 import { DataType, newDb } from "pg-mem";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../app.js";
+import type { SignupMode } from "@orchestrat/protocol";
 import type { DocumentStorageConfig } from "../services/document-service.js";
 import { isPgMemMigrationStatementSupported } from "./pg-mem-migrations.js";
 
@@ -13,11 +14,11 @@ export async function fixture(
     documentStorage?: DocumentStorageConfig;
     repository?: Parameters<typeof buildApp>[0]["repository"];
     trustProxyHops?: number;
-    rateLimits?: Partial<{
-      publicCliCreate: number;
-      publicCliPoll: number;
-      expensive: number;
-    }>;
+    rateLimits?: Parameters<typeof buildApp>[0]["rateLimits"];
+    // Use the real session auth instead of the "alice"/"bob" fake.
+    builtinAuth?: boolean;
+    signupMode?: SignupMode;
+    sessionAuth?: Parameters<typeof buildApp>[0]["sessionAuth"];
   } = {}
 ): Promise<{
   app: FastifyInstance;
@@ -117,7 +118,9 @@ export async function fixture(
   return {
     app: buildApp({
       allowedOrigins: [],
-      auth,
+      auth: options.builtinAuth ? undefined : auth,
+      signupMode: options.signupMode,
+      sessionAuth: options.sessionAuth,
       db,
       documentStorage: options.documentStorage,
       repository: options.repository,

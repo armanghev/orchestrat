@@ -160,21 +160,24 @@ test("provisions provider profile once and preserves editable fields", async () 
   }
 });
 
-test("does not link identities by email and qualifies uniqueness by provider", async () => {
+test("does not link identities by email, and each email belongs to one account", async () => {
   const { db, pool } = await testDatabase();
   const identities = new IdentityService(db);
   const subject = "550e8400-e29b-41d4-a716-446655440000";
   try {
     const supabaseId = await identities.resolveUserId(principal(subject));
     const otherId = await identities.resolveUserId(
-      principal("9a787b7b-84c1-4d76-83a4-0f76997e5981", { name: "Bob" })
+      principal("9a787b7b-84c1-4d76-83a4-0f76997e5981", {
+        name: "Bob",
+        email: "bob@example.com"
+      })
     );
     const [legacy] = await db
       .insert(users)
       .values({
         authProvider: "legacy",
         authSubject: subject,
-        email: "shared@example.com",
+        email: "legacy@example.com",
         name: "Legacy"
       })
       .returning({ id: users.id });
@@ -182,6 +185,14 @@ test("does not link identities by email and qualifies uniqueness by provider", a
     assert.notEqual(otherId, supabaseId);
     assert.notEqual(legacy.id, supabaseId);
     assert.equal((await db.select({ id: users.id }).from(users)).length, 3);
+    await assert.rejects(
+      db.insert(users).values({
+        authProvider: "legacy",
+        authSubject: "another-subject",
+        email: "shared@example.com",
+        name: "Duplicate"
+      })
+    );
   } finally {
     await pool.end();
   }

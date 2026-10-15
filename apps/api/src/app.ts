@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import cors from "@fastify/cors";
 import type { HumanAuth } from "@orchestrat/auth";
+import type { SignupMode } from "@orchestrat/protocol";
 import type { Database } from "@orchestrat/db";
 import { logger } from "@orchestrat/logger";
 import type { ApiErrorResponse, ErrorCode } from "@orchestrat/protocol";
@@ -39,6 +40,11 @@ import { MergeService } from "./services/merge-service.js";
 import { MergeEngine } from "./services/merges/engine.js";
 import { TaskClaimService } from "./services/task-claim-service.js";
 import { IdentityService } from "./services/identity-service.js";
+import {
+  AuthService,
+  type AuthServiceOptions
+} from "./services/auth-service.js";
+import { authHumanRoutes, authPublicRoutes } from "./routes/auth.js";
 import { PermissionService } from "./services/permission-service.js";
 import { ProjectService } from "./services/project-service.js";
 import {
@@ -100,7 +106,10 @@ type AppOptions = {
     now?: () => Date;
   };
   allowedOrigins: string[];
-  auth: HumanAuth;
+  /** Overrides the built-in session auth; tests inject a fake here. */
+  auth?: HumanAuth;
+  signupMode?: SignupMode;
+  sessionAuth?: Omit<AuthServiceOptions, "signupMode">;
   closeDatabase?: () => Promise<void>;
   db: Database;
   avatarStorage?: AvatarStorageConfig;
@@ -111,6 +120,10 @@ type AppOptions = {
     publicCliCreate: number;
     publicCliPoll: number;
     expensive: number;
+    authLogin: number;
+    authLoginPerEmail: number;
+    authSignup: number;
+    authRefresh: number;
   }>;
 };
 
@@ -161,6 +174,11 @@ export function buildApp(options: AppOptions) {
   });
   const chats = new ChatService(db);
   const identities = new IdentityService(db);
+  const sessions = new AuthService(db, {
+    ...options.sessionAuth,
+    signupMode: options.signupMode ?? "invite"
+  });
+  const humanAuth = options.auth ?? sessions;
   const profiles = new ProfileService(db, options.avatarStorage);
   const tasks = new TaskService(db);
   const agents = new AgentService(db);
@@ -262,6 +280,10 @@ export function buildApp(options: AppOptions) {
     publicCliCreate: 10,
     publicCliPoll: 120,
     expensive: 120,
+    authLogin: 20,
+    authLoginPerEmail: 10,
+    authSignup: 10,
+    authRefresh: 60,
     ...options.rateLimits
   };
   const publicCliCreateRateLimit = rateLimitHook(
@@ -279,6 +301,11 @@ export function buildApp(options: AppOptions) {
         ? `agent:${request.agentPrincipal.credentialId}`
         : `user:${request.userId}`
   );
+
+  const loginEmailKey = (request: { body: unknown }) => {
+    const email = (request.body as { email?: unknown } | null)?.email;
+    return `email:${typeof email === "string" ? email.trim().toLowerCase() : ""}`;
+  };
 
   app.register(cors, {
     origin: options.allowedOrigins,
@@ -376,6 +403,28 @@ export function buildApp(options: AppOptions) {
     pollRateLimit: publicCliPollRateLimit
   });
   app.register(cliSetupRoutes, { prefix: "/api/v1", setup: cliSetup });
+  app.register(authPublicRoutes, {
+    prefix: "/api/v1",
+    auth: sessions,
+    signupRateLimit: rateLimitHook(
+      new FixedWindowRateLimit(rateLimits.authSignup, 60_000),
+      (request) => request.ip
+    ),
+    loginRateLimits: [
+      rateLimitHook(
+        new FixedWindowRateLimit(rateLimits.authLogin, 60_000),
+        (request) => request.ip
+      ),
+      rateLimitHook(
+        new FixedWindowRateLimit(rateLimits.authLoginPerEmail, 15 * 60_000),
+        loginEmailKey
+      )
+    ],
+    refreshRateLimit: rateLimitHook(
+      new FixedWindowRateLimit(rateLimits.authRefresh, 60_000),
+      (request) => request.ip
+    )
+  });
   app.register(publicRepositoryRoutes, {
     prefix: "/api/v1",
     repositories,
@@ -404,7 +453,7 @@ export function buildApp(options: AppOptions) {
             "Agent credentials are only valid on agent routes."
           );
         }
-        const principal = await options.auth.authenticate({
+        const principal = await humanAuth.authenticate({
           headers: rawHeaderEntries(request.raw.rawHeaders),
           method: request.method,
           url: `http://${request.headers.host ?? "localhost"}${request.url}`
@@ -417,7 +466,8 @@ export function buildApp(options: AppOptions) {
           );
         }
         request.suggestedUsername = principal.username;
-        request.userId = await identities.resolveUserId(principal);
+        request.userId =
+          principal.userId ?? (await identities.resolveUserId(principal));
       });
       api.register(v1Routes, {
         projects,
@@ -451,6 +501,7 @@ export function buildApp(options: AppOptions) {
       api.register(cliAuthorizationHumanRoutes, {
         authorization: cliAuthorization
       });
+      api.register(authHumanRoutes, { auth: sessions });
     },
     { prefix: "/api/v1" }
   );

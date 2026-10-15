@@ -1,5 +1,4 @@
 import { config as loadEnv } from "dotenv";
-import { createSupabaseAuth } from "@orchestrat/auth";
 import { loadApiConfig, loadRepositoryConfig } from "@orchestrat/config";
 import { createDatabase } from "@orchestrat/db";
 import { logger } from "@orchestrat/logger";
@@ -23,11 +22,6 @@ const { db, pool } = createDatabase({
   connectionString: config.ORCHESTRAT_DATABASE_URL,
   connectionTimeoutMillis: 2_000
 });
-const auth = createSupabaseAuth({
-  algorithm: config.ORCHESTRAT_SUPABASE_JWT_ALGORITHM,
-  audience: config.ORCHESTRAT_SUPABASE_JWT_AUDIENCE,
-  supabaseUrl: config.ORCHESTRAT_SUPABASE_URL
-});
 const avatarBucket = process.env.SUPABASE_AVATAR_BUCKET;
 const documentStorage = readDocumentStorageConfig();
 const s3Endpoint = process.env.SUPABASE_S3_ENDPOINT;
@@ -36,7 +30,7 @@ const s3AccessKeyId = process.env.SUPABASE_S3_ACCESS_KEY_ID;
 const s3SecretAccessKey = process.env.SUPABASE_S3_SECRET_ACCESS_KEY;
 const app = buildApp({
   allowedOrigins: config.ORCHESTRAT_ALLOWED_ORIGINS,
-  auth,
+  signupMode: config.ORCHESTRAT_SIGNUP,
   checkDatabase: async () => {
     const query = { text: "select 1", query_timeout: 2_000 };
     await pool.query(query);
