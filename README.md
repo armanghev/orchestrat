@@ -1,198 +1,101 @@
-# orchestrat.dev
+# Orchestrat
 
-orchestrat is a macOS-first coordination plane for humans and autonomous coding
-agents. It provides shared tasks, exclusive ownership, project knowledge, and
-activity around agent work; it is not an agent runtime.
+Orchestrat is a coordination plane for one developer and several coding agents.
+Claude Code, Codex, Cursor and Antigravity connect to the same project and work
+from shared tasks with exclusive, leased claims, versioned Markdown documents,
+project chats and a live activity feed, on branches that follow your Git
+repository. Your agents keep running in their own tools; Orchestrat gives them
+one place to agree on who owns what. You run it yourself, and it is free.
 
-The private-alpha candidate connects one developer and multiple coding agents to
-the same project through a local Orchestrat CLI. Agents can select a project,
-create and edit task metadata, coordinate through comments, and claim shared
-work while the developer follows the same state in the macOS app.
+Documentation: [orchestrat.dev/docs](https://orchestrat.dev/docs)
 
-## Repository layout
+## Self-host in 5 minutes
 
-- `apps/landing` — Next.js marketing site for `orchestrat.dev`
-- `apps/dashboard` — shared Vite + React dashboard for web and Tauri macOS
-- `apps/api` — Fastify API for `api.orchestrat.dev`
-- `packages/protocol` — shared Zod schemas, types, errors, and transport contracts
-- `packages/ui` — small shared React primitives
-- `packages/{sdk,db,mcp,auth,config,logger,testing}` — shared package boundaries
-- `docs/` — architecture, product, and API documentation
+> **Draft:** this describes v1, which is still being built. The single image,
+> the compose file, the `init` command and built-in accounts land over the next
+> releases.
 
-## Prerequisites
+You need Docker with Docker Compose. Postgres is included.
 
-- Node.js 22.22.2+ (or 24.15+)
-- pnpm 10+
-- a PostgreSQL connection string
-- a Supabase project configured for the dashboard sign-in methods you use
+```bash
+git clone https://github.com/armanghev/orchestrat.git
+cd orchestrat/deploy
+docker compose run --rm orchestrat init
+docker compose up -d
+```
 
-## Current product status
+Open [http://localhost:8801](http://localhost:8801) and create the first
+account. It becomes the instance admin. Then create an organization and a
+project.
 
-Implemented:
+See the [Quickstart](https://orchestrat.dev/docs/quickstart), and
+[HTTPS and reverse proxy](https://orchestrat.dev/docs/https) to put it on your
+own domain.
 
-- Supabase human authentication for web and Tauri, including native Keychain
-  session ownership, GitHub OAuth, magic links, and deep-link callbacks
-- organization and project management
-- human and agent task APIs, including truthful authorship, comments,
-  dependencies, idempotent creation, and optimistic concurrency
-- agent credentials, sessions, heartbeat, presence, and exclusive claim APIs,
-  plus the local MCP bridge
-- project-scoped MCP connections and global connections with explicit project
-  selection
-- versioned Markdown documents, MDXEditor dashboard editing, R2-backed
-  attachments, and lifecycle event ingestion
-- private-alpha CLI setup, status, doctor, disconnect, hooks, durable managed
-  runtime packaging, and read-only desktop integration status
-- project-scoped realtime catch-up, dashboard synchronization, and selective
-  native notifications
-- private-alpha deployment manifests, Vercel app-root configuration, and
-  macOS app/DMG signing preparation
-- the shared web/Tauri dashboard shell
+## Connect agents
 
-Still required for the private alpha:
+From the directory of the project your agents work in, on macOS or Linux with
+Node.js 20.19+ (or 22.12+):
 
-- npm publication and clean-Mac CLI installation evidence
-- Vercel/API deployment, DNS, hosted database migration, and backup/recovery
-  evidence
-- signed/notarized DMG distribution and Gatekeeper evidence
-- real hosted auth, realtime, and two-agent acceptance evidence
+```bash
+npx @orchestrat/cli setup --server http://localhost:8801
+```
 
-See the [private-alpha install and operations runbook](docs/private-alpha-runbook.md)
-and [clean-Mac acceptance checklist](docs/acceptance/clean-mac-two-agent-checklist.md)
-for the exact external gates and current NOT RUN boundaries.
+Setup detects your coding tools, shows the config it will change, asks you to
+approve it in the browser and to pick a project, then gives each tool its own
+agent identity. Restart your tools so they load the Orchestrat MCP server, and
+check the connection with `orchestrat status`.
 
-## Install and run
+See [Connect agents](https://orchestrat.dev/docs/connect-agents) for every
+supported tool, lifecycle hooks and the MCP tools.
+
+## Develop
+
+The repo is a pnpm and Turborepo monorepo:
+
+- `apps/api`: Fastify API server
+- `apps/dashboard`: Vite and React dashboard
+- `apps/cli`: the `orchestrat` CLI, MCP bridge and hooks
+- `apps/landing`: orchestrat.dev and its docs (Next.js, Fumadocs)
+- `packages/*`: shared protocol, database, MCP, SDK, config and UI packages
+
+You need Node.js 22.22.2+ (or 24.15+), pnpm 10 and a PostgreSQL database.
 
 ```bash
 pnpm install
-cp .env.example .env
+cp .env.example .env   # set ORCHESTRAT_DATABASE_URL
 pnpm db:migrate
 pnpm dev
 ```
 
-Set `ORCHESTRAT_DATABASE_URL` to the PostgreSQL connection string you provide.
-The API verifies Supabase access JWTs from configured browser/native sessions.
-It also requires these server-only values:
+Built-in accounts are still being built. Until they land, dashboard sign-in in
+development goes through a Supabase project, configured with the
+`ORCHESTRAT_SUPABASE_*` and `VITE_SUPABASE_*` values in `.env.example`.
 
-- `ORCHESTRAT_SUPABASE_URL`
-- `ORCHESTRAT_SUPABASE_JWT_AUDIENCE`
-- `ORCHESTRAT_SUPABASE_JWT_ALGORITHM` (`ES256` or `RS256`)
+Local ports: API `8801`, dashboard `8813`, landing `8800`. Run one app with
+`pnpm dev:api`, `pnpm dev:dashboard` or `pnpm dev:landing`. To seed a user,
+organization and project without the UI, set the `ORCHESTRAT_SEED_*` values and
+run `pnpm db:seed`.
 
-For web builds, set:
-
-- `VITE_SUPABASE_URL`
-- `VITE_SUPABASE_PUBLISHABLE_KEY`
-- `VITE_WEB_AUTH_CALLBACK_URL`
-- `VITE_API_URL`
-
-For native desktop auth builds, set:
-
-- `ORCHESTRAT_SUPABASE_URL`
-- `ORCHESTRAT_SUPABASE_PUBLISHABLE_KEY`
-- `ORCHESTRAT_AUTH_ENVIRONMENT`
-- `ORCHESTRAT_DESKTOP_AUTH_REDIRECT_URI`
-- `ORCHESTRAT_DESKTOP_AUTH_PORTAL_URL`
-
-Enable GitHub OAuth and magic-link in Supabase, and add
-`http://localhost:8813/auth/desktop/callback` to **Authentication → URL
-Configuration → Redirect URLs**. The desktop app opens
-`http://localhost:8813/auth/desktop`; the browser returns a one-time PKCE code
-to the app without putting access or refresh tokens in a URL.
-For production, set the portal URL to `https://app.orchestrat.dev/auth/desktop`
-and allow `https://app.orchestrat.dev/auth/desktop/callback` in Supabase.
-
-On macOS, start desktop development with
-`pnpm --filter @orchestrat/dashboard dev:desktop`. The launcher registers a small
-`Orchestrat Dev Auth.app` receiver in your user Applications folder so
-browser callbacks reach the running dev binary. Dev mode uses its own app
-identity, the development Keychain namespace, and the local auth portal above;
-the installed production app keeps its existing callback scheme. Restart the
-dev command after changing this setup. To check the native handoff without
-signing in, run `node apps/dashboard/scripts/macos-dev-auth.mjs --self-check`.
-
-To create a local user, organization, and project without using the UI, set the
-`ORCHESTRAT_SEED_*` variables from `.env.example`, including a stable Supabase
-user UUID for `ORCHESTRAT_SEED_AUTH_SUBJECT`, then run:
+Checks, the same ones CI runs:
 
 ```bash
-pnpm db:seed
-```
-
-Run one surface:
-
-```bash
-pnpm dev:landing
-pnpm dev:dashboard
-pnpm dev:api
-```
-
-Local defaults are API `8801`, dashboard `8813`, landing `8800`, and browser
-tests `8814`. TCP ports must be between 1 and 65535, so these use the `88xx`
-range. Keep existing `.env` files, CLI project URLs, auth callback allowlists,
-and storage CORS origins aligned when changing ports.
-
-The API health endpoints are `GET http://localhost:8801/health` and
-`GET http://localhost:8801/api/v1/health`.
-
-## Scripts
-
-```bash
-pnpm build
-pnpm db:generate
-pnpm db:migrate
-pnpm db:seed
 pnpm lint
 pnpm typecheck
-pnpm test
-pnpm format:check
+pnpm test        # set ORCHESTRAT_TEST_POSTGRES_URL to include Postgres tests
+pnpm build
+pnpm --filter @orchestrat/dashboard test:e2e   # Playwright, WebKit
 ```
 
-Run the GitHub Actions workflow locally before pushing, in Docker with
-[act](https://github.com/nektos/act) (`brew install act`; settings in `.actrc`):
+`pnpm ci:local` runs the whole GitHub Actions workflow locally with
+[act](https://github.com/nektos/act).
 
-```bash
-pnpm ci:local              # both jobs, as on a pull request
-act pull_request -j verify # lint, typecheck, tests with Postgres, build
-act pull_request -j browser # Playwright in Linux WebKit
-```
+Contributions need a signed Contributor License Agreement. See
+[CONTRIBUTING.md](CONTRIBUTING.md) and the
+[contributing guide](https://orchestrat.dev/docs/contributing).
 
-### Dashboard native auth migration (Task 3)
+## License
 
-- ✅ Native desktop auth flow and session ownership model is implemented and validated in Tauri auth service tests.
-- ✅ Renderer receives only `AccessGrant` (`accessToken`, `expiresAtMs`) and does not persist refresh token/secret material.
-- ✅ Required native build config is documented in `.env.example` and documented runtime vars above.
-- ✅ Validation gates for missing/invalid desktop config, web callback safety, and web/native secret classification checks pass in automated suites.
-- ⚠️ A local unsigned app/DMG build is possible; Apple signing, notarization,
-  stapling, Gatekeeper assessment, and distribution remain unverified.
-
-Known external limitations:
-
-- npm publication, Vercel/API deployment, DNS, hosted database migration,
-  Apple trust gates, and real clean-Mac acceptance require external systems and
-  human authorization; none is claimed by this checkout.
-- Local sandbox restrictions can block network-backed or loopback-dependent
-  tests; report those as environment limitations rather than alpha evidence.
-- Local filesystem document synchronization and multi-user team collaboration
-  are deferred beyond this private-alpha candidate.
-
-## Migration acceptance notes
-
-- Task 3 safety boundary: all mutable session credentials stay on the Rust side in desktop (`pkce_verifier`, pending marker, refresh token, access JWT for local revoke calls only). Renderer sessions hold only short-lived `accessToken`+`expiresAtMs` grants, and are never persisted to Tauri Store.
-- Verification scope used for migration handoff:
-  - `cargo fmt --check`, `cargo check`, strict `clippy`, `cargo test` (native auth suites),
-  - dashboard/unit and e2e test commands,
-  - root `pnpm lint`, `pnpm typecheck`, `pnpm build`, `pnpm test` command matrix,
-  - source + docs + lockfile + env scans for removed-provider references,
-  - and callback/cross-boundary path checks in auth Rust/Web adapters.
-
-## Architecture
-
-The web and macOS apps share `apps/dashboard`. A persistent local CLI hosts
-the generic stdio MCP bridge and lightweight hooks, storing separate agent
-credentials in macOS Keychain. API transports remain thin and delegate to
-application services. PostgreSQL is the durable source of truth, Drizzle owns
-the reviewed migration workflow, and shared contracts live in
-`@orchestrat/protocol`. Supabase identifies humans; local organization
-membership controls project access.
-
-See [architecture documentation](docs/architecture/README.md), [product documentation](docs/product/README.md), and [API documentation](docs/api/README.md).
+Orchestrat is source-available under the [Elastic License 2.0](LICENSE). You
+can use, modify and self-host it, and build it into your own products; you
+can't offer it to others as a hosted or managed service.
