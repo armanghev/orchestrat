@@ -56,3 +56,14 @@ jobs:
           name: browser-failure-evidence
           path: apps/dashboard/test-results
           retention-days: 7
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.2
+      - run: deploy/smoke.sh
+      - run: deploy/smoke.sh
+        env:
+          SMOKE_STORAGE: "1"

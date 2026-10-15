@@ -13,6 +13,21 @@ export const apiConfigSchema = z.object({
         .map((origin) => origin.trim())
         .filter(Boolean)
     ),
+  // The origin people and agents use to reach this server, e.g.
+  // https://orchestrat.example.com. Links, invites, provider callbacks and
+  // the setup URL are built from it.
+  ORCHESTRAT_PUBLIC_URL: z
+    .string()
+    .url()
+    .transform((value) => new URL(value).origin)
+    .optional(),
+  // A built dashboard (apps/dashboard/dist) to serve on the API's origin.
+  ORCHESTRAT_DASHBOARD_DIR: z.string().trim().min(1).optional(),
+  // Apply pending database migrations before listening.
+  ORCHESTRAT_MIGRATE_ON_START: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((value) => value === "true"),
   ORCHESTRAT_DATABASE_URL: z.string().min(1),
   // Who may create an account once the first (admin) account exists:
   // invite = only with a project invite link, open = anyone who can reach
@@ -26,11 +41,17 @@ export const apiConfigSchema = z.object({
 export type ApiConfig = z.infer<typeof apiConfigSchema>;
 export const loadApiConfig = (
   env: NodeJS.ProcessEnv = process.env
-): ApiConfig =>
-  apiConfigSchema.parse({
+): ApiConfig => {
+  const config = apiConfigSchema.parse({
     ...env,
     ORCHESTRAT_API_HOST: env.ORCHESTRAT_API_HOST ?? env.HOST,
     ORCHESTRAT_API_PORT: env.ORCHESTRAT_API_PORT ?? env.PORT
   });
+  // With one public origin and no explicit list, that origin is the only
+  // browser origin that needs CORS.
+  if (!env.ORCHESTRAT_ALLOWED_ORIGINS && config.ORCHESTRAT_PUBLIC_URL)
+    config.ORCHESTRAT_ALLOWED_ORIGINS = [config.ORCHESTRAT_PUBLIC_URL];
+  return config;
+};
 
 export * from "./repository.js";

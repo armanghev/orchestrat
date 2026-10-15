@@ -44,6 +44,39 @@ test("splits allowed origins", () => {
   ]);
 });
 
+test("one public URL becomes the allowed origin unless origins are listed", () => {
+  const config = loadApiConfig({
+    ...env,
+    ORCHESTRAT_PUBLIC_URL: "https://orch.example.com/some/path"
+  });
+  assert.equal(config.ORCHESTRAT_PUBLIC_URL, "https://orch.example.com");
+  assert.deepEqual(config.ORCHESTRAT_ALLOWED_ORIGINS, [
+    "https://orch.example.com"
+  ]);
+  assert.deepEqual(
+    loadApiConfig({
+      ...env,
+      ORCHESTRAT_PUBLIC_URL: "https://orch.example.com",
+      ORCHESTRAT_ALLOWED_ORIGINS: "http://localhost:8813"
+    }).ORCHESTRAT_ALLOWED_ORIGINS,
+    ["http://localhost:8813"]
+  );
+  assert.equal(config.ORCHESTRAT_MIGRATE_ON_START, true);
+  assert.equal(
+    loadApiConfig({ ...env, ORCHESTRAT_MIGRATE_ON_START: "false" })
+      .ORCHESTRAT_MIGRATE_ON_START,
+    false
+  );
+});
+
+test("repository links fall back to the public URL", () => {
+  const config = loadRepositoryConfig({
+    ORCHESTRAT_PUBLIC_URL: "https://orch.example.com"
+  });
+  assert.equal(config.publicApiUrl, "https://orch.example.com");
+  assert.equal(config.dashboardUrl, "https://orch.example.com");
+});
+
 test("signup defaults to invite-only and accepts only known modes", () => {
   assert.equal(loadApiConfig(env).ORCHESTRAT_SIGNUP, "invite");
   for (const mode of ["invite", "open", "closed"] as const)
@@ -114,7 +147,7 @@ test("repository providers count as configured only when complete", () => {
 
   const bare = loadRepositoryConfig({});
   assert.equal(bare.syncEnabled, false);
-  assert.match(bare.unavailable.gitlab!, /ORCHESTRAT_PUBLIC_API_URL/);
+  assert.match(bare.unavailable.gitlab!, /ORCHESTRAT_PUBLIC_URL/);
   assert.throws(() =>
     loadRepositoryConfig({
       ...repositoryEnv,

@@ -81,11 +81,15 @@ if (process.argv[2] === "--self-check") {
   const root = readEnv("../../../.env");
   const local = { ...readEnv("../.env"), ...readEnv("../.env.local") };
   const apiUrl = process.env.VITE_API_URL ?? local.VITE_API_URL;
-  const csp = storageCsp(
-    process.env.DOCUMENT_STORAGE_S3_ENDPOINT ??
-      root.DOCUMENT_STORAGE_S3_ENDPOINT,
-    apiUrl
-  );
+  // Browsers upload to the public endpoint; the rest are older names.
+  const storageEndpoint = [
+    "ORCHESTRAT_S3_PUBLIC_ENDPOINT",
+    "ORCHESTRAT_S3_ENDPOINT",
+    "DOCUMENT_STORAGE_S3_ENDPOINT"
+  ]
+    .map((name) => process.env[name] || root[name])
+    .find(Boolean);
+  const csp = storageCsp(storageEndpoint, apiUrl);
   const overrides = { app: { security: { csp } } };
   const env = { ...process.env };
   if (process.platform === "darwin" && args[0] === "dev") {

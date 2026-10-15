@@ -74,6 +74,39 @@ describe("parsePublicConfig", () => {
     ).toBe(apiUrl)
   );
 
+  it("defaults the web dashboard to the origin it was served from", () => {
+    expect(
+      parsePublicConfig({}, "web", "http://192.168.1.20:8801").apiUrl
+    ).toBe("http://192.168.1.20:8801");
+    expect(
+      parsePublicConfig({ VITE_API_URL: "" }, "web", "https://orch.example")
+        .apiUrl
+    ).toBe("https://orch.example");
+  });
+
+  it("allows plain http on a LAN only for the dashboard's own origin", () => {
+    expect(
+      parsePublicConfig(
+        { VITE_API_URL: "http://192.168.1.20:8801" },
+        "web",
+        "http://192.168.1.20:8801"
+      ).apiUrl
+    ).toBe("http://192.168.1.20:8801");
+    expect(() =>
+      parsePublicConfig(
+        { VITE_API_URL: "http://192.168.1.21:8801" },
+        "web",
+        "http://192.168.1.20:8801"
+      )
+    ).toThrow("Dashboard configuration is invalid");
+  });
+
+  it("still needs an explicit API URL on desktop", () => {
+    expect(() => parsePublicConfig({}, "desktop", "tauri://localhost")).toThrow(
+      "Dashboard configuration is invalid"
+    );
+  });
+
   it("rejects invalid common config", () => {
     expect(() =>
       parsePublicConfig({ VITE_API_URL: "not-a-url" }, "desktop")

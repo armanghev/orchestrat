@@ -4,7 +4,7 @@ import {
   GetObjectCommand,
   ListObjectsV2Command,
   PutObjectCommand,
-  S3Client
+  type S3Client
 } from "@aws-sdk/client-s3";
 import {
   documentFolders,
@@ -33,15 +33,17 @@ import {
   type BranchSelector
 } from "./branch-context.js";
 import { PermissionService } from "./permission-service.js";
+import { createS3Client, type S3ConnectionConfig } from "./s3-client.js";
 
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 type Executor = Database | Transaction;
-export type DocumentStorageConfig = {
-  endpoint: string;
-  region: string;
-  accessKeyId: string;
-  secretAccessKey: string;
-  bucket: string;
+export type DocumentStorageConfig = S3ConnectionConfig & {
+  /**
+   * The endpoint browsers reach, used only to sign upload URLs; server-side
+   * calls use `endpoint`. Defaults to `endpoint`.
+   */
+  publicEndpoint?: string;
+  /** Replaces the server-side client (tests). */
   client?: S3Client;
 };
 type StoredContent = { content: string; size: number; sha256: string };
@@ -142,17 +144,7 @@ export class DocumentService {
     this.permissions = new PermissionService(db);
     this.storage =
       storageConfig?.client ??
-      (storageConfig
-        ? new S3Client({
-            forcePathStyle: true,
-            region: storageConfig.region,
-            endpoint: storageConfig.endpoint,
-            credentials: {
-              accessKeyId: storageConfig.accessKeyId,
-              secretAccessKey: storageConfig.secretAccessKey
-            }
-          })
-        : null);
+      (storageConfig ? createS3Client(storageConfig) : null);
   }
   private async access(userId: string, projectId: string, write = false) {
     const record = await this.permissions.projectAccess(userId, projectId);

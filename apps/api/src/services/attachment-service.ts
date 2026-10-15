@@ -12,7 +12,7 @@ import {
   type ListPartsCommandOutput,
   type GetObjectCommandOutput,
   GetObjectCommand,
-  S3Client,
+  type S3Client,
   PutObjectCommand,
   UploadPartCommand
 } from "@aws-sdk/client-s3";
@@ -37,6 +37,8 @@ import { PermissionService } from "./permission-service.js";
 import type { DocumentStorageConfig } from "./document-service.js";
 import { AttachmentDownloadTicketStore } from "../realtime/realtime.js";
 import type { AttachmentObjects } from "./merges/engine.js";
+import { createS3Client } from "./s3-client.js";
+import { DEFAULT_ATTACHMENT_QUOTA_BYTES } from "../storage-config.js";
 
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 /**
@@ -56,7 +58,6 @@ const agentWriter = (principal: AgentPrincipal): Writer => ({
   selector: principal.branch
 });
 const MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024 * 1024;
-const PROJECT_QUOTA_BYTES = 10 * 1024 * 1024 * 1024;
 const MULTIPART_THRESHOLD_BYTES = 100 * 1024 * 1024;
 const PART_SIZE_BYTES = 16 * 1024 * 1024;
 const UPLOAD_TTL_MS = 24 * 60 * 60 * 1000;
@@ -87,26 +88,34 @@ const attachmentDisposition = (filename: string, inline = false) => {
 };
 export class AttachmentService {
   private readonly permissions: PermissionService;
+  /** Server-side calls, on the internal endpoint. */
   private readonly storage: S3Client | null;
+  /** Signs browser upload URLs for the public endpoint; never sends. */
+  private readonly presigner: S3Client | null;
   constructor(
     private readonly db: Database,
     private readonly config?: DocumentStorageConfig,
-    private readonly downloadTickets = new AttachmentDownloadTicketStore()
+    private readonly downloadTickets = new AttachmentDownloadTicketStore(),
+    private readonly quotaBytes = DEFAULT_ATTACHMENT_QUOTA_BYTES
   ) {
     this.permissions = new PermissionService(db);
-    this.storage =
-      config?.client ??
-      (config
-        ? new S3Client({
-            forcePathStyle: true,
-            region: config.region,
-            endpoint: config.endpoint,
-            credentials: {
-              accessKeyId: config.accessKeyId,
-              secretAccessKey: config.secretAccessKey
-            }
-          })
-        : null);
+    this.storage = config?.client ?? (config ? createS3Client(config) : null);
+    this.presigner =
+      config?.publicEndpoint && config.publicEndpoint !== config.endpoint
+        ? createS3Client(config, config.publicEndpoint)
+        : this.storage;
+  }
+  /** A presigned URL the browser (or CLI) uploads to directly. */
+  private signUpload(command: PutObjectCommand | UploadPartCommand) {
+    if (!this.presigner)
+      throw new ApiError(
+        503,
+        "STORAGE_UPLOAD_FAILED",
+        "Private attachment storage is not configured."
+      );
+    return getSignedUrl(this.presigner as any, command as any, {
+      expiresIn: URL_TTL_SECONDS
+    });
   }
   private requireStorage() {
     if (!this.storage || !this.config)
@@ -390,7 +399,7 @@ export class AttachmentService {
         );
         if (
           (await this.quota(tx, projectId)) + input.size_bytes >
-          PROJECT_QUOTA_BYTES
+          this.quotaBytes
         )
           throw new ApiError(
             409,
@@ -421,14 +430,12 @@ export class AttachmentService {
       const extra =
         uploadMode === "single"
           ? {
-              upload_url: await getSignedUrl(
-                this.storage! as any,
+              upload_url: await this.signUpload(
                 new PutObjectCommand({
                   Bucket: this.config!.bucket,
                   Key: this.key(projectId, documentId, uploadId),
                   ContentLength: row.reservedBytes
-                }),
-                { expiresIn: URL_TTL_SECONDS }
+                })
               ),
               mode: "single"
             }
@@ -568,8 +575,7 @@ export class AttachmentService {
       parts: await Promise.all(
         numbers.map(async (part_number) => ({
           part_number,
-          upload_url: await getSignedUrl(
-            this.storage! as any,
+          upload_url: await this.signUpload(
             new UploadPartCommand({
               Bucket: this.config!.bucket,
               Key: this.key(row.projectId, row.documentId, row.id),
@@ -579,8 +585,7 @@ export class AttachmentService {
                 PART_SIZE_BYTES,
                 row.reservedBytes - (part_number - 1) * PART_SIZE_BYTES
               )
-            }),
-            { expiresIn: URL_TTL_SECONDS }
+            })
           )
         }))
       )
@@ -622,14 +627,12 @@ export class AttachmentService {
         row,
         row.uploadMode === "single"
           ? {
-              upload_url: await getSignedUrl(
-                this.storage! as any,
+              upload_url: await this.signUpload(
                 new PutObjectCommand({
                   Bucket: this.config!.bucket,
                   Key: this.key(row.projectId, row.documentId, row.id),
                   ContentLength: row.reservedBytes
-                }),
-                { expiresIn: URL_TTL_SECONDS }
+                })
               )
             }
           : {
@@ -656,14 +659,12 @@ export class AttachmentService {
         row,
         row.uploadMode === "single"
           ? {
-              upload_url: await getSignedUrl(
-                this.storage! as any,
+              upload_url: await this.signUpload(
                 new PutObjectCommand({
                   Bucket: this.config!.bucket,
                   Key: this.key(row.projectId, row.documentId, row.id),
                   ContentLength: row.reservedBytes
-                }),
-                { expiresIn: URL_TTL_SECONDS }
+                })
               )
             }
           : {

@@ -250,6 +250,34 @@ test("documents copy with every revision, their attachments and folders", async 
   );
 });
 
+test("attachment copies respect a configured project quota", async (t) => {
+  const s = await setup();
+  t.after(() => s.app.close());
+  const plan = await s.document("plan.md", "v1");
+  await s.attach(plan.id, "diagram.png"); // 3 bytes
+  const engine = (quota: number) =>
+    new MergeEngine(
+      s.db,
+      new BranchService(s.db, new AgentService(s.db)),
+      { copy: async () => undefined, remove: async () => undefined },
+      quota
+    );
+  const run = (quota: number) =>
+    engine(quota).apply(s.project.id, {
+      sourceBranchId: s.main,
+      targetBranchId: s.feature,
+      kind: "import",
+      selection: { tasks: "all", documents: "all", chats: "all" },
+      trigger: "dashboard",
+      userId: s.aliceUser.id
+    });
+  await assert.rejects(
+    run(5),
+    (error: { code?: string }) => error.code === "ATTACHMENT_QUOTA_EXCEEDED"
+  );
+  assert.equal((await run(6)).body.run.counts["document_attachment.copy"], 1);
+});
+
 test("body, path and archive changes apply; a taken path is never overwritten", async (t) => {
   const s = await setup();
   t.after(() => s.app.close());

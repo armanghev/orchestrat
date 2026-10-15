@@ -85,7 +85,14 @@ const pem = (value: string) => Buffer.from(value, "base64").toString("utf8");
 export function loadRepositoryConfig(
   env: NodeJS.ProcessEnv = process.env
 ): RepositoryConfig {
-  const parsed = repositoryEnvSchema.parse(env);
+  // One public origin serves both the API and the dashboard; the split
+  // variables remain for deployments that host them apart.
+  const publicUrl = env.ORCHESTRAT_PUBLIC_URL?.trim() || undefined;
+  const parsed = repositoryEnvSchema.parse({
+    ...env,
+    ORCHESTRAT_PUBLIC_API_URL: env.ORCHESTRAT_PUBLIC_API_URL || publicUrl,
+    ORCHESTRAT_DASHBOARD_URL: env.ORCHESTRAT_DASHBOARD_URL || publicUrl
+  });
   const secret = parsed.ORCHESTRAT_REPOSITORY_SECRET_KEY
     ? key(parsed.ORCHESTRAT_REPOSITORY_SECRET_KEY)
     : null;
@@ -110,7 +117,7 @@ export function loadRepositoryConfig(
     });
   const shared =
     !parsed.ORCHESTRAT_PUBLIC_API_URL || !parsed.ORCHESTRAT_DASHBOARD_URL
-      ? "Set ORCHESTRAT_PUBLIC_API_URL and ORCHESTRAT_DASHBOARD_URL."
+      ? "Set ORCHESTRAT_PUBLIC_URL."
       : !secret || !parsed.ORCHESTRAT_REPOSITORY_SECRET_KEY_ID
         ? "Set ORCHESTRAT_REPOSITORY_SECRET_KEY and ORCHESTRAT_REPOSITORY_SECRET_KEY_ID."
         : null;

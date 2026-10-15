@@ -13,7 +13,17 @@ const usernameSchema = z
   .max(32)
   .regex(/^[a-zA-Z0-9_]+$/);
 const fullNameSchema = z.string().trim().min(1).max(120);
-const avatarUrlSchema = z.string().url().max(2048).nullable();
+/** The id in an uploaded avatar's URL: 24 random bytes, base64url. */
+export const avatarKeySchema = z.string().regex(/^[A-Za-z0-9_-]{32}$/);
+// The API serves uploaded avatars at /api/v1/avatars/<key>. Without a
+// configured public URL it stores that path root-relative, which resolves
+// when the dashboard and the API share an origin. No other relative URL.
+const avatarUrlSchema = z
+  .union([
+    z.string().url().max(2048),
+    z.string().regex(/^\/api\/v1\/avatars\/[A-Za-z0-9_-]{32}$/)
+  ])
+  .nullable();
 
 export const profileSchema = z.object({
   user_id: z.string().uuid(),

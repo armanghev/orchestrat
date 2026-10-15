@@ -11,3 +11,10 @@ coverage
 *.env.*
 *.tsbuildinfo
 .DS_Store
+apps/landing/*
+!apps/landing/package.json
+apps/dashboard/src-tauri/target
+apps/dashboard/test-results
+apps/dashboard/playwright-report
+.act
+.claude
