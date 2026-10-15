@@ -687,8 +687,7 @@ These items have no implied timeline.
 Hosted deployment, production R2 configuration, native distribution, and
 clean-Mac multi-agent acceptance are not verified by this source checkout.
 Repository connections are tested against simulated providers only; live
-GitHub, GitLab.com and Cursor Origin acceptance has not run. See
-`docs/acceptance/2026-09-30-project-branches.md`.
+GitHub, GitLab.com and Cursor Origin acceptance has not run.
 
 ## Errors and request IDs
 

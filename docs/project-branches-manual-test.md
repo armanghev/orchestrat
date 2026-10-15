@@ -4,8 +4,7 @@ This is the hands-on test of [project branches](project-branches.md) before
 release. It covers the local stack, agents, the dashboard and the three real
 providers. App registration is in the
 [provider setup guide](project-branches-provider-setup.md). Record results in
-the [acceptance record](acceptance/2026-09-30-project-branches.md); anything you
-skip stays **NOT RUN**.
+an acceptance record; anything you skip stays **NOT RUN**.
 
 Time: about 45 minutes for parts 1–3, then about 30 minutes per provider.
 

@@ -12,8 +12,9 @@ local/
 .worktrees/
 .DS_Store*
 PRODUCT.md
-DESIGN.md
+# Archived hosted-alpha secrets; keep ignored while local copies exist
 deploy/private-alpha.env
 .vercel/
+.claude/
 # Local GitHub Actions runs (act)
 .act/

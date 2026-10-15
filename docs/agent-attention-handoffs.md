@@ -960,8 +960,8 @@ Postgres, with two `orchestrat mcp` bridges (agents A and B) over stdio:
    - Claude Desktop `asyncRewake` wake;
    - Cursor IDE `followup_message`.
 
-The evidence goes in `docs/acceptance/<date>-agent-attention.md`, with explicit
-NOT RUN boundaries.
+The evidence goes in a dated acceptance record, with explicit NOT RUN
+boundaries.
 
 ## 17. Research sources and unknowns
 
@@ -1044,7 +1044,7 @@ Unknowns (honest list):
 
 ## 18. Rollout
 
-Release order follows the runbook:
+Release order:
 
 1. Verify.
 2. Migrate the hosted database to `0015` via `railway run` **before** pushing
