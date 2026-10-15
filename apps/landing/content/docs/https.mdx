@@ -3,57 +3,75 @@ title: HTTPS and reverse proxy
 description: Put Orchestrat behind Caddy on your own domain, with automatic HTTPS.
 ---
 
-<Draft />
-
-{/* TODO(verify): once the single image ships (Release 08+), check: the server serves the API, the dashboard and the realtime WebSocket on one origin, port 8801; `ORCHESTRAT_PUBLIC_URL` is the only URL setting needed behind a proxy (CLI approval links, invite links, provider callbacks, storage CORS); `ORCHESTRAT_TRUST_PROXY_HOPS=1` is right for one Caddy hop; the compose service name `orchestrat` for the in-compose Caddy example. */}
-
 Orchestrat listens on plain HTTP on port 8801. That is fine on `localhost`. To reach it from other machines, or to connect a [Git provider](/docs/git-providers), which needs a public HTTPS URL for webhooks and sign-in callbacks, put it behind a reverse proxy that terminates TLS. Orchestrat doesn't bundle one; this page uses [Caddy](https://caddyserver.com), which gets and renews certificates for you.
+
+One port serves everything: the API under `/api/v1`, the realtime WebSocket the dashboard uses for live updates, and the dashboard itself. The proxy needs one site for Orchestrat, plus one for storage if you use the [bundled SeaweedFS](/docs/storage#the-bundled-seaweedfs).
 
 ## 1. Point a domain at the server
 
-Create a DNS record, for example `orchestrat.example.com`, pointing at the machine that runs Orchestrat. Ports 80 and 443 must be reachable from the internet so Caddy can complete the certificate challenge.
+Create DNS records pointing at the machine that runs Orchestrat, for example `orchestrat.example.com`, and `s3.orchestrat.example.com` for storage. Ports 80 and 443 must be reachable from the internet so Caddy can complete the certificate challenge.
 
 ## 2. Configure Caddy
 
-If Caddy runs on the same host as Docker, proxy to the published port:
+With Caddy installed on the same host as Docker, proxy each site to its published port:
 
 ```text title="Caddyfile"
 orchestrat.example.com {
 	reverse_proxy localhost:8801
 }
-```
 
-If you run Caddy as another service in the same compose project, proxy to the service name instead, and stop publishing port 8801 on the host:
-
-```text title="Caddyfile"
-orchestrat.example.com {
-	reverse_proxy orchestrat:8801
+s3.orchestrat.example.com {
+	reverse_proxy localhost:8333
 }
 ```
 
-Caddy forwards WebSocket connections without extra configuration. The dashboard uses one for live updates.
+Leave out the second site if you don't use the bundled storage. Caddy forwards WebSocket connections and the original `Host` header without extra configuration.
 
-## 3. Tell Orchestrat its public URL
+If you run Caddy as another service in the same compose project instead, proxy to the service names, `orchestrat:8801` and `seaweedfs:8333`.
 
-In `.env`, set the URL people and providers use, and tell the server how many proxies sit in front of it so it sees real client IP addresses for rate limiting:
+## 3. Tell Orchestrat its public URLs
+
+In `.env`, set the URL people and providers use, tell the server that one proxy sits in front of it, and set the address browsers upload attachments to:
 
 ```bash
 ORCHESTRAT_PUBLIC_URL=https://orchestrat.example.com
 ORCHESTRAT_TRUST_PROXY_HOPS=1
+ORCHESTRAT_S3_PUBLIC_ENDPOINT=https://s3.orchestrat.example.com
 ```
 
-Then restart the server:
+`ORCHESTRAT_TRUST_PROXY_HOPS=1` makes the server read each client's address from the `X-Forwarded-For` header Caddy adds. Without it, rate limits see every request as coming from the proxy.
+
+Only Caddy should reach the plain HTTP ports. If Caddy runs on the same host, publish them on the loopback interface only:
+
+```bash
+ORCHESTRAT_PORT=127.0.0.1:8801
+S3_PORT=127.0.0.1:8333
+```
+
+Then apply the changes, with `-f compose.yml -f compose.storage.yml` if you use the bundled storage:
 
 ```bash
 docker compose up -d
 ```
 
-`ORCHESTRAT_PUBLIC_URL` is used for CLI approval links, invite links, Git provider callbacks and webhooks, and the storage CORS origin. After changing it, reconnect agents against the new URL:
+## What the public URL changes
+
+`ORCHESTRAT_PUBLIC_URL` builds the setup link in the server log, Git provider callback, setup and webhook URLs, and avatar URLs. Avatars uploaded before you changed it keep the old address, so upload them again if that address is no longer reachable.
+
+Invite links and CLI approval links don't depend on it: invite links use the address you opened the dashboard at, and the CLI uses the server URL you give it. After moving to HTTPS, reconnect agents against the new URL. Credentials are bound to the server URL, so setup asks you to approve the CLI again:
 
 ```bash
 npx @orchestrat/cli setup --server https://orchestrat.example.com
 ```
 
+On a new install, you can pass the URL to `init` instead of editing `.env`:
+
+```bash
+docker compose run --rm --no-deps -T orchestrat init https://orchestrat.example.com > .env
+```
+
 ## Storage behind the proxy
 
-Browsers upload attachments straight to your storage endpoint, so that endpoint needs HTTPS too when the dashboard is served over HTTPS. Give MinIO its own hostname in Caddy, for example `storage.example.com`, proxy it to port 9000, and set `ORCHESTRAT_S3_ENDPOINT` to that URL. See [Storage](/docs/storage).
+Browsers upload attachments straight to `ORCHESTRAT_S3_PUBLIC_ENDPOINT`, so it needs HTTPS too: browsers block uploads from an HTTPS page to a plain HTTP address. The second Caddy site above gives the bundled SeaweedFS that address. Presigned upload URLs are signed for that hostname, so the proxy must pass the `Host` header and paths through unchanged, which `reverse_proxy` does. See [Storage](/docs/storage#the-public-endpoint).
+
+With Amazon S3 or Cloudflare R2, the storage endpoint already has HTTPS, and you don't need the second site.

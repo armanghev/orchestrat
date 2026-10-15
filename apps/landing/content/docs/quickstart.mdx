@@ -5,11 +5,11 @@ description: Run Orchestrat with Docker Compose, create the admin account, and c
 
 <Draft />
 
-{/* TODO(verify): once Releases 06–11 land, check that: the repo URL, the `deploy/` directory and `deploy/compose.yml` (services `postgres` and `orchestrat`) match the published layout; `docker compose run --rm orchestrat init` writes `deploy/.env` with generated secrets and prints nothing secret; the server listens on http://localhost:8801 and serves the dashboard on the same origin; the first visit shows the "create admin" screen, followed by profile, organization and project setup; `npx @orchestrat/cli setup --server http://localhost:8801` works on a clean macOS and Linux machine; `orchestrat status` prints the connected integrations. */}
+The `ghcr.io/armanghev/orchestrat` image is published at launch. Until then, build it from source: after `cd orchestrat/deploy`, run `docker compose build`, then continue with `init`. The local build gets the same image name, so the other commands work unchanged.
 
 This gets a local Orchestrat server running and two agents connected in a few minutes. You need:
 
-- Docker with Docker Compose. The compose file includes Postgres.
+- Docker with Docker Compose 2.24 or later. The compose file includes Postgres.
 - Git.
 - Node.js 20.19 or later (or 22.12 or later) for the CLI, on macOS or Linux.
 - Claude Code or Codex installed in the project you want to connect.
@@ -19,21 +19,35 @@ This gets a local Orchestrat server running and two agents connected in a few mi
 ```bash
 git clone https://github.com/armanghev/orchestrat.git
 cd orchestrat/deploy
-docker compose run --rm orchestrat init
+docker compose run --rm --no-deps -T orchestrat init > .env
 docker compose up -d
 ```
 
-`init` writes a `.env` file next to the compose file with generated secrets. Keep it: the server needs the same secrets on every start. `up -d` starts Postgres and the Orchestrat server, which runs database migrations before it accepts requests.
+`init` prints an env file with fresh secrets, and `> .env` saves it next to `compose.yml`. While `init` runs, Compose warns that `POSTGRES_PASSWORD` is not set; that's expected, because `.env` is still empty at that point. Keep `.env`: the server needs the same secrets on every start. [Configuration](/docs/configuration) lists what it contains.
 
-Check that it is up:
+Run `init` once. Running it again replaces every secret, but Postgres keeps the password it was first started with, so the server can no longer connect to it.
+
+`init` sets the server's public URL to `http://localhost:8801`. To use another address, pass it to `init`, for example `init https://orchestrat.example.com`. See [HTTPS and reverse proxy](/docs/https).
+
+`up -d` starts Postgres and the Orchestrat server. The server applies database migrations, then listens on port 8801 and serves the API and the dashboard on the same origin. Check that it is up:
 
 ```bash
-curl http://localhost:8801/health
+curl http://localhost:8801/ready
 ```
+
+It returns `{"status":"ready"}` once the server can reach the database.
 
 ## 2. Create the admin account
 
-Open [http://localhost:8801](http://localhost:8801). On a new instance, the first account you create becomes the instance admin. The dashboard then walks you through your profile, a first organization and a first project.
+While the server has no accounts, it prints a setup link in its log:
+
+```bash
+docker compose logs orchestrat
+```
+
+Look for `No accounts yet. Create the admin account at http://localhost:8801/?setup_token=…` and open that link. The dashboard shows **Set up this Orchestrat server** with the setup token filled in. The account you create there becomes the instance admin. The dashboard then walks you through your profile, a first organization and a first project.
+
+The token is `ORCHESTRAT_SETUP_TOKEN` in `.env`. Anyone who has it can create the first account, so keep it private until you have.
 
 Other people join through invite links. See [Users and accounts](/docs/users).
 
@@ -61,5 +75,6 @@ Create a task in the dashboard, then ask an agent to claim it and leave a commen
 
 - [Connect agents](/docs/connect-agents): what setup changes, every supported tool, and troubleshooting.
 - [Configuration](/docs/configuration): every environment variable.
-- [Storage](/docs/storage): enable attachments with MinIO, S3 or R2.
+- [Storage](/docs/storage): turn on attachments with the bundled SeaweedFS, Amazon S3 or Cloudflare R2.
 - [HTTPS and reverse proxy](/docs/https): put the server on a real domain.
+- [Upgrades and backups](/docs/upgrades): upgrade, and back up your data.

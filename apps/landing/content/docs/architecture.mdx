@@ -25,7 +25,7 @@ dashboard (browser)
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | Server         | Fastify app in `apps/api`. The only component that reads or writes the database. Also runs the realtime hub and the repository sync worker. |
 | PostgreSQL     | Source of truth for every entity, event and credential hash.                                                                                |
-| Object storage | Optional S3-compatible bucket for document attachments, avatars and copies of document revisions.                                           |
+| Object storage | Optional S3-compatible bucket for document attachments, avatars and copies of document revisions. Compose can run SeaweedFS for it.         |
 | CLI            | `@orchestrat/cli`. Configures your harnesses, holds credentials, and runs the local MCP bridge and hooks.                                   |
 | Dashboard      | React app in `apps/dashboard`. Uses the same REST API as every other client.                                                                |
 
@@ -33,17 +33,17 @@ Routes validate shared Zod contracts from `packages/protocol` and delegate to se
 
 ## The server process
 
-<Draft />
-
-{/* TODO(verify): image name ghcr.io/armanghev/orchestrat; dashboard served on the same origin with SPA fallback for non-API paths; listen port 8801 inside the image; auto-migrate under a Postgres advisory lock and the ORCHESTRAT_MIGRATE_ON_START default; VITE_API_URL kept only as a split-dev override. */}
-
-You run one `orchestrat` process from the `ghcr.io/armanghev/orchestrat` image. On port 8801 it serves:
+You run one server process from the `ghcr.io/armanghev/orchestrat` image, built from `deploy/Dockerfile`. On port 8801 it serves:
 
 - the API under `/api/v1`, plus `/health` and `/ready`
 - the realtime WebSocket under `/api/v1/realtime`
-- the built dashboard on the same origin, with SPA fallback for every non-API path
+- the built dashboard on the same origin, from `ORCHESTRAT_DASHBOARD_DIR`. Every other `GET` outside `/api`, `/health` and `/ready` returns its `index.html`, so client-side routes load directly.
 
-On start, the server applies pending database migrations under a PostgreSQL advisory lock, unless `ORCHESTRAT_MIGRATE_ON_START` is `false`. See [Quickstart](/docs/quickstart) and [Configuration](/docs/configuration).
+The dashboard talks to the origin that served it. `VITE_API_URL` only matters when you run the dashboard on its own, as in development.
+
+On start, the server applies pending database migrations under a PostgreSQL advisory lock, unless `ORCHESTRAT_MIGRATE_ON_START` is `false`, then starts listening. The server is also its own identity provider: people's accounts, passwords and sessions live in PostgreSQL, with no external auth service (see [Authentication](#authentication)).
+
+The image's entrypoint takes a command: `serve` (the default) runs the server, `init` prints a new `.env`, and `admin` runs the account commands, also installed as `orchestrat-admin`. See [Quickstart](/docs/quickstart) and [Configuration](/docs/configuration).
 
 ## Run one replica
 
@@ -62,9 +62,9 @@ Storage is optional. Any S3-compatible service works.
 
 - **Attachments.** The server creates the upload and presigns part URLs; the browser or CLI sends bytes straight to the bucket; the server verifies completion and keeps metadata in PostgreSQL. Files are limited to 2 GiB, and an upload can be resumed for 24 hours. Downloads go through the server: a download request returns a single-use URL on `/api/v1/attachments/download` that expires after 60 seconds.
 - **Document revisions.** Content is always stored in PostgreSQL. With storage configured, each new revision is also written to the bucket with its size and SHA-256, and read back from there. Those revisions then need the bucket to be reachable, or reads return `503 DOCUMENT_CONTENT_UNAVAILABLE`.
-- **Avatars.** JPEG, PNG or WebP, up to 2 MiB.
+- **Avatars.** JPEG, PNG or WebP, up to 2 MiB, under `avatars/` in the same bucket. The server uploads them and serves them at `/api/v1/avatars/<key>`, so the bucket stays private.
 
-Without storage, tasks, documents and chats work normally; attachment routes return `503 STORAGE_UPLOAD_FAILED` and avatar upload is unavailable. Because uploads go directly to the bucket, the browser must be able to reach its endpoint. See [Storage](/docs/storage).
+Without storage, tasks, documents and chats work normally; attachment routes and avatar upload return `503 STORAGE_UPLOAD_FAILED`. Uploads go directly to the bucket through presigned URLs for `ORCHESTRAT_S3_PUBLIC_ENDPOINT`, so browsers and agent machines must be able to reach it. See [Storage](/docs/storage).
 
 ## Domain model
 
@@ -142,16 +142,14 @@ Every meaningful change inserts an ordered, project-scoped event in the same tra
 
 ### People
 
-<Draft />
-
-{/* TODO(verify): token prefixes and lifetimes, refresh rotation and reuse detection, scrypt parameters, first-run admin, ORCHESTRAT_SIGNUP behavior once Phase 2 (built-in auth) lands. */}
-
-The server is its own identity provider. People sign in with an email and password, stored as scrypt hashes with a per-user salt. A successful sign-in returns two opaque tokens:
+The server is its own identity provider. People sign in with an email and password. Passwords are stored as scrypt hashes with a per-password salt. Signing in with an unknown email costs the same scrypt work as a wrong password, so response times don't reveal which emails have accounts. A successful sign-in returns two opaque tokens:
 
 - an access token (`orch_sess_…`), valid for 1 hour, sent as `Authorization: Bearer <access token>`
-- a refresh token (`orch_refresh_…`), valid for 30 days and rotated on every use; reusing an old refresh token revokes the session
+- a refresh token (`orch_refresh_…`), valid for 30 days and rotated on every use. Presenting the previous refresh token more than 60 seconds after rotation revokes the session.
 
-Only SHA-256 hashes of the tokens are stored. The first account on an empty instance becomes the instance admin, and `ORCHESTRAT_SIGNUP` decides who can sign up after that. See [Users and auth](/docs/users) and the [API reference](/docs/api#authentication).
+A session ends 90 days after sign-in, however often it is refreshed. Only SHA-256 hashes of the tokens are stored. Changing the password, signing out everywhere and the admin's `reset-password` and `revoke-sessions` also revoke the person's CLI credentials, since a stolen session could have approved one.
+
+Creating the first account on an empty instance needs the setup token (`ORCHESTRAT_SETUP_TOKEN`, or one the server generates and prints at startup), so a server reachable from the internet can't be claimed by whoever finds it first. That account becomes the instance admin, and `ORCHESTRAT_SIGNUP` decides who can sign up after that. See [Users and accounts](/docs/users) and the [API reference](/docs/api#people).
 
 Everything else that involves a person, including route guards, realtime tickets, CLI browser approval and invitations, depends only on resolving that person from the bearer token.
 
@@ -176,11 +174,7 @@ The CLI credential belongs to the person who approved it, works only on the `/ap
 
 ### Where the CLI keeps credentials
 
-<Draft />
-
-{/* TODO(verify): Linux credential storage (secret-tool, else a 0600 file under $XDG_CONFIG_HOME/orchestrat) ships with CLI 0.2.0; today's CLI only uses the macOS Keychain. */}
-
-The CLI keeps the CLI credential and agent tokens in the operating system's credential store: the Keychain on macOS, and libsecret through `secret-tool` on Linux, falling back to a `0600` file under `$XDG_CONFIG_HOME/orchestrat`. Tokens never go into harness config files, URLs or logs. Non-secret settings, such as which working directory maps to which project, live in `~/.orchestrat/config.json`.
+The CLI keeps the CLI credential and agent tokens in the operating system's credential store: the Keychain on macOS, and libsecret through `secret-tool` on Linux, falling back to a `0600` file, `$XDG_CONFIG_HOME/orchestrat/credentials.json`, when `secret-tool` is unavailable. See [Connect agents](/docs/connect-agents#credentials). Tokens never go into harness config files, URLs or logs. Non-secret settings, such as which working directory maps to which project, live in `~/.orchestrat/config.json`.
 
 ## CLI bridge and hooks
 

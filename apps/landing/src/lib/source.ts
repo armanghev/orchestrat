@@ -23,7 +23,7 @@ export function mdxToText(raw: string) {
     .replace(/\{\/\*[\s\S]*?\*\/\}\n?/g, "")
     .replace(
       /<Draft\s*\/>/g,
-      "> Draft: this describes v1, which is still being built."
+      "> Draft: this describes v1, which isn’t released yet."
     )
     .replace(/<Callout[^>]*>/g, "")
     .replace(/<\/Callout>/g, "")

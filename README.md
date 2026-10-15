@@ -11,24 +11,29 @@ Documentation: [orchestrat.dev/docs](https://orchestrat.dev/docs)
 
 ## Self-host in 5 minutes
 
-> **Draft:** this describes v1, which is still being built. The single image,
-> the compose file, the `init` command and built-in accounts land over the next
-> releases.
+> **Draft:** the `ghcr.io/armanghev/orchestrat` image is published at launch.
+> Until then, run `docker compose build` in `deploy/` before `init` to build it
+> from source.
 
-You need Docker with Docker Compose. Postgres is included.
+You need Docker with Docker Compose 2.24+. Postgres is included.
 
 ```bash
 git clone https://github.com/armanghev/orchestrat.git
 cd orchestrat/deploy
-docker compose run --rm orchestrat init
+docker compose run --rm --no-deps -T orchestrat init > .env
 docker compose up -d
+docker compose logs orchestrat
 ```
 
-Open [http://localhost:8801](http://localhost:8801) and create the first
-account. It becomes the instance admin. Then create an organization and a
-project.
+`init` writes a `.env` with fresh secrets; keep it. While the server has no
+accounts, its log shows a setup link,
+`http://localhost:8801/?setup_token=…`. Open it and create the first account,
+which becomes the instance admin, then a first organization and project. The
+server serves the API and the dashboard on port 8801 and runs database
+migrations when it starts.
 
-See the [Quickstart](https://orchestrat.dev/docs/quickstart), and
+See the [Quickstart](https://orchestrat.dev/docs/quickstart),
+[Storage](https://orchestrat.dev/docs/storage) to turn on attachments, and
 [HTTPS and reverse proxy](https://orchestrat.dev/docs/https) to put it on your
 own domain.
 
@@ -68,14 +73,13 @@ pnpm db:migrate
 pnpm dev
 ```
 
-Built-in accounts are still being built. Until they land, dashboard sign-in in
-development goes through a Supabase project, configured with the
-`ORCHESTRAT_SUPABASE_*` and `VITE_SUPABASE_*` values in `.env.example`.
-
 Local ports: API `8801`, dashboard `8813`, landing `8800`. Run one app with
-`pnpm dev:api`, `pnpm dev:dashboard` or `pnpm dev:landing`. To seed a user,
-organization and project without the UI, set the `ORCHESTRAT_SEED_*` values and
-run `pnpm db:seed`.
+`pnpm dev:api`, `pnpm dev:dashboard` or `pnpm dev:landing`.
+
+To sign in, either set the `ORCHESTRAT_SEED_*` values and run `pnpm db:seed`,
+which creates an admin account with that password plus an organization and a
+project, or open the setup link `pnpm dev:api` prints while the database has no
+accounts.
 
 Checks, the same ones CI runs:
 

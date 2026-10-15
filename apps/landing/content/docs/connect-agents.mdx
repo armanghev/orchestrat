@@ -11,15 +11,9 @@ The `orchestrat` CLI connects the coding tools on your machine to one project on
 - Node.js 20.19 or later on the 20.x line, or 22.12 or later. The installed `orchestrat` command keeps running on Node.
 - A running Orchestrat server, and an account on it that is an owner or admin of at least one project. Setup creates agents, which project members can't do. See [Quickstart](/docs/quickstart).
 - At least one supported tool: Claude Code, Codex, Cursor or Antigravity.
-- A browser on the same machine, to approve the CLI.
-
-{/* TODO(verify): Linux support is v1 (Phase 4); today the CLI only works on macOS (Keychain via /usr/bin/security, browser via `open`). Node range comes from apps/cli/package.json engines (^20.19.0 || >=22.12.0); recheck for CLI 0.2.0. */}
+- A browser to approve the CLI. Setup opens one for you; when it can't, it prints the approval URL, which you can open on any machine.
 
 ## Run setup
-
-<Draft />
-
-{/* TODO(verify): `--server` flag name and behavior (today there is no flag; the API comes from ORCHESTRAT_API_URL, else the saved mapping, else a hosted default). Setup prompts when `--server` is missing and suggests http://localhost:8801. The approval page opens on the server URL by default (today it defaults to a hosted dashboard unless ORCHESTRAT_WEB_URL is set). ORCHESTRAT_WEB_URL and ORCHESTRAT_API_URL are still honored, and ORCHESTRAT_API_URL still overrides the URL saved for a project. Re-running setup in a connected directory without `--server` reuses the saved URL or prompts. Package name @orchestrat/cli and the 0.2.0 release. */}
 
 From the root of the project directory your agents work in, run:
 
@@ -27,14 +21,18 @@ From the root of the project directory your agents work in, run:
 npx @orchestrat/cli setup --server http://localhost:8801
 ```
 
-`--server` is the URL of your Orchestrat server, the same URL you open the dashboard at. If you leave it out, setup asks for it and suggests `http://localhost:8801`.
+`--server` is the URL of your Orchestrat server, the same URL you open the dashboard at. The CLI has no default server. It picks one in this order:
 
-Two environment variables override the URLs:
+1. the `--server` flag;
+2. the `ORCHESTRAT_API_URL` environment variable;
+3. the URL saved when this directory was connected.
 
-| Variable             | Effect                                                                                                                                  |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `ORCHESTRAT_WEB_URL` | Opens the approval page on this dashboard origin instead of the server URL.                                                             |
-| `ORCHESTRAT_API_URL` | Uses this server for every `orchestrat` command, including the MCP server and hooks, instead of the URL saved for a project connection. |
+If none is set, setup asks for the URL and suggests `http://localhost:8801`. Without a terminal it fails instead and tells you to pass `--server`. Other commands, such as `status` and the MCP server, use `ORCHESTRAT_API_URL` or the saved URL.
+
+| Variable             | Effect                                                                                                                                        |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ORCHESTRAT_API_URL` | Uses this server for every `orchestrat` command, including the MCP server and hooks, instead of the URL saved for a project connection.       |
+| `ORCHESTRAT_WEB_URL` | Opens the approval page on this dashboard origin instead of the server URL. Only needed when the dashboard runs elsewhere, as in development. |
 
 When setup finishes, start a new session in each tool (or restart it) so it loads the Orchestrat MCP server. To check the connection, run `orchestrat status`, or ask your agent to call `get_project`.
 
@@ -237,13 +235,13 @@ Credentials are generic passwords in your default Keychain, under the service `d
 
 ### Linux
 
-<Draft />
+The CLI stores the same entries with `secret-tool` (libsecret), under the attributes `service dev.orchestrat.cli.agent` and `account <name>`. On Debian and Ubuntu, `secret-tool` comes with the `libsecret-tools` package, and it needs a running Secret Service, such as GNOME Keyring.
 
-{/* TODO(verify): Linux storage from Phase 4: `secret-tool` (libsecret) when available, else a 0600 file under $XDG_CONFIG_HOME/orchestrat; fallback path when XDG_CONFIG_HOME is unset (assumed ~/.config/orchestrat); account names match macOS; browser opens with `xdg-open` and what happens without a desktop browser; managed file paths for each tool on Linux (especially Antigravity's ~/.gemini/config) and hook paths. */}
+When `secret-tool` is missing or fails, for example on a server without a desktop session, the CLI uses a file instead: `$XDG_CONFIG_HOME/orchestrat/credentials.json`, or `~/.config/orchestrat/credentials.json` when `XDG_CONFIG_HOME` is unset. Only you can read it (mode `0600`, in a `0700` directory). The CLI still looks in that file when `secret-tool` works again, and moves a credential out of it the next time it saves one.
 
-The CLI stores the same entries with `secret-tool` (libsecret) when it is installed. On Debian and Ubuntu it comes with the `libsecret-tools` package. Without it, the CLI falls back to a file only you can read (mode `0600`) under `$XDG_CONFIG_HOME/orchestrat`, which is `~/.config/orchestrat` when `XDG_CONFIG_HOME` is unset.
+Setup opens the approval page with `xdg-open`. Without a desktop browser, it prints the URL; open it on any machine where you can sign in to the dashboard.
 
-Setup opens the approval page with `xdg-open`.
+Tool configuration files are at the same paths as on macOS.
 
 ## Troubleshooting
 

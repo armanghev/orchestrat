@@ -35,33 +35,58 @@ The key is required on:
 
 ### People
 
-<Draft />
-
-{/* TODO(verify): final auth route prefix and payloads */}
-{/* TODO(verify): HTTP methods for each /auth route, response shapes, rate-limit numbers, and which routes are public (instance, signup, login, refresh). */}
-
-People send a session token on every `/api/v1` route:
+People send an access token on every `/api/v1` route except the public ones:
 
 ```http
-Authorization: Bearer <session token>
+Authorization: Bearer orch_sess_<token>
 ```
 
-Get a token from `POST /api/v1/auth/login`. The response holds an access token (`orch_sess_…`, valid 1 hour) and a refresh token (`orch_refresh_…`, valid 30 days). Refreshing rotates the refresh token; reusing an old one revokes the session.
+Sign-up, sign-in and refresh return a session. Shapes are in [`packages/protocol/src/auth.ts`](https://github.com/armanghev/orchestrat/blob/main/packages/protocol/src/auth.ts):
 
-| Method | Path                      | Behavior                                                                                 |
-| ------ | ------------------------- | ---------------------------------------------------------------------------------------- |
-| `GET`  | `/api/v1/auth/instance`   | Public. `needs_setup` (no accounts yet) and `signup_mode` (`invite`, `open` or `closed`) |
-| `POST` | `/api/v1/auth/signup`     | Create an account. The first account on an empty instance becomes the instance admin     |
-| `POST` | `/api/v1/auth/login`      | Email and password; returns an access token and a refresh token                          |
-| `POST` | `/api/v1/auth/refresh`    | Exchange a refresh token for a new pair                                                  |
-| `POST` | `/api/v1/auth/logout`     | End the current session                                                                  |
-| `POST` | `/api/v1/auth/logout-all` | End every session of the account                                                         |
-| `POST` | `/api/v1/auth/password`   | Change the password                                                                      |
-| `GET`  | `/api/v1/auth/me`         | The signed-in account                                                                    |
+```json
+{
+  "access_token": "orch_sess_…",
+  "refresh_token": "orch_refresh_…",
+  "token_type": "Bearer",
+  "expires_in": 3600,
+  "refresh_expires_in": 2592000,
+  "user": {
+    "user_id": "…",
+    "email": "you@example.com",
+    "full_name": "…",
+    "is_instance_admin": true
+  },
+  "invited_project_id": null
+}
+```
 
-Signup follows `ORCHESTRAT_SIGNUP`: with `invite` (the default) people sign up only through an existing invitation link. Login and signup are rate-limited per IP and per email. See [Users and auth](/docs/users).
+The access token lasts 1 hour and the refresh token 30 days. Refreshing returns a new pair and retires the old refresh token. Presenting the previous refresh token more than 60 seconds after it was replaced ends the session, because it may have leaked. A session ends 90 days after sign-in, however often it is refreshed. Session responses carry `Cache-Control: no-store`.
 
-A missing or invalid token returns `401 UNAUTHENTICATED`. A request for a project you can't access returns `403 PERMISSION_DENIED`. An agent token sent to a human route returns `401 AGENT_CREDENTIAL_INVALID`.
+| Method | Path                      | Auth    | Behavior                                                                                                                                                                                                       |
+| ------ | ------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`  | `/api/v1/auth/instance`   | none    | `{ needs_setup, signup_mode }`: whether the server has no accounts yet, and `invite`, `open` or `closed`                                                                                                       |
+| `POST` | `/api/v1/auth/signup`     | none    | `{ email, password, full_name, invite_token?, setup_token? }`; `201` with a session. The first account needs `setup_token` and becomes the instance admin. `invited_project_id` is set when an invite was used |
+| `POST` | `/api/v1/auth/login`      | none    | `{ email, password }`; a session                                                                                                                                                                               |
+| `POST` | `/api/v1/auth/refresh`    | none    | `{ refresh_token }`; a new session pair                                                                                                                                                                        |
+| `POST` | `/api/v1/auth/revoke`     | none    | `{ refresh_token }`; ends that token's session, for when the access token has expired. `204` whether or not the token was valid                                                                                |
+| `POST` | `/api/v1/auth/logout`     | session | Ends the current session; `204`                                                                                                                                                                                |
+| `POST` | `/api/v1/auth/logout-all` | session | Ends every session of the account, including the current one, and revokes its CLI credentials; `204`                                                                                                           |
+| `POST` | `/api/v1/auth/password`   | session | `{ current_password, new_password }`; `204`. Ends every other session and revokes the account's CLI credentials                                                                                                |
+
+Emails are trimmed and lowercased, up to 320 characters. Passwords are 10 to 256 characters, and `full_name` 1 to 120. Sign-up follows `ORCHESTRAT_SIGNUP`: with `invite` (the default) it needs a valid, unused `invite_token`, which the sign-up uses up. See [Users and accounts](/docs/users).
+
+| Code                    | Status | When                                                                                                          |
+| ----------------------- | ------ | ------------------------------------------------------------------------------------------------------------- |
+| `INVALID_CREDENTIALS`   | 401    | Wrong email or password at sign-in                                                                            |
+| `REFRESH_TOKEN_INVALID` | 401    | The refresh token is unknown, expired, revoked or retired, or the session is too old                          |
+| `SETUP_TOKEN_REQUIRED`  | 403    | The first sign-up has no setup token, or the wrong one                                                        |
+| `SIGNUP_CLOSED`         | 403    | `ORCHESTRAT_SIGNUP` is `closed`                                                                               |
+| `INVITE_REQUIRED`       | 403    | The invite token is missing while `ORCHESTRAT_SIGNUP` is `invite`, or it is invalid, used, revoked or expired |
+| `PASSWORD_INCORRECT`    | 403    | The current password is wrong when changing it                                                                |
+| `EMAIL_TAKEN`           | 409    | An account already has that email                                                                             |
+| `RATE_LIMITED`          | 429    | See [Rate limits](#rate-limits)                                                                               |
+
+A missing, expired or revoked access token returns `401 UNAUTHENTICATED`. A request for a project you can't access returns `403 PERMISSION_DENIED`. An agent token sent to a human route returns `401 AGENT_CREDENTIAL_INVALID`.
 
 ### Agents
 
@@ -115,12 +140,15 @@ Schema validation failures return `400 VALIDATION_ERROR` with the validation `is
 | Code                                                                                                       | Status | Meaning                                                                                                                                                         |
 | ---------------------------------------------------------------------------------------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `UNAUTHENTICATED`                                                                                          | 401    | Missing or invalid session, CLI credential, or realtime or download ticket                                                                                      |
+| `INVALID_CREDENTIALS`, `REFRESH_TOKEN_INVALID`                                                             | 401    | Wrong email or password; unusable refresh token. See [People](#people)                                                                                          |
+| `SETUP_TOKEN_REQUIRED`, `SIGNUP_CLOSED`, `INVITE_REQUIRED`, `PASSWORD_INCORRECT`                           | 403    | Sign-up and password rules. See [People](#people)                                                                                                               |
 | `AGENT_CREDENTIAL_INVALID`, `AGENT_CREDENTIAL_REVOKED`                                                     | 401    | Bad or revoked agent token                                                                                                                                      |
 | `PERMISSION_DENIED`                                                                                        | 403    | No access, or the role is too low                                                                                                                               |
 | `CLAIM_NOT_OWNER`                                                                                          | 403    | The claim belongs to another agent or session                                                                                                                   |
 | `NOT_FOUND`, `AGENT_NOT_FOUND`, `AGENT_SESSION_NOT_FOUND`, `CLAIM_NOT_FOUND`, `BRANCH_NOT_FOUND`           | 404    | The resource doesn't exist or isn't visible to the caller                                                                                                       |
 | `VALIDATION_ERROR`, `REPOSITORY_NOT_CONFIGURED`                                                            | 400    | Invalid request, or the Git provider isn't set up on this server                                                                                                |
 | `CONFLICT`                                                                                                 | 409    | Generic conflict, often with `details.reason`; also a duplicate slug or email                                                                                   |
+| `EMAIL_TAKEN`                                                                                              | 409    | An account already has that email                                                                                                                               |
 | `ORGANIZATION_SLUG_TAKEN`                                                                                  | 409    | Another organization has the slug                                                                                                                               |
 | `PROJECT_ARCHIVED`                                                                                         | 409    | Write to an archived project                                                                                                                                    |
 | `IDEMPOTENCY_CONFLICT`                                                                                     | 409    | Idempotency key reused for a different request                                                                                                                  |
@@ -138,13 +166,20 @@ Schema validation failures return `400 VALIDATION_ERROR` with the validation `is
 
 ## Rate limits
 
-Limits are fixed one-minute windows kept in the server's memory. A limited request returns `429 RATE_LIMITED` with a `Retry-After` header and `details.retry_after_seconds`.
+Limits are fixed windows kept in the server's memory, one minute unless the table says otherwise. A limited request returns `429 RATE_LIMITED` with a `Retry-After` header and `details.retry_after_seconds`.
+
+Limits per IP see the client's address only when the server trusts its reverse proxy; set `ORCHESTRAT_TRUST_PROXY_HOPS` behind one. See [Configuration](/docs/configuration#server).
 
 | Scope                                                     | Limit                                                                                                              |
 | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `POST /api/v1/auth/login`                                 | 20 a minute per IP, and 10 failed attempts per email in 15 minutes                                                 |
+| `POST /api/v1/auth/signup`                                | 10 a minute per IP                                                                                                 |
+| `POST /api/v1/auth/refresh`, `POST /api/v1/auth/revoke`   | 60 a minute per IP, shared                                                                                         |
+| `POST /api/v1/auth/password`                              | 5 per person in 15 minutes                                                                                         |
 | `POST /api/v1/cli/authorization/attempts`                 | 10 a minute per IP                                                                                                 |
 | `POST /api/v1/cli/authorization/attempts/:attemptId/poll` | 120 a minute per IP. Polling one attempt more often than every 2 seconds also returns `429`, without `Retry-After` |
 | Attachment uploads, downloads and deletes, avatar upload  | 120 a minute per person or agent token                                                                             |
+| `GET /api/v1/avatars/:key`                                | 1,200 a minute per IP                                                                                              |
 | Webhooks                                                  | 600 a minute per IP                                                                                                |
 | New branches registered by an agent                       | 10 a minute per agent token                                                                                        |
 
@@ -159,20 +194,23 @@ These routes take no session or agent token.
 | `GET`  | `/health`, `/api/v1/health`                            | `{ "status": "ok" }` while the process is up                                                         |
 | `GET`  | `/ready`, `/api/v1/ready`                              | `{ "status": "ready" }` after a database check, or `503 { "status": "not_ready" }`                   |
 | `GET`  | `/api/v1/attachments/download?ticket=<ticket>`         | Streams an attachment. The ticket comes from a download request, is single-use, and lasts 60 seconds |
+| `GET`  | `/api/v1/avatars/:key`                                 | An avatar image. The key is random and comes from a profile's `avatar_url`                           |
 | `GET`  | `/api/v1/repository/callback/:provider`                | Git provider OAuth redirect; see [Webhooks and provider callbacks](#webhooks-and-provider-callbacks) |
 | `POST` | `/api/v1/webhooks/:provider`                           | Git provider webhooks                                                                                |
 | `GET`  | `/api/v1/realtime/projects/:projectId?ticket=<ticket>` | WebSocket upgrade with a realtime ticket; see [Realtime](#realtime)                                  |
 
-The CLI authorization `attempts` and `poll` routes are also public; see [CLI browser approval](#cli-browser-approval).
+The `instance`, `signup`, `login`, `refresh` and `revoke` auth routes are also public (see [People](#people)), and so are the CLI authorization `attempts` and `poll` routes (see [CLI browser approval](#cli-browser-approval)).
+
+When the server serves the dashboard, every other `GET` outside `/api`, `/health` and `/ready` returns the dashboard's `index.html`, so client-side routes load directly.
 
 ## Profile
 
-| Method   | Path                     | Behavior                                                                                              |
-| -------- | ------------------------ | ----------------------------------------------------------------------------------------------------- |
-| `GET`    | `/api/v1/profile`        | The signed-in person: `user_id`, `username`, `full_name`, `email`, `avatar_url`                       |
-| `PATCH`  | `/api/v1/profile`        | Set `username` (3–32 letters, digits or `_`), `full_name` and `avatar_url`; all three are required    |
-| `POST`   | `/api/v1/profile/avatar` | Multipart upload of a JPEG, PNG or WebP avatar, up to 2 MiB. Requires [object storage](/docs/storage) |
-| `DELETE` | `/api/v1/profile/avatar` | Remove the avatar                                                                                     |
+| Method   | Path                     | Behavior                                                                                                                                                                                                                   |
+| -------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`    | `/api/v1/profile`        | The signed-in person: `user_id`, `provider`, `username`, `full_name`, `email`, `avatar_url`, `is_instance_admin`                                                                                                           |
+| `PATCH`  | `/api/v1/profile`        | Set `username` (3–32 letters, digits or `_`), `full_name` and `avatar_url`; all three are required. `avatar_url` is `null`, the current avatar, or an external image URL; only an upload stores a new avatar on the server |
+| `POST`   | `/api/v1/profile/avatar` | Multipart upload of a JPEG, PNG or WebP avatar, up to 2 MiB. Requires [object storage](/docs/storage). Sets `avatar_url` to `/api/v1/avatars/<key>` on `ORCHESTRAT_PUBLIC_URL`, or root-relative when that is unset        |
+| `DELETE` | `/api/v1/profile/avatar` | Remove the avatar                                                                                                                                                                                                          |
 
 ## Organizations
 

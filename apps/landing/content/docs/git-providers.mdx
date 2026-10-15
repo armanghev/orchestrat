@@ -3,9 +3,6 @@ title: Git providers
 description: Register your own GitHub App and GitLab.com application so project branches follow your repositories.
 ---
 
-{/* TODO(verify): every URL on this page assumes v1's single ORCHESTRAT_PUBLIC_URL. Today API callbacks and webhooks use ORCHESTRAT_PUBLIC_API_URL (apps/api/src/services/repository/connection-service.ts:144, providers/gitlab.ts:403) and the GitHub setup URL and post-callback redirects use ORCHESTRAT_DASHBOARD_URL (connection-service.ts:264); see packages/config/src/repository.ts:14-15. */}
-{/* TODO(verify): whether `init` also writes ORCHESTRAT_REPOSITORY_SECRET_KEY_ID, or only the key. */}
-
 Connect a GitHub or GitLab.com repository to a project, and the project's branches follow Git. Orchestrat doesn't ship shared provider credentials: you register your own GitHub App and GitLab application, pointed at your server.
 
 Supported hosts are GitHub.com and GitLab.com. GitHub Enterprise Server and self-managed GitLab are not supported.
@@ -23,7 +20,7 @@ Orchestrat never writes to your repositories. On GitLab, the only write it makes
 ## Before you start
 
 - **A public HTTPS URL.** GitHub and GitLab deliver webhooks to your server over the internet, and your browser returns to it after you authorize. Set `ORCHESTRAT_PUBLIC_URL` to a stable public HTTPS origin with a valid certificate before you register anything. The URLs below are saved in each app's registration, so changing the hostname later means editing them. See [HTTPS](/docs/https).
-- **An encryption key.** Provider tokens and webhook secrets are stored encrypted. Set `ORCHESTRAT_REPOSITORY_SECRET_KEY` (base64 of 32 random bytes) and `ORCHESTRAT_REPOSITORY_SECRET_KEY_ID` (a short name such as `k1`). Generate a key with `openssl rand -base64 32`. See [Configuration](/docs/configuration).
+- **An encryption key.** Provider tokens and webhook secrets are stored encrypted with `ORCHESTRAT_REPOSITORY_SECRET_KEY` (base64 of 32 random bytes) and `ORCHESTRAT_REPOSITORY_SECRET_KEY_ID` (a short name such as `k1`). `init` writes both into `.env`. To set them yourself, generate a key with `openssl rand -base64 32`. See [Configuration](/docs/configuration).
 - **Roles.** Only owners and admins of an Orchestrat project connect, sync and disconnect its repository. On GitLab you also need the Maintainer role on each project you connect.
 
 ## URLs you'll register
@@ -102,7 +99,7 @@ On the app's **General** page:
 
    Keep the `.pem` out of any repository. You can generate a new key on the same page at any time.
 
-Add the values to your server's environment, then restart Orchestrat:
+Add the values to `.env`, then apply them with `docker compose up -d`:
 
 ```bash
 ORCHESTRAT_GITHUB_APP_ID=123456
@@ -148,7 +145,7 @@ ORCHESTRAT_GITLAB_OAUTH_CLIENT_ID=<Application ID>
 ORCHESTRAT_GITLAB_OAUTH_CLIENT_SECRET=<Secret>
 ```
 
-Add them to your server's environment and restart Orchestrat.
+Add them to `.env` and apply them with `docker compose up -d`.
 
 ### Connect a project
 

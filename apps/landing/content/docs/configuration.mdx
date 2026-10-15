@@ -1,78 +1,90 @@
 ---
 title: Configuration
-description: Every environment variable the Orchestrat server reads, with defaults, formats and what each one controls.
+description: Every environment variable the Orchestrat server and its compose files read, with defaults, and which ones init and compose set for you.
 ---
-
-<Draft />
-
-{/* TODO(verify): v1 replaces today's ORCHESTRAT_PUBLIC_API_URL (API callbacks and webhooks) and ORCHESTRAT_DASHBOARD_URL (browser redirects, GitHub setup URL) with one ORCHESTRAT_PUBLIC_URL; see packages/config/src/repository.ts:14-15 and the "Set ORCHESTRAT_PUBLIC_API_URL and ORCHESTRAT_DASHBOARD_URL." reason at repository.ts:111-116. Confirm the final name and every URL derived from it. */}
-{/* TODO(verify): ORCHESTRAT_PUBLIC_URL default (none, or http://localhost:8801?) and whether `init` writes it. */}
-{/* TODO(verify): `docker compose run --rm orchestrat init` writes .env next to compose.yml, and which secrets it generates (repository secret key, key ID, Postgres password?). */}
-{/* TODO(verify): `docker compose up -d` recreates the orchestrat container after .env changes. */}
-{/* TODO(verify): ORCHESTRAT_MIGRATE_ON_START name, default true, advisory lock, and how to run migrations by hand when it is false. */}
-{/* TODO(verify): ORCHESTRAT_ALLOWED_ORIGINS v1 default. Today it is http://localhost:8813 (packages/config/src/index.ts:7-15); with the dashboard on the same origin, check whether ORCHESTRAT_PUBLIC_URL is allowed automatically. */}
-{/* TODO(verify): ORCHESTRAT_API_HOST / ORCHESTRAT_API_PORT and the HOST / PORT fallback (packages/config/src/index.ts:26-30) survive in the single image. */}
-{/* TODO(verify): ORCHESTRAT_SIGNUP values and default; whether first-run admin setup still works with `closed`. */}
-{/* TODO(verify): ORCHESTRAT_S3_* names, the all-or-nothing rule (today apps/api/src/document-storage-config.ts:31-33) and whether ORCHESTRAT_S3_PUBLIC_URL is required for avatars. */}
-{/* TODO(verify): ORCHESTRAT_ATTACHMENT_QUOTA_BYTES default. Today the quota is the hardcoded PROJECT_QUOTA_BYTES = 10 * 1024 * 1024 * 1024 in apps/api/src/services/attachment-service.ts:59 and apps/api/src/services/merges/engine.ts:136. */}
 
 Orchestrat reads its configuration from environment variables when the server starts. Change a value, then restart the server for it to take effect.
 
 ## The `.env` file
 
-You don't write the file by hand. The `init` command creates it with generated secrets:
+You don't write the file by hand. `init` prints one with generated secrets:
 
 ```bash
-docker compose run --rm orchestrat init
+docker compose run --rm --no-deps -T orchestrat init > .env
 ```
 
-It writes `.env` next to `compose.yml`, including a generated `ORCHESTRAT_REPOSITORY_SECRET_KEY`. Edit it to change settings, then apply the change:
+It contains:
+
+| Variable                              | Value                                                                     |
+| ------------------------------------- | ------------------------------------------------------------------------- |
+| `ORCHESTRAT_PUBLIC_URL`               | `http://localhost:8801`, or the URL you pass as `init <url>`              |
+| `POSTGRES_PASSWORD`                   | A random password for the bundled Postgres                                |
+| `ORCHESTRAT_SETUP_TOKEN`              | A random token that creating the first account needs                      |
+| `ORCHESTRAT_SIGNUP`                   | `invite`                                                                  |
+| `ORCHESTRAT_REPOSITORY_SECRET_KEY`    | 32 random bytes, base64. Encrypts Git provider tokens.                    |
+| `ORCHESTRAT_REPOSITORY_SECRET_KEY_ID` | `k1`                                                                      |
+| `S3_ACCESS_KEY`, `S3_SECRET_KEY`      | Credentials for the bundled SeaweedFS, used only with the storage overlay |
+| `ORCHESTRAT_S3_PUBLIC_ENDPOINT`       | `http://localhost:8333`, where browsers reach the bundled SeaweedFS       |
+
+Compose reads `.env` twice: to fill in the `${...}` values in the compose files, and as the server container's environment, so every variable in it reaches the server. Values in a compose file's `environment:` block win over `.env`. For example, `compose.yml` always sets `ORCHESTRAT_DATABASE_URL` to the bundled Postgres.
+
+Edit `.env` to change settings, then apply the change:
 
 ```bash
 docker compose up -d
 ```
 
+`up -d` recreates the server container when its environment changed. `docker compose restart` does not pick up changes to `.env`.
+
 `.env` holds secrets. Keep it out of version control and include it in your backups: losing `ORCHESTRAT_REPOSITORY_SECRET_KEY` makes stored Git provider tokens unreadable, and every connection then asks you to reauthorize.
 
-To generate a key yourself, for example when you add or rotate one:
+To generate a key yourself, for example when you rotate one:
 
 ```bash
 openssl rand -base64 32
 ```
 
-The server checks values at startup and refuses to start when one is malformed, for example a secret key that doesn't decode to 32 bytes.
+The server checks values at startup and refuses to start when one is malformed, for example a secret key that doesn't decode to 32 bytes, or a partial storage configuration.
 
 ## Server
 
-| Variable                      | Default                 | Description                                                                                                                                                                                                                                                                                  |
-| ----------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ORCHESTRAT_PUBLIC_URL`       | None                    | The URL people and agents use to reach Orchestrat, such as `http://localhost:8801` or `https://orchestrat.example.com`. Origin only: no path, no trailing slash. It builds CLI approval links, invite links, Git provider callback and webhook URLs, and the origin allowed by storage CORS. |
-| `ORCHESTRAT_DATABASE_URL`     | None (required)         | Postgres connection string, such as `postgresql://orchestrat:password@postgres:5432/orchestrat`. `init` points it at the compose `postgres` service.                                                                                                                                         |
-| `ORCHESTRAT_MIGRATE_ON_START` | `true`                  | Apply pending database migrations when the server starts. Set to `false` to skip them.                                                                                                                                                                                                       |
-| `ORCHESTRAT_API_HOST`         | `0.0.0.0`               | Address the server listens on. When unset, `HOST` is used if present.                                                                                                                                                                                                                        |
-| `ORCHESTRAT_API_PORT`         | `8801`                  | Port the server listens on, `1` to `65535`. When unset, `PORT` is used if present.                                                                                                                                                                                                           |
-| `ORCHESTRAT_TRUST_PROXY_HOPS` | `0`                     | How many reverse proxies in front of Orchestrat to trust for the client address in `X-Forwarded-For`, `0` to `3`. Rate limits key on the client address. Keep `0` when clients connect directly; set `1` behind one proxy you control, such as Caddy. See [HTTPS](/docs/https).              |
-| `ORCHESTRAT_ALLOWED_ORIGINS`  | `http://localhost:8813` | Comma-separated browser origins allowed to call the API (CORS). You only need it when a dashboard is served from a different origin than the API, such as the dashboard dev server.                                                                                                          |
+| Variable                      | Default                                                        | Set by  | Description                                                                                                                                                                                                                                                         |
+| ----------------------------- | -------------------------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ORCHESTRAT_PUBLIC_URL`       | None                                                           | `init`  | The URL people and agents use to reach Orchestrat, such as `http://localhost:8801` or `https://orchestrat.example.com`. Origin only: no path, no trailing slash. It builds the setup link, Git provider callback, setup and webhook URLs, and avatar URLs.          |
+| `ORCHESTRAT_DATABASE_URL`     | None (required)                                                | compose | Postgres connection string. `compose.yml` points it at the bundled `postgres` service with `POSTGRES_PASSWORD`.                                                                                                                                                     |
+| `ORCHESTRAT_MIGRATE_ON_START` | `true`                                                         |         | Apply pending database migrations before the server listens. `true` or `false`.                                                                                                                                                                                     |
+| `ORCHESTRAT_API_HOST`         | `0.0.0.0`                                                      | image   | Address the server listens on. When unset, `HOST` is used if present.                                                                                                                                                                                               |
+| `ORCHESTRAT_API_PORT`         | `8801`                                                         | image   | Port the server listens on inside the container, `1` to `65535`. When unset, `PORT` is used if present. To change the port on your host, set `ORCHESTRAT_PORT` instead.                                                                                             |
+| `ORCHESTRAT_TRUST_PROXY_HOPS` | `0`                                                            |         | How many reverse proxies in front of Orchestrat to trust for the client address in `X-Forwarded-For`, `0` to `3`. Rate limits key on the client address. Keep `0` when clients connect directly; set `1` behind one proxy, such as Caddy. See [HTTPS](/docs/https). |
+| `ORCHESTRAT_ALLOWED_ORIGINS`  | `ORCHESTRAT_PUBLIC_URL` when set, else `http://localhost:8813` |         | Comma-separated browser origins allowed to call the API (CORS). The dashboard the server serves is on the same origin and needs none. Set it only for a dashboard served elsewhere, such as the development server.                                                 |
+| `ORCHESTRAT_DASHBOARD_DIR`    | None                                                           | image   | A built dashboard to serve on the API's origin. The image sets it to `/app/apps/dashboard/dist`. The server refuses to start if the directory has no `index.html`.                                                                                                  |
 
 ## Accounts
 
-| Variable            | Default  | Description                                                                                                                                                                                                                                       |
-| ------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ORCHESTRAT_SIGNUP` | `invite` | Who can create an account. `invite`: only through project invite links. `open`: anyone who can reach the server. `closed`: nobody signs up; an admin creates accounts with `orchestrat-admin create-user`. See [Users and accounts](/docs/users). |
+| Variable                 | Default                       | Set by | Description                                                                                                                                                                                                                                                |
+| ------------------------ | ----------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ORCHESTRAT_SIGNUP`      | `invite`                      | `init` | Who can create an account after the first one. `invite`: only with a project invite link. `open`: anyone who can reach the server. `closed`: nobody; an admin creates accounts with `orchestrat-admin create-user`. See [Users and accounts](/docs/users). |
+| `ORCHESTRAT_SETUP_TOKEN` | A new random token each start | `init` | Creating the first account needs it. 16 to 512 characters. While there are no accounts, the server prints a setup link that carries it.                                                                                                                    |
 
 ## Storage
 
-All optional. Set all of the `ORCHESTRAT_S3_*` connection values or none of them. Without storage, documents still work, but attachments and avatar uploads are off. See [Storage](/docs/storage).
+All optional. Set the endpoint, bucket and both keys, or none of them; the others have defaults. Without storage, documents work, but attachments and avatar uploads are off. See [Storage](/docs/storage).
 
-| Variable                            | Default                | Description                                                                                                                                                                                                                     |
-| ----------------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ORCHESTRAT_S3_ENDPOINT`            | None                   | S3 API endpoint, such as `https://s3.us-east-1.amazonaws.com` or `https://<account id>.r2.cloudflarestorage.com`. The server calls it, and browsers and agents upload straight to it, so it must be reachable from all of them. |
-| `ORCHESTRAT_S3_REGION`              | None                   | Bucket region, such as `us-east-1`. Use `auto` for Cloudflare R2.                                                                                                                                                               |
-| `ORCHESTRAT_S3_BUCKET`              | None                   | Bucket name. Keep the bucket private.                                                                                                                                                                                           |
-| `ORCHESTRAT_S3_ACCESS_KEY_ID`       | None                   | Access key ID with read and write access to the bucket.                                                                                                                                                                         |
-| `ORCHESTRAT_S3_SECRET_ACCESS_KEY`   | None                   | Secret access key. Server-side only.                                                                                                                                                                                            |
-| `ORCHESTRAT_S3_PUBLIC_URL`          | None                   | Public base URL browsers load avatar images from.                                                                                                                                                                               |
-| `ORCHESTRAT_ATTACHMENT_QUOTA_BYTES` | `10737418240` (10 GiB) | Total attachment bytes allowed per project, counting uploads in progress.                                                                                                                                                       |
+"Overlay" means the server gets the value from `compose.storage.yml`, which overrides `.env`.
+
+| Variable                            | Default                  | Set by  | Description                                                                                                                                                                                                 |
+| ----------------------------------- | ------------------------ | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ORCHESTRAT_S3_ENDPOINT`            | None                     | overlay | S3 API endpoint the server calls, such as `https://s3.us-east-1.amazonaws.com`. The overlay sets `http://seaweedfs:8333`. For R2, the account endpoint without a bucket path.                               |
+| `ORCHESTRAT_S3_PUBLIC_ENDPOINT`     | `ORCHESTRAT_S3_ENDPOINT` | `init`  | The endpoint browsers and the CLI upload to, through presigned URLs. Set it when they reach storage at a different address than the server does. It must be reachable from every browser and agent machine. |
+| `ORCHESTRAT_S3_REGION`              | `us-east-1`              | overlay | Bucket region. Use `auto` for Cloudflare R2.                                                                                                                                                                |
+| `ORCHESTRAT_S3_BUCKET`              | None                     | overlay | Bucket name. Keep the bucket private. The overlay uses `orchestrat`.                                                                                                                                        |
+| `ORCHESTRAT_S3_ACCESS_KEY_ID`       | None                     | overlay | Access key ID with read and write access to the bucket. The overlay passes `S3_ACCESS_KEY`.                                                                                                                 |
+| `ORCHESTRAT_S3_SECRET_ACCESS_KEY`   | None                     | overlay | Secret access key. Server-side only. The overlay passes `S3_SECRET_KEY`.                                                                                                                                    |
+| `ORCHESTRAT_S3_FORCE_PATH_STYLE`    | `true`                   |         | Use `<endpoint>/<bucket>/<key>` URLs instead of `<bucket>.<endpoint>/<key>`. `true` or `false`.                                                                                                             |
+| `ORCHESTRAT_S3_CREATE_BUCKET`       | `false`                  | overlay | Create the bucket at startup when it is missing. The overlay sets `true`.                                                                                                                                   |
+| `ORCHESTRAT_ATTACHMENT_QUOTA_BYTES` | `10737418240` (10 GiB)   |         | Total attachment bytes allowed per project, counting uploads in progress. A positive whole number.                                                                                                          |
+
+The older names `DOCUMENT_STORAGE_S3_ENDPOINT`, `DOCUMENT_STORAGE_S3_REGION`, `DOCUMENT_STORAGE_BUCKET`, `DOCUMENT_STORAGE_S3_ACCESS_KEY_ID` and `DOCUMENT_STORAGE_S3_SECRET_ACCESS_KEY` still work when the matching `ORCHESTRAT_S3_*` variable is unset. The server logs a warning asking you to rename them.
 
 ## Git providers
 
@@ -80,13 +92,15 @@ A provider is available only when the shared settings (`ORCHESTRAT_PUBLIC_URL`, 
 
 ### Shared settings
 
-| Variable                                           | Default                                            | Description                                                                                                                                                  |
-| -------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `ORCHESTRAT_REPOSITORY_SECRET_KEY`                 | None                                               | Base64 of exactly 32 random bytes (`openssl rand -base64 32`). Encrypts stored provider tokens and webhook signing secrets with AES-256-GCM. Keep it stable. |
-| `ORCHESTRAT_REPOSITORY_SECRET_KEY_ID`              | None                                               | Short name stored with each encrypted value, matching `[a-z0-9]{1,16}`, such as `k1`. Use a new ID whenever you change the key.                              |
-| `ORCHESTRAT_REPOSITORY_PREVIOUS_SECRET_KEYS`       | None                                               | Older keys that can still decrypt, as comma-separated `id:base64` pairs, such as `k1:<old key>`. New values are always written with the current key.         |
-| `ORCHESTRAT_REPOSITORY_SYNC_ENABLED`               | `true` when a provider is configured, else `false` | Runs the in-process worker that processes webhooks and reconciles with providers. `true` or `false`.                                                         |
-| `ORCHESTRAT_REPOSITORY_RECONCILE_INTERVAL_SECONDS` | `900`                                              | How often, in seconds, each connected repository and organization integration is re-read from its provider to catch missed webhooks. Minimum `30`.           |
+| Variable                                           | Default                                            | Set by | Description                                                                                                                                                  |
+| -------------------------------------------------- | -------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ORCHESTRAT_REPOSITORY_SECRET_KEY`                 | None                                               | `init` | Base64 of exactly 32 random bytes (`openssl rand -base64 32`). Encrypts stored provider tokens and webhook signing secrets with AES-256-GCM. Keep it stable. |
+| `ORCHESTRAT_REPOSITORY_SECRET_KEY_ID`              | None                                               | `init` | Short name stored with each encrypted value, matching `[a-z0-9]{1,16}`, such as `k1`. Use a new ID whenever you change the key.                              |
+| `ORCHESTRAT_REPOSITORY_PREVIOUS_SECRET_KEYS`       | None                                               |        | Older keys that can still decrypt, as comma-separated `id:base64` pairs, such as `k1:<old key>`. New values are always written with the current key.         |
+| `ORCHESTRAT_REPOSITORY_SYNC_ENABLED`               | `true` when a provider is configured, else `false` |        | Runs the in-process worker that processes webhooks and reconciles with providers. `true` or `false`.                                                         |
+| `ORCHESTRAT_REPOSITORY_RECONCILE_INTERVAL_SECONDS` | `900`                                              |        | How often, in seconds, each connected repository and organization integration is re-read from its provider to catch missed webhooks. Minimum `30`.           |
+| `ORCHESTRAT_PUBLIC_API_URL`                        | `ORCHESTRAT_PUBLIC_URL`                            |        | Only when the API and the dashboard have different origins: the API's public URL, for provider callbacks and webhooks.                                       |
+| `ORCHESTRAT_DASHBOARD_URL`                         | `ORCHESTRAT_PUBLIC_URL`                            |        | Only when the API and the dashboard have different origins: the dashboard's URL, for the GitHub setup URL and the redirects after a provider callback.       |
 
 ### GitHub
 
@@ -108,11 +122,36 @@ A provider is available only when the shared settings (`ORCHESTRAT_PUBLIC_URL`, 
 
 The GitLab webhook signing token is generated per connection and stored encrypted in the database, so it has no variable.
 
+### Cursor Origin
+
+Cursor Origin is in early beta and hidden unless you turn it on.
+
+| Variable                                   | Default                            | Description                                         |
+| ------------------------------------------ | ---------------------------------- | --------------------------------------------------- |
+| `ORCHESTRAT_ORIGIN_ENABLED`                | `false`                            | Set `true` to offer Cursor Origin in the dashboard. |
+| `ORCHESTRAT_ORIGIN_APP_ID`                 | None                               | The Origin app's ID.                                |
+| `ORCHESTRAT_ORIGIN_APP_PRIVATE_KEY_BASE64` | None                               | The app's private key, base64-encoded on one line.  |
+| `ORCHESTRAT_ORIGIN_API_BASE`               | `https://api.cursor.com/v1/origin` | The Origin API's base URL.                          |
+
+## Compose variables
+
+The compose files read these from `.env` or your shell. The server doesn't use them.
+
+| Variable              | Default      | Set by | Description                                                                                                                                                                           |
+| --------------------- | ------------ | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POSTGRES_PASSWORD`   | None         | `init` | Password of the bundled Postgres. Compose builds `ORCHESTRAT_DATABASE_URL` from it. Postgres keeps the password it was first started with, so changing it later locks the server out. |
+| `ORCHESTRAT_VERSION`  | `latest`     |        | Tag of the `ghcr.io/armanghev/orchestrat` image to run. See [Upgrades](/docs/upgrades#pin-a-version).                                                                                 |
+| `ORCHESTRAT_PORT`     | `8801`       |        | Host port for the server. `127.0.0.1:8801` publishes it on the loopback interface only.                                                                                               |
+| `ORCHESTRAT_ENV_FILE` | `.env`       |        | The env file passed to the server container.                                                                                                                                          |
+| `S3_ACCESS_KEY`       | `orchestrat` | `init` | Access key the bundled SeaweedFS accepts. Storage overlay only.                                                                                                                       |
+| `S3_SECRET_KEY`       | None         | `init` | Secret key the bundled SeaweedFS accepts. Storage overlay only.                                                                                                                       |
+| `S3_PORT`             | `8333`       |        | Host port for SeaweedFS. `127.0.0.1:8333` publishes it on the loopback interface only. Storage overlay only.                                                                          |
+
 ## Rotate the repository secret key
 
 1. Generate a new key with `openssl rand -base64 32`.
 2. Add the current ID and key to `ORCHESTRAT_REPOSITORY_PREVIOUS_SECRET_KEYS`, such as `k1:<current key>`.
 3. Set `ORCHESTRAT_REPOSITORY_SECRET_KEY` to the new key and `ORCHESTRAT_REPOSITORY_SECRET_KEY_ID` to a new ID, such as `k2`.
-4. Restart the server.
+4. Restart the server with `docker compose up -d`.
 
 Keep the old entry listed. Values written with it are still decrypted with it.

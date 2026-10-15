@@ -1,79 +1,91 @@
 ---
 title: Storage
-description: Optional S3-compatible storage for document revisions, attachments and avatars, with MinIO, Amazon S3 or Cloudflare R2.
+description: Optional S3-compatible storage for document revisions, attachments and avatars, with the bundled SeaweedFS, Amazon S3 or Cloudflare R2.
 ---
 
-<Draft />
-
-{/* TODO(verify): the compose `storage` profile name, MinIO's published port (9000), the bucket name, the credential variables, and that its init job creates the bucket and applies CORS. */}
-{/* TODO(verify): one ORCHESTRAT_S3_ENDPOINT is used for server-side calls and for presigned URLs (today DOCUMENT_STORAGE_S3_ENDPOINT, apps/api/src/document-storage-config.ts:25, presigned in apps/api/src/services/attachment-service.ts createProject/signParts). With MinIO in compose, http://localhost:9000 does not reach MinIO from inside the orchestrat container, and http://minio:9000 does not resolve in the browser. v1 needs a separate presign/public endpoint or a proxy; update the "Reachable endpoint" section to match. */}
-{/* TODO(verify): avatars in v1: same bucket as documents or not, the public-read rule, and the ORCHESTRAT_S3_PUBLIC_URL format. Today avatars use a separate bucket and separate vars (apps/api/src/server.ts:31-56) and document storage refuses the avatar bucket (apps/api/src/document-storage-config.ts:42-47). */}
-{/* TODO(verify): attachments and avatars without storage. Today attachment uploads return 503 STORAGE_UPLOAD_FAILED (attachment-service.ts:112-119) and ProfileService throws a plain Error (apps/api/src/services/profile-service.ts:78), which surfaces as a server error; the dashboard does not hide either control. */}
-{/* TODO(verify): ORCHESTRAT_ATTACHMENT_QUOTA_BYTES default; today hardcoded PROJECT_QUOTA_BYTES = 10 GiB at apps/api/src/services/attachment-service.ts:59 and apps/api/src/services/merges/engine.ts:136. */}
-{/* TODO(verify): the R2 endpoint check (no bucket path) carries over from document-storage-config.ts:35-41 to ORCHESTRAT_S3_ENDPOINT. */}
-
-Storage is optional. Without it, Orchestrat keeps everything in Postgres and documents work normally, but attachments and avatar uploads are off. Add an S3-compatible bucket when you want them.
+Storage is optional. Without it, Orchestrat keeps documents in Postgres and they work normally, but attachments and avatar uploads are off. Add an S3-compatible bucket when you want them.
 
 ## What storage holds
 
-| Data               | Without storage                                 | With storage                                                                                                        |
-| ------------------ | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| Document revisions | Stored in Postgres.                             | Each new revision is also written to the bucket and read back from it, checked against its stored size and SHA-256. |
-| Attachments        | Off. Uploads fail with `STORAGE_UPLOAD_FAILED`. | Files attached to documents: images you add in the dashboard editor and files agents upload with the CLI.           |
-| Avatars            | Off.                                            | Profile pictures uploaded in onboarding and profile settings.                                                       |
+Everything goes in one private bucket.
 
-Revisions written before you added storage stay in Postgres and keep working. Once storage is on, keep it on: the server reads newer revisions from the bucket and returns `DOCUMENT_CONTENT_UNAVAILABLE` when it can't reach them.
+| Data               | Without storage                                  | With storage                                                                                                        |
+| ------------------ | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| Document revisions | Stored in Postgres.                              | Each new revision is also written to the bucket and read back from it, checked against its stored size and SHA-256. |
+| Attachments        | Off. Uploads return `503 STORAGE_UPLOAD_FAILED`. | Files attached to documents: images you add in the dashboard editor and files agents upload with the CLI.           |
+| Avatars            | Off. Uploads return `503 STORAGE_UPLOAD_FAILED`. | Profile pictures uploaded in onboarding and profile settings.                                                       |
 
-Objects live under two prefixes in the bucket: `document-revisions/v1/` and `document-attachments/v1/`. Deleting a project deletes its objects. Branch imports and merges copy attachment objects on the server.
+Objects live under three prefixes: `document-revisions/v1/`, `document-attachments/v1/` and `avatars/`. Deleting a project deletes its revisions and attachments. Branch imports and merges copy attachment objects on the server.
 
-## How uploads work
+Revisions written before you added storage stay in Postgres and keep working. Once storage is on, keep it on. See [Turning storage off](#turning-storage-off).
 
-Attachment bytes never pass through the Orchestrat server on the way in:
+## The bundled SeaweedFS
+
+`compose.storage.yml` adds [SeaweedFS](https://github.com/seaweedfs/seaweedfs), an S3-compatible server, on port 8333, and points Orchestrat at it. Start the stack with both files:
+
+```bash
+docker compose -f compose.yml -f compose.storage.yml up -d
+```
+
+It needs nothing beyond the `.env` that `init` wrote: `S3_ACCESS_KEY`, `S3_SECRET_KEY` and `ORCHESTRAT_S3_PUBLIC_ENDPOINT=http://localhost:8333`. The overlay sets the server's `ORCHESTRAT_S3_*` values itself, including a bucket named `orchestrat` that the server creates on first start. While SeaweedFS starts, the server can fail to reach it and restart a few times before it settles.
+
+Pass both files to every later `docker compose` command, or a plain `up -d` recreates the server without storage. To make that automatic, add this line to `.env`:
+
+```bash
+COMPOSE_FILE=compose.yml:compose.storage.yml
+```
+
+SeaweedFS keeps its data in the `seaweedfs` Docker volume. Back it up with Postgres; see [Upgrades and backups](/docs/upgrades#back-up-seaweedfs).
+
+The bundled storage used to be MinIO. MinIO no longer publishes Docker images, so the compose files use SeaweedFS instead.
+
+## The public endpoint
+
+Attachment bytes don't pass through the Orchestrat server on the way in. Browsers and the CLI upload straight to storage with presigned URLs:
 
 1. The dashboard or CLI asks the server for an upload. The server checks permissions and the project quota.
-2. The server returns a presigned `PUT` URL for the bucket, valid for 15 minutes.
-3. The client uploads the file straight to that URL. Files over 100 MiB are sent as a multipart upload in 16 MiB parts.
+2. The server returns a presigned `PUT` URL, valid for 15 minutes, that points at `ORCHESTRAT_S3_PUBLIC_ENDPOINT`.
+3. The client uploads the file to that URL. Files over 100 MiB are sent as a multipart upload in 16 MiB parts.
 4. The client tells the server the upload is complete, and the server checks the stored object's size.
 
-Each attachment can be up to 2 GiB. Downloads go through the server, so the bucket never serves files to browsers directly.
+Each attachment can be up to 2 GiB, and an unfinished upload can be resumed for 24 hours. Downloads go through the server, so the bucket never serves files to browsers directly.
 
-## Reachable endpoint
+So storage has two addresses:
 
-Upload URLs point at `ORCHESTRAT_S3_ENDPOINT`. Every browser that uses the dashboard and every machine where agents run the CLI must be able to reach that address, not only the Orchestrat server.
+- `ORCHESTRAT_S3_ENDPOINT` is where the server reaches it. With the overlay, that's `http://seaweedfs:8333` inside the compose network.
+- `ORCHESTRAT_S3_PUBLIC_ENDPOINT` is where browsers and agent machines reach it. With the overlay on your own machine, that's `http://localhost:8333`. When unset, it is the same as `ORCHESTRAT_S3_ENDPOINT`.
 
-<Callout type="warn" title="Use an address browsers can resolve">
-  With MinIO on your own machine, browsers reach it at `http://localhost:9000`.
-  A compose service name such as `http://minio:9000` only resolves inside the
-  compose network, so uploads from the dashboard fail. On a server, give the
-  storage endpoint a public hostname, such as
-  `https://s3.orchestrat.example.com`.
-</Callout>
+Every browser that uses the dashboard and every machine where agents run the CLI must be able to reach the public endpoint. On a server, give storage its own hostname, such as `https://s3.orchestrat.example.com`, and set `ORCHESTRAT_S3_PUBLIC_ENDPOINT` to it. A dashboard served over HTTPS needs an HTTPS storage endpoint, because browsers block uploads from an HTTPS page to plain HTTP. See [HTTPS and reverse proxy](/docs/https#storage-behind-the-proxy).
 
-Orchestrat uses path-style URLs: `<endpoint>/<bucket>/<object key>`. If you put a reverse proxy in front of your storage, it must pass those paths through unchanged.
+Orchestrat uses path-style URLs by default: `<endpoint>/<bucket>/<object key>`. If you put a reverse proxy in front of storage, it must pass those paths and the `Host` header through unchanged, because the presigned signature covers them.
 
-## MinIO with compose
+## CORS
 
-The compose file has an optional `storage` profile that runs MinIO, creates the bucket and applies the CORS rule. Set the storage variables in `.env`:
+Because browsers upload straight to storage, storage must allow cross-origin `PUT` requests from your dashboard's origin, `ORCHESTRAT_PUBLIC_URL`, with a `Content-Type` header. No `GET` rule is needed, because downloads go through the server.
 
-```bash
-ORCHESTRAT_S3_ENDPOINT=http://localhost:9000
-ORCHESTRAT_S3_REGION=us-east-1
-ORCHESTRAT_S3_BUCKET=orchestrat
-ORCHESTRAT_S3_ACCESS_KEY_ID=<MinIO access key>
-ORCHESTRAT_S3_SECRET_ACCESS_KEY=<MinIO secret key>
+- **SeaweedFS** allows any origin by default. There is nothing to set.
+- **Amazon S3 and Cloudflare R2** need a CORS rule on the bucket:
+
+```json
+[
+  {
+    "AllowedOrigins": ["https://orchestrat.example.com"],
+    "AllowedMethods": ["PUT"],
+    "AllowedHeaders": ["Content-Type"],
+    "ExposeHeaders": ["ETag"],
+    "MaxAgeSeconds": 3600
+  }
+]
 ```
 
-Then start everything with the profile:
+- **Cloudflare R2:** paste the rule into the bucket's **Settings → CORS policy**.
+- **Amazon S3:** paste it into the bucket's **Permissions → Cross-origin resource sharing (CORS)**. With the AWS CLI, wrap the array as `{"CORSRules": [...]}` and run `aws s3api put-bucket-cors --bucket orchestrat-example --cors-configuration file://cors.json`.
 
-```bash
-docker compose --profile storage up -d
-```
-
-Keep passing `--profile storage` on later `up` commands, or MinIO doesn't start.
+If you change `ORCHESTRAT_PUBLIC_URL`, update the rule. Uploads from an origin that isn't listed fail in the browser before they reach the bucket.
 
 ## Amazon S3
 
-Create a private bucket and an IAM user or role for Orchestrat, then set:
+Don't use the overlay. Create a private bucket and an IAM user or role for Orchestrat, then set these in `.env` and run `docker compose up -d`:
 
 ```bash
 ORCHESTRAT_S3_ENDPOINT=https://s3.us-east-1.amazonaws.com
@@ -81,7 +93,10 @@ ORCHESTRAT_S3_REGION=us-east-1
 ORCHESTRAT_S3_BUCKET=orchestrat-example
 ORCHESTRAT_S3_ACCESS_KEY_ID=<access key ID>
 ORCHESTRAT_S3_SECRET_ACCESS_KEY=<secret access key>
+ORCHESTRAT_S3_PUBLIC_ENDPOINT=https://s3.us-east-1.amazonaws.com
 ```
+
+`init` set `ORCHESTRAT_S3_PUBLIC_ENDPOINT` to the bundled SeaweedFS address. Change it to the same endpoint, or remove the line.
 
 The calls Orchestrat makes need this policy on the bucket:
 
@@ -111,7 +126,7 @@ The calls Orchestrat makes need this policy on the bucket:
 
 ## Cloudflare R2
 
-Create a bucket and an R2 API token with **Object Read & Write** on it, then set:
+Don't use the overlay. Create a bucket and an R2 API token with **Object Read & Write** on it, then set these in `.env` and run `docker compose up -d`:
 
 ```bash
 ORCHESTRAT_S3_ENDPOINT=https://<account id>.r2.cloudflarestorage.com
@@ -119,35 +134,14 @@ ORCHESTRAT_S3_REGION=auto
 ORCHESTRAT_S3_BUCKET=orchestrat
 ORCHESTRAT_S3_ACCESS_KEY_ID=<R2 access key ID>
 ORCHESTRAT_S3_SECRET_ACCESS_KEY=<R2 secret access key>
+ORCHESTRAT_S3_PUBLIC_ENDPOINT=https://<account id>.r2.cloudflarestorage.com
 ```
 
-R2's region is always `auto`. Use the account endpoint without the bucket name in the path; set the bucket in `ORCHESTRAT_S3_BUCKET`. The server refuses to start when the endpoint includes a bucket path.
+R2's region is always `auto`. Use the account endpoint without the bucket name in the path, and set the bucket in `ORCHESTRAT_S3_BUCKET`. The server refuses to start when the endpoint includes a bucket path.
 
 ## Avatars
 
-Avatars (JPEG, PNG or WebP, up to 2 MiB) are uploaded through the Orchestrat server, which writes them to storage. Browsers then load them from `ORCHESTRAT_S3_PUBLIC_URL`, so avatar images must be publicly readable at that URL. Document revisions and attachments must stay private: never make the whole bucket public.
-
-## CORS
-
-Because browsers upload straight to the bucket, the bucket needs a CORS rule that lets your Orchestrat origin send `PUT` requests with a `Content-Type` header. No `GET` rule is needed, because downloads go through the server. Set the allowed origin to your `ORCHESTRAT_PUBLIC_URL`:
-
-```json
-[
-  {
-    "AllowedOrigins": ["https://orchestrat.example.com"],
-    "AllowedMethods": ["PUT"],
-    "AllowedHeaders": ["Content-Type"],
-    "ExposeHeaders": ["ETag"],
-    "MaxAgeSeconds": 3600
-  }
-]
-```
-
-- **Cloudflare R2:** paste the rule into the bucket's **Settings → CORS policy**.
-- **Amazon S3:** paste it into the bucket's **Permissions → Cross-origin resource sharing (CORS)**. With the AWS CLI, wrap the array as `{"CORSRules": [...]}` and run `aws s3api put-bucket-cors --bucket orchestrat-example --cors-configuration file://cors.json`.
-- **MinIO with the `storage` profile:** already applied.
-
-If you change `ORCHESTRAT_PUBLIC_URL`, update the rule. Uploads from an origin that isn't listed fail in the browser before they reach the bucket.
+Avatars (JPEG, PNG or WebP, up to 2 MiB) are uploaded through the Orchestrat server, which writes them to the bucket under `avatars/`. Browsers load them from the server too, at `/api/v1/avatars/<key>` on `ORCHESTRAT_PUBLIC_URL`, so the bucket stays private. Each key is random, and anyone who has an avatar's URL can load it.
 
 ## Attachment quota
 
@@ -158,6 +152,14 @@ Each project can store up to `ORCHESTRAT_ATTACHMENT_QUOTA_BYTES` of attachments,
 ORCHESTRAT_ATTACHMENT_QUOTA_BYTES=53687091200
 ```
 
+## Turning storage off
+
+If you remove the storage settings after storage has been used, the server still starts, and logs a warning with the number of document revisions and attachments it can no longer reach. Those revisions return `503 DOCUMENT_CONTENT_UNAVAILABLE` and those attachments `503 STORAGE_UPLOAD_FAILED` until you set the same storage settings again. Nothing is deleted.
+
+## Old variable names
+
+Earlier versions read `DOCUMENT_STORAGE_S3_ENDPOINT`, `DOCUMENT_STORAGE_S3_REGION`, `DOCUMENT_STORAGE_BUCKET`, `DOCUMENT_STORAGE_S3_ACCESS_KEY_ID` and `DOCUMENT_STORAGE_S3_SECRET_ACCESS_KEY`. They still work when the matching `ORCHESTRAT_S3_*` variable is unset, and the server logs a warning asking you to rename them.
+
 ## Back up the bucket
 
-Once storage is on, a Postgres backup alone is not a complete backup: newer document revisions and every attachment live in the bucket. Back up the bucket together with the database, and restore them together. See [Upgrades and backups](/docs/upgrades).
+Once storage is on, a Postgres backup alone is not a complete backup: newer document revisions, every attachment and every avatar live in the bucket. Back up the bucket together with the database, and restore them together. See [Upgrades and backups](/docs/upgrades).

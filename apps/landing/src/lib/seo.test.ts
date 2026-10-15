@@ -220,7 +220,7 @@ test("public pages, crawl files, structured data, and real 404 responses", async
     if (file === "llms-full.txt") {
       for (const text of [
         "npx @orchestrat/cli setup --server http://localhost:8801",
-        "Draft: this describes v1, which is still being built.",
+        "Draft: this describes v1, which isn’t released yet.",
         "orchestrat mcp --integration codex",
         "Read current state before writing",
         "Elastic License 2.0"

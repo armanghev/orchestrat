@@ -3,8 +3,6 @@ title: Contributing
 description: Set up the monorepo, run the tests, and send a pull request. Contributions need a signed CLA.
 ---
 
-{/* TODO(verify): remove the sign-in callout once built-in auth (Release 06+) lands, and drop the Supabase values from .env.example. Check that CONTRIBUTING.md exists on main with the CLA Assistant link before launch. */}
-
 Orchestrat is source-available under the Elastic License 2.0, and contributions are welcome. Read [CONTRIBUTING.md](https://github.com/armanghev/orchestrat/blob/main/CONTRIBUTING.md) before you open a pull request: it has the conventions and the review process.
 
 ## Contributor License Agreement
@@ -42,12 +40,6 @@ pnpm db:migrate
 pnpm dev
 ```
 
-<Callout type="info" title="Sign-in during development">
-  Built-in accounts are still being built. Until they land, the dashboard signs
-  in through a Supabase project, so local development needs the
-  `ORCHESTRAT_SUPABASE_*` and `VITE_SUPABASE_*` values in `.env.example`.
-</Callout>
-
 `pnpm dev` starts every app with Turborepo. To run one:
 
 ```bash
@@ -56,7 +48,12 @@ pnpm dev:dashboard  # http://localhost:8813
 pnpm dev:landing    # http://localhost:8800
 ```
 
-To create a local user, organization and project without the UI, set the `ORCHESTRAT_SEED_*` values from `.env.example` and run `pnpm db:seed`.
+### Sign in during development
+
+The dashboard uses the API's built-in accounts, so you need no external auth service. Create the first account in one of two ways:
+
+- **Seed.** Set `ORCHESTRAT_SEED_USER_EMAIL`, `ORCHESTRAT_SEED_USER_NAME` and `ORCHESTRAT_SEED_USER_PASSWORD` in `.env`, then run `pnpm db:seed`. It creates that account as an instance admin, with a "Local organization" and a "Demo project", and you sign in at `http://localhost:8813` with that password. The password must be 10 to 256 characters and differ from the `.env.example` value. Running the seed again resets the password.
+- **Setup link.** While the database has no accounts, `pnpm dev:api` prints a setup link to the dashboard dev server, `http://localhost:8813/?setup_token=…`. Open it and create the first account. The token changes on every start unless you set `ORCHESTRAT_SETUP_TOKEN`.
 
 To try your CLI changes against your local API and dashboard, build and install it in place of the managed runtime, then run setup with both URLs:
 
