@@ -95,14 +95,12 @@ try {
         : (repositoryConfig.dashboardUrl ??
           config.ORCHESTRAT_ALLOWED_ORIGINS[0] ??
           local));
-    const setupUrl = config.ORCHESTRAT_SETUP_TOKEN
-      ? `${dashboard}/`
-      : `${dashboard}/?setup_token=${setupToken}`;
+    // The link carries the token: whoever can read the server log (or the
+    // .env it came from) is already trusted to set the server up.
+    const setupUrl = `${dashboard}/?setup_token=${encodeURIComponent(setupToken)}`;
     logger.info(
       { setup_url: setupUrl },
-      config.ORCHESTRAT_SETUP_TOKEN
-        ? `No accounts yet. Create the admin account at ${setupUrl} with ORCHESTRAT_SETUP_TOKEN.`
-        : `No accounts yet. Create the admin account at ${setupUrl}`
+      `No accounts yet. Create the admin account at ${setupUrl}`
     );
   }
 } catch (error) {
