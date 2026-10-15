@@ -27,10 +27,22 @@ const STALE_PROCESSING_MS = 5 * 60_000;
 const errorText = (error: unknown) =>
   (error instanceof Error ? error.message : "Delivery failed.").slice(0, 1000);
 
+const INTEGRATION_CHECK_MS = 15_000;
+
 export class RepositorySyncWorker {
   private timer?: ReturnType<typeof setInterval>;
   private running: Promise<void> | null = null;
   private readonly requested = new Set<string>();
+  private lastIntegrationCheck = 0;
+  /** Organization integrations: refreshed on installation events and on a
+   * schedule, so new repositories show up for import. */
+  integrations?: {
+    refreshDue(): Promise<void>;
+    requestRefreshByInstallation(
+      provider: string,
+      installationId: string
+    ): void;
+  };
 
   constructor(
     private readonly db: Database,
@@ -118,6 +130,20 @@ export class RepositorySyncWorker {
       if (claimed) await this.deliver(claimed);
     }
     await this.reconcileDue();
+    if (
+      this.integrations &&
+      this.now().getTime() - this.lastIntegrationCheck >= INTEGRATION_CHECK_MS
+    ) {
+      this.lastIntegrationCheck = this.now().getTime();
+      await this.integrations
+        .refreshDue()
+        .catch((error: unknown) =>
+          console.error(
+            "[integrations] refresh pass failed:",
+            error instanceof Error ? error.message : String(error)
+          )
+        );
+    }
   }
 
   private async deliver(delivery: DeliveryRow) {
@@ -161,6 +187,16 @@ export class RepositorySyncWorker {
 
   /** Returns false when no active connection takes the delivery. */
   private async process(delivery: DeliveryRow) {
+    // Repositories added to or removed from an installation, or the
+    // installation itself changing: refresh the integrations that use it.
+    if (
+      delivery.installationId &&
+      delivery.eventType.startsWith("installation")
+    )
+      await this.integrations?.requestRefreshByInstallation(
+        delivery.provider,
+        delivery.installationId
+      );
     const connections = delivery.connectionId
       ? await this.db
           .select()

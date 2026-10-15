@@ -9,7 +9,10 @@ const ids = {
   missing: "00000000-0000-4000-8000-000000000006",
   user: "00000000-0000-4000-8000-000000000007",
   task: "00000000-0000-4000-8000-000000000008",
-  agent: "00000000-0000-4000-8000-000000000009"
+  agent: "00000000-0000-4000-8000-000000000009",
+  imported: "00000000-0000-4000-8000-000000000010",
+  integration: "00000000-0000-4000-8000-000000000011",
+  repository: "00000000-0000-4000-8000-000000000012"
 } as const;
 const now = "2026-01-01T00:00:00.000Z";
 
@@ -28,6 +31,9 @@ type HierarchyState = {
   agentAttention?: Array<Record<string, unknown>>;
   /** Branches per project id; each project otherwise has only `main`. */
   branches?: Record<string, Array<Record<string, unknown>>>;
+  /** Organization Git integrations and the repositories they can import. */
+  integrations?: Array<Record<string, unknown>>;
+  importableRepositories?: Array<Record<string, unknown>>;
   failingOrganizationId?: string;
   abortOrganizations?: boolean;
   unauthorized?: "once" | "always";
@@ -503,6 +509,65 @@ async function mockHierarchy(page: Page, state: HierarchyState) {
       return route.fulfill({
         json: { ticket: "e".repeat(32), expires_at: now }
       });
+    if (
+      /^\/api\/v1\/organizations\/[^/]+\/integrations$/.test(path) &&
+      method === "GET"
+    )
+      return route.fulfill({
+        json: { integrations: state.integrations ?? [] }
+      });
+    if (
+      /^\/api\/v1\/organizations\/[^/]+\/repositories$/.test(path) &&
+      method === "GET"
+    )
+      return route.fulfill({
+        json: { repositories: state.importableRepositories ?? [] }
+      });
+    const importMatch = path.match(
+      /^\/api\/v1\/organizations\/([^/]+)\/projects\/import$/
+    );
+    if (importMatch && method === "POST") {
+      const organizationId = importMatch[1]!;
+      const body = route.request().postDataJSON() as {
+        repository_id: string;
+        name: string;
+      };
+      const source = state.importableRepositories?.find(
+        (repository) => repository.id === body.repository_id
+      );
+      const created = project(ids.imported, organizationId, body.name);
+      state.projects[organizationId] = [
+        ...(state.projects[organizationId] ?? []),
+        created
+      ];
+      state.importableRepositories = state.importableRepositories?.filter(
+        (repository) => repository.id !== body.repository_id
+      );
+      return route.fulfill({
+        status: 201,
+        json: {
+          project: created,
+          repository: {
+            id: "00000000-0000-4000-8000-000000000071",
+            project_id: created.id,
+            provider: source?.provider ?? "github",
+            provider_repository_id: source?.provider_repository_id ?? "1",
+            full_name: source?.full_name ?? "acme/app",
+            url: null,
+            provider_default_branch: "main",
+            status: "active",
+            status_reason: null,
+            last_event_at: null,
+            last_reconciled_at: null,
+            connected_by_user_id: ids.user,
+            hook_health: null,
+            failed_delivery_count: 0,
+            created_at: now,
+            updated_at: now
+          }
+        }
+      });
+    }
     if (path === "/api/v1/repository/providers")
       return route.fulfill({
         json: {
@@ -763,6 +828,100 @@ test("organization home lists projects and links back from a project", async ({
 
   await page.goto(`/organizations/${ids.organization}/settings`);
   await expect(page.getByLabel("Name")).toBeVisible();
+  await settle(page);
+  await expectNoAxe(page);
+});
+
+test("imports an organization repository from the organization home", async ({
+  page
+}) => {
+  await seed(page);
+  await mockHierarchy(page, {
+    ...populatedState(),
+    integrations: [
+      {
+        id: ids.integration,
+        organization_id: ids.organization,
+        provider: "github",
+        account_name: "acme",
+        account_type: "Organization",
+        repository_selection: "all",
+        selected_repository_ids: [],
+        repository_count: 1,
+        status: "active",
+        status_reason: null,
+        manage_url:
+          "https://github.com/organizations/acme/settings/installations/1",
+        connected_by_user_id: ids.user,
+        last_synced_at: now,
+        created_at: now,
+        updated_at: now
+      }
+    ],
+    importableRepositories: [
+      {
+        id: ids.repository,
+        integration_id: ids.integration,
+        provider: "github",
+        provider_repository_id: "101",
+        full_name: "acme/rocket",
+        url: "https://github.com/acme/rocket",
+        default_branch: "main",
+        pushed_at: now,
+        first_seen_at: now,
+        is_new: true,
+        project_id: null,
+        dismissed: false
+      }
+    ]
+  });
+  await page.goto(`/organizations/${ids.organization}`);
+  const panel = page.getByRole("region", { name: "Import Git repository" });
+  await expect(panel.getByText("acme/rocket")).toBeVisible();
+  await settle(page);
+  await expectNoAxe(page);
+  await panel.getByRole("button", { name: "Import acme/rocket" }).click();
+  await expect(page).toHaveURL(
+    new RegExp(`/organizations/${ids.organization}/projects/new\\?repository=`)
+  );
+  await expect(
+    page.getByText("Importing acme/rocket from GitHub")
+  ).toBeVisible();
+  await expect(page.getByLabel("Project name")).toHaveValue("rocket");
+  await expect(page.getByLabel("Task key")).toHaveValue("ROC");
+  await settle(page);
+  await expectNoAxe(page);
+  const [request] = await Promise.all([
+    page.waitForRequest(
+      (request) =>
+        request.method() === "POST" &&
+        new URL(request.url()).pathname ===
+          `/api/v1/organizations/${ids.organization}/projects/import`
+    ),
+    page.getByRole("button", { name: "Import", exact: true }).click()
+  ]);
+  expect(request.postDataJSON()).toEqual({
+    repository_id: ids.repository,
+    name: "rocket",
+    description: null,
+    task_key_prefix: "ROC"
+  });
+  await expect(page).toHaveURL(
+    new RegExp(`/projects/${ids.imported}/overview`)
+  );
+  await expect(page.locator('[data-slot="top-toolbar-page"]')).toHaveText(
+    "Overview"
+  );
+
+  await page.goto(`/organizations/${ids.organization}/integrations`);
+  await expect(page.locator('[data-slot="top-toolbar-page"]')).toHaveText(
+    "Integrations"
+  );
+  const github = page.getByRole("region", { name: "GitHub" });
+  await expect(github.getByText("acme · Organization")).toBeVisible();
+  await expect(
+    github.getByRole("link", { name: "Manage on GitHub (acme)" })
+  ).toBeVisible();
   await settle(page);
   await expectNoAxe(page);
 });

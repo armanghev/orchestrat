@@ -108,7 +108,8 @@ export class FakeGitLab {
         ? reply(200, { application: { uid: this.applicationUid } })
         : reply(401);
     if (!authorized) return reply(401);
-    if (path === "/api/v4/user") return reply(200, { id: caller.user });
+    if (path === "/api/v4/user")
+      return reply(200, { id: caller.user, username: `user${caller.user}` });
     if (path === "/api/v4/projects")
       return reply(
         200,

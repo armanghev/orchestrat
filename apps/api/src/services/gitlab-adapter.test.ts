@@ -403,3 +403,68 @@ test("disconnect deletes the hook and revokes both tokens", async (t) => {
     .where(eq(repositoryConnections.status, "disconnected"));
   assert.equal(row!.accessTokenCiphertext, null, "secrets are wiped");
 });
+
+test("an organization integration's tokens serve imported connections and survive a disconnect", async (t) => {
+  const s = await setup();
+  t.after(() => s.app.close());
+  const org = `/organizations/${s.organization.id}`;
+  const code = s.gitlab.user(7);
+  const started = (
+    await s.alice("POST", `${org}/integrations/authorizations`, {
+      provider: "gitlab"
+    })
+  ).json();
+  const state = new URL(started.authorize_url).searchParams.get("state");
+  const callback = await s.app.inject({
+    method: "GET",
+    url: `/api/v1/repository/callback/gitlab?code=${code}&state=${state}`
+  });
+  assert.match(callback.headers.location as string, /\/integrations\?/);
+  const created = await s.alice("POST", `${org}/integrations`, {
+    provider: "gitlab",
+    authorization_id: started.authorization_id,
+    repository_selection: "all"
+  });
+  assert.equal(created.statusCode, 201, created.body);
+  assert.equal(created.json().integration.account_name, "user7");
+  const [repository] = (await s.alice("GET", `${org}/repositories`)).json()
+    .repositories;
+  assert.equal(repository.full_name, "acme/app");
+  const imported = await s.alice("POST", `${org}/projects/import`, {
+    repository_id: repository.id,
+    name: "App"
+  });
+  assert.equal(imported.statusCode, 201, imported.body);
+  const connection = await s.row();
+  assert.equal(
+    connection.accessTokenCiphertext,
+    null,
+    "the connection keeps no tokens of its own"
+  );
+  assert.ok(connection.integrationId);
+  assert.equal(s.gitlab.projects.get(300)!.hooks.size, 1);
+
+  s.advance(3 * 3600_000);
+  await s.adapter.getBranch(connection, "main");
+  assert.equal(s.gitlab.refreshes, 1, "the integration's pair rotated");
+  await s.adapter.getBranch(await s.row(), "main");
+  assert.equal(s.gitlab.refreshes, 1);
+
+  const projectId = imported.json().project.id;
+  assert.equal(
+    (await s.alice("DELETE", `/projects/${projectId}/repository`)).statusCode,
+    204
+  );
+  assert.equal(s.gitlab.projects.get(300)!.hooks.size, 0, "the hook goes");
+  assert.equal(s.gitlab.revoked.length, 0, "the shared tokens stay");
+  assert.equal(
+    (
+      await s.alice(
+        "DELETE",
+        `${org}/integrations/${created.json().integration.id}`
+      )
+    ).statusCode,
+    204,
+    "unused, the integration can go"
+  );
+});

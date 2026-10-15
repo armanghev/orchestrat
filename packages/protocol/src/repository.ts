@@ -135,7 +135,9 @@ export const pendingRepositoryAuthorizationQuerySchema = z.object({
 export const pendingRepositoryAuthorizationResponseSchema = z.object({
   return_path: returnPathSchema.optional(),
   authorization_id: z.string().regex(/^ra_[A-Za-z0-9_-]{20,}$/),
-  project_id: idSchema,
+  /** Exactly one of project_id and organization_id is set. */
+  project_id: idSchema.nullable(),
+  organization_id: idSchema.nullable().optional(),
   provider: repositoryProviderSchema,
   expires_at: dateSchema
 });

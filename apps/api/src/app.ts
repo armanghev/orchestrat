@@ -29,6 +29,8 @@ import {
 import { BranchSync } from "./services/repository/branch-sync.js";
 import { ProviderMerges } from "./services/repository/provider-merges.js";
 import { RepositoryService } from "./services/repository/connection-service.js";
+import { IntegrationService } from "./services/repository/integration-service.js";
+import { integrationRoutes } from "./routes/integrations.js";
 import type { SecretBox } from "./services/repository/secrets.js";
 import { RepositorySyncWorker } from "./services/repository/sync-worker.js";
 import type { ProviderAdapter } from "./services/repository/types.js";
@@ -237,6 +239,12 @@ export function buildApp(options: AppOptions) {
     (connectionId) => repositoryWorker.requestReconcile(connectionId),
     repositoryOptions.now
   );
+  const integrations = new IntegrationService(db, repositories, {
+    refreshIntervalSeconds:
+      repositoryOptions.config?.reconcileIntervalSeconds ?? 900,
+    now: repositoryOptions.now
+  });
+  repositoryWorker.integrations = integrations;
   const webhookIngress = new WebhookIngress(
     db,
     providerAdapters,
@@ -431,6 +439,7 @@ export function buildApp(options: AppOptions) {
       api.register(humanBranchRoutes, { branches });
       api.register(humanMergeRoutes, { merges });
       api.register(humanRepositoryRoutes, { repositories });
+      api.register(integrationRoutes, { integrations, projects });
       api.register(humanChatRoutes, { chats });
       api.register(projectMemberRoutes, { memberships });
       api.register(humanAttentionRoutes, {

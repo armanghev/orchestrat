@@ -24,6 +24,7 @@ import { Route as AuthenticatedOrganizationsNewRouteImport } from './routes/_aut
 import { Route as AuthenticatedProjectsProjectIdRouteImport } from './routes/_authenticated.projects.$projectId'
 import { Route as AuthDesktopCallbackRouteImport } from './routes/auth.desktop_.callback'
 import { Route as AuthenticatedOrganizationsOrganizationIdIndexRouteImport } from './routes/_authenticated.organizations.$organizationId.index'
+import { Route as AuthenticatedOrganizationsOrganizationIdIntegrationsRouteImport } from './routes/_authenticated.organizations.$organizationId.integrations'
 import { Route as AuthenticatedOrganizationsOrganizationIdMembersRouteImport } from './routes/_authenticated.organizations.$organizationId.members'
 import { Route as AuthenticatedOrganizationsOrganizationIdSettingsRouteImport } from './routes/_authenticated.organizations.$organizationId.settings'
 import { Route as AuthenticatedProjectsProjectIdIndexRouteImport } from './routes/_authenticated.projects.$projectId.index'
@@ -117,6 +118,12 @@ const AuthenticatedOrganizationsOrganizationIdIndexRoute =
   AuthenticatedOrganizationsOrganizationIdIndexRouteImport.update({
     id: '/',
     path: '/',
+    getParentRoute: () => AuthenticatedOrganizationsOrganizationIdRoute,
+  } as any)
+const AuthenticatedOrganizationsOrganizationIdIntegrationsRoute =
+  AuthenticatedOrganizationsOrganizationIdIntegrationsRouteImport.update({
+    id: '/integrations',
+    path: '/integrations',
     getParentRoute: () => AuthenticatedOrganizationsOrganizationIdRoute,
   } as any)
 const AuthenticatedOrganizationsOrganizationIdMembersRoute =
@@ -224,6 +231,7 @@ export interface FileRoutesByFullPath {
   '/organizations/new': typeof AuthenticatedOrganizationsNewRoute
   '/projects/$projectId': typeof AuthenticatedProjectsProjectIdRouteWithChildren
   '/auth/desktop/callback': typeof AuthDesktopCallbackRoute
+  '/organizations/$organizationId/integrations': typeof AuthenticatedOrganizationsOrganizationIdIntegrationsRoute
   '/organizations/$organizationId/members': typeof AuthenticatedOrganizationsOrganizationIdMembersRoute
   '/organizations/$organizationId/settings': typeof AuthenticatedOrganizationsOrganizationIdSettingsRoute
   '/projects/$projectId/activity': typeof AuthenticatedProjectsProjectIdActivityRoute
@@ -253,6 +261,7 @@ export interface FileRoutesByTo {
   '/project-invitations/join': typeof ProjectInvitationsJoinRoute
   '/organizations/new': typeof AuthenticatedOrganizationsNewRoute
   '/auth/desktop/callback': typeof AuthDesktopCallbackRoute
+  '/organizations/$organizationId/integrations': typeof AuthenticatedOrganizationsOrganizationIdIntegrationsRoute
   '/organizations/$organizationId/members': typeof AuthenticatedOrganizationsOrganizationIdMembersRoute
   '/organizations/$organizationId/settings': typeof AuthenticatedOrganizationsOrganizationIdSettingsRoute
   '/projects/$projectId/activity': typeof AuthenticatedProjectsProjectIdActivityRoute
@@ -286,6 +295,7 @@ export interface FileRoutesById {
   '/_authenticated/organizations/new': typeof AuthenticatedOrganizationsNewRoute
   '/_authenticated/projects/$projectId': typeof AuthenticatedProjectsProjectIdRouteWithChildren
   '/auth/desktop_/callback': typeof AuthDesktopCallbackRoute
+  '/_authenticated/organizations/$organizationId/integrations': typeof AuthenticatedOrganizationsOrganizationIdIntegrationsRoute
   '/_authenticated/organizations/$organizationId/members': typeof AuthenticatedOrganizationsOrganizationIdMembersRoute
   '/_authenticated/organizations/$organizationId/settings': typeof AuthenticatedOrganizationsOrganizationIdSettingsRoute
   '/_authenticated/projects/$projectId/activity': typeof AuthenticatedProjectsProjectIdActivityRoute
@@ -319,6 +329,7 @@ export interface FileRouteTypes {
     | '/organizations/new'
     | '/projects/$projectId'
     | '/auth/desktop/callback'
+    | '/organizations/$organizationId/integrations'
     | '/organizations/$organizationId/members'
     | '/organizations/$organizationId/settings'
     | '/projects/$projectId/activity'
@@ -348,6 +359,7 @@ export interface FileRouteTypes {
     | '/project-invitations/join'
     | '/organizations/new'
     | '/auth/desktop/callback'
+    | '/organizations/$organizationId/integrations'
     | '/organizations/$organizationId/members'
     | '/organizations/$organizationId/settings'
     | '/projects/$projectId/activity'
@@ -380,6 +392,7 @@ export interface FileRouteTypes {
     | '/_authenticated/organizations/new'
     | '/_authenticated/projects/$projectId'
     | '/auth/desktop_/callback'
+    | '/_authenticated/organizations/$organizationId/integrations'
     | '/_authenticated/organizations/$organizationId/members'
     | '/_authenticated/organizations/$organizationId/settings'
     | '/_authenticated/projects/$projectId/activity'
@@ -515,6 +528,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedOrganizationsOrganizationIdIndexRouteImport
       parentRoute: typeof AuthenticatedOrganizationsOrganizationIdRoute
     }
+    '/_authenticated/organizations/$organizationId/integrations': {
+      id: '/_authenticated/organizations/$organizationId/integrations'
+      path: '/integrations'
+      fullPath: '/organizations/$organizationId/integrations'
+      preLoaderRoute: typeof AuthenticatedOrganizationsOrganizationIdIntegrationsRouteImport
+      parentRoute: typeof AuthenticatedOrganizationsOrganizationIdRoute
+    }
     '/_authenticated/organizations/$organizationId/members': {
       id: '/_authenticated/organizations/$organizationId/members'
       path: '/members'
@@ -624,6 +644,7 @@ declare module '@tanstack/react-router' {
 }
 
 interface AuthenticatedOrganizationsOrganizationIdRouteChildren {
+  AuthenticatedOrganizationsOrganizationIdIntegrationsRoute: typeof AuthenticatedOrganizationsOrganizationIdIntegrationsRoute
   AuthenticatedOrganizationsOrganizationIdMembersRoute: typeof AuthenticatedOrganizationsOrganizationIdMembersRoute
   AuthenticatedOrganizationsOrganizationIdSettingsRoute: typeof AuthenticatedOrganizationsOrganizationIdSettingsRoute
   AuthenticatedOrganizationsOrganizationIdIndexRoute: typeof AuthenticatedOrganizationsOrganizationIdIndexRoute
@@ -632,6 +653,8 @@ interface AuthenticatedOrganizationsOrganizationIdRouteChildren {
 
 const AuthenticatedOrganizationsOrganizationIdRouteChildren: AuthenticatedOrganizationsOrganizationIdRouteChildren =
   {
+    AuthenticatedOrganizationsOrganizationIdIntegrationsRoute:
+      AuthenticatedOrganizationsOrganizationIdIntegrationsRoute,
     AuthenticatedOrganizationsOrganizationIdMembersRoute:
       AuthenticatedOrganizationsOrganizationIdMembersRoute,
     AuthenticatedOrganizationsOrganizationIdSettingsRoute:

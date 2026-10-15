@@ -1450,6 +1450,131 @@ export class ApiClient {
       repositoryProvidersResponseSchema
     );
   }
+
+  listOrganizationIntegrations(
+    organizationId: string
+  ): Promise<OrganizationIntegrationsResponse> {
+    return this.request(
+      `/api/v1/organizations/${encodeURIComponent(organizationId)}/integrations`,
+      { method: "GET" },
+      organizationIntegrationsResponseSchema
+    );
+  }
+
+  authorizeOrganizationIntegration(
+    organizationId: string,
+    input: CreateIntegrationAuthorizationRequest
+  ): Promise<RepositoryAuthorizationResponse> {
+    return this.request(
+      `/api/v1/organizations/${encodeURIComponent(organizationId)}/integrations/authorizations`,
+      { method: "POST", body: input },
+      repositoryAuthorizationResponseSchema
+    );
+  }
+
+  /** After the provider redirect: GitHub installations or GitLab projects. */
+  getIntegrationAuthorizationOptions(
+    organizationId: string,
+    authorizationId: string
+  ): Promise<IntegrationAuthorizationOptionsResponse> {
+    return this.request(
+      `/api/v1/organizations/${encodeURIComponent(organizationId)}/integrations/authorizations/${encodeURIComponent(authorizationId)}`,
+      { method: "GET" },
+      integrationAuthorizationOptionsResponseSchema
+    );
+  }
+
+  createOrganizationIntegration(
+    organizationId: string,
+    input: CreateOrganizationIntegrationRequest
+  ): Promise<OrganizationIntegrationResponse> {
+    return this.request(
+      `/api/v1/organizations/${encodeURIComponent(organizationId)}/integrations`,
+      { method: "POST", body: input },
+      organizationIntegrationResponseSchema
+    );
+  }
+
+  updateOrganizationIntegration(
+    organizationId: string,
+    integrationId: string,
+    input: UpdateOrganizationIntegrationRequest
+  ): Promise<OrganizationIntegrationResponse> {
+    return this.request(
+      `/api/v1/organizations/${encodeURIComponent(organizationId)}/integrations/${encodeURIComponent(integrationId)}`,
+      { method: "PATCH", body: input },
+      organizationIntegrationResponseSchema
+    );
+  }
+
+  deleteOrganizationIntegration(
+    organizationId: string,
+    integrationId: string
+  ): Promise<void> {
+    return this.request(
+      `/api/v1/organizations/${encodeURIComponent(organizationId)}/integrations/${encodeURIComponent(integrationId)}`,
+      { method: "DELETE" },
+      z.undefined()
+    );
+  }
+
+  /** Re-reads the repositories the integration can reach. */
+  refreshOrganizationIntegration(
+    organizationId: string,
+    integrationId: string
+  ): Promise<OrganizationIntegrationResponse> {
+    return this.request(
+      `/api/v1/organizations/${encodeURIComponent(organizationId)}/integrations/${encodeURIComponent(integrationId)}/refresh`,
+      { method: "POST", body: {} },
+      organizationIntegrationResponseSchema
+    );
+  }
+
+  listOrganizationRepositories(
+    organizationId: string,
+    filter: "importable" | "all" = "importable"
+  ): Promise<OrganizationRepositoriesResponse> {
+    return this.request(
+      `/api/v1/organizations/${encodeURIComponent(organizationId)}/repositories?filter=${filter}`,
+      { method: "GET" },
+      organizationRepositoriesResponseSchema
+    );
+  }
+
+  dismissOrganizationRepository(
+    organizationId: string,
+    repositoryId: string
+  ): Promise<{ repository: OrganizationRepository }> {
+    return this.request(
+      `/api/v1/organizations/${encodeURIComponent(organizationId)}/repositories/${encodeURIComponent(repositoryId)}/dismiss`,
+      { method: "POST", body: {} },
+      organizationRepositoryResponseSchema
+    );
+  }
+
+  /** Creates a project already connected to an organization repository. */
+  importRepositoryProject(
+    organizationId: string,
+    input: ImportRepositoryProjectRequest
+  ): Promise<ImportRepositoryProjectResponse> {
+    return this.request(
+      `/api/v1/organizations/${encodeURIComponent(organizationId)}/projects/import`,
+      { method: "POST", body: input },
+      importRepositoryProjectResponseSchema
+    );
+  }
+
+  /** Connects an existing project to an organization repository. */
+  connectOrganizationRepository(
+    projectId: string,
+    input: ConnectOrganizationRepositoryRequest
+  ): Promise<{ repository: RepositoryConnection }> {
+    return this.request(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/repository/import`,
+      { method: "POST", body: input },
+      repositoryConnectionResponseSchema
+    );
+  }
 }
 
 import {
@@ -1460,4 +1585,24 @@ import {
 import {
   repositoryProvidersResponseSchema,
   type RepositoryProvidersResponse
+} from "@orchestrat/protocol";
+
+import {
+  importRepositoryProjectResponseSchema,
+  integrationAuthorizationOptionsResponseSchema,
+  organizationIntegrationResponseSchema,
+  organizationIntegrationsResponseSchema,
+  organizationRepositoriesResponseSchema,
+  organizationRepositoryResponseSchema,
+  type ConnectOrganizationRepositoryRequest,
+  type CreateIntegrationAuthorizationRequest,
+  type CreateOrganizationIntegrationRequest,
+  type ImportRepositoryProjectRequest,
+  type ImportRepositoryProjectResponse,
+  type IntegrationAuthorizationOptionsResponse,
+  type OrganizationIntegrationResponse,
+  type OrganizationIntegrationsResponse,
+  type OrganizationRepositoriesResponse,
+  type OrganizationRepository,
+  type UpdateOrganizationIntegrationRequest
 } from "@orchestrat/protocol";

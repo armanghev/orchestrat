@@ -71,3 +71,46 @@ export function projectSummariesQueryOptions(
     staleTime: hierarchyStaleTime
   });
 }
+
+export const integrationKeys = {
+  all: (organizationId: string) =>
+    [
+      ...hierarchyKeys.all,
+      "organizations",
+      organizationId,
+      "integrations"
+    ] as const,
+  repositories: (organizationId: string, filter: "importable" | "all") =>
+    [
+      ...hierarchyKeys.all,
+      "organizations",
+      organizationId,
+      "repositories",
+      filter
+    ] as const
+};
+
+/** The organization's Git integrations (owners and admins). */
+export function organizationIntegrationsQueryOptions(
+  api: ApiClient,
+  organizationId: string
+) {
+  return queryOptions({
+    queryKey: integrationKeys.all(organizationId),
+    queryFn: () => api.listOrganizationIntegrations(organizationId),
+    staleTime: 60_000
+  });
+}
+
+/** Repositories the organization's integrations reach. */
+export function organizationRepositoriesQueryOptions(
+  api: ApiClient,
+  organizationId: string,
+  filter: "importable" | "all" = "importable"
+) {
+  return queryOptions({
+    queryKey: integrationKeys.repositories(organizationId, filter),
+    queryFn: () => api.listOrganizationRepositories(organizationId, filter),
+    staleTime: 60_000
+  });
+}

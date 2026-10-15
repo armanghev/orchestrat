@@ -11,10 +11,12 @@ import {
   timestamp,
   unique,
   uniqueIndex,
-  uuid
+  uuid,
+  type AnyPgColumn
 } from "drizzle-orm/pg-core";
 import {
   documentAuthorType,
+  organizations,
   projectBranches,
   projects,
   users
@@ -238,6 +240,12 @@ export const repositoryConnections = pgTable(
     repositoryUrl: text("repository_url"),
     providerDefaultBranch: text("provider_default_branch").notNull(),
     installationId: text("installation_id"),
+    /** Set when imported through an organization integration (0017); a
+     * GitLab connection then uses the integration's tokens. */
+    integrationId: uuid("integration_id").references(
+      (): AnyPgColumn => organizationIntegrations.id,
+      { onDelete: "set null" }
+    ),
     gitlabHookId: text("gitlab_hook_id"),
     accessTokenCiphertext: text("access_token_ciphertext"),
     refreshTokenCiphertext: text("refresh_token_ciphertext"),
@@ -298,9 +306,13 @@ export const repositoryConnectionAttempts = pgTable(
   "repository_connection_attempts",
   {
     id: text("id").primaryKey(),
-    projectId: uuid("project_id")
-      .notNull()
-      .references(() => projects.id, { onDelete: "cascade" }),
+    // A project's attempt, or (0017) an organization integration's.
+    projectId: uuid("project_id").references(() => projects.id, {
+      onDelete: "cascade"
+    }),
+    organizationId: uuid("organization_id").references(() => organizations.id, {
+      onDelete: "cascade"
+    }),
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
@@ -332,7 +344,11 @@ export const repositoryConnectionAttempts = pgTable(
     uniqueIndex("repository_connection_attempts_receipt_jti_unique")
       .on(table.receiptJti)
       .where(sql`${table.receiptJti} is not null`),
-    index("repository_connection_attempts_expires_idx").on(table.expiresAt)
+    index("repository_connection_attempts_expires_idx").on(table.expiresAt),
+    check(
+      "repository_connection_attempts_one_owner",
+      sql`(${table.projectId} is null) <> (${table.organizationId} is null)`
+    )
   ]
 ).enableRLS();
 
@@ -435,5 +451,111 @@ export const repositoryWebhookDeliveries = pgTable(
       "repository_webhook_deliveries_attempts_nonnegative",
       sql`${table.attempts} >= 0`
     )
+  ]
+).enableRLS();
+
+// Organization Git integrations (migration 0017): a GitHub App installation
+// or a GitLab account connected to an organization, and the repositories it
+// reaches. Projects import from them; owners and admins manage them.
+export const organizationIntegrations = pgTable(
+  "organization_integrations",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    provider: text("provider").$type<"github" | "gitlab">().notNull(),
+    /** GitHub: the installation's account id. GitLab: the user id. */
+    providerAccountId: text("provider_account_id").notNull(),
+    accountName: text("account_name").notNull(),
+    accountType: text("account_type"),
+    installationId: text("installation_id"),
+    repositorySelection: text("repository_selection")
+      .$type<"all" | "selected">()
+      .notNull(),
+    /** GitLab "selected": provider project ids. */
+    selectedRepositoryIds: jsonb("selected_repository_ids")
+      .$type<string[]>()
+      .default([])
+      .notNull(),
+    accessTokenCiphertext: text("access_token_ciphertext"),
+    refreshTokenCiphertext: text("refresh_token_ciphertext"),
+    tokenExpiresAt: timestamp("token_expires_at", { withTimezone: true }),
+    status: text("status")
+      .$type<"active" | "needs_reauthorization" | "suspended">()
+      .default("active")
+      .notNull(),
+    statusReason: text("status_reason"),
+    connectedByUserId: uuid("connected_by_user_id").references(() => users.id, {
+      onDelete: "set null"
+    }),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    unique("organization_integrations_account_unique").on(
+      table.organizationId,
+      table.provider,
+      table.providerAccountId
+    ),
+    index("organization_integrations_installation_idx").on(
+      table.provider,
+      table.installationId
+    ),
+    check(
+      "organization_integrations_provider_valid",
+      sql`${table.provider} in ('github', 'gitlab')`
+    ),
+    check(
+      "organization_integrations_selection_valid",
+      sql`${table.repositorySelection} in ('all', 'selected')`
+    ),
+    check(
+      "organization_integrations_status_valid",
+      sql`${table.status} in ('active', 'needs_reauthorization', 'suspended')`
+    )
+  ]
+).enableRLS();
+
+export const organizationRepositories = pgTable(
+  "organization_repositories",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    integrationId: uuid("integration_id")
+      .notNull()
+      .references(() => organizationIntegrations.id, { onDelete: "cascade" }),
+    provider: text("provider").$type<"github" | "gitlab">().notNull(),
+    providerRepositoryId: text("provider_repository_id").notNull(),
+    fullName: text("full_name").notNull(),
+    url: text("url"),
+    defaultBranch: text("default_branch"),
+    pushedAt: timestamp("pushed_at", { withTimezone: true }),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    /** No longer reachable through the integration. */
+    removedAt: timestamp("removed_at", { withTimezone: true }),
+    dismissedAt: timestamp("dismissed_at", { withTimezone: true }),
+    dismissedByUserId: uuid("dismissed_by_user_id").references(() => users.id, {
+      onDelete: "set null"
+    })
+  },
+  (table) => [
+    unique("organization_repositories_integration_repo_unique").on(
+      table.integrationId,
+      table.providerRepositoryId
+    ),
+    index("organization_repositories_organization_idx").on(table.organizationId)
   ]
 ).enableRLS();
