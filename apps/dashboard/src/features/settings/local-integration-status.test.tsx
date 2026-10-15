@@ -125,7 +125,7 @@ describe("LocalIntegrationStatusSection", () => {
     expect(writeText).toHaveBeenCalledWith(expectedSetupCommand);
     expect(await screen.findByText("Setup command copied.")).toBeVisible();
     expect(
-      screen.getByText(/Setup requires macOS, Node\.js 20\+/i)
+      screen.getByText(/Setup requires macOS or Linux, Node\.js 20\+/i)
     ).toBeInTheDocument();
   });
 

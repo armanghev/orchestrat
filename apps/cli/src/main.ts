@@ -13,16 +13,13 @@ import {
   isConfigurableIntegration,
   type ConfigurableIntegration
 } from "./harnesses.js";
-import { KeychainCredentialStore } from "./keychain.js";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { platformCredentialStore } from "./credential-store.js";
+import { openApprovalUrl } from "./browser.js";
 import { resolve } from "node:path";
 import { readFileSync, realpathSync } from "node:fs";
-const openUrl = promisify(execFile);
 const packageVersion = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8")
 ).version as string;
-import { KeychainCredentialReader } from "./keychain.js";
 import { resolveGlobalInvocation, resolveInvocation } from "./resolve.js";
 import {
   canonicalizeCwd,
@@ -412,6 +409,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     return;
   }
   const home = process.env.HOME ?? process.cwd();
+  // Keychain on macOS, secret-tool or a private file on Linux.
+  const credentials = platformCredentialStore({ home });
   if (
     command === "hook" &&
     integration !== undefined &&
@@ -447,7 +446,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       cwd: invocationCwd,
       integration: integration as ConfigurableIntegration,
       read: readConfig,
-      credentials: new KeychainCredentialReader()
+      credentials
     });
     // Documents live on the checkout's branch.
     const { client } = await clientForCheckout(
@@ -480,7 +479,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       cwd: invocationCwd,
       integration: integration as ConfigurableIntegration,
       read: readConfig,
-      credentials: new KeychainCredentialReader()
+      credentials
     });
     const result = await runBranchCommand({
       action: branchAction!,
@@ -502,7 +501,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       home,
       cwd: process.cwd(),
       api,
-      credentials: new KeychainCredentialReader()
+      credentials
     });
     return;
   }
@@ -512,7 +511,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       integration,
       cwd: process.cwd(),
       home: process.env.HOME ?? process.cwd(),
-      credentials: new KeychainCredentialReader(),
+      credentials,
       payload: hookPayload,
       event,
       api
@@ -537,7 +536,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
             cwd: process.cwd(),
             home,
             api,
-            credentials: new KeychainCredentialReader(),
+            credentials,
             read: async () => config
           })
         )
@@ -548,7 +547,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     const result = await runDoctor({
       home,
       cwd: process.cwd(),
-      credentials: new KeychainCredentialReader(),
+      credentials,
       api,
       sourceCommand: resolve(process.argv[1] ?? "orchestrat")
     });
@@ -564,7 +563,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       home,
       cwd: process.cwd(),
       integration,
-      store: new KeychainCredentialStore(),
+      store: credentials,
       api,
       localOnly: local,
       fetch: globalThis.fetch,
@@ -585,7 +584,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     return;
   }
   if (command === "setup") {
-    const store = new KeychainCredentialStore();
+    const store = credentials;
     const cwd = process.cwd();
     const existing = config.projects[canonicalizeCwd(cwd)];
     startSetup({ interactive });
@@ -611,9 +610,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
             {
               api: setupApi,
               fetch: globalThis.fetch,
-              open: async (url) => {
-                await openUrl("open", [url]);
-              },
+              open: (url) => openApprovalUrl(url, writeError),
               sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms))
             },
             store,
@@ -676,9 +673,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         runSetup({
           api: setupApi,
           fetch: globalThis.fetch,
-          open: async (url) => {
-            await openUrl("open", [url]);
-          },
+          open: (url) => openApprovalUrl(url, writeError),
           sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
           store,
           cwd,
@@ -733,7 +728,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     const result = await runStatus({
       home,
       cwd: process.cwd(),
-      credentials: new KeychainCredentialReader(),
+      credentials,
       api
     });
     renderResult("status", result, {
@@ -747,7 +742,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         api,
         integration,
         read: readConfig,
-        credentials: new KeychainCredentialReader(),
+        credentials,
         home,
         warn: (message) => process.stderr.write(message)
       });
@@ -783,7 +778,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       cwd: invocationCwd,
       integration,
       read: readConfig,
-      credentials: new KeychainCredentialReader()
+      credentials
     });
     const publicResult = resolved.public as {
       integration: string;
@@ -836,7 +831,7 @@ async function runStopCommand(input: {
       cwd: process.cwd(),
       home: input.home,
       api,
-      credentials: new KeychainCredentialReader(),
+      credentials: platformCredentialStore({ home: input.home }),
       read: async () => config
     };
     return renderStopDecision(
@@ -850,6 +845,10 @@ async function runStopCommand(input: {
     });
   }
 }
+
+const writeError = (text: string) => {
+  process.stderr.write(text);
+};
 
 function writeStopOutput(output: StopOutput) {
   if (output.stdout) process.stdout.write(output.stdout);

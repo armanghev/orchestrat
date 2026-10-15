@@ -202,13 +202,14 @@ export function LocalIntegrationStatusSection({
         </summary>
         <div className="mt-2 space-y-2 text-muted-foreground">
           <p>
-            Setup requires macOS, Node.js 20+, an Orchestrat account, and a
-            local project checkout.
+            Setup requires macOS or Linux, Node.js 20+, an account on this
+            Orchestrat server, and a local project checkout.
           </p>
           <p>
             Setup previews managed changes before writing them, stores
-            credentials in macOS Keychain, and is safe to repeat. It does not
-            run from this dashboard.
+            credentials in the macOS Keychain or, on Linux, the Secret Service
+            or a private file, and is safe to repeat. It does not run from this
+            dashboard.
           </p>
           <p>
             Claude Code, Codex, Cursor, and Antigravity receive MCP and hooks.
