@@ -34,7 +34,7 @@ const T0 = Date.parse("2026-09-27T10:00:00.000Z");
 
 type SpawnCall = { command: string; args: string[]; options: SpawnOptions };
 
-async function fixture(waker?: unknown) {
+async function fixture(waker?: unknown, integrations = ["codex"]) {
   const home = await mkdtemp(join(tmpdir(), "orchestrat-waker-"));
   const cwd = join(home, "project");
   await mkdir(cwd);
@@ -47,7 +47,12 @@ async function fixture(waker?: unknown) {
       projects: {
         [real]: {
           projectId: PROJECT,
-          integrations: { codex: { agentId: AGENT } }
+          integrations: Object.fromEntries(
+            integrations.map((name) => [
+              name,
+              { agentId: name === "codex" ? AGENT : randomUUID() }
+            ])
+          )
         }
       },
       ...(waker === undefined ? {} : { waker })
@@ -642,6 +647,148 @@ test("enable shows argv, limits and permissions and needs the typed confirmation
       1
     );
     assert.match(disabled.err.join(""), /disabled/);
+  } finally {
+    await env.cleanup();
+  }
+});
+
+// ORC-76: enable with --integration and --wake-on, through the confirmation.
+async function enableWith(
+  env: Awaited<ReturnType<typeof fixture>>,
+  args: string[]
+) {
+  const run = deps({
+    isTTY: true,
+    stdin: Readable.from([`${ENABLE_CONFIRMATION}\n`])
+  });
+  const code = await runWakerCommand(["enable", ...args], env.ctx, run.deps);
+  const config = await readJson(join(env.home, ".orchestrat", "config.json"));
+  return { code, run, agents: config.waker?.agents as Record<string, any>[] };
+}
+
+test("enable --integration picks the agents and accepts every integration", async () => {
+  const all = ["codex", "claude-code", "cursor", "antigravity"];
+  const env = await fixture(undefined, all);
+  try {
+    const one = await enableWith(env, ["--integration", "cursor"]);
+    assert.equal(one.code, 0, one.run.err.join(""));
+    assert.deepEqual(
+      one.agents.map((agent) => [agent.integration, agent.wake_on]),
+      [["cursor", ["handoff"]]]
+    );
+    assert.ok(
+      one.run.out.join("").includes(JSON.stringify(harnessArgv("cursor")))
+    );
+
+    // Repeated, `=` form, and a duplicate that is collapsed.
+    const many = await enableWith(env, [
+      "--integration",
+      "codex",
+      "--integration=claude-code",
+      "--integration",
+      "antigravity",
+      "--integration",
+      "codex"
+    ]);
+    assert.equal(many.code, 0, many.run.err.join(""));
+    assert.deepEqual(
+      many.agents.map((agent) => agent.integration),
+      ["cursor", "codex", "claude-code", "antigravity"]
+    );
+  } finally {
+    await env.cleanup();
+  }
+});
+
+test("enable --wake-on sets the wake kinds, alone or with --integration", async () => {
+  const env = await fixture(undefined, ["codex", "claude-code"]);
+  try {
+    const kinds = await enableWith(env, [
+      "--wake-on",
+      "handoff,direct_message,mention"
+    ]);
+    assert.equal(kinds.code, 0, kinds.run.err.join(""));
+    assert.deepEqual(
+      kinds.agents.map((agent) => [agent.integration, agent.wake_on]),
+      [
+        ["codex", ["handoff", "direct_message", "mention"]],
+        ["claude-code", ["handoff", "direct_message", "mention"]]
+      ]
+    );
+    assert.match(
+      kinds.run.out.join(""),
+      /Wakes on: handoff, direct_message, mention/
+    );
+
+    const both = await enableWith(env, [
+      "--integration",
+      "claude-code",
+      "--wake-on=mention",
+      "--wake-on",
+      "direct_message,mention"
+    ]);
+    assert.equal(both.code, 0, both.run.err.join(""));
+    assert.deepEqual(
+      both.agents.map((agent) => [agent.integration, agent.wake_on]),
+      [
+        ["codex", ["handoff", "direct_message", "mention"]],
+        ["claude-code", ["mention", "direct_message"]]
+      ]
+    );
+
+    // Without --wake-on, re-enabling keeps the agent's wake kinds.
+    const kept = await enableWith(env, ["--integration", "claude-code"]);
+    assert.equal(kept.code, 0, kept.run.err.join(""));
+    assert.deepEqual(
+      kept.agents.find((agent) => agent.integration === "claude-code")?.wake_on,
+      ["mention", "direct_message"]
+    );
+  } finally {
+    await env.cleanup();
+  }
+});
+
+test("waker rejects bad flag values by name and changes nothing", async () => {
+  const env = await fixture();
+  try {
+    const path = join(env.home, ".orchestrat", "config.json");
+    const before = await readFile(path, "utf8");
+    for (const [args, message] of [
+      [
+        ["enable", "--integration", "opencode"],
+        /Unknown integration "opencode" for --integration; use codex, claude-code, cursor, antigravity\./
+      ],
+      [["enable", "--integration="], /--integration needs a value/],
+      [["enable", "--integration"], /--integration needs a value/],
+      [
+        ["enable", "--wake-on", "handoff,everything"],
+        /Unknown wake kind "everything" for --wake-on; use one or more of handoff, direct_message, mention/
+      ],
+      [["enable", "--wake-on", ","], /--wake-on needs one or more of/],
+      [["enable", "--once"], /waker enable does not accept --once\./],
+      [
+        ["run", "--integration", "codex"],
+        /waker run does not accept --integration\./
+      ],
+      [
+        ["status", "--wake-on", "handoff"],
+        /waker status does not accept --wake-on\./
+      ],
+      [["run", "--once=yes"], /--once does not take a value\./],
+      [["enable", "codex"], /waker enable does not take "codex"\./],
+      [["start"], /^Usage: orchestrat waker enable/]
+    ] as const) {
+      const run = deps({
+        isTTY: true,
+        stdin: Readable.from([`${ENABLE_CONFIRMATION}\n`])
+      });
+      assert.equal(await runWakerCommand([...args], env.ctx, run.deps), 1);
+      const err = run.err.join("");
+      assert.match(err, message, args.join(" "));
+      assert.match(err, /Usage: orchestrat waker enable \[--integration/);
+      assert.deepEqual(run.out, []);
+    }
+    assert.equal(await readFile(path, "utf8"), before);
   } finally {
     await env.cleanup();
   }
