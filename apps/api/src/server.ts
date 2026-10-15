@@ -6,10 +6,14 @@ import { loadApiConfig, loadRepositoryConfig } from "@orchestrat/config";
 import { createDatabase, migrateDatabase, users } from "@orchestrat/db";
 import { logger } from "@orchestrat/logger";
 import { buildApp } from "./app.js";
-import { readDocumentStorageConfig } from "./document-storage-config.js";
 import { providerAdapters } from "./services/repository/providers/index.js";
 import { SecretBox } from "./services/repository/secrets.js";
 import { createShutdownHandler } from "./services/shutdown.js";
+import {
+  ensureBucket,
+  readStorageConfig,
+  warnIfStorageMissing
+} from "./storage-config.js";
 
 loadEnv({ path: "../../.env" });
 
@@ -35,12 +39,8 @@ if (dashboardDir && !existsSync(join(dashboardDir, "index.html"))) {
 }
 const setupToken =
   config.ORCHESTRAT_SETUP_TOKEN ?? randomBytes(24).toString("base64url");
-const avatarBucket = process.env.SUPABASE_AVATAR_BUCKET;
-const documentStorage = readDocumentStorageConfig();
-const s3Endpoint = process.env.SUPABASE_S3_ENDPOINT;
-const s3Region = process.env.SUPABASE_S3_REGION;
-const s3AccessKeyId = process.env.SUPABASE_S3_ACCESS_KEY_ID;
-const s3SecretAccessKey = process.env.SUPABASE_S3_SECRET_ACCESS_KEY;
+// Throws on a partial or invalid storage configuration.
+const storage = readStorageConfig();
 const app = buildApp({
   allowedOrigins: config.ORCHESTRAT_ALLOWED_ORIGINS,
   signupMode: config.ORCHESTRAT_SIGNUP,
@@ -52,18 +52,11 @@ const app = buildApp({
   },
   closeDatabase: () => pool.end(),
   db,
-  avatarStorage:
-    avatarBucket && s3Endpoint && s3Region && s3AccessKeyId && s3SecretAccessKey
-      ? {
-          bucket: avatarBucket,
-          endpoint: s3Endpoint,
-          region: s3Region,
-          accessKeyId: s3AccessKeyId,
-          secretAccessKey: s3SecretAccessKey,
-          publicUrlBase: `${s3Endpoint.replace(/\/storage\/v1\/s3\/?$/, "")}/storage/v1/object/public/${avatarBucket}`
-        }
-      : undefined,
-  documentStorage,
+  avatarStorage: storage.avatarStorage,
+  documentStorage: storage.documentStorage,
+  attachmentQuotaBytes: storage.attachmentQuotaBytes,
+  publicApiUrl:
+    config.ORCHESTRAT_PUBLIC_URL ?? repositoryConfig.publicApiUrl ?? undefined,
   repository: {
     config: repositoryConfig,
     adapters: providerAdapters(repositoryConfig, repositorySecrets),
@@ -80,6 +73,9 @@ try {
     await migrateDatabase(db, pool);
     logger.info({}, "Database migrations are up to date");
   }
+  if (storage.documentStorage && storage.createBucket)
+    await ensureBucket(storage.documentStorage);
+  await warnIfStorageMissing(db, storage.documentStorage);
   await app.listen({
     host: config.ORCHESTRAT_API_HOST,
     port: config.ORCHESTRAT_API_PORT

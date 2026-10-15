@@ -32,8 +32,6 @@ const profileJson = (user: typeof users.$inferSelect) => ({
 export type AvatarStorageConfig = S3ConnectionConfig & {
   /** Replaces the client (tests). */
   client?: S3Client;
-  /** @deprecated Ignored; avatars are served by the API. */
-  publicUrlBase?: string;
 };
 
 type AvatarFile = { mimetype: string; buffer: Buffer };
