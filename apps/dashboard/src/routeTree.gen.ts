@@ -11,18 +11,16 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
+import { Route as SignupRouteImport } from './routes/signup'
 import { Route as AuthenticatedOnboardingRouteImport } from './routes/_authenticated.onboarding'
 import { Route as AuthenticatedPreferencesRouteImport } from './routes/_authenticated.preferences'
 import { Route as AuthenticatedProfileRouteImport } from './routes/_authenticated.profile'
 import { Route as AuthenticatedSetupRouteImport } from './routes/_authenticated.setup'
-import { Route as AuthCallbackRouteImport } from './routes/auth.callback'
-import { Route as AuthDesktopRouteImport } from './routes/auth.desktop'
 import { Route as CliAuthorizeRouteImport } from './routes/cli.authorize'
 import { Route as ProjectInvitationsJoinRouteImport } from './routes/project-invitations.join'
 import { Route as AuthenticatedOrganizationsOrganizationIdRouteImport } from './routes/_authenticated.organizations.$organizationId'
 import { Route as AuthenticatedOrganizationsNewRouteImport } from './routes/_authenticated.organizations.new'
 import { Route as AuthenticatedProjectsProjectIdRouteImport } from './routes/_authenticated.projects.$projectId'
-import { Route as AuthDesktopCallbackRouteImport } from './routes/auth.desktop_.callback'
 import { Route as AuthenticatedOrganizationsOrganizationIdIndexRouteImport } from './routes/_authenticated.organizations.$organizationId.index'
 import { Route as AuthenticatedOrganizationsOrganizationIdIntegrationsRouteImport } from './routes/_authenticated.organizations.$organizationId.integrations'
 import { Route as AuthenticatedOrganizationsOrganizationIdMembersRouteImport } from './routes/_authenticated.organizations.$organizationId.members'
@@ -50,6 +48,11 @@ const AuthenticatedRoute = AuthenticatedRouteImport.update({
   id: '/_authenticated',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SignupRoute = SignupRouteImport.update({
+  id: '/signup',
+  path: '/signup',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthenticatedOnboardingRoute = AuthenticatedOnboardingRouteImport.update({
   id: '/onboarding',
   path: '/onboarding',
@@ -70,16 +73,6 @@ const AuthenticatedSetupRoute = AuthenticatedSetupRouteImport.update({
   id: '/setup',
   path: '/setup',
   getParentRoute: () => AuthenticatedRoute,
-} as any)
-const AuthCallbackRoute = AuthCallbackRouteImport.update({
-  id: '/auth/callback',
-  path: '/auth/callback',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AuthDesktopRoute = AuthDesktopRouteImport.update({
-  id: '/auth/desktop',
-  path: '/auth/desktop',
-  getParentRoute: () => rootRouteImport,
 } as any)
 const CliAuthorizeRoute = CliAuthorizeRouteImport.update({
   id: '/cli/authorize',
@@ -109,11 +102,6 @@ const AuthenticatedProjectsProjectIdRoute =
     path: '/projects/$projectId',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
-const AuthDesktopCallbackRoute = AuthDesktopCallbackRouteImport.update({
-  id: '/auth/desktop_/callback',
-  path: '/auth/desktop/callback',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const AuthenticatedOrganizationsOrganizationIdIndexRoute =
   AuthenticatedOrganizationsOrganizationIdIndexRouteImport.update({
     id: '/',
@@ -219,18 +207,16 @@ const AuthenticatedOrganizationsOrganizationIdProjectsNewRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/signup': typeof SignupRoute
   '/onboarding': typeof AuthenticatedOnboardingRoute
   '/preferences': typeof AuthenticatedPreferencesRoute
   '/profile': typeof AuthenticatedProfileRoute
   '/setup': typeof AuthenticatedSetupRoute
-  '/auth/callback': typeof AuthCallbackRoute
-  '/auth/desktop': typeof AuthDesktopRoute
   '/cli/authorize': typeof CliAuthorizeRoute
   '/project-invitations/join': typeof ProjectInvitationsJoinRoute
   '/organizations/$organizationId': typeof AuthenticatedOrganizationsOrganizationIdRouteWithChildren
   '/organizations/new': typeof AuthenticatedOrganizationsNewRoute
   '/projects/$projectId': typeof AuthenticatedProjectsProjectIdRouteWithChildren
-  '/auth/desktop/callback': typeof AuthDesktopCallbackRoute
   '/organizations/$organizationId/integrations': typeof AuthenticatedOrganizationsOrganizationIdIntegrationsRoute
   '/organizations/$organizationId/members': typeof AuthenticatedOrganizationsOrganizationIdMembersRoute
   '/organizations/$organizationId/settings': typeof AuthenticatedOrganizationsOrganizationIdSettingsRoute
@@ -251,16 +237,14 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/signup': typeof SignupRoute
   '/onboarding': typeof AuthenticatedOnboardingRoute
   '/preferences': typeof AuthenticatedPreferencesRoute
   '/profile': typeof AuthenticatedProfileRoute
   '/setup': typeof AuthenticatedSetupRoute
-  '/auth/callback': typeof AuthCallbackRoute
-  '/auth/desktop': typeof AuthDesktopRoute
   '/cli/authorize': typeof CliAuthorizeRoute
   '/project-invitations/join': typeof ProjectInvitationsJoinRoute
   '/organizations/new': typeof AuthenticatedOrganizationsNewRoute
-  '/auth/desktop/callback': typeof AuthDesktopCallbackRoute
   '/organizations/$organizationId/integrations': typeof AuthenticatedOrganizationsOrganizationIdIntegrationsRoute
   '/organizations/$organizationId/members': typeof AuthenticatedOrganizationsOrganizationIdMembersRoute
   '/organizations/$organizationId/settings': typeof AuthenticatedOrganizationsOrganizationIdSettingsRoute
@@ -283,18 +267,16 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteWithChildren
+  '/signup': typeof SignupRoute
   '/_authenticated/onboarding': typeof AuthenticatedOnboardingRoute
   '/_authenticated/preferences': typeof AuthenticatedPreferencesRoute
   '/_authenticated/profile': typeof AuthenticatedProfileRoute
   '/_authenticated/setup': typeof AuthenticatedSetupRoute
-  '/auth/callback': typeof AuthCallbackRoute
-  '/auth/desktop': typeof AuthDesktopRoute
   '/cli/authorize': typeof CliAuthorizeRoute
   '/project-invitations/join': typeof ProjectInvitationsJoinRoute
   '/_authenticated/organizations/$organizationId': typeof AuthenticatedOrganizationsOrganizationIdRouteWithChildren
   '/_authenticated/organizations/new': typeof AuthenticatedOrganizationsNewRoute
   '/_authenticated/projects/$projectId': typeof AuthenticatedProjectsProjectIdRouteWithChildren
-  '/auth/desktop_/callback': typeof AuthDesktopCallbackRoute
   '/_authenticated/organizations/$organizationId/integrations': typeof AuthenticatedOrganizationsOrganizationIdIntegrationsRoute
   '/_authenticated/organizations/$organizationId/members': typeof AuthenticatedOrganizationsOrganizationIdMembersRoute
   '/_authenticated/organizations/$organizationId/settings': typeof AuthenticatedOrganizationsOrganizationIdSettingsRoute
@@ -317,18 +299,16 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/signup'
     | '/onboarding'
     | '/preferences'
     | '/profile'
     | '/setup'
-    | '/auth/callback'
-    | '/auth/desktop'
     | '/cli/authorize'
     | '/project-invitations/join'
     | '/organizations/$organizationId'
     | '/organizations/new'
     | '/projects/$projectId'
-    | '/auth/desktop/callback'
     | '/organizations/$organizationId/integrations'
     | '/organizations/$organizationId/members'
     | '/organizations/$organizationId/settings'
@@ -349,16 +329,14 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/signup'
     | '/onboarding'
     | '/preferences'
     | '/profile'
     | '/setup'
-    | '/auth/callback'
-    | '/auth/desktop'
     | '/cli/authorize'
     | '/project-invitations/join'
     | '/organizations/new'
-    | '/auth/desktop/callback'
     | '/organizations/$organizationId/integrations'
     | '/organizations/$organizationId/members'
     | '/organizations/$organizationId/settings'
@@ -380,18 +358,16 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/_authenticated'
+    | '/signup'
     | '/_authenticated/onboarding'
     | '/_authenticated/preferences'
     | '/_authenticated/profile'
     | '/_authenticated/setup'
-    | '/auth/callback'
-    | '/auth/desktop'
     | '/cli/authorize'
     | '/project-invitations/join'
     | '/_authenticated/organizations/$organizationId'
     | '/_authenticated/organizations/new'
     | '/_authenticated/projects/$projectId'
-    | '/auth/desktop_/callback'
     | '/_authenticated/organizations/$organizationId/integrations'
     | '/_authenticated/organizations/$organizationId/members'
     | '/_authenticated/organizations/$organizationId/settings'
@@ -414,11 +390,9 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRoute: typeof AuthenticatedRouteWithChildren
-  AuthCallbackRoute: typeof AuthCallbackRoute
-  AuthDesktopRoute: typeof AuthDesktopRoute
+  SignupRoute: typeof SignupRoute
   CliAuthorizeRoute: typeof CliAuthorizeRoute
   ProjectInvitationsJoinRoute: typeof ProjectInvitationsJoinRoute
-  AuthDesktopCallbackRoute: typeof AuthDesktopCallbackRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -435,6 +409,13 @@ declare module '@tanstack/react-router' {
       path: ''
       fullPath: '/'
       preLoaderRoute: typeof AuthenticatedRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/signup': {
+      id: '/signup'
+      path: '/signup'
+      fullPath: '/signup'
+      preLoaderRoute: typeof SignupRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated/onboarding': {
@@ -464,20 +445,6 @@ declare module '@tanstack/react-router' {
       fullPath: '/setup'
       preLoaderRoute: typeof AuthenticatedSetupRouteImport
       parentRoute: typeof AuthenticatedRoute
-    }
-    '/auth/callback': {
-      id: '/auth/callback'
-      path: '/auth/callback'
-      fullPath: '/auth/callback'
-      preLoaderRoute: typeof AuthCallbackRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/auth/desktop': {
-      id: '/auth/desktop'
-      path: '/auth/desktop'
-      fullPath: '/auth/desktop'
-      preLoaderRoute: typeof AuthDesktopRouteImport
-      parentRoute: typeof rootRouteImport
     }
     '/cli/authorize': {
       id: '/cli/authorize'
@@ -513,13 +480,6 @@ declare module '@tanstack/react-router' {
       fullPath: '/projects/$projectId'
       preLoaderRoute: typeof AuthenticatedProjectsProjectIdRouteImport
       parentRoute: typeof AuthenticatedRoute
-    }
-    '/auth/desktop_/callback': {
-      id: '/auth/desktop_/callback'
-      path: '/auth/desktop/callback'
-      fullPath: '/auth/desktop/callback'
-      preLoaderRoute: typeof AuthDesktopCallbackRouteImport
-      parentRoute: typeof rootRouteImport
     }
     '/_authenticated/organizations/$organizationId/': {
       id: '/_authenticated/organizations/$organizationId/'
@@ -747,11 +707,9 @@ const AuthenticatedRouteWithChildren = AuthenticatedRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRoute: AuthenticatedRouteWithChildren,
-  AuthCallbackRoute: AuthCallbackRoute,
-  AuthDesktopRoute: AuthDesktopRoute,
+  SignupRoute: SignupRoute,
   CliAuthorizeRoute: CliAuthorizeRoute,
   ProjectInvitationsJoinRoute: ProjectInvitationsJoinRoute,
-  AuthDesktopCallbackRoute: AuthDesktopCallbackRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

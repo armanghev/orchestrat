@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import cors from "@fastify/cors";
 import type { HumanAuth } from "@orchestrat/auth";
+import type { SignupMode } from "@orchestrat/protocol";
 import type { Database } from "@orchestrat/db";
 import { logger } from "@orchestrat/logger";
 import type { ApiErrorResponse, ErrorCode } from "@orchestrat/protocol";
@@ -39,6 +40,11 @@ import { MergeService } from "./services/merge-service.js";
 import { MergeEngine } from "./services/merges/engine.js";
 import { TaskClaimService } from "./services/task-claim-service.js";
 import { IdentityService } from "./services/identity-service.js";
+import {
+  AuthService,
+  type AuthServiceOptions
+} from "./services/auth-service.js";
+import { authHumanRoutes, authPublicRoutes } from "./routes/auth.js";
 import { PermissionService } from "./services/permission-service.js";
 import { ProjectService } from "./services/project-service.js";
 import {
@@ -69,7 +75,11 @@ import {
   cliAuthorizationHumanRoutes,
   cliAuthorizationPublicRoutes
 } from "./routes/cli-authorization.js";
-import { FixedWindowRateLimit, rateLimitHook } from "./services/rate-limit.js";
+import {
+  FixedWindowRateLimit,
+  clientKey,
+  rateLimitHook
+} from "./services/rate-limit.js";
 import { ChatService } from "./services/chat-service.js";
 import { ProjectMembershipService } from "./services/project-membership-service.js";
 import { AttentionService } from "./services/attention-service.js";
@@ -100,7 +110,15 @@ type AppOptions = {
     now?: () => Date;
   };
   allowedOrigins: string[];
-  auth: HumanAuth;
+  /** Overrides the built-in session auth; tests inject a fake here. */
+  auth?: HumanAuth;
+  signupMode?: SignupMode;
+  sessionAuth?: Omit<
+    AuthServiceOptions,
+    "signupMode" | "setupToken" | "memberships"
+  >;
+  /** Needed to create the first account on an empty instance. */
+  setupToken?: string;
   closeDatabase?: () => Promise<void>;
   db: Database;
   avatarStorage?: AvatarStorageConfig;
@@ -111,6 +129,11 @@ type AppOptions = {
     publicCliCreate: number;
     publicCliPoll: number;
     expensive: number;
+    authLogin: number;
+    authLoginPerEmail: number;
+    authSignup: number;
+    authRefresh: number;
+    authPassword: number;
   }>;
 };
 
@@ -180,6 +203,13 @@ export function buildApp(options: AppOptions) {
     db,
     chats.assertHumanMayLeaveProject.bind(chats)
   );
+  const sessions = new AuthService(db, {
+    ...options.sessionAuth,
+    signupMode: options.signupMode ?? "invite",
+    setupToken: options.setupToken,
+    memberships
+  });
+  const humanAuth = options.auth ?? sessions;
   const attachments = new AttachmentService(
     db,
     options.documentStorage,
@@ -262,15 +292,20 @@ export function buildApp(options: AppOptions) {
     publicCliCreate: 10,
     publicCliPoll: 120,
     expensive: 120,
+    authLogin: 20,
+    authLoginPerEmail: 10,
+    authSignup: 10,
+    authRefresh: 60,
+    authPassword: 5,
     ...options.rateLimits
   };
   const publicCliCreateRateLimit = rateLimitHook(
     new FixedWindowRateLimit(rateLimits.publicCliCreate, 60_000),
-    (request) => request.ip
+    (request) => clientKey(request.ip)
   );
   const publicCliPollRateLimit = rateLimitHook(
     new FixedWindowRateLimit(rateLimits.publicCliPoll, 60_000),
-    (request) => request.ip
+    (request) => clientKey(request.ip)
   );
   const expensiveRateLimit = rateLimitHook(
     new FixedWindowRateLimit(rateLimits.expensive, 60_000),
@@ -376,13 +411,32 @@ export function buildApp(options: AppOptions) {
     pollRateLimit: publicCliPollRateLimit
   });
   app.register(cliSetupRoutes, { prefix: "/api/v1", setup: cliSetup });
+  app.register(authPublicRoutes, {
+    prefix: "/api/v1",
+    auth: sessions,
+    signupRateLimit: rateLimitHook(
+      new FixedWindowRateLimit(rateLimits.authSignup, 60_000),
+      (request) => clientKey(request.ip)
+    ),
+    loginRateLimit: rateLimitHook(
+      new FixedWindowRateLimit(rateLimits.authLogin, 60_000),
+      (request) => clientKey(request.ip)
+    ),
+    loginFailures: new FixedWindowRateLimit(
+      rateLimits.authLoginPerEmail,
+      15 * 60_000
+    ),
+    refreshRateLimit: rateLimitHook(
+      new FixedWindowRateLimit(rateLimits.authRefresh, 60_000),
+      (request) => clientKey(request.ip)
+    )
+  });
   app.register(publicRepositoryRoutes, {
     prefix: "/api/v1",
     repositories,
     ingress: webhookIngress,
-    rateLimit: rateLimitHook(
-      new FixedWindowRateLimit(600, 60_000),
-      (request) => request.ip
+    rateLimit: rateLimitHook(new FixedWindowRateLimit(600, 60_000), (request) =>
+      clientKey(request.ip)
     )
   });
   app.decorateRequest("agentPrincipal", null);
@@ -404,7 +458,7 @@ export function buildApp(options: AppOptions) {
             "Agent credentials are only valid on agent routes."
           );
         }
-        const principal = await options.auth.authenticate({
+        const principal = await humanAuth.authenticate({
           headers: rawHeaderEntries(request.raw.rawHeaders),
           method: request.method,
           url: `http://${request.headers.host ?? "localhost"}${request.url}`
@@ -417,7 +471,8 @@ export function buildApp(options: AppOptions) {
           );
         }
         request.suggestedUsername = principal.username;
-        request.userId = await identities.resolveUserId(principal);
+        request.userId =
+          principal.userId ?? (await identities.resolveUserId(principal));
       });
       api.register(v1Routes, {
         projects,
@@ -450,6 +505,13 @@ export function buildApp(options: AppOptions) {
       });
       api.register(cliAuthorizationHumanRoutes, {
         authorization: cliAuthorization
+      });
+      api.register(authHumanRoutes, {
+        auth: sessions,
+        passwordRateLimit: rateLimitHook(
+          new FixedWindowRateLimit(rateLimits.authPassword, 15 * 60_000),
+          (request) => `user:${request.userId}`
+        )
       });
     },
     { prefix: "/api/v1" }

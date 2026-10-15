@@ -21,6 +21,7 @@ import { Label } from "@/components/ui/label";
 import { useTheme } from "@/features/theme/theme-provider";
 import type { Theme } from "@/features/theme/theme";
 import type { ApiClient } from "@/lib/api/client";
+import { PasswordCard, SessionsCard } from "@/features/auth/password-settings";
 
 type ProfileSettingsProfile = Profile & {
   provider?: string | null;
@@ -32,6 +33,8 @@ type ProfileSettingsPageProps = {
   api: ApiClient;
   onProfileUpdated?: (profile: Profile) => void;
   onSignOut: () => void | Promise<void>;
+  onSignOutEverywhere: () => Promise<void>;
+  onChangePassword: (current: string, next: string) => Promise<void>;
 };
 
 const usernamePattern = /^[a-zA-Z0-9_]{3,32}$/;
@@ -40,7 +43,9 @@ export function ProfileSettingsPage({
   profile,
   api,
   onProfileUpdated,
-  onSignOut
+  onSignOut,
+  onSignOutEverywhere,
+  onChangePassword
 }: ProfileSettingsPageProps) {
   const { theme, setTheme } = useTheme();
   const heading = useRef<HTMLHeadingElement>(null);
@@ -289,14 +294,22 @@ export function ProfileSettingsPage({
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <dl className="mt-4 text-sm">
+          <dl className="mt-4 space-y-4 text-sm">
             <div>
               <dt className="text-muted-foreground">Email</dt>
               <dd className="mt-1 break-words">{profile.email}</dd>
             </div>
+            {profile.is_instance_admin ? (
+              <div>
+                <dt className="text-muted-foreground">Server role</dt>
+                <dd className="mt-1">Admin of this Orchestrat server</dd>
+              </div>
+            ) : null}
           </dl>
         </CardContent>
       </Card>
+
+      <PasswordCard email={profile.email} onChangePassword={onChangePassword} />
 
       <Card className="mt-6" aria-labelledby="appearance-heading">
         <CardHeader>
@@ -340,30 +353,15 @@ export function ProfileSettingsPage({
           {error}
         </p>
       ) : null}
+      <SessionsCard
+        onSignOut={onSignOut}
+        onSignOutEverywhere={onSignOutEverywhere}
+      />
       {profile.user_id ? (
         <p className="mt-10 break-all font-mono text-xs text-muted-foreground">
           User ID: {profile.user_id}
         </p>
       ) : null}
-      <Card className="mt-6" aria-labelledby="profile-session-heading">
-        <CardHeader>
-          <CardTitle>
-            <h2 id="profile-session-heading" className="font-medium">
-              Session
-            </h2>
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Button
-            type="button"
-            variant="destructive"
-            className="mt-4"
-            onClick={() => void onSignOut()}
-          >
-            Sign out
-          </Button>
-        </CardContent>
-      </Card>
     </div>
   );
 }

@@ -14,9 +14,13 @@ export const apiConfigSchema = z.object({
         .filter(Boolean)
     ),
   ORCHESTRAT_DATABASE_URL: z.string().min(1),
-  ORCHESTRAT_SUPABASE_URL: z.string().url(),
-  ORCHESTRAT_SUPABASE_JWT_AUDIENCE: z.string().trim().min(1),
-  ORCHESTRAT_SUPABASE_JWT_ALGORITHM: z.enum(["ES256", "RS256"])
+  // Who may create an account once the first (admin) account exists:
+  // invite = only with a project invite link, open = anyone who can reach
+  // the server, closed = admins create accounts with orchestrat-admin.
+  ORCHESTRAT_SIGNUP: z.enum(["invite", "open", "closed"]).default("invite"),
+  // Creating the first account needs this token. Unset, the server makes a
+  // fresh one at startup and prints it while the instance has no accounts.
+  ORCHESTRAT_SETUP_TOKEN: z.string().trim().min(16).max(512).optional()
 });
 
 export type ApiConfig = z.infer<typeof apiConfigSchema>;

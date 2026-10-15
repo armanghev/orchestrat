@@ -1,180 +1,142 @@
+import { z, type ZodType } from "zod";
 import {
-  createClient,
-  type AuthChangeEvent,
-  type Session,
-  type SupabaseClient
-} from "@supabase/supabase-js";
+  authInstanceResponseSchema,
+  authSessionResponseSchema,
+  type AuthSessionResponse
+} from "@orchestrat/protocol";
 import {
-  type AuthCapabilities,
-  type AuthClient,
-  type AuthCompletionResult,
-  type AuthSnapshot,
+  AuthRequestError,
   loadingAuthSnapshot,
+  type AuthClient,
+  type AuthInstance,
+  type AuthSnapshot,
+  type SignUpInput,
+  type SignUpResult,
   type TokenOptions
 } from "./auth-client";
-import { ProviderTokenStrippingStorage } from "./web-auth-storage";
+import {
+  AuthSessionStorage,
+  removeLegacySupabaseSessions,
+  type StoredSession
+} from "./web-auth-storage";
 
-type AuthResult<T> = Promise<{ data: T; error: unknown }>;
+// Refresh this long before the access token expires.
+export const REFRESH_MARGIN_MS = 60_000;
+const REFRESH_LOCK_NAME = "orchestrat.auth.refresh";
+// Sign-out revokes the session first, but never waits on it for long.
+const REVOKE_TIMEOUT_MS = 5_000;
 
-export type WebAuthApi = {
-  onAuthStateChange(
-    listener: (event: AuthChangeEvent, session: Session | null) => void
-  ): {
-    data: { subscription: { unsubscribe(): void } };
-  };
-  getSession(): AuthResult<{ session: Session | null }>;
-  signInWithOAuth(credentials: {
-    provider: "github";
-    options: { redirectTo: string };
-  }): Promise<{ data: unknown; error: unknown }>;
-  signInWithOtp(credentials: {
-    email: string;
-    options: { emailRedirectTo: string; shouldCreateUser: true };
-  }): Promise<{ data: unknown; error: unknown }>;
-  exchangeCodeForSession(
-    code: string
-  ): AuthResult<{ session: Session | null; user: unknown }>;
-  refreshSession(): AuthResult<{ session: Session | null; user: unknown }>;
-  signOut(options: { scope: "local" }): Promise<{ error: unknown }>;
-  dispose(): Promise<void>;
-};
-
-const webCapabilities: AuthCapabilities = Object.freeze({
-  github: true,
-  magicLink: true
+// An invite signup also joins the project and says which one.
+const signupResponseSchema = authSessionResponseSchema.extend({
+  invited_project_id: z.string().uuid().nullable().optional()
 });
 
-const invalidCallbackError: AuthSnapshot = {
-  status: "error",
-  code: "invalid_callback",
-  message: "We couldn't complete your sign-in. Try again."
-};
-const providerCallbackError: AuthSnapshot = {
-  status: "error",
-  code: "provider_error",
-  message: "We couldn't complete your sign-in. Try again."
+// The subset of the Web Locks API the client needs. Holding the lock while
+// refreshing keeps two tabs from presenting the same refresh token.
+export type RefreshLocks = {
+  request<T>(name: string, callback: () => Promise<T>): Promise<T>;
 };
 
-type ParsedCallback =
-  | { kind: "code"; code: string }
-  | { kind: "providerError" }
-  | { kind: "invalid" };
-type OperationContext = {
-  generation: number;
-  authEventVersion: number;
-  operationEpoch: number;
+export type WebAuthClientOptions = {
+  apiUrl: string;
+  storage?: AuthSessionStorage;
+  fetch?: typeof fetch;
+  now?: () => number;
+  locks?: RefreshLocks | null;
 };
+
+type Sent = { response: Response; data: unknown };
+
+const errorBodySchema = z.object({
+  error: z.object({
+    code: z.string().min(1).max(64),
+    message: z.string().max(1024),
+    details: z.record(z.string(), z.unknown()).optional()
+  })
+});
+
+const unauthenticated = () =>
+  new AuthRequestError(
+    "Your session has ended. Sign in again.",
+    "UNAUTHENTICATED",
+    401
+  );
+
+function retryAfterSeconds(response: Response, details: unknown) {
+  const fromBody =
+    typeof details === "object" && details !== null
+      ? (details as Record<string, unknown>).retry_after_seconds
+      : undefined;
+  if (typeof fromBody === "number" && Number.isFinite(fromBody))
+    return Math.max(1, Math.ceil(fromBody));
+  const fromHeader = Number(response.headers.get("retry-after"));
+  return Number.isFinite(fromHeader) && fromHeader > 0
+    ? Math.ceil(fromHeader)
+    : null;
+}
+
+function errorFromResponse(response: Response, data: unknown) {
+  const parsed = errorBodySchema.safeParse(data);
+  const code = parsed.success
+    ? parsed.data.error.code
+    : response.status === 401
+      ? "UNAUTHENTICATED"
+      : response.status === 429
+        ? "RATE_LIMITED"
+        : "INTERNAL_ERROR";
+  return new AuthRequestError(
+    parsed.success ? parsed.data.error.message : "The request failed.",
+    code,
+    response.status,
+    code === "RATE_LIMITED"
+      ? retryAfterSeconds(
+          response,
+          parsed.success ? parsed.data.error.details : undefined
+        )
+      : null
+  );
+}
 
 function snapshotsEqual(left: AuthSnapshot, right: AuthSnapshot): boolean {
   if (left.status !== right.status) return false;
-  if (left.status === "error" && right.status === "error")
-    return left.code === right.code && left.message === right.message;
   if (left.status === "signedIn" && right.status === "signedIn")
     return left.identityKey === right.identityKey;
-  if (
-    (left.status === "sendingMagicLink" || left.status === "magicLinkSent") &&
-    (right.status === "sendingMagicLink" || right.status === "magicLinkSent")
-  )
-    return left.email === right.email;
   return true;
 }
 
-function normalizedEmail(value: string): string | null {
-  const email = value.trim().toLowerCase();
-  if (
-    email.length > 254 ||
-    !/^[^\s@]{1,64}@[^\s@.]+(?:\.[^\s@.]+)+$/.test(email)
-  )
-    return null;
-  return email;
-}
-
-function safeCallbackValue(value: string, maxLength: number): boolean {
-  if (value.length === 0 || value.length > maxLength) return false;
-  return [...value].every((character) => {
-    const codePoint = character.codePointAt(0) ?? 0;
-    return codePoint > 31 && codePoint !== 127;
-  });
-}
-
-function parseCallback(
-  callbackUrl: string,
-  configuredCallbackUrl: string
-): ParsedCallback {
-  let callback: URL;
-  let configured: URL;
-  try {
-    callback = new URL(callbackUrl);
-    configured = new URL(configuredCallbackUrl);
-  } catch {
-    return { kind: "invalid" };
-  }
-  if (
-    callback.origin !== configured.origin ||
-    callback.pathname !== configured.pathname ||
-    callback.username ||
-    callback.password ||
-    callback.hash
-  )
-    return { kind: "invalid" };
-
-  const allowed = new Set(["code", "error", "error_code", "error_description"]);
-  const counts = new Map<string, number>();
-  for (const [key] of callback.searchParams) {
-    if (!allowed.has(key)) return { kind: "invalid" };
-    counts.set(key, (counts.get(key) ?? 0) + 1);
-  }
-  if ([...counts.values()].some((count) => count !== 1))
-    return { kind: "invalid" };
-
-  const code = callback.searchParams.get("code");
-  const error = callback.searchParams.get("error");
-  const errorCode = callback.searchParams.get("error_code");
-  const errorDescription = callback.searchParams.get("error_description");
-  if (code !== null) {
-    if (
-      error !== null ||
-      errorCode !== null ||
-      errorDescription !== null ||
-      !safeCallbackValue(code, 4096)
-    )
-      return { kind: "invalid" };
-    return { kind: "code", code };
-  }
-  if (error !== null) {
-    if (
-      !safeCallbackValue(error, 256) ||
-      (errorCode !== null && !safeCallbackValue(errorCode, 256)) ||
-      (errorDescription !== null && !safeCallbackValue(errorDescription, 1024))
-    )
-      return { kind: "invalid" };
-    return { kind: "providerError" };
-  }
-  return { kind: "invalid" };
-}
-
+/**
+ * Email and password sessions against the API's own /auth endpoints.
+ * Tokens live in localStorage so every tab shares one session.
+ */
 export class WebAuthClient implements AuthClient {
-  readonly capabilities = webCapabilities;
   private snapshot: AuthSnapshot = loadingAuthSnapshot;
-  private session: Session | null = null;
+  private session: StoredSession | null = null;
   private readonly listeners = new Set<() => void>();
+  private readonly baseUrl: string;
+  private readonly storage: AuthSessionStorage;
+  private readonly fetchImpl: typeof fetch;
+  private readonly now: () => number;
+  private readonly locks: RefreshLocks | null;
   private initialization: Promise<void> | null = null;
-  private githubOperation: Promise<void> | null = null;
-  private magicLinkOperation: Promise<void> | null = null;
-  private callbackOperation: Promise<AuthCompletionResult> | null = null;
-  private callbackAttempted = false;
+  private instanceRequest: Promise<AuthInstance> | null = null;
   private refreshOperation: Promise<string | null> | null = null;
-  private signOutOperation: Promise<void> | null = null;
-  private authUnsubscribe: (() => void) | null = null;
+  private storageUnsubscribe: (() => void) | null = null;
+  // False once a write failed; the session then lives in memory only and the
+  // shared storage is no longer consulted.
+  private storageBacked: boolean;
+  // Bumped whenever the local session is replaced or cleared, so a request
+  // that started before can't commit stale tokens.
   private generation = 0;
-  private authEventVersion = 0;
-  private operationEpoch = 0;
   private disposed = false;
 
-  constructor(
-    private readonly auth: WebAuthApi,
-    private readonly callbackUrl: string
-  ) {}
+  constructor(options: WebAuthClientOptions) {
+    this.baseUrl = new URL(options.apiUrl).toString().replace(/\/$/, "");
+    this.storage = options.storage ?? new AuthSessionStorage(null);
+    this.storageBacked = this.storage.available;
+    this.fetchImpl = options.fetch ?? ((input, init) => fetch(input, init));
+    this.now = options.now ?? Date.now;
+    this.locks = options.locks ?? null;
+  }
 
   initialize(): Promise<void> {
     if (this.disposed) return Promise.resolve();
@@ -183,78 +145,30 @@ export class WebAuthClient implements AuthClient {
   }
 
   private async initializeOnce(): Promise<void> {
-    const generation = this.generation;
-    const version = this.authEventVersion;
-    const subscription = this.auth.onAuthStateChange((event, session) => {
-      if (this.disposed) return;
-      if (event === "SIGNED_OUT") {
-        this.authEventVersion += 1;
-        this.operationEpoch += 1;
-        this.session = null;
-        this.setSnapshot({ status: "signedOut" });
-      } else if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
-        this.authEventVersion += 1;
-        this.operationEpoch += 1;
-        this.session = session;
-        this.setSnapshot(
-          session
-            ? { status: "signedIn", identityKey: session.user.id }
-            : { status: "signedOut" }
-        );
-      }
-    }).data.subscription;
-    if (this.disposed) {
-      subscription.unsubscribe();
-      return;
+    // Restoring is local: an expired access token is refreshed on first use.
+    const stored = this.storage.read();
+    if (stored && stored.refresh_expires_at > this.now()) {
+      this.session = stored;
+      this.setSnapshot({
+        status: "signedIn",
+        identityKey: stored.user.user_id
+      });
+    } else {
+      if (stored) this.storage.clear();
+      this.setSnapshot({ status: "signedOut" });
     }
-    this.authUnsubscribe = () => subscription.unsubscribe();
-    try {
-      const result = await this.auth.getSession();
-      if (result.error) throw result.error;
-      if (
-        !this.disposed &&
-        generation === this.generation &&
-        version === this.authEventVersion
-      ) {
-        this.session = result.data.session;
-        this.setSnapshot(
-          this.session
-            ? { status: "signedIn", identityKey: this.session.user.id }
-            : { status: "signedOut" }
-        );
-      }
-    } catch {
-      if (
-        !this.disposed &&
-        generation === this.generation &&
-        this.snapshot.status === "loading"
-      ) {
-        this.setSnapshot({
-          status: "error",
-          code: "session_restore_failed",
-          message: "Your session could not be restored. Try again."
-        });
-      }
-    }
+    this.storageUnsubscribe = this.storage.subscribe(() =>
+      this.onSharedSessionChange()
+    );
   }
 
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
     this.generation += 1;
-    this.operationEpoch += 1;
     this.session = null;
-    try {
-      this.authUnsubscribe?.();
-    } catch {
-      /* Cleanup must continue without exposing provider details. */
-    }
-    this.authUnsubscribe = null;
-    try {
-      void this.auth.dispose().catch(() => undefined);
-    } catch {
-      /* Cleanup is best-effort and intentionally silent. */
-    }
+    this.storageUnsubscribe?.();
+    this.storageUnsubscribe = null;
     this.listeners.clear();
   }
 
@@ -268,220 +182,325 @@ export class WebAuthClient implements AuthClient {
     return () => this.listeners.delete(listener);
   }
 
-  signInWithGitHub(): Promise<void> {
-    if (this.disposed) return Promise.resolve();
-    if (this.githubOperation) return this.githubOperation;
-    const context = this.beginOperation();
-    this.setSnapshot({ status: "signingIn" });
-    const operation = this.auth
-      .signInWithOAuth({
-        provider: "github",
-        options: { redirectTo: this.callbackUrl }
-      })
-      .then((result) => {
-        if (result.error) throw result.error;
-        if (this.canCommit(context)) this.callbackAttempted = false;
-      })
-      .catch(() => {
-        if (this.canCommit(context)) {
-          this.setSnapshot({
-            status: "error",
-            code: "oauth_start_failed",
-            message: "Sign-in could not be started. Try again."
-          });
-        }
-      })
-      .finally(() => {
-        if (this.githubOperation === operation) this.githubOperation = null;
-      });
-    this.githubOperation = operation;
-    return operation;
+  getInstance(options?: { refresh?: boolean }): Promise<AuthInstance> {
+    if (this.instanceRequest && !options?.refresh) return this.instanceRequest;
+    const request = this.request(
+      "/api/v1/auth/instance",
+      { method: "GET" },
+      authInstanceResponseSchema
+    );
+    this.instanceRequest = request;
+    request.catch(() => {
+      if (this.instanceRequest === request) this.instanceRequest = null;
+    });
+    return request;
   }
 
-  sendMagicLink(value: string): Promise<void> {
-    if (this.disposed) return Promise.resolve();
-    if (this.magicLinkOperation) return this.magicLinkOperation;
-    const email = normalizedEmail(value);
-    if (!email) {
-      this.setSnapshot({
-        status: "error",
-        code: "invalid_email",
-        message: "Enter a valid email address."
-      });
-      return Promise.resolve();
-    }
-    const context = this.beginOperation();
-    this.setSnapshot({ status: "sendingMagicLink", email });
-    const operation = this.auth
-      .signInWithOtp({
-        email,
-        options: { emailRedirectTo: this.callbackUrl, shouldCreateUser: true }
-      })
-      .then((result) => {
-        if (result.error) throw result.error;
-        if (this.canCommit(context)) {
-          this.callbackAttempted = false;
-          this.setSnapshot({ status: "magicLinkSent", email });
-        }
-      })
-      .catch(() => {
-        if (this.canCommit(context)) {
-          this.setSnapshot({
-            status: "error",
-            code: "magic_link_failed",
-            message: "The sign-in link could not be sent. Try again."
-          });
-        }
-      })
-      .finally(() => {
-        if (this.magicLinkOperation === operation)
-          this.magicLinkOperation = null;
-      });
-    this.magicLinkOperation = operation;
-    return operation;
+  async signIn(email: string, password: string): Promise<void> {
+    const session = await this.request(
+      "/api/v1/auth/login",
+      { method: "POST", body: { email: email.trim(), password } },
+      authSessionResponseSchema
+    );
+    this.commitSession(session);
   }
 
-  completeSignIn(callbackUrl: string): Promise<AuthCompletionResult> {
-    if (this.disposed) return Promise.resolve({ status: "error" });
-    if (this.callbackOperation) return this.callbackOperation;
-    if (this.callbackAttempted) return Promise.resolve({ status: "error" });
-    const parsed = parseCallback(callbackUrl, this.callbackUrl);
-    const context = this.beginOperation();
-    if (parsed.kind === "invalid") {
-      this.setSnapshot(invalidCallbackError);
-      return Promise.resolve({ status: "error" });
-    }
-    this.callbackAttempted = true;
-    if (parsed.kind === "providerError") {
-      this.setSnapshot(providerCallbackError);
-      return Promise.resolve({ status: "error" });
-    }
-    this.setSnapshot({ status: "signingIn" });
-    let request: ReturnType<WebAuthApi["exchangeCodeForSession"]>;
-    try {
-      request = this.auth.exchangeCodeForSession(parsed.code);
-    } catch {
-      if (this.canCommit(context)) {
-        this.setSnapshot({
-          status: "error",
-          code: "callback_exchange_failed",
-          message: "We couldn't complete your sign-in. Try again."
-        });
-      }
-      return Promise.resolve({ status: "error" });
-    }
-    const operation: Promise<AuthCompletionResult> = request
-      .then((result): AuthCompletionResult => {
-        if (result.error || !result.data.session)
-          throw result.error ?? new Error("Session missing");
-        const identityKey = result.data.session.user.id;
-        if (this.canCommit(context)) {
-          this.session = result.data.session;
-          this.setSnapshot({ status: "signedIn", identityKey });
-          return { status: "success", identityKey };
+  async signUp(input: SignUpInput): Promise<SignUpResult> {
+    const setupToken = input.setupToken?.trim();
+    const session = await this.request(
+      "/api/v1/auth/signup",
+      {
+        method: "POST",
+        body: {
+          email: input.email.trim(),
+          password: input.password,
+          full_name: input.fullName.trim(),
+          ...(input.inviteToken ? { invite_token: input.inviteToken } : {}),
+          ...(setupToken ? { setup_token: setupToken } : {})
         }
-        if (
-          this.authEventVersion !== context.authEventVersion &&
-          this.session?.user.id === identityKey &&
-          this.snapshot.status === "signedIn"
-        )
-          return { status: "success", identityKey };
-        return { status: "error" };
-      })
-      .catch((): AuthCompletionResult => {
-        if (this.canCommit(context)) {
-          this.setSnapshot({
-            status: "error",
-            code: "callback_exchange_failed",
-            message: "We couldn't complete your sign-in. Try again."
-          });
-        }
-        return { status: "error" };
-      })
-      .finally(() => {
-        if (this.callbackOperation === operation) this.callbackOperation = null;
-      });
-    this.callbackOperation = operation;
-    return operation;
+      },
+      signupResponseSchema
+    );
+    // The server has an account now, so it no longer needs setup.
+    this.instanceRequest = null;
+    this.commitSession(session);
+    return { invitedProjectId: session.invited_project_id ?? null };
   }
 
-  signOut(): Promise<void> {
-    return this.clearLocalSession();
-  }
-  expireSession(): Promise<void> {
-    return this.clearLocalSession();
+  async signOut(): Promise<void> {
+    const session = this.session;
+    if (this.disposed || !session) return;
+    // Revoking by refresh token works even after the access token expired.
+    await this.revoke(session.refresh_token);
+    this.clearLocalSession();
   }
 
-  private clearLocalSession(): Promise<void> {
-    if (this.disposed) return Promise.resolve();
-    if (this.signOutOperation) return this.signOutOperation;
-    this.generation += 1;
-    this.operationEpoch += 1;
-    this.session = null;
-    this.githubOperation = null;
-    this.magicLinkOperation = null;
-    this.callbackOperation = null;
-    this.setSnapshot({ status: "signedOut" });
-    const operation = this.auth
-      .signOut({ scope: "local" })
-      .then(
-        () => undefined,
-        () => undefined
-      )
-      .finally(() => {
-        if (this.signOutOperation === operation) this.signOutOperation = null;
-      });
-    this.signOutOperation = operation;
-    return operation;
+  async signOutEverywhere(): Promise<void> {
+    await this.authorizedPost("/api/v1/auth/logout-all");
+    this.clearLocalSession();
+  }
+
+  async changePassword(
+    currentPassword: string,
+    newPassword: string
+  ): Promise<void> {
+    await this.authorizedPost("/api/v1/auth/password", {
+      current_password: currentPassword,
+      new_password: newPassword
+    });
+  }
+
+  async expireSession(): Promise<void> {
+    if (this.disposed) return;
+    this.clearLocalSession();
   }
 
   getAccessToken(options?: TokenOptions): Promise<string | null> {
-    if (!options?.forceRefresh)
-      return Promise.resolve(this.session?.access_token ?? null);
-    if (!this.session) return Promise.resolve(null);
-    if (!this.refreshOperation) this.refreshOperation = this.refresh();
+    const session = this.session;
+    if (this.disposed || !session) return Promise.resolve(null);
+    const now = this.now();
+    if (session.refresh_expires_at <= now) {
+      this.clearLocalSession();
+      return Promise.resolve(null);
+    }
+    if (
+      !options?.forceRefresh &&
+      session.access_expires_at - REFRESH_MARGIN_MS > now
+    )
+      return Promise.resolve(session.access_token);
+    if (!this.refreshOperation) {
+      const operation = this.refresh(
+        session,
+        Boolean(options?.forceRefresh)
+      ).finally(() => {
+        if (this.refreshOperation === operation) this.refreshOperation = null;
+      });
+      this.refreshOperation = operation;
+    }
     return this.refreshOperation;
   }
 
-  private async refresh(): Promise<string | null> {
-    const context = this.beginOperation();
-    try {
-      const result = await this.auth.refreshSession();
-      if (!this.canCommit(context)) return this.session?.access_token ?? null;
-      if (result.error || !result.data.session) {
-        await this.expireSession();
-        return null;
-      }
-      this.session = result.data.session;
-      this.setSnapshot({
-        status: "signedIn",
-        identityKey: this.session.user.id
-      });
-      return this.session.access_token;
-    } catch {
-      if (!this.canCommit(context)) return this.session?.access_token ?? null;
-      await this.expireSession();
+  private refresh(
+    presented: StoredSession,
+    forced: boolean
+  ): Promise<string | null> {
+    const generation = this.generation;
+    const run = () => this.refreshExclusively(presented, forced, generation);
+    return this.locks ? this.locks.request(REFRESH_LOCK_NAME, run) : run();
+  }
+
+  private async refreshExclusively(
+    presented: StoredSession,
+    forced: boolean,
+    generation: number
+  ): Promise<string | null> {
+    if (this.disposed) return null;
+    if (generation !== this.generation)
+      return this.session?.access_token ?? null;
+
+    // Another tab may have rotated or ended this session while we waited.
+    const shared = this.readShared();
+    if (shared === null) {
+      this.forgetSession();
       return null;
+    }
+    if (shared && shared.refresh_token !== presented.refresh_token) {
+      this.adopt(shared);
+      return shared.access_token;
+    }
+
+    let sent: Sent;
+    try {
+      sent = await this.send("/api/v1/auth/refresh", {
+        method: "POST",
+        body: { refresh_token: presented.refresh_token }
+      });
+    } catch {
+      return this.afterTransientRefreshFailure(presented, forced);
+    }
+    if (this.disposed) return null;
+    if (generation !== this.generation)
+      return this.session?.access_token ?? null;
+
+    if (sent.response.ok) {
+      const parsed = authSessionResponseSchema.safeParse(sent.data);
+      if (!parsed.success)
+        return this.afterTransientRefreshFailure(presented, forced);
+      this.commitSession(parsed.data);
+      return parsed.data.access_token;
+    }
+    if (sent.response.status === 401) {
+      // The API also answers 401 when another tab rotated this token in the
+      // last minute. Use that tab's tokens before treating this as sign-out.
+      const latest = this.readShared();
+      if (latest && latest.refresh_token !== presented.refresh_token) {
+        this.adopt(latest);
+        return latest.access_token;
+      }
+      this.clearLocalSession();
+      return null;
+    }
+    return this.afterTransientRefreshFailure(presented, forced);
+  }
+
+  // Network trouble, rate limits and server errors keep the session.
+  private afterTransientRefreshFailure(
+    presented: StoredSession,
+    forced: boolean
+  ): string | null {
+    // A forced refresh follows a 401, so never replay the rejected token.
+    if (forced) return null;
+    return presented.access_expires_at > this.now()
+      ? presented.access_token
+      : null;
+  }
+
+  private onSharedSessionChange(): void {
+    if (this.disposed || !this.initialization || !this.storageBacked) return;
+    const shared = this.storage.read();
+    if (shared === undefined) return;
+    if (shared === null) {
+      if (this.session) this.forgetSession();
+      return;
+    }
+    if (shared.refresh_expires_at <= this.now()) return;
+    if (
+      !this.session ||
+      shared.refresh_token !== this.session.refresh_token ||
+      shared.access_token !== this.session.access_token
+    )
+      this.adopt(shared);
+  }
+
+  private readShared(): StoredSession | null | undefined {
+    return this.storageBacked ? this.storage.read() : undefined;
+  }
+
+  private adopt(session: StoredSession): void {
+    this.generation += 1;
+    this.session = session;
+    this.setSnapshot({ status: "signedIn", identityKey: session.user.user_id });
+  }
+
+  private commitSession(response: AuthSessionResponse): void {
+    if (this.disposed) return;
+    const now = this.now();
+    const session: StoredSession = {
+      version: 1,
+      access_token: response.access_token,
+      refresh_token: response.refresh_token,
+      access_expires_at: now + response.expires_in * 1000,
+      refresh_expires_at: now + response.refresh_expires_in * 1000,
+      user: response.user
+    };
+    this.generation += 1;
+    this.session = session;
+    this.storageBacked = this.storage.write(session);
+    this.setSnapshot({ status: "signedIn", identityKey: session.user.user_id });
+  }
+
+  // Signs this tab out without touching shared storage (it's already empty).
+  private forgetSession(): void {
+    this.generation += 1;
+    this.session = null;
+    this.setSnapshot({ status: "signedOut" });
+  }
+
+  private clearLocalSession(): void {
+    if (this.disposed) return;
+    this.storage.clear();
+    this.forgetSession();
+  }
+
+  // Best effort: the API answers 204 for any token, and a failure here must
+  // not keep anyone signed in on this device.
+  private async revoke(refreshToken: string): Promise<void> {
+    const abort = new AbortController();
+    const timeout = setTimeout(() => abort.abort(), REVOKE_TIMEOUT_MS);
+    try {
+      await this.send("/api/v1/auth/revoke", {
+        method: "POST",
+        body: { refresh_token: refreshToken },
+        signal: abort.signal
+      });
+    } catch {
+      /* Ignored; local sign-out continues. */
     } finally {
-      this.refreshOperation = null;
+      clearTimeout(timeout);
     }
   }
 
-  private beginOperation(): OperationContext {
-    return {
-      generation: this.generation,
-      authEventVersion: this.authEventVersion,
-      operationEpoch: ++this.operationEpoch
-    };
+  // Signed-in POSTs that answer 204: one forced refresh on 401, like ApiClient.
+  private async authorizedPost(path: string, body?: unknown): Promise<void> {
+    for (const forceRefresh of [false, true]) {
+      const accessToken = await this.getAccessToken({ forceRefresh });
+      if (!accessToken) throw unauthenticated();
+      const sent = await this.send(path, { method: "POST", body, accessToken });
+      if (sent.response.ok) return;
+      if (sent.response.status !== 401)
+        throw errorFromResponse(sent.response, sent.data);
+    }
+    await this.expireSession();
+    throw unauthenticated();
   }
 
-  private canCommit(context: OperationContext): boolean {
-    return (
-      !this.disposed &&
-      context.generation === this.generation &&
-      context.authEventVersion === this.authEventVersion &&
-      context.operationEpoch === this.operationEpoch
-    );
+  private async request<T>(
+    path: string,
+    options: { method: "GET" | "POST"; body?: unknown },
+    schema: ZodType<T>
+  ): Promise<T> {
+    const sent = await this.send(path, options);
+    if (!sent.response.ok) throw errorFromResponse(sent.response, sent.data);
+    const parsed = schema.safeParse(sent.data);
+    if (!parsed.success)
+      throw new AuthRequestError(
+        "The server returned an unexpected response.",
+        "INVALID_RESPONSE",
+        sent.response.status
+      );
+    return parsed.data;
+  }
+
+  private async send(
+    path: string,
+    options: {
+      method: "GET" | "POST";
+      body?: unknown;
+      accessToken?: string;
+      signal?: AbortSignal;
+    }
+  ): Promise<Sent> {
+    const headers = new Headers({ Accept: "application/json" });
+    if (options.accessToken)
+      headers.set("Authorization", `Bearer ${options.accessToken}`);
+    // Fastify rejects an empty body that claims to be JSON.
+    if (options.body !== undefined)
+      headers.set("Content-Type", "application/json");
+    let response: Response;
+    try {
+      response = await this.fetchImpl(`${this.baseUrl}${path}`, {
+        method: options.method,
+        headers,
+        body:
+          options.body === undefined ? undefined : JSON.stringify(options.body),
+        cache: "no-store",
+        credentials: "omit",
+        signal: options.signal
+      });
+    } catch {
+      throw new AuthRequestError(
+        "We couldn't reach the server.",
+        "NETWORK_ERROR",
+        null
+      );
+    }
+    let data: unknown;
+    try {
+      data = response.status === 204 ? undefined : await response.json();
+    } catch {
+      data = undefined;
+    }
+    return { response, data };
   }
 
   private setSnapshot(snapshot: AuthSnapshot): void {
@@ -491,21 +510,29 @@ export class WebAuthClient implements AuthClient {
   }
 }
 
-export function createBrowserWebAuthClient(
-  supabaseUrl: string,
-  supabasePublishableKey: string,
-  callbackUrl: string,
-  storage: Storage = window.localStorage,
-  factory: typeof createClient = createClient
-): WebAuthClient {
-  const client = factory(supabaseUrl, supabasePublishableKey, {
-    auth: {
-      flowType: "pkce",
-      persistSession: true,
-      autoRefreshToken: true,
-      detectSessionInUrl: false,
-      storage: new ProviderTokenStrippingStorage(storage)
-    }
-  }) as SupabaseClient;
-  return new WebAuthClient(client.auth, callbackUrl);
+function browserStorage(): Storage | null {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+function browserLocks(): RefreshLocks | null {
+  const locks = (globalThis.navigator as Navigator | undefined)?.locks;
+  if (!locks || typeof locks.request !== "function") return null;
+  return {
+    request: <T>(name: string, callback: () => Promise<T>) =>
+      locks.request(name, callback) as Promise<T>
+  };
+}
+
+export function createBrowserWebAuthClient(apiUrl: string): WebAuthClient {
+  const storage = browserStorage();
+  removeLegacySupabaseSessions(storage);
+  return new WebAuthClient({
+    apiUrl,
+    storage: new AuthSessionStorage(storage),
+    locks: browserLocks()
+  });
 }

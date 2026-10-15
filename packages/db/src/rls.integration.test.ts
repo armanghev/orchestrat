@@ -24,7 +24,10 @@ const protectedTables = [
   "repository_refs",
   "repository_webhook_deliveries",
   "organization_integrations",
-  "organization_repositories"
+  "organization_repositories",
+  "user_passwords",
+  "auth_sessions",
+  "instance_settings"
 ] as const;
 
 // Tables without created_at get a harmless self-assignment on another column.
@@ -36,7 +39,8 @@ const updateAssignment: Partial<
   branch_item_baselines: '"updated_at" = "updated_at"',
   repository_refs: '"last_seen_at" = "last_seen_at"',
   repository_webhook_deliveries: '"received_at" = "received_at"',
-  organization_repositories: '"first_seen_at" = "first_seen_at"'
+  organization_repositories: '"first_seen_at" = "first_seen_at"',
+  instance_settings: '"bootstrapped_at" = "bootstrapped_at"'
 };
 
 test(
@@ -230,6 +234,23 @@ test(
             full_name)
          VALUES ($1, $2, 'gitlab', '42', 'acme/app')`,
         [organizationId, integrationId]
+      );
+      await pool.query(
+        `INSERT INTO user_passwords (user_id, password_hash)
+         VALUES ($1, 'scrypt$15$8$1$salt$hash')`,
+        [userId]
+      );
+      await pool.query(
+        `INSERT INTO auth_sessions
+           (user_id, access_token_hash, refresh_token_hash,
+            access_expires_at, refresh_expires_at)
+         VALUES ($1, $2, $3, now() + interval '1 hour',
+                 now() + interval '30 days')`,
+        [userId, `access-${suffix}`, `refresh-${suffix}`]
+      );
+      await pool.query(
+        `INSERT INTO instance_settings (id, bootstrapped_by) VALUES (1, $1)`,
+        [userId]
       );
       await pool.query(
         `INSERT INTO repository_webhook_deliveries

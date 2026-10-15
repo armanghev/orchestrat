@@ -1,201 +1,206 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
+import { Link } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { useAuthClient, useAuthSnapshot } from "./auth-context";
+import type { SignupMode } from "@orchestrat/protocol";
+import { AccountForm } from "./account-form";
+import { useAuthClient } from "./auth-context";
+import { authErrorMessage } from "./auth-errors";
+import {
+  AuthField,
+  AuthLoading,
+  AuthPage,
+  authLinkClassName,
+  useFieldFocus
+} from "./auth-page";
+import { normalizeAuthEmail } from "./email";
+import { useAuthInstance } from "./use-auth-instance";
 
-function maskedEmail(value: string): string {
-  const separator = value.lastIndexOf("@");
-  return separator > 0 ? `•••${value.slice(separator)}` : "•••";
+type SignInScreenProps = {
+  /** A project invitation the person is signing in to accept. */
+  inviteToken?: string | null;
+  /** From `?setup_token=`; prefills first-run setup. */
+  setupToken?: string;
+};
+
+/**
+ * Signed-out entry point. On a server with no accounts yet it becomes
+ * first-run setup, which creates the admin account.
+ */
+export function SignInScreen({ inviteToken, setupToken }: SignInScreenProps) {
+  const instance = useAuthInstance();
+  if (instance.status === "loading")
+    return <AuthLoading label="Loading sign-in" />;
+  if (instance.status === "ready" && instance.instance.needs_setup)
+    return <SetupScreen setupToken={setupToken} onRejected={instance.reload} />;
+  return (
+    <SignInForm
+      inviteToken={inviteToken ?? null}
+      signupMode={
+        instance.status === "ready" ? instance.instance.signup_mode : null
+      }
+      unreachable={instance.status === "error"}
+      onRetry={instance.reload}
+    />
+  );
 }
 
-export function SignInScreen() {
-  const client = useAuthClient();
-  const snapshot = useAuthSnapshot();
-  const initialEmail =
-    snapshot.status === "sendingMagicLink" ||
-    snapshot.status === "magicLinkSent"
-      ? snapshot.email
-      : "";
-  const [email, setEmail] = useState(initialEmail);
-  const [editingEmail, setEditingEmail] = useState(
-    snapshot.status !== "magicLinkSent"
+export function SetupScreen({
+  setupToken,
+  onRejected,
+  onPendingChange,
+  onSignedUp
+}: {
+  setupToken?: string;
+  onRejected(): void;
+  onPendingChange?(pending: boolean): void;
+  onSignedUp?(): void;
+}) {
+  return (
+    <AuthPage
+      title="Set up this Orchestrat server"
+      description="Create the first account. It becomes the admin for this server."
+    >
+      <AccountForm
+        mode="setup"
+        initialSetupToken={setupToken}
+        onRejected={onRejected}
+        onPendingChange={onPendingChange}
+        onSignedUp={onSignedUp ? () => onSignedUp() : undefined}
+      />
+    </AuthPage>
   );
-  const emailInput = useRef<HTMLInputElement>(null);
-  const githubPending = snapshot.status === "signingIn";
-  const magicPending = snapshot.status === "sendingMagicLink";
-  const pending =
-    snapshot.status === "loading" || githubPending || magicPending;
-  const invalidEmail =
-    snapshot.status === "error" && snapshot.code === "invalid_email";
-  const acceptedEmail =
-    snapshot.status === "magicLinkSent" ? snapshot.email : null;
+}
 
-  useEffect(() => {
-    if (acceptedEmail !== null) {
-      setEmail(acceptedEmail);
-      setEditingEmail(false);
-    }
-  }, [acceptedEmail]);
+const ids = { email: "sign-in-email", password: "sign-in-password" };
 
-  useEffect(() => {
-    if (editingEmail && (invalidEmail || email === ""))
-      emailInput.current?.focus();
-  }, [editingEmail, email, invalidEmail]);
+function SignInForm({
+  inviteToken,
+  signupMode,
+  unreachable,
+  onRetry
+}: {
+  inviteToken: string | null;
+  signupMode: SignupMode | null;
+  unreachable: boolean;
+  onRetry(): void;
+}) {
+  const client = useAuthClient();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [pending, setPending] = useState(false);
+  const [errors, setErrors] = useState<{
+    email?: string;
+    password?: string;
+    form?: string;
+  }>({});
+  const focusField = useFieldFocus();
 
-  function submitMagicLink(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!pending) void client.sendMagicLink(email);
+    if (pending) return;
+    const normalized = normalizeAuthEmail(email);
+    const problems = {
+      email: normalized ? undefined : "Enter a valid email address.",
+      password: password.length > 0 ? undefined : "Enter your password."
+    };
+    if (problems.email || problems.password) {
+      setErrors(problems);
+      focusField(problems.email ? ids.email : ids.password);
+      return;
+    }
+    setErrors({});
+    setPending(true);
+    try {
+      await client.signIn(normalized!, password);
+    } catch (error) {
+      setErrors({ form: authErrorMessage(error, "signIn") });
+      setPending(false);
+    }
   }
 
-  function changeEmail() {
-    setEmail("");
-    setEditingEmail(true);
-  }
-
-  const sentEmail =
-    snapshot.status === "magicLinkSent" ? snapshot.email : initialEmail;
+  let footer: ReactNode = null;
+  if (signupMode === "closed" && !inviteToken)
+    footer = "Need an account? Ask an admin to create your account.";
+  else if (signupMode !== null || inviteToken)
+    footer = (
+      <>
+        New here?{" "}
+        <Link
+          to="/signup"
+          search={inviteToken ? { invite: inviteToken } : {}}
+          className={authLinkClassName}
+        >
+          Create an account
+        </Link>
+      </>
+    );
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-6 text-center">
-      <p className="mb-5 text-sm font-semibold tracking-[0.2em] text-primary-text">
-        ORCHESTRAT
-      </p>
-      <h1 className="text-3xl font-semibold tracking-tight">
-        Coordinate agents. Keep control.
-      </h1>
-      <p className="mt-4 text-sm text-muted-foreground">
-        {client.capabilities.browserPortal
-          ? "Sign in securely at app.orchestrat.dev, then return here automatically."
-          : "Sign in securely to continue to the dashboard."}
-      </p>
-
-      <div className="mt-8 space-y-5">
-        {snapshot.status === "error" && (
+    <AuthPage
+      title="Sign in to Orchestrat"
+      description={
+        inviteToken
+          ? "Sign in or create an account to join the project."
+          : "Use the email and password for your account on this server."
+      }
+      footer={footer}
+    >
+      {unreachable ? (
+        <div role="alert" className="mb-5 rounded-lg border p-3 text-sm">
+          <p>We couldn't reach this Orchestrat server.</p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="mt-3"
+            onClick={onRetry}
+          >
+            Retry
+          </Button>
+        </div>
+      ) : null}
+      <form
+        className="space-y-4"
+        onSubmit={submit}
+        noValidate
+        aria-busy={pending}
+      >
+        <AuthField
+          id={ids.email}
+          label="Email"
+          type="email"
+          name="email"
+          autoComplete="username"
+          inputMode="email"
+          maxLength={254}
+          required
+          value={email}
+          error={errors.email}
+          disabled={pending}
+          onChange={(event) => setEmail(event.target.value)}
+        />
+        <AuthField
+          id={ids.password}
+          label="Password"
+          type="password"
+          name="password"
+          autoComplete="current-password"
+          maxLength={256}
+          required
+          value={password}
+          error={errors.password}
+          disabled={pending}
+          onChange={(event) => setPassword(event.target.value)}
+        />
+        {errors.form ? (
           <p role="alert" className="text-sm text-destructive">
-            {invalidEmail
-              ? "Enter a valid email address."
-              : "We couldn't sign you in. Try again."}
+            {errors.form}
           </p>
-        )}
-
-        {client.capabilities.browserPortal ? (
-          <Button
-            className="w-full"
-            type="button"
-            disabled={pending}
-            onClick={() => {
-              void client.signInWithGitHub();
-            }}
-          >
-            {githubPending ? "Opening browser…" : "Continue in browser"}
-          </Button>
-        ) : client.capabilities.github ? (
-          <Button
-            className="w-full"
-            type="button"
-            disabled={pending}
-            onClick={() => {
-              void client.signInWithGitHub();
-            }}
-          >
-            {githubPending ? "Connecting to GitHub…" : "Continue with GitHub"}
-          </Button>
         ) : null}
-
-        {!client.capabilities.browserPortal &&
-          client.capabilities.github &&
-          client.capabilities.magicLink && (
-            <div
-              role="separator"
-              aria-label="or"
-              className="flex items-center gap-3 text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground"
-            >
-              <span aria-hidden="true" className="h-px flex-1 bg-border" />
-              <span aria-hidden="true">or</span>
-              <span aria-hidden="true" className="h-px flex-1 bg-border" />
-            </div>
-          )}
-
-        {client.capabilities.magicLink &&
-        snapshot.status === "magicLinkSent" &&
-        !editingEmail ? (
-          <div
-            role="status"
-            className="rounded-lg border border-border bg-muted/40 p-4 text-left"
-          >
-            <p className="font-medium text-foreground">Check your email</p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              A sign-in link was accepted for {maskedEmail(sentEmail)}. Delivery
-              may take a moment.
-            </p>
-            <div className="mt-4 flex flex-wrap gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  void client.sendMagicLink(sentEmail);
-                }}
-              >
-                Send again
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                onClick={changeEmail}
-              >
-                Use a different email
-              </Button>
-            </div>
-          </div>
-        ) : (
-          client.capabilities.magicLink && (
-            <form
-              className="space-y-3 text-left"
-              onSubmit={submitMagicLink}
-              noValidate
-            >
-              <div className="space-y-2">
-                <Label htmlFor="auth-email">Email address</Label>
-                <Input
-                  ref={emailInput}
-                  id="auth-email"
-                  name="email"
-                  type="email"
-                  autoComplete="email"
-                  inputMode="email"
-                  maxLength={254}
-                  required
-                  disabled={magicPending}
-                  aria-invalid={invalidEmail || undefined}
-                  aria-describedby={
-                    invalidEmail ? "auth-email-error" : undefined
-                  }
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                />
-                {invalidEmail && (
-                  <p id="auth-email-error" className="text-xs text-destructive">
-                    Use an address such as name@example.com.
-                  </p>
-                )}
-              </div>
-              <Button
-                className="w-full"
-                type="submit"
-                variant="outline"
-                disabled={pending || email.length === 0}
-              >
-                {magicPending
-                  ? "Sending sign-in link…"
-                  : "Email me a sign-in link"}
-              </Button>
-            </form>
-          )
-        )}
-      </div>
-    </main>
+        <Button className="w-full" type="submit" disabled={pending}>
+          {pending ? "Signing in…" : "Sign in"}
+        </Button>
+      </form>
+    </AuthPage>
   );
 }

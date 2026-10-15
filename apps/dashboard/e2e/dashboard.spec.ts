@@ -627,7 +627,7 @@ async function expectNoAxe(page: Page) {
 }
 
 // Each test starts from localStorage so the in-browser auth adapter, router, and token-bearing API client are exercised together.
-test("@auth signed-out users continue in browser and reach setup", async ({
+test("@auth signed-out users sign in with a password and reach setup", async ({
   page
 }) => {
   await seed(page, "signedOut");
@@ -637,45 +637,26 @@ test("@auth signed-out users continue in browser and reach setup", async ({
   });
   await page.goto("/");
   await expect(
-    page.getByRole("heading", { name: "Coordinate agents. Keep control." })
+    page.getByRole("heading", { name: "Sign in to Orchestrat" })
   ).toBeVisible();
   await expectNoAxe(page);
-  await page.getByRole("button", { name: "Continue with GitHub" }).click();
-  await expect(
-    page.getByRole("heading", { name: "Create your organization" })
-  ).toBeVisible();
-});
+  await page.getByLabel("Email").fill("a@.com");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByText("Enter a valid email address.")).toBeVisible();
+  await expect(page.getByText("Enter your password.")).toBeVisible();
+  await expectNoAxe(page);
 
-test("@auth magic-link rejects invalid email, shows masked sent state, and completes the sent flow", async ({
-  page
-}) => {
-  await seed(page, "signedOut");
-  await mockHierarchy(page, {
-    organizations: [],
-    projects: {}
-  });
-  await page.goto("/");
-  const email = page.getByLabel("Email address");
-  await email.fill("a@.com");
-  await page.getByRole("button", { name: "Email me a sign-in link" }).click();
+  await page.getByLabel("Email").fill("person@example.com");
+  await page.getByLabel("Password").fill("wrong-password");
+  await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByRole("alert")).toHaveText(
-    "Enter a valid email address."
+    "Email or password is incorrect."
   );
-  await expectNoAxe(page);
-
-  await email.fill("Person@Example.COM");
-  await page.getByRole("button", { name: "Email me a sign-in link" }).click();
-  await expect(page.getByRole("status")).toContainText("•••@example.com");
-  await expect(
-    page.getByText("person@example.com", { exact: true })
-  ).toHaveCount(0);
-  await expectNoAxe(page);
-
-  await page.goto("/auth/callback?code=e2e-magic-code");
+  await page.getByLabel("Password").fill("correct horse battery");
+  await page.getByRole("button", { name: "Sign in" }).click();
   await expect(
     page.getByRole("heading", { name: "Create your organization" })
   ).toBeVisible();
-  await expectNoAxe(page);
 });
 
 test("sign-out survives reload", async ({ page }) => {
@@ -686,11 +667,11 @@ test("sign-out survives reload", async ({ page }) => {
   await page.getByPlaceholder("Search commands…").fill("Sign out");
   await page.getByText("Sign out", { exact: true }).click();
   await expect(
-    page.getByRole("heading", { name: "Coordinate agents. Keep control." })
+    page.getByRole("heading", { name: "Sign in to Orchestrat" })
   ).toBeVisible();
   await page.reload();
   await expect(
-    page.getByRole("heading", { name: "Coordinate agents. Keep control." })
+    page.getByRole("heading", { name: "Sign in to Orchestrat" })
   ).toBeVisible();
 });
 
@@ -719,11 +700,11 @@ test("a repeated 401 expires the session and recovery remains signed out after r
   await mockHierarchy(page, { ...populatedState(), unauthorized: "always" });
   await page.goto(`/projects/${ids.alpha}/overview`);
   await expect(
-    page.getByRole("heading", { name: "Coordinate agents. Keep control." })
+    page.getByRole("heading", { name: "Sign in to Orchestrat" })
   ).toBeVisible();
   await page.reload();
   await expect(
-    page.getByRole("heading", { name: "Coordinate agents. Keep control." })
+    page.getByRole("heading", { name: "Sign in to Orchestrat" })
   ).toBeVisible();
   await expectNoAxe(page);
 });
@@ -738,7 +719,7 @@ test("the e2e adapter rejects arbitrary persisted auth modes", async ({
   });
   await page.goto("/");
   await expect(
-    page.getByRole("heading", { name: "Coordinate agents. Keep control." })
+    page.getByRole("heading", { name: "Sign in to Orchestrat" })
   ).toBeVisible();
 });
 

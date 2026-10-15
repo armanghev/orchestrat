@@ -608,6 +608,16 @@ Creation is a full page, not a dialog, because it can leave the app for a Git pr
 - Choosing a provider creates the project first, then sends the person to the provider with `/projects/$projectId/connect` as the return path. The connect page picks the repository and the default-branch mapping in full page, offers **Skip for now** throughout, and shows **Not connected** with Try again when the provider step fails. A project is never lost because the provider step failed.
 - On desktop the provider opens in the browser and the app moves to the project's repository settings.
 
+### Sign-in, setup and sign-up
+
+Signed-out pages use one narrow centered column with no shell: the word **Orchestrat** in orange, a page heading, then the form.
+
+- **Sign in** (`/`) asks for email and password. Errors appear inline: field problems under the field, a wrong password or a rate limit ("Try again in 30 seconds.") as one alert above the button. **Create an account** shows unless signup is closed and there is no invite.
+- **First-run setup** replaces sign-in while the server has no accounts: **Set up this Orchestrat server**, with the setup token from the server log (prefilled from `?setup_token=`), name, email, password and confirmation. The account it creates is the server admin.
+- **Create account** (`/signup?invite=`) has the same fields without the token. An invite-only server without an invite says "Ask a teammate for an invite link"; a closed server says "Ask an admin to create your account". An invite signup lands in the invited project.
+- A signed-out invite link shows sign-in in place and keeps the invite through sign-up.
+- Profile settings hold **Password** (current, new, confirm) and **Sessions** (**Sign out**, **Sign out everywhere**).
+
 ### Settings
 
 Organization and project settings are reached from their toolbar selectors. Profile settings are reached from the sidebar profile menu. Keep settings forms narrow enough to read and separate dangerous operations from routine configuration.
@@ -735,3 +745,4 @@ The main implementation references are:
 - `apps/dashboard/src/features/branches/import-dialog.tsx` — import dialog, selection and conflicts.
 - `apps/dashboard/src/features/branches/archived-banner.tsx` — archived-branch notice.
 - `apps/dashboard/src/features/decisions/decisions-page.tsx` and `decision-sheet.tsx` — Decisions list and sheet.
+- `apps/dashboard/src/features/auth/sign-in-screen.tsx`, `create-account-screen.tsx` and `account-form.tsx` — sign-in, first-run setup and sign-up.

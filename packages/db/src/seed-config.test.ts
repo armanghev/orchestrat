@@ -1,13 +1,25 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseSeedAuthSubject } from "./seed-config.js";
+import { EXAMPLE_SEED_PASSWORD, parseSeedPassword } from "./seed-config.js";
 
-test("seed subject must be a Supabase user UUID", () => {
+test("seed password must be 10 to 256 characters and not the example", () => {
   assert.equal(
-    parseSeedAuthSubject("550E8400-E29B-41D4-A716-446655440000"),
-    "550e8400-e29b-41d4-a716-446655440000"
+    parseSeedPassword("local dev password", {}),
+    "local dev password"
   );
-  for (const value of [undefined, "", "user_old-provider-id", "not-a-uuid"]) {
-    assert.throws(() => parseSeedAuthSubject(value));
+  for (const value of [
+    undefined,
+    "",
+    "short",
+    "x".repeat(257),
+    EXAMPLE_SEED_PASSWORD
+  ]) {
+    assert.throws(() => parseSeedPassword(value, {}));
   }
+});
+
+test("seed refuses to run in production", () => {
+  assert.throws(() =>
+    parseSeedPassword("local dev password", { NODE_ENV: "production" })
+  );
 });

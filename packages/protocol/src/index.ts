@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { attentionErrorCodeSchema } from "./attention.js";
+import { authErrorCodeSchema } from "./auth.js";
 import { branchErrorCodeSchema } from "./branches.js";
 
 export const healthResponseSchema = z.object({ status: z.literal("ok") });
@@ -21,7 +22,8 @@ export const profileSchema = z.object({
   suggested_username: usernameSchema.nullable().optional(),
   full_name: z.string(),
   email: z.string().email(),
-  avatar_url: avatarUrlSchema
+  avatar_url: avatarUrlSchema,
+  is_instance_admin: z.boolean().optional()
 });
 export type Profile = z.infer<typeof profileSchema>;
 
@@ -80,7 +82,8 @@ export const errorCodeSchema = z.union([
   coordinationErrorCodeSchema,
   documentErrorCodeSchema,
   attentionErrorCodeSchema,
-  branchErrorCodeSchema
+  branchErrorCodeSchema,
+  authErrorCodeSchema
 ]);
 export type ErrorCode = z.infer<typeof errorCodeSchema>;
 
@@ -1406,6 +1409,7 @@ export const projectChatParamsSchema = z.object({ projectId: idSchema });
 export const chatParamsSchema = z.object({ id: idSchema });
 
 export * from "./attention.js";
+export * from "./auth.js";
 export * from "./branches.js";
 export * from "./merges.js";
 export * from "./repository.js";

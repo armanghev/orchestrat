@@ -21,7 +21,6 @@ function deferred() {
 }
 
 class FakeWebClient implements AuthClient {
-  readonly capabilities = { github: true, magicLink: true };
   private snapshot: AuthSnapshot = { status: "loading" };
   private readonly listeners = new Set<() => void>();
   constructor(readonly label: string) {}
@@ -34,10 +33,15 @@ class FakeWebClient implements AuthClient {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   };
-  signInWithGitHub = vi.fn(async () => undefined);
-  sendMagicLink = vi.fn(async () => undefined);
-  completeSignIn = vi.fn(async () => ({ status: "error" as const }));
+  getInstance = vi.fn(async () => ({
+    needs_setup: false,
+    signup_mode: "invite" as const
+  }));
+  signIn = vi.fn(async () => undefined);
+  signUp = vi.fn(async () => ({ invitedProjectId: null }));
   signOut = vi.fn(async () => undefined);
+  signOutEverywhere = vi.fn(async () => undefined);
+  changePassword = vi.fn(async () => undefined);
   expireSession = vi.fn(async () => undefined);
   getAccessToken = vi.fn(async () => null);
   initializeAfter(promise: Promise<void>) {
@@ -53,9 +57,7 @@ class FakeWebClient implements AuthClient {
 }
 
 const productionConfig = (name: string) => ({
-  supabaseUrl: `https://${name}.supabase.co`,
-  supabasePublishableKey: `sb_publishable_${name}`,
-  callbackUrl: `https://${name}.example.com/auth/callback`
+  apiUrl: `https://${name}.example.com`
 });
 
 function Status() {
@@ -262,5 +264,18 @@ describe("WebAuthProvider", () => {
     await waitFor(() => expect(first.dispose).toHaveBeenCalledOnce());
     expect(second.initialize).toHaveBeenCalledOnce();
     expect(second.dispose).not.toHaveBeenCalled();
+  });
+  it("creates the production password client for the configured API", async () => {
+    const client = new FakeWebClient("api-production");
+    createBrowserWebAuthClient.mockReturnValueOnce(client);
+    render(
+      <WebAuthProvider apiUrl="https://api.example.com">
+        <ClientLabel />
+      </WebAuthProvider>
+    );
+    await screen.findByText("api-production");
+    expect(createBrowserWebAuthClient).toHaveBeenCalledWith(
+      "https://api.example.com"
+    );
   });
 });

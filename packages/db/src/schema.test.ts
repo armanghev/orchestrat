@@ -74,7 +74,7 @@ test("agent lifecycle idempotency is project/agent scoped and hash-only", async 
       "utf8"
     )
   ) as { entries: { tag: string }[] };
-  assert.equal(journal.entries.at(-1)?.tag, "0017_organization_integrations");
+  assert.equal(journal.entries.at(-1)?.tag, "0018_builtin_auth");
 });
 
 test("agent attention schema matches the 0015 migration", async () => {
@@ -211,7 +211,7 @@ test("CLI credentials can be user-scoped after the authorization migration", asy
   assert.match(sql, /ALTER COLUMN "project_id" DROP NOT NULL/);
 });
 
-test("users have provider-qualified identity and non-unique email indexes", () => {
+test("users have provider-qualified identity and one account per email", () => {
   const config = getTableConfig(users);
   assert.equal(users.authProvider.notNull, true);
   assert.equal(users.authProvider.hasDefault, false);
@@ -228,9 +228,14 @@ test("users have provider-qualified identity and non-unique email indexes", () =
   );
 
   const email = config.indexes.find(
-    (index) => index.config.name === "users_email_idx"
+    (index) => index.config.name === "users_email_unique"
   );
-  assert.equal(email?.config.unique, false);
+  assert.equal(email?.config.unique, true);
+  assert.equal(
+    config.indexes.some((index) => index.config.name === "users_email_idx"),
+    false,
+    "the unique index replaces the plain one"
+  );
 });
 
 test("identity migration labels legacy rows then removes the default", async () => {

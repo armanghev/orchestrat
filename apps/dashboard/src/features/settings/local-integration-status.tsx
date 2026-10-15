@@ -25,9 +25,8 @@ const httpOrigin = (value: string | undefined) => {
 // dashboard is not served from that origin (the CLI's default).
 export function buildCliCommands(
   kind: "desktop" | "web",
-  input: { apiUrl?: string; webCallbackUrl?: string } = {
-    apiUrl: import.meta.env.VITE_API_URL,
-    webCallbackUrl: import.meta.env.VITE_WEB_AUTH_CALLBACK_URL
+  input: { apiUrl?: string; webUrl?: string } = {
+    apiUrl: import.meta.env.VITE_API_URL
   },
   currentOrigin = typeof window !== "undefined"
     ? window.location.origin
@@ -35,7 +34,7 @@ export function buildCliCommands(
 ) {
   const pageOrigin = kind === "web" ? httpOrigin(currentOrigin) : undefined;
   const apiUrl = httpOrigin(input.apiUrl) ?? pageOrigin;
-  const webUrl = httpOrigin(input.webCallbackUrl) ?? pageOrigin;
+  const webUrl = httpOrigin(input.webUrl) ?? pageOrigin;
   const environment =
     webUrl && webUrl !== apiUrl
       ? `ORCHESTRAT_WEB_URL=${shellQuote(webUrl)} `

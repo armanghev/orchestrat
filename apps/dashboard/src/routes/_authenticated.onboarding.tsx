@@ -100,7 +100,7 @@ function OnboardingRoute() {
               id="onboarding-username"
               value={username}
               onChange={(event) => setUsername(event.target.value)}
-              placeholder="armanghevondyan"
+              placeholder="your_handle"
               autoComplete="username"
               required
               minLength={3}

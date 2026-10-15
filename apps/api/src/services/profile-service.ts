@@ -13,7 +13,8 @@ const profileJson = (user: typeof users.$inferSelect) => ({
   username: user.username,
   full_name: user.name,
   email: user.email,
-  avatar_url: user.avatarUrl
+  avatar_url: user.avatarUrl,
+  is_instance_admin: user.isInstanceAdmin
 });
 
 export type AvatarStorageConfig = {

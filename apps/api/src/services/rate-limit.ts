@@ -1,3 +1,4 @@
+import { isIPv6 } from "node:net";
 import type {
   FastifyReply,
   FastifyRequest,
@@ -40,6 +41,34 @@ export class FixedWindowRateLimit {
     bucket.count += 1;
     return null;
   }
+
+  // The retry-after for a key already at its limit, without counting a hit.
+  // Unknown keys are never blocked, so a full table fails open here.
+  blocked(key: string): number | null {
+    const now = this.now();
+    const bucket = this.buckets.get(key);
+    if (!bucket || bucket.resetAt <= now || bucket.count < this.limit)
+      return null;
+    return Math.max(1, Math.ceil((bucket.resetAt - now) / 1_000));
+  }
+}
+
+// One client usually controls a whole IPv6 /64, so limits key on that prefix.
+export function clientKey(ip: string) {
+  const mapped = ip.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i);
+  if (mapped) return mapped[1]!;
+  if (!isIPv6(ip)) return ip;
+  const [head = "", tail] = ip.toLowerCase().split("::");
+  const left = head ? head.split(":") : [];
+  const right = tail ? tail.split(":") : [];
+  const groups =
+    tail === undefined
+      ? left
+      : [...left, ...Array(8 - left.length - right.length).fill("0"), ...right];
+  return `${groups
+    .slice(0, 4)
+    .map((group) => group.replace(/^0+(?=.)/, ""))
+    .join(":")}::/64`;
 }
 
 export const rateLimitHook = (

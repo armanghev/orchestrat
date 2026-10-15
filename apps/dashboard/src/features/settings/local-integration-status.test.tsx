@@ -24,7 +24,7 @@ describe("LocalIntegrationStatusSection", () => {
     expect(
       buildCliCommands("web", {
         apiUrl: "http://localhost:8801",
-        webCallbackUrl: "http://localhost:8813/auth/callback"
+        webUrl: "http://localhost:8813"
       })
     ).toEqual({
       setup:
@@ -38,7 +38,7 @@ describe("LocalIntegrationStatusSection", () => {
     expect(
       buildCliCommands("web", {
         apiUrl: "https://orchestrat.example.com/",
-        webCallbackUrl: "https://orchestrat.example.com/auth/callback"
+        webUrl: "https://orchestrat.example.com"
       }).setup
     ).toBe(
       "npx @orchestrat/cli@latest setup --server 'https://orchestrat.example.com'"
@@ -46,7 +46,7 @@ describe("LocalIntegrationStatusSection", () => {
     expect(
       buildCliCommands(
         "web",
-        { apiUrl: undefined, webCallbackUrl: undefined },
+        { apiUrl: undefined, webUrl: undefined },
         "https://orchestrat.example.com"
       ).setup
     ).toBe(
@@ -63,7 +63,7 @@ describe("LocalIntegrationStatusSection", () => {
       JSON.stringify(
         buildCliCommands("web", {
           apiUrl: "https://orchestrat.example.com",
-          webCallbackUrl: "https://orchestrat.example.com/auth/callback"
+          webUrl: "https://orchestrat.example.com"
         })
       )
     ).not.toContain("orchestrat.dev");

@@ -2,32 +2,21 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { describe, expect, it, vi } from "vitest";
-import type { AuthClient, AuthSnapshot } from "@/features/auth/auth-client";
+import type { AuthSnapshot } from "@/features/auth/auth-client";
+import { FakeAuthClient } from "@/test/fake-auth-client";
 import { renderDashboardRoute } from "@/test/render";
 import { CLI_ATTEMPT_KEY, CLI_TERMINAL_KEY } from "./cli.authorize";
 
 const apiUrl = "http://localhost:8801/api/v1";
 const attempt = "ca_12345678901234567890";
 
-class Auth implements AuthClient {
-  readonly capabilities = { github: true, magicLink: true };
-  constructor(
-    private readonly snapshot: AuthSnapshot,
-    private readonly result: AuthSnapshot = snapshot
-  ) {}
-  initialize = async () => undefined;
-  completeSignIn = async () => ({
-    status: "success" as const,
-    identityKey: "user"
-  });
-  getSnapshot = () => this.snapshot;
-  subscribe = () => () => undefined;
-  signInWithGitHub = async () => undefined;
-  sendMagicLink = async () => undefined;
-  signOut = async () => undefined;
-  expireSession = async () => undefined;
-  getAccessToken = async () =>
-    this.result.status === "signedIn" ? "test-token" : null;
+class Auth extends FakeAuthClient {
+  constructor(snapshot: AuthSnapshot, result: AuthSnapshot = snapshot) {
+    super(snapshot);
+    this.getAccessToken.mockImplementation(async () =>
+      result.status === "signedIn" ? "test-token" : null
+    );
+  }
 }
 
 function platform() {
@@ -70,7 +59,7 @@ describe("CLI authorization route", () => {
       platform: platform()
     });
     expect(
-      await screen.findByRole("button", { name: "Continue with GitHub" })
+      await screen.findByRole("button", { name: "Sign in" })
     ).toBeVisible();
     expect(
       window.sessionStorage.getItem("orchestrat.cli.authorization.attempt")
@@ -185,13 +174,13 @@ describe("CLI authorization route", () => {
     expect(screen.queryByText("secret=leaked")).not.toBeInTheDocument();
   });
 
-  it("returns a consumed pending attempt from auth callback and keeps ordinary auth onboarding", async () => {
+  it("returns a consumed pending attempt after sign-in and keeps ordinary onboarding", async () => {
     window.sessionStorage.setItem(
       "orchestrat.cli.authorization.attempt",
       attempt
     );
     const returned = await renderDashboardRoute({
-      path: "/auth/callback?code=one-time",
+      path: "/",
       auth: new Auth({ status: "signedIn", identityKey: "user" }),
       platform: platform()
     });
@@ -204,7 +193,7 @@ describe("CLI authorization route", () => {
     ).toBeNull();
 
     const ordinary = await renderDashboardRoute({
-      path: "/auth/callback?code=ordinary",
+      path: "/",
       auth: new Auth({ status: "signedIn", identityKey: "user" }),
       platform: platform()
     });

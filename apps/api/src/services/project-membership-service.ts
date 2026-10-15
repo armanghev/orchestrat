@@ -305,8 +305,15 @@ export class ProjectMembershipService {
   }
 
   async acceptInvitation(userId: string, token: string) {
+    return this.db.transaction((tx) =>
+      this.acceptInvitationIn(tx, userId, token)
+    );
+  }
+
+  // Sign-up accepts an invite inside its own transaction.
+  async acceptInvitationIn(tx: Transaction, userId: string, token: string) {
     const hash = tokenHash(token);
-    return this.db.transaction(async (tx) => {
+    {
       const [candidate] = await tx
         .select({
           id: projectInvitations.id,
@@ -389,7 +396,7 @@ export class ProjectMembershipService {
         .set({ acceptedAt, acceptedBy: userId })
         .where(eq(projectInvitations.id, invitation.id));
       return { project: projectJson(project, role) };
-    });
+    }
   }
 
   private async editorContext(
