@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { LocalIntegrationStatus, Platform } from "@/platform/contract";
 import { PlatformProvider } from "@/platform/provider";
 import {
-  buildCliEnvironment,
+  buildCliCommands,
   LocalIntegrationStatusSection
 } from "./local-integration-status";
 
@@ -19,21 +19,54 @@ function platform(overrides: Partial<Platform> = {}): Platform {
 }
 
 describe("LocalIntegrationStatusSection", () => {
-  it("builds safe CLI origins for dev and production", () => {
+  it("points setup at this dashboard's own server", () => {
+    // Split development: the dashboard is not on the API origin.
     expect(
-      buildCliEnvironment("web", {
+      buildCliCommands("web", {
         apiUrl: "http://localhost:8801",
         webCallbackUrl: "http://localhost:8813/auth/callback"
       })
+    ).toEqual({
+      setup:
+        "ORCHESTRAT_WEB_URL='http://localhost:8813' npx @orchestrat/cli@latest setup --server 'http://localhost:8801'",
+      installedSetup:
+        "ORCHESTRAT_WEB_URL='http://localhost:8813' orchestrat setup --server 'http://localhost:8801'",
+      status: "orchestrat status",
+      doctor: "orchestrat doctor"
+    });
+    // Self-hosted: the dashboard is served on the server's origin.
+    expect(
+      buildCliCommands("web", {
+        apiUrl: "https://orchestrat.example.com/",
+        webCallbackUrl: "https://orchestrat.example.com/auth/callback"
+      }).setup
     ).toBe(
-      "ORCHESTRAT_API_URL='http://localhost:8801' ORCHESTRAT_WEB_URL='http://localhost:8813' "
+      "npx @orchestrat/cli@latest setup --server 'https://orchestrat.example.com'"
     );
     expect(
-      buildCliEnvironment("desktop", {
-        apiUrl: "https://api.orchestrat.dev",
-        webCallbackUrl: "https://app.orchestrat.dev/auth/callback"
-      })
-    ).toBe("");
+      buildCliCommands(
+        "web",
+        { apiUrl: undefined, webCallbackUrl: undefined },
+        "https://orchestrat.example.com"
+      ).setup
+    ).toBe(
+      "npx @orchestrat/cli@latest setup --server 'https://orchestrat.example.com'"
+    );
+    expect(
+      buildCliCommands(
+        "desktop",
+        { apiUrl: "http://localhost:8801" },
+        "tauri://localhost"
+      ).installedSetup
+    ).toBe("orchestrat setup --server 'http://localhost:8801'");
+    expect(
+      JSON.stringify(
+        buildCliCommands("web", {
+          apiUrl: "https://orchestrat.example.com",
+          webCallbackUrl: "https://orchestrat.example.com/auth/callback"
+        })
+      )
+    ).not.toContain("orchestrat.dev");
   });
 
   it("renders unsupported immediately when the platform has no status method", () => {
@@ -92,7 +125,7 @@ describe("LocalIntegrationStatusSection", () => {
     expect(writeText).toHaveBeenCalledWith(expectedSetupCommand);
     expect(await screen.findByText("Setup command copied.")).toBeVisible();
     expect(
-      screen.getByText(/Setup requires macOS, Node\.js 20\+/i)
+      screen.getByText(/Setup requires macOS or Linux, Node\.js 20\+/i)
     ).toBeInTheDocument();
   });
 

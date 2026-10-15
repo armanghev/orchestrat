@@ -2,7 +2,6 @@ import { AgentApiClient } from "@orchestrat/sdk";
 import { readOptional, writeManaged } from "./safe-files.js";
 import {
   apiOrigin,
-  DEFAULT_API_URL,
   configPath,
   findProject,
   INTEGRATIONS,
@@ -29,11 +28,14 @@ const checkoutJson = (target: CheckoutTarget) =>
     override: target.overridden ? target.name : null
   };
 const execFileAsync = promisify(execFile);
+const optionalOrigin = (value: string | undefined) =>
+  value === undefined ? undefined : apiOrigin(value);
+const NO_SERVER = "no server URL; run orchestrat setup --server <url>";
 
 function diagnosticConnections(
   config: OrchestratConfig,
   cwd: string,
-  api: string
+  api: string | undefined
 ) {
   const project = findProject(config, cwd);
   const connections = project
@@ -44,7 +46,7 @@ function diagnosticConnections(
         integration,
         projectId: project.projectId,
         agentId: project.integrations[integration]!.agentId,
-        api: apiOrigin(api),
+        api: optionalOrigin(api ?? project.apiUrl),
         scope: project.mcpScopes?.[integration] ?? "project"
       }))
     : INTEGRATIONS.flatMap((integration) =>
@@ -54,7 +56,7 @@ function diagnosticConnections(
             integration,
             projectId,
             agentId: mapping.agentId,
-            api: apiOrigin(mapping.apiUrl ?? api),
+            api: optionalOrigin(mapping.apiUrl ?? api),
             scope: "global" as const
           })
         )
@@ -62,10 +64,27 @@ function diagnosticConnections(
   return { project, connections };
 }
 
+// The servers this directory talks to, so status and doctor can show them.
+function connectionServers(
+  connections: { api: string | undefined }[],
+  api: string | undefined
+) {
+  const servers = [
+    ...new Set(
+      connections.flatMap((connection) =>
+        connection.api ? [connection.api] : []
+      )
+    )
+  ];
+  if (!connections.length && api) servers.push(apiOrigin(api));
+  return servers;
+}
+
 async function connectionCredential(
   credentials: { read(account: string): Promise<string | undefined> },
   connection: ReturnType<typeof diagnosticConnections>["connections"][number]
 ) {
+  if (!connection.api) return undefined;
   return credentials.read(
     agentAccount(connection.projectId, connection.integration, connection.api)
   );
@@ -75,7 +94,7 @@ export async function runStatus(input: {
   home: string;
   cwd: string;
   credentials: { read(account: string): Promise<string | undefined> };
-  api: string;
+  api?: string;
   fetch?: typeof globalThis.fetch;
 }) {
   const config = await readConfig(input.home);
@@ -90,6 +109,10 @@ export async function runStatus(input: {
   const target = await checkoutTarget(input.cwd, input.home);
   const backend: Record<string, unknown> = {};
   for (const connection of connections) {
+    if (!connection.api) {
+      backend[connection.key] = redacted(false, NO_SERVER);
+      continue;
+    }
     const token = await connectionCredential(input.credentials, connection);
     if (!token) {
       backend[connection.key] = redacted(false, "missing credential");
@@ -126,6 +149,7 @@ export async function runStatus(input: {
     scope: project ? "project" : "global",
     cwd: input.cwd,
     project_id: project?.projectId ?? null,
+    servers: connectionServers(connections, input.api),
     integrations,
     ...(target.checkout ? { checkout: checkoutJson(target) } : {}),
     backend
@@ -136,7 +160,7 @@ export async function runDoctor(input: {
   home: string;
   cwd: string;
   credentials: { read(account: string): Promise<string | undefined> };
-  api: string;
+  api?: string;
   sourceCommand?: string;
   fetch?: typeof globalThis.fetch;
 }) {
@@ -151,6 +175,15 @@ export async function runDoctor(input: {
   const { project, connections } = config
     ? diagnosticConnections(config, input.cwd, input.api)
     : { project: undefined, connections: [] };
+  const servers = connectionServers(connections, input.api);
+  const serverMissing =
+    !servers.length || connections.some((connection) => !connection.api);
+  checks.server = redacted(
+    !serverMissing,
+    servers.length
+      ? `${servers.join(", ")}${serverMissing ? `; some connections have ${NO_SERVER}` : ""}`
+      : `not configured; run orchestrat setup --server <url> or set ORCHESTRAT_API_URL`
+  );
   const target = await checkoutTarget(input.cwd, input.home);
   if (target.checkout) {
     checks.git_head = redacted(
@@ -176,12 +209,12 @@ export async function runDoctor(input: {
         ? "global projects configured; select a project in MCP"
         : "missing"
   );
-  const origins = [...new Set(connections.map((connection) => connection.api))];
-  if (!origins.length) origins.push(apiOrigin(input.api));
-  checks.cli_credential = redacted(true, "present");
-  for (const origin of origins) {
+  checks.cli_credential = servers.length
+    ? redacted(true, "present")
+    : redacted(false, NO_SERVER);
+  for (const origin of servers) {
     const cliToken = await input.credentials.read(cliAccount(origin));
-    const key = origins.length === 1 ? "cli_project" : `cli_project:${origin}`;
+    const key = servers.length === 1 ? "cli_project" : `cli_project:${origin}`;
     if (!cliToken) {
       checks.cli_credential = redacted(
         false,
@@ -284,9 +317,9 @@ export async function runDoctor(input: {
     const token = await connectionCredential(input.credentials, connection);
     checks[`credential.${connection.key}`] = redacted(
       Boolean(token),
-      token ? "present" : "missing"
+      token ? "present" : connection.api ? "missing" : NO_SERVER
     );
-    if (token) {
+    if (token && connection.api) {
       try {
         const presence = await new AgentApiClient({
           baseUrl: connection.api,
@@ -341,7 +374,7 @@ export async function disconnectLocal(input: {
   cwd: string;
   integration: Integration | "all";
   store: CredentialStore;
-  api: string;
+  api?: string;
   localOnly?: boolean;
   fetch?: typeof globalThis.fetch;
   sourceCommand: string;
@@ -357,11 +390,22 @@ export async function disconnectLocal(input: {
     (integration) => project?.integrations[integration]
   );
   if (!project || !mapped.length) return { previews: [], disconnected: [] };
-  const api = apiOrigin(project.apiUrl ?? input.api);
-  if (!input.localOnly && apiOrigin(input.api) !== api)
+  const api = optionalOrigin(project.apiUrl ?? input.api);
+  if (!input.localOnly && !api)
+    throw new Error(
+      "No Orchestrat server URL for this project; set ORCHESTRAT_API_URL or use --local"
+    );
+  if (
+    !input.localOnly &&
+    input.api !== undefined &&
+    apiOrigin(input.api) !== api
+  )
     throw new Error(
       "Disconnect API differs from the project mapping; use its API or --local"
     );
+  // A mapping without apiUrl has no known server, so it never matches.
+  const onThisServer = (value: string | undefined) =>
+    api !== undefined && value !== undefined && apiOrigin(value) === api;
   const command = join(input.home, ".local", "bin", "orchestrat");
   const writes: {
     path: string;
@@ -380,7 +424,7 @@ export async function disconnectLocal(input: {
       ([projectId, mapping]) =>
         mcpScope !== "global" ||
         projectId !== project.projectId ||
-        apiOrigin(mapping.apiUrl ?? DEFAULT_API_URL) !== api
+        !onThisServer(mapping.apiUrl)
     );
     const plan = harnessConfigPlan(
       input.home,
@@ -414,10 +458,9 @@ export async function disconnectLocal(input: {
   for (const name of mapped)
     if (
       project.mcpScopes?.[name] === "global" &&
-      apiOrigin(
-        nextConfig.globalProjects?.[name]?.[project.projectId]?.apiUrl ??
-          DEFAULT_API_URL
-      ) === api
+      onThisServer(
+        nextConfig.globalProjects?.[name]?.[project.projectId]?.apiUrl
+      )
     ) {
       delete nextConfig.globalProjects?.[name]?.[project.projectId];
       if (!Object.keys(nextConfig.globalProjects?.[name] ?? {}).length)
@@ -451,22 +494,18 @@ export async function disconnectLocal(input: {
     )
   ];
   const integrationsRemain = remainingMappings.length > 0;
-  const originRemains = remainingMappings.some(
-    (value) => apiOrigin(value.apiUrl ?? DEFAULT_API_URL) === api
+  const originRemains = remainingMappings.some((value) =>
+    onThisServer(value.apiUrl)
   );
   const credentialRemains = (name: Integration) =>
     Object.values(nextConfig.projects).some(
       (value) =>
         value.projectId === project.projectId &&
         value.integrations[name] &&
-        apiOrigin(value.apiUrl ?? DEFAULT_API_URL) === api
+        onThisServer(value.apiUrl)
     ) ||
-    Boolean(
-      nextConfig.globalProjects?.[name]?.[project.projectId] &&
-      apiOrigin(
-        nextConfig.globalProjects[name]![project.projectId]!.apiUrl ??
-          DEFAULT_API_URL
-      ) === api
+    onThisServer(
+      nextConfig.globalProjects?.[name]?.[project.projectId]?.apiUrl
     );
   const revoked = mapped.filter((name) => !credentialRemains(name));
   let launcherPath: string | undefined;
@@ -479,7 +518,7 @@ export async function disconnectLocal(input: {
     ...(launcherPath ? [{ path: launcherPath, entries: ["launcher"] }] : [])
   ];
   await input.reportPreview?.(previews);
-  if (!input.localOnly && revoked.length) {
+  if (!input.localOnly && api && revoked.length) {
     const cliToken = await input.store.read(cliAccount(api));
     if (!cliToken)
       throw new Error(
@@ -511,9 +550,11 @@ export async function disconnectLocal(input: {
       force: true
     });
   }
-  for (const name of revoked)
-    await input.store.remove(agentAccount(project.projectId, name, api));
-  if (!originRemains) await input.store.remove(cliAccount(api));
+  if (api) {
+    for (const name of revoked)
+      await input.store.remove(agentAccount(project.projectId, name, api));
+    if (!originRemains) await input.store.remove(cliAccount(api));
+  }
   for (const name of mapped) {
     const local = Object.values(nextConfig.projects).filter(
       (value) => value.integrations[name]

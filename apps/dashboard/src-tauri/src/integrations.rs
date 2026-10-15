@@ -181,12 +181,11 @@ pub(crate) fn inspect_local(
         } else {
             project
         };
-        let api = mapping
+        // A mapping without apiUrl has no known server, so no credential matches it.
+        mapping
             .and_then(|value| value.get("apiUrl"))
             .and_then(Value::as_str)
-            .unwrap_or("https://api.orchestrat.dev");
-        url::Url::parse(api)
-            .ok()
+            .and_then(|api| url::Url::parse(api).ok())
             .filter(|url| matches!(url.scheme(), "http" | "https"))
             .is_some_and(|url| {
                 credential(&format!(
@@ -270,12 +269,12 @@ mod tests {
         let command = home.join(".local/bin/orchestrat");
         create_dir_all(command.parent().unwrap()).unwrap();
         write(&command, "#!/bin/sh\n").unwrap();
-        write(home.join(".orchestrat/config.json"), r#"{"version":1,"projects":{"/tmp":{"projectId":"p1","integrations":{"codex":{"agentId":"a1"}}}}}"#).unwrap();
+        write(home.join(".orchestrat/config.json"), r#"{"version":1,"projects":{"/tmp":{"projectId":"p1","apiUrl":"http://localhost:8801","integrations":{"codex":{"agentId":"a1"}}}}}"#).unwrap();
         write(home.join(".codex/config.toml"), format!("[mcp_servers.orchestrat]\ncommand = \"{}\"\nargs = [\"mcp\", \"--integration\", \"codex\"]\n", command.display())).unwrap();
         write(home.join(".codex/hooks.json"), format!(r#"{{"hooks":{{"SessionStart":[{{"hooks":[{{"type":"command","command":"'{0}' hook codex"}}]}}],"SessionEnd":[{{"hooks":[{{"type":"command","command":"'{0}' hook codex"}}]}}]}}}}"#, command.display())).unwrap();
         let fake_secret = "orch_agent_unique_fake_secret";
         let status = inspect_local(&home, "p1", |account| {
-            account == "agent:p1:codex:https://api.orchestrat.dev" || account == fake_secret
+            account == "agent:p1:codex:http://localhost:8801" || account == fake_secret
         });
         assert!(status.project_mapping);
         let codex = status.integrations.get("codex").unwrap();
@@ -304,18 +303,20 @@ mod tests {
         assert!(!inspect_local(&home, "p1", |_| true).integrations["codex"].hooks);
         assert!(
             inspect_local(&home, "p1", |account| account
-                == "agent:p1:codex:https://api.orchestrat.dev")
+                == "agent:p1:codex:http://localhost:8801")
             .integrations["codex"]
                 .credential
         );
-        write(home.join(".orchestrat/config.json"), r#"{"version":1,"projects":{},"globalProjects":{"codex":{"p1":{"agentId":"a1"}},"claude-code":{"p1":{"agentId":"a2"}}}}"#).unwrap();
+        write(home.join(".orchestrat/config.json"), r#"{"version":1,"projects":{"/tmp":{"projectId":"p1","integrations":{"codex":{"agentId":"a1"}}}}}"#).unwrap();
+        assert!(!inspect_local(&home, "p1", |_| true).integrations["codex"].credential);
+        write(home.join(".orchestrat/config.json"), r#"{"version":1,"projects":{},"globalProjects":{"codex":{"p1":{"agentId":"a1","apiUrl":"http://localhost:8801"}},"claude-code":{"p1":{"agentId":"a2","apiUrl":"http://localhost:8801"}}}}"#).unwrap();
         write(home.join(".codex/config.toml"), format!("[mcp_servers.orchestrat]\ncommand=\"{}\" # installed launcher\nargs = [\n  \"mcp\", \"--integration\", \"codex\", \"--global\",\n]\n", command.display())).unwrap();
         write(home.join(".claude.json"), serde_json::json!({"mcpServers":{"orchestrat":{"command":command.to_string_lossy(),"args":["mcp","--integration","claude-code","--global"]}}}).to_string()).unwrap();
         let global = inspect_local(&home, "p1", |account| {
             matches!(
                 account,
-                "agent:p1:codex:https://api.orchestrat.dev"
-                    | "agent:p1:claude-code:https://api.orchestrat.dev"
+                "agent:p1:codex:http://localhost:8801"
+                    | "agent:p1:claude-code:http://localhost:8801"
             )
         });
         assert!(global.project_mapping);
