@@ -1,0 +1,40 @@
+# Object storage for attachments, layered on compose.yml:
+#   docker compose -f compose.yml -f compose.storage.yml up -d
+#
+# SeaweedFS serves an S3-compatible API on port 8333. The server reaches it
+# as http://seaweedfs:8333; browsers upload to ORCHESTRAT_S3_PUBLIC_ENDPOINT
+# (http://localhost:8333 by default), so publish that address to them.
+services:
+  seaweedfs:
+    image: chrislusf/seaweedfs:4.48
+    restart: unless-stopped
+    environment:
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-orchestrat}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        cat > /tmp/s3.json <<EOF
+        {"identities":[{"name":"orchestrat","credentials":[{"accessKey":"$$S3_ACCESS_KEY","secretKey":"$$S3_SECRET_KEY"}],"actions":["Admin","Read","Write","List","Tagging"]}]}
+        EOF
+        exec weed server -dir=/data -s3 -s3.port=8333 -s3.config=/tmp/s3.json
+    volumes:
+      - seaweedfs:/data
+    ports:
+      - "${S3_PORT:-8333}:8333"
+
+  orchestrat:
+    depends_on:
+      seaweedfs:
+        condition: service_started
+    environment:
+      ORCHESTRAT_S3_ENDPOINT: http://seaweedfs:8333
+      ORCHESTRAT_S3_PUBLIC_ENDPOINT: ${ORCHESTRAT_S3_PUBLIC_ENDPOINT:-http://localhost:8333}
+      ORCHESTRAT_S3_REGION: us-east-1
+      ORCHESTRAT_S3_BUCKET: orchestrat
+      ORCHESTRAT_S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY:-orchestrat}
+      ORCHESTRAT_S3_SECRET_ACCESS_KEY: ${S3_SECRET_KEY}
+      ORCHESTRAT_S3_CREATE_BUCKET: "true"
+
+volumes:
+  seaweedfs:
