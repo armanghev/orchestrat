@@ -9,7 +9,7 @@ import {
   ListObjectsV2Command
 } from "@aws-sdk/client-s3";
 import { buildApp } from "../app.js";
-import { readDocumentStorageConfig } from "../document-storage-config.js";
+import { readStorageConfig } from "../storage-config.js";
 import { createStorageClient, backfill } from "./storage-operations.js";
 import { DocumentService } from "../services/document-service.js";
 import { ChatService } from "../services/chat-service.js";
@@ -32,10 +32,12 @@ test(
       connectionString: url.toString(),
       max: 8
     });
-    const storageConfig = testR2 ? readDocumentStorageConfig() : undefined;
+    const storageConfig = testR2
+      ? readStorageConfig().documentStorage
+      : undefined;
     if (testR2 && !storageConfig)
       throw new Error(
-        "R2 acceptance requires the DOCUMENT_STORAGE_* environment values."
+        "R2 acceptance requires the ORCHESTRAT_S3_* environment values."
       );
     const storage = storageConfig
       ? createStorageClient(storageConfig)

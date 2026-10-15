@@ -8,7 +8,7 @@ import {
   ListMultipartUploadsCommand,
   ListObjectsV2Command,
   PutObjectCommand,
-  S3Client
+  type S3Client
 } from "@aws-sdk/client-s3";
 import { and, eq, isNull, lte, or, sql } from "drizzle-orm";
 import {
@@ -18,16 +18,15 @@ import {
   documentRevisions,
   type Database
 } from "@orchestrat/db";
-import {
-  readDocumentStorageConfig,
-  type DocumentStorageConfigValues
-} from "../document-storage-config.js";
+import type { DocumentStorageConfig } from "../services/document-service.js";
+import { createS3Client } from "../services/s3-client.js";
+import { readStorageConfig as readStorageSettings } from "../storage-config.js";
 
 export const STORAGE_GRACE_MS = 24 * 60 * 60 * 1000;
 
 export type OperatorArgs = { apply: boolean };
 
-export type StorageConfig = DocumentStorageConfigValues;
+export type StorageConfig = DocumentStorageConfig;
 
 export function parseOperatorArgs(argv: readonly string[]): OperatorArgs {
   const unknown = argv.filter(
@@ -100,22 +99,17 @@ export function isStaleOrphanMultipart(
 }
 
 export function readStorageConfig(env: NodeJS.ProcessEnv = process.env) {
-  const values = readDocumentStorageConfig(env);
+  const values = readStorageSettings(env).documentStorage;
   if (!values)
-    throw new Error("Document storage operations require an S3 configuration.");
+    throw new Error(
+      "Document storage operations require ORCHESTRAT_S3_ENDPOINT, ORCHESTRAT_S3_BUCKET, ORCHESTRAT_S3_ACCESS_KEY_ID and ORCHESTRAT_S3_SECRET_ACCESS_KEY."
+    );
   return values;
 }
 
+/** Operator scripts run next to the API, so they use the internal endpoint. */
 export function createStorageClient(config: StorageConfig) {
-  return new S3Client({
-    forcePathStyle: true,
-    region: config.region,
-    endpoint: config.endpoint,
-    credentials: {
-      accessKeyId: config.accessKeyId,
-      secretAccessKey: config.secretAccessKey
-    }
-  });
+  return createS3Client(config);
 }
 
 export function createOperatorContext(): {

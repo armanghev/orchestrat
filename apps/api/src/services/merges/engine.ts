@@ -20,6 +20,7 @@ import type {
 import { and, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import { insertProjectEvent } from "../agent-service.js";
 import { ApiError } from "../api-error.js";
+import { DEFAULT_ATTACHMENT_QUOTA_BYTES } from "../../storage-config.js";
 import {
   assertBranchWritable,
   findProjectBranch,
@@ -132,8 +133,6 @@ export const MERGE_LIMITS = {
   childItems: 20000,
   attachmentBytes: 5 * 1024 * 1024 * 1024
 };
-// The project attachment quota, as in AttachmentService.
-const PROJECT_QUOTA_BYTES = 10 * 1024 * 1024 * 1024;
 const EXCERPT = 2000;
 
 type Plan = {
@@ -220,7 +219,9 @@ export class MergeEngine {
   constructor(
     private readonly db: Database,
     private readonly branches: BranchService,
-    private readonly objects?: AttachmentObjects
+    private readonly objects?: AttachmentObjects,
+    /** The project attachment quota, as in AttachmentService. */
+    private readonly attachmentQuotaBytes = DEFAULT_ATTACHMENT_QUOTA_BYTES
   ) {}
 
   async preview(projectId: string, request: MergeRequest) {
@@ -882,7 +883,7 @@ export class MergeEngine {
       );
     if (
       Number(stored?.value ?? 0) + Number(reserved?.value ?? 0) + incoming >
-      PROJECT_QUOTA_BYTES
+      this.attachmentQuotaBytes
     )
       throw new ApiError(
         409,

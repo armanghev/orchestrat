@@ -7,6 +7,7 @@ import type { FastifyInstance } from "fastify";
 import { buildApp } from "../app.js";
 import type { SignupMode } from "@orchestrat/protocol";
 import type { DocumentStorageConfig } from "../services/document-service.js";
+import type { AvatarStorageConfig } from "../services/profile-service.js";
 import { isPgMemMigrationStatementSupported } from "./pg-mem-migrations.js";
 
 export const TEST_SETUP_TOKEN = "test-setup-token-0123456789";
@@ -14,6 +15,9 @@ export const TEST_SETUP_TOKEN = "test-setup-token-0123456789";
 export async function fixture(
   options: {
     documentStorage?: DocumentStorageConfig;
+    avatarStorage?: AvatarStorageConfig;
+    attachmentQuotaBytes?: number;
+    publicApiUrl?: string;
     repository?: Parameters<typeof buildApp>[0]["repository"];
     trustProxyHops?: number;
     rateLimits?: Parameters<typeof buildApp>[0]["rateLimits"];
@@ -127,6 +131,9 @@ export async function fixture(
       setupToken: options.setupToken ?? TEST_SETUP_TOKEN,
       db,
       documentStorage: options.documentStorage,
+      avatarStorage: options.avatarStorage,
+      attachmentQuotaBytes: options.attachmentQuotaBytes,
+      publicApiUrl: options.publicApiUrl,
       repository: options.repository,
       rateLimits: options.rateLimits,
       trustProxyHops: options.trustProxyHops
