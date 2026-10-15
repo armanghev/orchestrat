@@ -87,6 +87,7 @@ export const users = pgTable(
     name: text("name").notNull(),
     email: text("email").notNull(),
     avatarUrl: text("avatar_url"),
+    isInstanceAdmin: boolean("is_instance_admin").default(false).notNull(),
     ...timestamps
   },
   (table) => [
@@ -96,12 +97,83 @@ export const users = pgTable(
     ),
     uniqueIndex("users_username_unique").on(table.username),
     index("users_email_idx").on(table.email),
+    uniqueIndex("users_email_unique").on(table.email),
     check(
       "users_email_normalized",
       sql`${table.email} = lower(btrim(${table.email}))`
     )
   ]
 );
+
+export const userPasswords = pgTable(
+  "user_passwords",
+  {
+    userId: uuid("user_id")
+      .primaryKey()
+      .references(() => users.id, { onDelete: "cascade" }),
+    passwordHash: text("password_hash").notNull(),
+    ...timestamps
+  },
+  (table) => [
+    check(
+      "user_passwords_hash_not_blank",
+      sql`btrim(${table.passwordHash}) <> ''`
+    )
+  ]
+).enableRLS();
+
+export const authSessions = pgTable(
+  "auth_sessions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    accessTokenHash: text("access_token_hash").notNull(),
+    refreshTokenHash: text("refresh_token_hash").notNull(),
+    previousRefreshTokenHash: text("previous_refresh_token_hash"),
+    accessExpiresAt: timestamp("access_expires_at", {
+      withTimezone: true
+    }).notNull(),
+    refreshExpiresAt: timestamp("refresh_expires_at", {
+      withTimezone: true
+    }).notNull(),
+    rotatedAt: timestamp("rotated_at", { withTimezone: true }),
+    userAgent: text("user_agent"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true })
+  },
+  (table) => [
+    uniqueIndex("auth_sessions_access_token_unique").on(table.accessTokenHash),
+    uniqueIndex("auth_sessions_refresh_token_unique").on(
+      table.refreshTokenHash
+    ),
+    index("auth_sessions_previous_refresh_idx").on(
+      table.previousRefreshTokenHash
+    ),
+    index("auth_sessions_user_idx").on(table.userId)
+  ]
+).enableRLS();
+
+// A single row (id = 1) recording which account set up an empty instance.
+export const instanceSettings = pgTable(
+  "instance_settings",
+  {
+    id: integer("id").primaryKey(),
+    bootstrappedBy: uuid("bootstrapped_by").references(() => users.id, {
+      onDelete: "set null"
+    }),
+    bootstrappedAt: timestamp("bootstrapped_at", { withTimezone: true })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [check("instance_settings_singleton", sql`${table.id} = 1`)]
+).enableRLS();
 
 export const organizations = pgTable(
   "organizations",

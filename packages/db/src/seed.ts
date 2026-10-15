@@ -1,49 +1,66 @@
 import { randomUUID } from "node:crypto";
 import { config } from "dotenv";
 import { and, eq } from "drizzle-orm";
+import { hashPassword } from "@orchestrat/auth";
 import { createDatabase } from "./index.js";
-import { parseSeedAuthSubject } from "./seed-config.js";
+import { parseSeedPassword } from "./seed-config.js";
 import {
+  instanceSettings,
   organizationMembers,
   organizations,
   projectBranches,
   projectMembers,
   projects,
+  userPasswords,
   users
 } from "./schema.js";
 
 config({ path: "../../.env" });
 
-const rawAuthSubject = process.env.ORCHESTRAT_SEED_AUTH_SUBJECT;
+const rawPassword = process.env.ORCHESTRAT_SEED_USER_PASSWORD;
 const email = process.env.ORCHESTRAT_SEED_USER_EMAIL?.trim().toLowerCase();
 const name = process.env.ORCHESTRAT_SEED_USER_NAME?.trim();
 const databaseUrl = process.env.ORCHESTRAT_DATABASE_URL;
 
-if (!databaseUrl || !rawAuthSubject || !email || !name) {
+if (!databaseUrl || !rawPassword || !email || !name) {
   throw new Error(
     "Set ORCHESTRAT_DATABASE_URL and the ORCHESTRAT_SEED_* variables before seeding."
   );
 }
 
-const authSubject = parseSeedAuthSubject(rawAuthSubject);
+const passwordHash = await hashPassword(parseSeedPassword(rawPassword));
 const { db, pool } = createDatabase({ connectionString: databaseUrl });
 
 try {
   const seeded = await db.transaction(async (tx) => {
+    // A local admin account that signs in with the seed password.
+    const id = randomUUID();
     const [user] = await tx
       .insert(users)
       .values({
-        id: randomUUID(),
-        authProvider: "supabase",
-        authSubject,
+        id,
+        authProvider: "local",
+        authSubject: id,
         email,
-        name
+        name,
+        isInstanceAdmin: true
       })
       .onConflictDoUpdate({
-        target: [users.authProvider, users.authSubject],
-        set: { email, name, updatedAt: new Date() }
+        target: users.email,
+        set: { name, isInstanceAdmin: true, updatedAt: new Date() }
       })
       .returning();
+    await tx
+      .insert(userPasswords)
+      .values({ userId: user.id, passwordHash })
+      .onConflictDoUpdate({
+        target: userPasswords.userId,
+        set: { passwordHash, updatedAt: new Date() }
+      });
+    await tx
+      .insert(instanceSettings)
+      .values({ id: 1, bootstrappedBy: user.id })
+      .onConflictDoNothing();
 
     const [organization] = await tx
       .insert(organizations)

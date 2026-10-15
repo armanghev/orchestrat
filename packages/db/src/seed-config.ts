@@ -1,12 +1,9 @@
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-export function parseSeedAuthSubject(value: string | undefined) {
-  const subject = value?.trim();
-  if (!subject || !UUID_PATTERN.test(subject)) {
+// Mirrors PASSWORD_MIN_LENGTH / PASSWORD_MAX_LENGTH in @orchestrat/auth.
+export function parseSeedPassword(value: string | undefined) {
+  if (!value || value.length < 10 || value.length > 256) {
     throw new Error(
-      "ORCHESTRAT_SEED_AUTH_SUBJECT must be a Supabase user UUID."
+      "ORCHESTRAT_SEED_USER_PASSWORD must be 10 to 256 characters."
     );
   }
-  return subject.toLowerCase();
+  return value;
 }
