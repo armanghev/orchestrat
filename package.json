@@ -2,6 +2,7 @@
   "name": "orchestrat",
   "version": "0.1.0",
   "private": true,
+  "license": "Elastic-2.0",
   "packageManager": "pnpm@10.14.0",
   "engines": {
     "node": "^22.22.2 || ^24.15.0 || >=26.0.0"

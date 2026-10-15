@@ -2,7 +2,9 @@
 name = "orchestrat-dashboard"
 version = "0.1.0"
 description = "Orchestrat macOS dashboard"
-authors = ["Orchestrat"]
+authors = ["Arman Ghevondyan"]
+license = "Elastic-2.0"
+repository = "https://github.com/armanghev/orchestrat"
 edition = "2021"
 rust-version = "1.88"
 
