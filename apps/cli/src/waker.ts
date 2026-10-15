@@ -429,7 +429,7 @@ type WakerClient = Pick<AgentApiClient, "attention" | "getPresence">;
 export type WakerContext = {
   home: string;
   cwd: string;
-  api: string;
+  api?: string;
   credentials: CredentialReader;
 };
 

@@ -7,8 +7,10 @@ import {
   select as clackSelect,
   note as clackNote,
   outro as clackOutro,
-  spinner as clackSpinner
+  spinner as clackSpinner,
+  text as clackText
 } from "@clack/prompts";
+import { SUGGESTED_SERVER_URL, validateApiUrl } from "./config.js";
 
 export type UiWriter = (text: string) => void;
 export type Harness = { id: string; label?: string; hint?: string };
@@ -38,6 +40,12 @@ export type UiComponents = {
     message: string;
     options: { value: string; label: string }[];
   }) => Promise<string | symbol>;
+  text?: (options: {
+    message: string;
+    placeholder?: string;
+    defaultValue?: string;
+    validate?: (value: string | undefined) => string | undefined;
+  }) => Promise<string | symbol>;
   cancel: (message?: string) => void;
   outro: (message?: string) => void;
   intro: (message?: string) => void;
@@ -56,6 +64,7 @@ export type UiComponents = {
 const defaultComponents: UiComponents = {
   multiselect: clackMultiselect,
   select: clackSelect,
+  text: clackText,
   cancel: clackCancel,
   outro: clackOutro,
   intro: clackIntro,
@@ -141,6 +150,46 @@ export async function selectProject(
   const project = projects.find((item) => item.id === answer);
   if (!project) throw new Error("Selected project is unavailable");
   return { cancelled: false, value: project };
+}
+
+// Asks for the server when no flag, environment or saved mapping names one.
+// An empty answer takes the suggested local server.
+export async function promptServerUrl(options: {
+  components?: UiComponents;
+  isCancel?: (answer: unknown) => boolean;
+}): Promise<{ cancelled: false; value: string } | Cancelled> {
+  const components = options.components ?? defaultComponents;
+  const invalid = (value: string | undefined) => {
+    const trimmed = value?.trim();
+    if (!trimmed) return undefined;
+    try {
+      validateApiUrl(trimmed);
+      return undefined;
+    } catch {
+      return `Enter an http(s) URL, for example ${SUGGESTED_SERVER_URL}`;
+    }
+  };
+  const answer = await (components.text ?? clackText)({
+    message: "Orchestrat server URL",
+    placeholder: SUGGESTED_SERVER_URL,
+    defaultValue: SUGGESTED_SERVER_URL,
+    validate: invalid
+  });
+  if ((options.isCancel ?? isCancel)(answer)) {
+    components.cancel("Setup canceled.");
+    return { cancelled: true };
+  }
+  const value = String(answer ?? "").trim() || SUGGESTED_SERVER_URL;
+  if (invalid(value)) throw new Error("Invalid server URL");
+  return { cancelled: false, value: validateApiUrl(value)! };
+}
+
+export function renderServer(
+  server: string,
+  options: { interactive: boolean; components?: UiComponents }
+): void {
+  if (options.interactive)
+    (options.components ?? defaultComponents).log.info(`Server: ${server}`);
 }
 
 export async function selectMcpScope(options: {
@@ -300,12 +349,19 @@ export function renderStatus(result: unknown, write: UiWriter): void {
     scope?: "project" | "global";
     cwd?: string;
     project_id?: string | null;
+    servers?: readonly string[];
     backend?: Record<
       string,
       { ok?: boolean; detail?: string; status?: string }
     >;
   };
   write(`Status: ${value.configured ? "configured" : "not configured"}\n`);
+  const servers = value.servers ?? [];
+  write(
+    servers.length
+      ? `Server${servers.length > 1 ? "s" : ""}: ${servers.join(", ")}\n`
+      : "Server: not configured (run orchestrat setup --server <url>)\n"
+  );
   if (value.configured && value.scope === "global")
     write("Projects: global connections; select a project in MCP\n");
   else if (value.cwd)

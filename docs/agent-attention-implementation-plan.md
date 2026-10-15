@@ -1,15 +1,15 @@
 # Agent attention and handoffs: implementation plan
 
 Status: in progress. Spec: `docs/agent-attention-handoffs.md` (authoritative;
-§19 decisions are final). Worktree `/Users/armanghevondyan/dev/orchestrat-attention`,
+§19 decisions are final). Worktree `../orchestrat-attention`,
 branch `feat/agent-attention` from `main` `e37bd65`. There is **one merge to
 `main` at the end**, and only with Arman's go-ahead.
 
 Guardrails for every agent:
 
 - Edit only files your work package owns (tables below).
-- Never touch `/Users/armanghevondyan/dev/orchestrat`,
-  `/Users/armanghevondyan/dev/orchestrat-branches` or `~/.codex/worktrees`.
+- Never touch the main checkout, `../orchestrat-branches` or
+  `~/.codex/worktrees`.
 - No `git commit`, `push`, `stash`, `reset` or `checkout`.
 - No deploys, no hosted or shared database migrations, no npm publish.
 - Follow house style: services are classes with paired human/agent methods,
@@ -26,7 +26,7 @@ Guardrails for every agent:
   - `pnpm --filter @orchestrat/<pkg> test`.
   - API: `node --test dist/routes/*.test.js ...` via the package script.
   - Real Postgres:
-    `source /private/tmp/claude-501/-Users-armanghevondyan-dev-orchestrat/dfe7b9d6-b858-4f70-9a74-c3887a7254e7/scratchpad/test-env.sh`
+    `source <scratchpad>/test-env.sh`
     sets `ORCHESTRAT_TEST_POSTGRES_URL` to local dev-postgres. Tests create and
     drop their own databases.
 - Lint and typecheck: `pnpm --filter @orchestrat/<pkg> lint` and `... typecheck`.
@@ -418,9 +418,9 @@ Gate: the full suite, including real Postgres, then an adversarial review
 
 **Wave 4**
 
-| Agent      | WP     | Owns                                                                                                                                                                                                 |
-| ---------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| acceptance | ORC-19 | `scripts/acceptance/attention-simulation.mjs`, `apps/api/src/operations/attention.integration.test.ts`, `docs/agent-setup.md`, `docs/api/README.md`, `docs/acceptance/2026-09-28-agent-attention.md` |
+| Agent      | WP     | Owns                                                                                                                                                |
+| ---------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| acceptance | ORC-19 | `scripts/acceptance/attention-simulation.mjs`, `apps/api/src/operations/attention.integration.test.ts`, `docs/agent-setup.md`, `docs/api/README.md` |
 
 After that: the final full gate and the ORC-13 checkpoint. `feat/project-branches`
 has not merged, so the checkpoint covers the migration ordering check and the

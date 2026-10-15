@@ -1,0 +1,57 @@
+name: Bug report
+description: Something in Orchestrat doesn't work as documented.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please don't include secrets, tokens or private
+        URLs. Report security issues privately as described in SECURITY.md.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - API server
+        - Dashboard
+        - CLI, MCP bridge or agent hooks
+        - Self-hosting (Docker, compose, configuration)
+        - Docs or website
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Orchestrat release or commit, and the CLI version (`orchestrat --version`).
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Node.js version, browser, and the coding agents involved (Claude Code, Codex, Cursor, Antigravity).
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant log output, with secrets removed.
+      render: shell

@@ -312,7 +312,7 @@ Unverified points to watch during this test:
 
 ## 4. What to test
 
-The checks for each provider, plus agents and the dashboard without a provider, are in [the manual test](project-branches-manual-test.md). Record results in `docs/acceptance/2026-09-30-project-branches.md`, and leave anything you didn't run marked **NOT RUN**.
+The checks for each provider, plus agents and the dashboard without a provider, are in [the manual test](project-branches-manual-test.md). Record results in an acceptance record, and leave anything you didn't run marked **NOT RUN**.
 
 ---
 

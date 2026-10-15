@@ -5,16 +5,13 @@ coding agents to one Orchestrat project. It is for trusted testers running from
 the intended project directory. The CLI requires Node.js 20.19+ on the 20.x line
 or Node.js 22.12+ and installs a
 self-contained managed runtime under `~/.orchestrat/runtimes` with a stable
-`~/.local/bin/orchestrat` launcher. Use the
-[private-alpha runbook](private-alpha-runbook.md) for verified release
-status, deployment operations, and the clean-Mac acceptance boundary.
+`~/.local/bin/orchestrat` launcher.
 
 ## Prerequisites
 
 - macOS and Node.js 20.19+ (or 22.12+).
 - An authorized published `@orchestrat/cli` package for trusted-tester setup.
-  The source-build command in the [private-alpha runbook](private-alpha-runbook.md)
-  is validation only, not clean-Mac installation evidence.
+  A source build is validation only, not clean-Mac installation evidence.
 - An Orchestrat account and access to the target project.
 - `ORCHESTRAT_API_URL` may override the API; the default is
   `https://api.orchestrat.dev`.
@@ -27,8 +24,7 @@ Run setup from the project directory whose mapping should be used:
 orchestrat setup
 ```
 
-The `0.1.0-alpha.2` release is published under both `alpha` and `latest`;
-see the [release acceptance record](acceptance/2026-09-24-cli-alpha2-release.md).
+The `0.1.0-alpha.2` release is published under both `alpha` and `latest`.
 Install or upgrade with
 `npx --yes @orchestrat/cli@0.1.0-alpha.2 setup`, then check `orchestrat --version`
 and restart agent MCP connections. Running an older persistent launcher does

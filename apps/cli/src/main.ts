@@ -13,22 +13,20 @@ import {
   isConfigurableIntegration,
   type ConfigurableIntegration
 } from "./harnesses.js";
-import { KeychainCredentialStore } from "./keychain.js";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { platformCredentialStore } from "./credential-store.js";
+import { openApprovalUrl } from "./browser.js";
 import { resolve } from "node:path";
 import { readFileSync, realpathSync } from "node:fs";
-const openUrl = promisify(execFile);
 const packageVersion = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8")
 ).version as string;
-import { KeychainCredentialReader } from "./keychain.js";
 import { resolveGlobalInvocation, resolveInvocation } from "./resolve.js";
 import {
   canonicalizeCwd,
   findProject,
+  MISSING_SERVER_MESSAGE,
   readConfig,
-  validateApiUrl
+  resolveServerUrl
 } from "./config.js";
 import { hookCwd, readBoundedStdin, runHook } from "./hooks.js";
 import {
@@ -48,6 +46,8 @@ import { disconnectLocal, runDoctor, runStatus } from "./diagnostics.js";
 import {
   finishSetup,
   isInteractive,
+  promptServerUrl,
+  renderServer,
   startSetup,
   renderDetectedAgents,
   renderPreview,
@@ -103,6 +103,7 @@ export function parseInvocationArgs(argv: string[]): {
   branchAction?: "current" | "list" | "create" | "select";
   branchName?: string;
   follow?: boolean;
+  server?: string;
 } {
   if (argv.length === 1 && (argv[0] === "--version" || argv[0] === "-v"))
     return { command: "version" };
@@ -125,7 +126,8 @@ export function parseInvocationArgs(argv: string[]): {
       rewake: { type: "boolean", default: false },
       once: { type: "boolean", default: false },
       "dry-run": { type: "boolean", default: false },
-      follow: { type: "boolean", default: false }
+      follow: { type: "boolean", default: false },
+      server: { type: "string" }
     },
     allowPositionals: true,
     strict: true
@@ -168,6 +170,7 @@ export function parseInvocationArgs(argv: string[]): {
   if ((values["auto-continue"] || values.rewake) && positionals[0] !== "setup")
     usage();
   if (values.rewake && !values["auto-continue"]) usage();
+  if (values.server !== undefined && positionals[0] !== "setup") usage();
   if ((values.once || values["dry-run"]) && positionals[0] !== "waker") usage();
   if (values.follow && !branchCommand) usage();
   if (
@@ -295,6 +298,7 @@ export function parseInvocationArgs(argv: string[]): {
   if (positionals[0] === "setup")
     return {
       command: "setup",
+      ...(values.server === undefined ? {} : { server: values.server }),
       ...(values["auto-continue"] ? { autoContinue: true } : {}),
       ...(values.rewake ? { rewake: true } : {})
     };
@@ -369,7 +373,7 @@ export function parseInvocationArgs(argv: string[]): {
 
 function usage(): never {
   throw new Error(
-    "Usage: orchestrat setup [--auto-continue [--rewake]] | status | doctor | hook <integration> [--event <event>] | hook <claude-code|codex> --event Stop [--watch] | disconnect <integration|all> | mcp --integration <integration> [--cwd <project>] [--global] [--wait-budget-seconds <n>] | waker <enable|disable|status|run> [--once] [--dry-run] | document(s) <list|read|create|write|patch|history|upload|download> --integration <integration> | branch [current|list [--include-archived]|create <name>|select <name>|select --follow] --integration <integration>"
+    "Usage: orchestrat setup [--server <url>] [--auto-continue [--rewake]] | status | doctor | hook <integration> [--event <event>] | hook <claude-code|codex> --event Stop [--watch] | disconnect <integration|all> | mcp --integration <integration> [--cwd <project>] [--global] [--wait-budget-seconds <n>] | waker <enable|disable|status|run> [--once] [--dry-run] | document(s) <list|read|create|write|patch|history|upload|download> --integration <integration> | branch [current|list [--include-archived]|create <name>|select <name>|select --follow] --integration <integration>"
   );
 }
 
@@ -397,13 +401,16 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     watch,
     autoContinue,
     rewake,
-    wakerArgs
+    wakerArgs,
+    server
   } = parseInvocationArgs(argv);
   if (command === "version") {
     process.stdout.write(`${packageVersion}\n`);
     return;
   }
   const home = process.env.HOME ?? process.cwd();
+  // Keychain on macOS, secret-tool or a private file on Linux.
+  const credentials = platformCredentialStore({ home });
   if (
     command === "hook" &&
     integration !== undefined &&
@@ -426,10 +433,12 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   const invocationCwd =
     command === "mcp" && configuredCwd ? resolve(configuredCwd) : payloadCwd;
   const project = findProject(config, invocationCwd);
-  const api =
-    validateApiUrl(process.env.ORCHESTRAT_API_URL) ??
-    project?.apiUrl ??
-    "https://api.orchestrat.dev";
+  // No hosted default: commands use ORCHESTRAT_API_URL or the saved mapping,
+  // and setup adds --server or asks (resolveServerUrl).
+  const api = resolveServerUrl({
+    env: process.env.ORCHESTRAT_API_URL,
+    projectApiUrl: project?.apiUrl
+  });
   if (command === "document") {
     const resolved = await resolveInvocation({
       api,
@@ -437,7 +446,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       cwd: invocationCwd,
       integration: integration as ConfigurableIntegration,
       read: readConfig,
-      credentials: new KeychainCredentialReader()
+      credentials
     });
     // Documents live on the checkout's branch.
     const { client } = await clientForCheckout(
@@ -470,7 +479,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       cwd: invocationCwd,
       integration: integration as ConfigurableIntegration,
       read: readConfig,
-      credentials: new KeychainCredentialReader()
+      credentials
     });
     const result = await runBranchCommand({
       action: branchAction!,
@@ -492,7 +501,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       home,
       cwd: process.cwd(),
       api,
-      credentials: new KeychainCredentialReader()
+      credentials
     });
     return;
   }
@@ -502,7 +511,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       integration,
       cwd: process.cwd(),
       home: process.env.HOME ?? process.cwd(),
-      credentials: new KeychainCredentialReader(),
+      credentials,
       payload: hookPayload,
       event,
       api
@@ -527,7 +536,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
             cwd: process.cwd(),
             home,
             api,
-            credentials: new KeychainCredentialReader(),
+            credentials,
             read: async () => config
           })
         )
@@ -538,7 +547,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     const result = await runDoctor({
       home,
       cwd: process.cwd(),
-      credentials: new KeychainCredentialReader(),
+      credentials,
       api,
       sourceCommand: resolve(process.argv[1] ?? "orchestrat")
     });
@@ -554,7 +563,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       home,
       cwd: process.cwd(),
       integration,
-      store: new KeychainCredentialStore(),
+      store: credentials,
       api,
       localOnly: local,
       fetch: globalThis.fetch,
@@ -575,23 +584,37 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     return;
   }
   if (command === "setup") {
-    const store = new KeychainCredentialStore();
+    const store = credentials;
     const cwd = process.cwd();
     const existing = config.projects[canonicalizeCwd(cwd)];
+    startSetup({ interactive });
+    let resolvedServer = resolveServerUrl({
+      flag: server,
+      env: process.env.ORCHESTRAT_API_URL,
+      projectApiUrl: project?.apiUrl
+    });
+    if (!resolvedServer) {
+      if (!interactive) throw new Error(MISSING_SERVER_MESSAGE);
+      const answer = await promptServerUrl({});
+      if (answer.cancelled) {
+        process.exitCode = 130;
+        return;
+      }
+      resolvedServer = answer.value;
+    }
+    const setupApi = resolvedServer;
+    renderServer(setupApi, { interactive });
     const authorization = interactive
       ? await (async () => {
-          startSetup({ interactive });
           const result = await resolveSetupAuthorization(
             {
-              api,
+              api: setupApi,
               fetch: globalThis.fetch,
-              open: async (url) => {
-                await openUrl("open", [url]);
-              },
+              open: (url) => openApprovalUrl(url, writeError),
               sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms))
             },
             store,
-            existing !== undefined && existing.apiUrl !== api
+            existing !== undefined && existing.apiUrl !== setupApi
           );
           const selected = await selectProject(result.projects, {
             interactive
@@ -648,11 +671,9 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     const setupResult = await runSetupProgress(
       () =>
         runSetup({
-          api,
+          api: setupApi,
           fetch: globalThis.fetch,
-          open: async (url) => {
-            await openUrl("open", [url]);
-          },
+          open: (url) => openApprovalUrl(url, writeError),
           sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
           store,
           cwd,
@@ -680,6 +701,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       { interactive }
     );
     const presentedResult = {
+      server: setupApi,
       ...setupResult,
       integrations: Object.fromEntries(
         integrations.map((id) => [id, setupResult.integrations[id]])
@@ -706,7 +728,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     const result = await runStatus({
       home,
       cwd: process.cwd(),
-      credentials: new KeychainCredentialReader(),
+      credentials,
       api
     });
     renderResult("status", result, {
@@ -720,7 +742,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         api,
         integration,
         read: readConfig,
-        credentials: new KeychainCredentialReader(),
+        credentials,
         home,
         warn: (message) => process.stderr.write(message)
       });
@@ -756,7 +778,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       cwd: invocationCwd,
       integration,
       read: readConfig,
-      credentials: new KeychainCredentialReader()
+      credentials
     });
     const publicResult = resolved.public as {
       integration: string;
@@ -799,17 +821,17 @@ async function runStopCommand(input: {
     const payload = await readBoundedStdin();
     const payloadCwd = hookCwd(input.integration, payload, process.cwd());
     const config = await readConfig(input.home);
-    const api =
-      validateApiUrl(process.env.ORCHESTRAT_API_URL) ??
-      findProject(config, payloadCwd)?.apiUrl ??
-      "https://api.orchestrat.dev";
+    const api = resolveServerUrl({
+      env: process.env.ORCHESTRAT_API_URL,
+      projectApiUrl: findProject(config, payloadCwd)?.apiUrl
+    });
     const options = {
       integration: input.integration,
       payload,
       cwd: process.cwd(),
       home: input.home,
       api,
-      credentials: new KeychainCredentialReader(),
+      credentials: platformCredentialStore({ home: input.home }),
       read: async () => config
     };
     return renderStopDecision(
@@ -823,6 +845,10 @@ async function runStopCommand(input: {
     });
   }
 }
+
+const writeError = (text: string) => {
+  process.stderr.write(text);
+};
 
 function writeStopOutput(output: StopOutput) {
   if (output.stdout) process.stdout.write(output.stdout);

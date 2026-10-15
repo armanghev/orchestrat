@@ -234,13 +234,30 @@ async function pruneRuntimes(runtimeRoot: string, current: string) {
     if (path !== current) await rm(path, { recursive: true, force: true });
   }
 }
+// Network failures name the server, since a wrong or stopped server is the
+// usual cause on a self-hosted setup.
+async function fetchServer(
+  transport: SetupTransport,
+  path: string,
+  init?: RequestInit
+) {
+  try {
+    return await transport.fetch(`${transport.api}${path}`, init);
+  } catch {
+    throw new Error(
+      `Unable to reach the Orchestrat server at ${transport.api}; check --server or ORCHESTRAT_API_URL`
+    );
+  }
+}
+
 export async function authorizeCli(
   transport: SetupTransport,
   store: CredentialStore
 ) {
   transport = { ...transport, api: apiOrigin(transport.api) };
-  const created = await transport.fetch(
-    `${transport.api}/api/v1/cli/authorization/attempts`,
+  const created = await fetchServer(
+    transport,
+    "/api/v1/cli/authorization/attempts",
     { method: "POST" }
   );
   if (!created.ok) throw new Error("Unable to start browser authorization");
@@ -249,7 +266,9 @@ export async function authorizeCli(
     secret: string;
     expires_at: string;
   };
-  const webUrl = process.env.ORCHESTRAT_WEB_URL ?? "https://app.orchestrat.dev";
+  // The dashboard is served on the server's origin; ORCHESTRAT_WEB_URL
+  // overrides it for split development setups.
+  const webUrl = process.env.ORCHESTRAT_WEB_URL?.trim() || transport.api;
   let origin: string;
   try {
     const url = new URL(webUrl);
@@ -307,10 +326,9 @@ export async function resolveSetupAuthorization(
   transport = { ...transport, api: apiOrigin(transport.api) };
   const credential = await store.read(cliAccount(transport.api));
   if (!credential || forceAuthorization) return authorizeCli(transport, store);
-  const response = await transport.fetch(
-    `${transport.api}/api/v1/cli/setup/projects`,
-    { headers: { authorization: `Bearer ${credential}` } }
-  );
+  const response = await fetchServer(transport, "/api/v1/cli/setup/projects", {
+    headers: { authorization: `Bearer ${credential}` }
+  });
   if (response.status === 401 || response.status === 403)
     return authorizeCli(transport, store);
   if (!response.ok) throw new Error("Unable to resolve CLI projects");

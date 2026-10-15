@@ -1771,7 +1771,7 @@ test("@phone settings keep local agent commands usable", async ({ page }) => {
     page.getByRole("button", { name: "Copy setup command" })
   ).toBeVisible();
   await expect(
-    page.getByText("ORCHESTRAT_API_URL", { exact: false }).first()
+    page.getByText("--server", { exact: false }).first()
   ).toBeVisible();
   expect(
     await page

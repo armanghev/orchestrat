@@ -1,6 +1,6 @@
 # Project branches
 
-Status: **built on `feat/project-branches`, not merged or deployed.** Verified locally against simulated providers; live providers (ORC-44) and the hosted rollout (ORC-45) are pending. `docs/acceptance/2026-09-30-project-branches.md` records what ran and every deviation from this spec. Written 2026-09-27 against `main` at `e37bd65`; quick review the same day (hotspot names checked against the code, new SQL probed on pg-mem 3.0.14, `retainSearchParams` and `useBlocker` confirmed in the installed TanStack Router).
+Status: **built on `feat/project-branches`, not merged or deployed.** Verified locally against simulated providers; live providers (ORC-44) and the hosted rollout (ORC-45) are pending. Written 2026-09-27 against `main` at `e37bd65`; quick review the same day (hotspot names checked against the code, new SQL probed on pg-mem 3.0.14, `retainSearchParams` and `useBlocker` confirmed in the installed TanStack Router).
 
 Companion documents:
 
@@ -39,7 +39,7 @@ Every existing project gets a default branch in migration `0016`. All existing r
 | D9 | `project_events.branch_id` is nullable (`NULL` = project-wide). There is still one websocket per project, and the envelope gains `branch_id`. | A single monotonic sequence per socket. The parallel attention feature can filter on `branch_id`. |
 | D10 | Webhooks go into a durable **inbox**: verify the signature, insert, return 2xx fast. An in-process worker processes the inbox, with backoff and periodic reconcile. | GitHub does not retry failed deliveries ([docs](https://docs.github.com/en/webhooks/using-webhooks/handling-failed-webhook-deliveries)). Never lose an event, and add no new infrastructure. |
 | D11 | Provider state lives in `repository_refs` (one row per provider-branch **generation**), separate from `project_branches`. Archived branches never reactivate. | Delete-then-recreate produces a new branch and never revives stale state. |
-| D12 | Migration `0016` is one file. It includes a temporary plpgsql trigger that fills `branch_id` for inserts from the **old** API during the rollout window, and a later migration drops it. | The hosted DB is migrated before the new API deploys (`docs/acceptance/2026-09-25-project-messaging.md:52-55`). |
+| D12 | Migration `0016` is one file. It includes a temporary plpgsql trigger that fills `branch_id` for inserts from the **old** API during the rollout window, and a later migration drops it. | The hosted DB is migrated before the new API deploys. |
 | D13 | Only humans who are owners or admins resolve decisions, merge, archive or change the default | Requirement, plus the earlier attempt's lesson that automated credentials must not approve data merges. |
 
 ---
@@ -1514,7 +1514,7 @@ Update the header-alignment count (6 → 7). Keyboard-only runs for the selector
 
 ### 13.5 Acceptance record and NOT RUN
 
-Write `docs/acceptance/<date>-project-branches.md` in the format of `2026-09-25-project-messaging.md`. **NOT RUN** until real evidence exists:
+Write a dated acceptance record. **NOT RUN** until real evidence exists:
 - live GitHub, GitLab.com and Origin acceptance (task **Branches 25, ORC-44**);
 - hosted migration and rollout;
 - a screen-reader pass (VoiceOver) on the selector, import dialog and decisions sheet;
@@ -1590,7 +1590,7 @@ Whichever feature merges second:
 ## 16. Rollout (later; each step needs Arman's approval)
 
 1. Local gates pass (§13) and the acceptance record is written with its NOT RUN section.
-2. Back up the hosted DB and test the restore. Supabase Free has no PITR (`docs/private-alpha-runbook.md:193-199`).
+2. Back up the hosted DB and test the restore. Supabase Free has no PITR.
 3. **Migrate the hosted DB** (`railway run … pnpm --filter @orchestrat/db migrate`). The old API keeps working via the shim (§5.2). Postchecks: one default branch per project, no NULL `branch_id`, RLS on the new tables, row counts unchanged.
 4. **Push `main`.** Railway deploys the API. Verify `/health`, `/ready` and legacy agent calls against the default branch.
 5. **Check the dashboard deployment, then move the `app.orchestrat.dev` alias.**

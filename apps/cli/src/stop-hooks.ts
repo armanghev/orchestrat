@@ -39,7 +39,7 @@ export type StopHookInput = {
   payload: unknown;
   cwd: string;
   home: string;
-  api: string;
+  api?: string;
   credentials: CredentialReader;
   read?: () => Promise<OrchestratConfig>;
   fetch?: typeof globalThis.fetch;

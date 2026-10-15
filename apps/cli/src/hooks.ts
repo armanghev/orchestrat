@@ -59,7 +59,7 @@ export async function runHook(input: {
   payload: unknown;
   event?: string;
   eventName?: string;
-  api: string;
+  api?: string;
   fetch?: typeof globalThis.fetch;
   gitReader?: GitReader;
 }) {
