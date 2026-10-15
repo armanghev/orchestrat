@@ -5,17 +5,9 @@ import {
   CardDescription,
   CardContent
 } from "@/components/ui/card";
-import {
-  NativeSelect,
-  NativeSelectOption
-} from "@/components/ui/native-select";
 import { Field, FieldGroup } from "@/components/ui/field";
-import { useEffect, useState } from "react";
-import type {
-  Organization,
-  OrganizationMember,
-  OrganizationRole
-} from "@orchestrat/protocol";
+import { useState } from "react";
+import type { Organization } from "@orchestrat/protocol";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -28,17 +20,13 @@ const errorMessage = (error: unknown) =>
 export function OrganizationSettingsPage({
   organization,
   api,
-  currentUserId,
   onUpdated,
-  onDeleted,
-  onLeft
+  onDeleted
 }: {
   organization: Organization;
   api: ApiClient;
-  currentUserId: string;
   onUpdated: (organization: Organization) => void;
   onDeleted: () => void;
-  onLeft: () => void;
 }) {
   const canEdit = organization.role !== "member";
   const [name, setName] = useState(organization.name);
@@ -46,40 +34,12 @@ export function OrganizationSettingsPage({
   const [saving, setSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [members, setMembers] = useState<OrganizationMember[]>([]);
-  const [membersLoading, setMembersLoading] = useState(true);
-  const [membersError, setMembersError] = useState<string | null>(null);
-  const [memberPending, setMemberPending] = useState<string | null>(null);
-  const [memberError, setMemberError] = useState<string | null>(null);
-  const [leaving, setLeaving] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deletePending, setDeletePending] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const changed = name !== organization.name || slug !== organization.slug;
   const valid =
     name.trim().length > 0 && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug);
-
-  useEffect(() => {
-    let active = true;
-    setMembersLoading(true);
-    setMembersError(null);
-    void api
-      .listOrganizationMembers(organization.id)
-      .then(
-        (result) => {
-          if (active) setMembers(result.members);
-        },
-        (error) => {
-          if (active) setMembersError(errorMessage(error));
-        }
-      )
-      .finally(() => {
-        if (active) setMembersLoading(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [api, organization.id]);
 
   async function save() {
     if (!canEdit || !changed || !valid) return;
@@ -101,66 +61,6 @@ export function OrganizationSettingsPage({
     }
   }
 
-  async function changeRole(
-    member: OrganizationMember,
-    role: OrganizationRole
-  ) {
-    const manageable =
-      organization.role === "owner" ||
-      (organization.role === "admin" && member.role !== "owner");
-    if (!manageable || member.role === role) return;
-    setMemberPending(member.user_id);
-    setMemberError(null);
-    try {
-      const updated = await api.updateOrganizationMember(
-        organization.id,
-        member.user_id,
-        role
-      );
-      setMembers((current) =>
-        current.map((item) =>
-          item.user_id === updated.user_id ? updated : item
-        )
-      );
-    } catch (error) {
-      setMemberError(errorMessage(error));
-    } finally {
-      setMemberPending(null);
-    }
-  }
-
-  async function removeMember(member: OrganizationMember) {
-    const manageable =
-      organization.role === "owner" ||
-      (organization.role === "admin" && member.role !== "owner");
-    if (!manageable) return;
-    setMemberPending(member.user_id);
-    setMemberError(null);
-    try {
-      await api.removeOrganizationMember(organization.id, member.user_id);
-      setMembers((current) =>
-        current.filter((item) => item.user_id !== member.user_id)
-      );
-    } catch (error) {
-      setMemberError(errorMessage(error));
-    } finally {
-      setMemberPending(null);
-    }
-  }
-
-  async function leave() {
-    setLeaving(true);
-    setMemberError(null);
-    try {
-      await api.leaveOrganization(organization.id);
-      onLeft();
-    } catch (error) {
-      setMemberError(errorMessage(error));
-    } finally {
-      setLeaving(false);
-    }
-  }
-
   async function removeOrganization() {
     setDeletePending(true);
     setDeleteError(null);
@@ -176,21 +76,9 @@ export function OrganizationSettingsPage({
 
   return (
     <section
-      className="dashboard-page max-w-5xl"
-      aria-labelledby="organization-settings-heading"
+      className="dashboard-page max-w-2xl"
+      aria-label="Organization settings"
     >
-      <header>
-        <h1
-          id="organization-settings-heading"
-          tabIndex={-1}
-          className="text-2xl font-semibold tracking-tight"
-        >
-          Organization settings
-        </h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Manage this organization and its members.
-        </p>
-      </header>
       <Card aria-labelledby="organization-general-heading">
         <CardHeader>
           <CardTitle>
@@ -203,7 +91,7 @@ export function OrganizationSettingsPage({
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col items-start gap-5">
-          <FieldGroup className="grid gap-4 sm:grid-cols-2">
+          <FieldGroup className="grid gap-4">
             <Field>
               <Label htmlFor="organization-name">Name</Label>
               <Input
@@ -248,104 +136,6 @@ export function OrganizationSettingsPage({
               You have read-only access to organization settings.
             </p>
           )}
-        </CardContent>
-      </Card>
-      <Card aria-labelledby="organization-members-heading">
-        <CardHeader>
-          <CardTitle>
-            <h2 id="organization-members-heading" className="font-medium">
-              Members
-            </h2>
-          </CardTitle>
-          <CardDescription>
-            Manage access for people who belong to this organization.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col items-start gap-5">
-          {membersLoading ? (
-            <p role="status" className="text-sm text-muted-foreground">
-              Loading members…
-            </p>
-          ) : membersError ? (
-            <p role="alert" className="text-sm text-destructive">
-              {membersError}
-            </p>
-          ) : (
-            <div className="divide-y rounded-lg border">
-              {members.map((member) => {
-                const manageable =
-                  organization.role === "owner" ||
-                  (organization.role === "admin" && member.role !== "owner");
-                return (
-                  <div
-                    key={member.user_id}
-                    className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"
-                  >
-                    <div className="min-w-0">
-                      <p className="truncate font-medium">
-                        {member.full_name || member.username || member.email}
-                        {member.user_id === currentUserId ? " (you)" : ""}
-                      </p>
-                      <p className="truncate text-sm text-muted-foreground">
-                        {member.email}
-                        {member.username ? ` · @${member.username}` : ""}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <NativeSelect
-                        aria-label={`Role for ${member.email}`}
-                        value={member.role}
-                        disabled={
-                          !manageable || memberPending === member.user_id
-                        }
-                        onChange={(event) =>
-                          void changeRole(
-                            member,
-                            event.target.value as OrganizationRole
-                          )
-                        }
-                      >
-                        {organization.role === "owner" ? (
-                          <NativeSelectOption value="owner">
-                            Owner
-                          </NativeSelectOption>
-                        ) : null}
-                        <NativeSelectOption value="admin">
-                          Admin
-                        </NativeSelectOption>
-                        <NativeSelectOption value="member">
-                          Member
-                        </NativeSelectOption>
-                      </NativeSelect>
-                      {manageable ? (
-                        <Button
-                          variant="ghost"
-                          disabled={memberPending === member.user_id}
-                          onClick={() => void removeMember(member)}
-                        >
-                          Remove
-                        </Button>
-                      ) : null}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-          {memberError ? (
-            <p role="alert" className="text-sm text-destructive">
-              {memberError}
-            </p>
-          ) : null}
-          {members.some((member) => member.user_id === currentUserId) ? (
-            <Button
-              variant="outline"
-              disabled={leaving}
-              onClick={() => void leave()}
-            >
-              {leaving ? "Leaving…" : "Leave organization"}
-            </Button>
-          ) : null}
         </CardContent>
       </Card>
       {organization.role === "owner" ? (

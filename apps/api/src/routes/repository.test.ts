@@ -9,7 +9,14 @@ import {
 import { asc, eq } from "drizzle-orm";
 import { SecretBox, aad } from "../services/repository/secrets.js";
 import { connected } from "../test/repository.js";
-import { workspace } from "../test/workspace.js";
+import { workspace, workspaceOn } from "../test/workspace.js";
+import { fixture } from "../test/fixture.js";
+import { FakeProvider } from "../services/repository/testing/fake-provider.js";
+import {
+  githubInstallationResponseSchema,
+  pendingRepositoryAuthorizationResponseSchema,
+  repositoryProvidersResponseSchema
+} from "@orchestrat/protocol";
 
 test("connecting authorizes once, links the default and snapshots branches", async (t) => {
   const s = await connected();
@@ -393,4 +400,128 @@ test("secrets are bound to their row and purpose and survive key rotation", () =
     /^v1\.k1\./,
     "writes use the current key"
   );
+});
+
+test("provider availability needs only human sign-in and matches project repository settings", async (t) => {
+  for (const configured of [true, false]) {
+    const { app, db } = await fixture({
+      repository: {
+        adapters: [new FakeProvider("github")],
+        ...(configured
+          ? { secrets: new SecretBox({ id: "test", key: Buffer.alloc(32, 8) }) }
+          : {}),
+        config: {
+          hidden: configured ? ["origin"] : [],
+          unavailable: {
+            github: "Missing encryption key",
+            gitlab: "GitLab is disabled",
+            origin: "Origin is disabled"
+          }
+        }
+      }
+    });
+    t.after(() => app.close());
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/v1/repository/providers",
+      headers: { authorization: "Bearer alice" }
+    });
+    assert.equal(response.statusCode, 200, response.body);
+    const result = repositoryProvidersResponseSchema.parse(response.json());
+    assert.deepEqual(result.providers, [
+      {
+        provider: "github",
+        configured,
+        unavailable_reason: configured ? null : "Missing encryption key"
+      },
+      {
+        provider: "gitlab",
+        configured: false,
+        unavailable_reason: "GitLab is disabled"
+      },
+      ...(!configured
+        ? [
+            {
+              provider: "origin",
+              configured: false,
+              unavailable_reason: "Origin is disabled"
+            }
+          ]
+        : [])
+    ]);
+    assert.equal(
+      (await app.inject({ method: "GET", url: "/api/v1/repository/providers" }))
+        .statusCode,
+      401
+    );
+    const s = await workspaceOn(app, db);
+    assert.deepEqual(
+      (await s.alice("GET", `/projects/${s.project.id}/repository`)).json()
+        .providers,
+      result.providers
+    );
+  }
+});
+
+test("GitHub installation and pending authorization preserve custom return paths and the settings fallback", async (t) => {
+  const fake = Object.assign(new FakeProvider("github"), {
+    async confirmInstallation({ installationId }: { installationId: string }) {
+      return { installationId };
+    }
+  });
+  const s = await workspace({
+    repository: {
+      adapters: [fake],
+      secrets: new SecretBox({ id: "test", key: Buffer.alloc(32, 8) })
+    }
+  });
+  t.after(() => s.app.close());
+  const base = `/projects/${s.project.id}`;
+  for (const returnPath of [
+    undefined,
+    `${base}/connect`,
+    `${base}/connect?source=creation`
+  ]) {
+    const authorization = (
+      await s.alice("POST", `${base}/repository/authorizations`, {
+        provider: "github",
+        ...(returnPath ? { return_path: returnPath } : {})
+      })
+    ).json();
+    const state = new URL(authorization.authorize_url).searchParams.get(
+      "state"
+    );
+    const callback = await s.app.inject({
+      method: "GET",
+      url: `/api/v1/repository/callback/github?code=good-code&state=${state}`
+    });
+    assert.equal(callback.statusCode, 302, callback.body);
+    const pending = await s.alice(
+      "GET",
+      "/repository/authorizations/pending?provider=github"
+    );
+    assert.equal(pending.statusCode, 200, pending.body);
+    const expected = returnPath ?? `${base}/settings`;
+    assert.equal(
+      pendingRepositoryAuthorizationResponseSchema.parse(pending.json())
+        .return_path,
+      expected
+    );
+    const installed = await s.alice(
+      "POST",
+      `${base}/repository/authorizations/${authorization.authorization_id}/github-installation`,
+      { installation_id: "4242" }
+    );
+    assert.equal(installed.statusCode, 200, installed.body);
+    assert.deepEqual(githubInstallationResponseSchema.parse(installed.json()), {
+      next: "pick_repository",
+      return_path: expected
+    });
+    await s.db
+      .update(repositoryConnectionAttempts)
+      .set({ status: "consumed" })
+      .where(
+        eq(repositoryConnectionAttempts.id, authorization.authorization_id)
+      );
+  }
 });

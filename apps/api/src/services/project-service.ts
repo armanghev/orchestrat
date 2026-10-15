@@ -3,11 +3,15 @@ import {
   organizationMembers,
   organizations,
   projectBranches,
+  projectEvents,
+  repositoryConnections,
+  tasks,
   projectMembers,
   projects,
   users,
   type Database
 } from "@orchestrat/db";
+import { slugifyName as slugify, slugSuffix } from "@orchestrat/protocol";
 import type {
   CreateOrganizationRequest,
   CreateProjectRequest,
@@ -15,11 +19,21 @@ import type {
   Organization,
   OrganizationMember,
   Project,
+  ProjectSummary,
   UpdateOrganizationMemberRequest,
   UpdateOrganizationRequest,
   UpdateProjectRequest
 } from "@orchestrat/protocol";
-import { and, asc, count, eq, inArray } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  eq,
+  inArray,
+  isNull,
+  notInArray,
+  sql
+} from "drizzle-orm";
 import { ApiError } from "./api-error.js";
 import {
   defaultBranchId,
@@ -28,16 +42,6 @@ import {
 import { PermissionService } from "./permission-service.js";
 
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
-
-const slugify = (value: string) =>
-  value
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 63)
-    .replace(/-$/g, "") || `item-${randomUUID().slice(0, 8)}`;
 
 const organizationJson = (
   organization: typeof organizations.$inferSelect,
@@ -118,14 +122,42 @@ export class ProjectService {
 
   async createOrganization(userId: string, input: CreateOrganizationRequest) {
     return this.db.transaction(async (tx) => {
-      const [organization] = await tx
-        .insert(organizations)
-        .values({
-          id: randomUUID(),
-          name: input.name,
-          slug: input.slug ?? slugify(input.name)
-        })
-        .returning();
+      const id = randomUUID();
+      const base = input.slug ?? slugify(input.name);
+      let organization: typeof organizations.$inferSelect | undefined;
+      // A chosen slug that's taken is the caller's to fix; a derived one
+      // (CLI, SDK and MCP send none) gets a short suffix instead.
+      const attempts = input.slug === undefined ? 4 : 1;
+      for (
+        let attempt = 0;
+        attempt < attempts && organization?.id !== id;
+        attempt++
+      )
+        [organization] = await tx
+          .insert(organizations)
+          .values({
+            id,
+            name: input.name,
+            slug:
+              attempt === 0
+                ? base
+                : `${base.slice(0, 54).replace(/-$/, "")}-${slugSuffix()}`
+          })
+          .onConflictDoNothing({ target: organizations.slug })
+          .returning();
+      if (input.slug !== undefined && organization?.id !== id)
+        throw new ApiError(
+          409,
+          "ORGANIZATION_SLUG_TAKEN",
+          "This organization slug is already taken.",
+          { field: "slug" }
+        );
+      if (!organization || organization.id !== id)
+        throw new ApiError(
+          409,
+          "CONFLICT",
+          "Couldn't find a free organization slug. Try again."
+        );
       await tx.insert(organizationMembers).values({
         organizationId: organization.id,
         userId,
@@ -454,6 +486,129 @@ export class ProjectService {
       projects: rows.map((row) =>
         projectJson(row.project, row.role, defaults.get(row.project.id))
       )
+    };
+  }
+
+  async listProjectSummaries(userId: string, organizationId: string) {
+    await this.permissions.organization(userId, organizationId);
+    // Aggregate only the caller's projects; the rest would be discarded.
+    const visible = this.db
+      .select({ id: projectMembers.projectId })
+      .from(projectMembers)
+      .where(eq(projectMembers.userId, userId));
+    const members = this.db
+      .select({
+        projectId: projectMembers.projectId,
+        total: count().as("member_count")
+      })
+      .from(projectMembers)
+      .innerJoin(projects, eq(projects.id, projectMembers.projectId))
+      .where(
+        and(
+          eq(projects.organizationId, organizationId),
+          inArray(projectMembers.projectId, visible)
+        )
+      )
+      .groupBy(projectMembers.projectId)
+      .as("members");
+    const openTasks = this.db
+      .select({
+        projectId: tasks.projectId,
+        total: count().as("open_task_count")
+      })
+      .from(tasks)
+      .innerJoin(
+        projectBranches,
+        and(
+          eq(projectBranches.id, tasks.branchId),
+          eq(projectBranches.isDefault, true)
+        )
+      )
+      .innerJoin(projects, eq(projects.id, tasks.projectId))
+      .where(
+        and(
+          eq(projects.organizationId, organizationId),
+          inArray(tasks.projectId, visible),
+          notInArray(tasks.status, ["done", "cancelled"])
+        )
+      )
+      .groupBy(tasks.projectId)
+      .as("open_tasks");
+    const activity = this.db
+      .select({
+        projectId: projectEvents.projectId,
+        latest: sql<Date>`max(${projectEvents.occurredAt})`
+          .mapWith(projectEvents.occurredAt)
+          .as("last_activity_at")
+      })
+      .from(projectEvents)
+      .innerJoin(projects, eq(projects.id, projectEvents.projectId))
+      .where(
+        and(
+          eq(projects.organizationId, organizationId),
+          inArray(projectEvents.projectId, visible)
+        )
+      )
+      .groupBy(projectEvents.projectId)
+      .as("activity");
+    const rows = await this.db
+      .select({
+        project: projects,
+        role: projectMembers.role,
+        defaultBranchId: projectBranches.id,
+        defaultBranchName: projectBranches.name,
+        memberCount: members.total,
+        openTaskCount: openTasks.total,
+        lastActivityAt: activity.latest,
+        repository: {
+          provider: repositoryConnections.provider,
+          fullName: repositoryConnections.repositoryFullName,
+          status: repositoryConnections.status
+        }
+      })
+      .from(projects)
+      .innerJoin(
+        projectMembers,
+        and(
+          eq(projectMembers.projectId, projects.id),
+          eq(projectMembers.userId, userId)
+        )
+      )
+      .leftJoin(
+        projectBranches,
+        and(
+          eq(projectBranches.projectId, projects.id),
+          eq(projectBranches.isDefault, true)
+        )
+      )
+      .leftJoin(members, eq(members.projectId, projects.id))
+      .leftJoin(openTasks, eq(openTasks.projectId, projects.id))
+      .leftJoin(activity, eq(activity.projectId, projects.id))
+      .leftJoin(
+        repositoryConnections,
+        and(
+          eq(repositoryConnections.projectId, projects.id),
+          isNull(repositoryConnections.disconnectedAt)
+        )
+      )
+      .where(eq(projects.organizationId, organizationId))
+      .orderBy(asc(projects.name));
+    return {
+      projects: rows.map((row): ProjectSummary => ({
+        ...projectJson(row.project, row.role, row.defaultBranchId ?? undefined),
+        task_key_prefix: row.project.taskKeyPrefix,
+        default_branch_name: row.defaultBranchName,
+        member_count: Number(row.memberCount ?? 0),
+        open_task_count: Number(row.openTaskCount ?? 0),
+        last_activity_at: row.lastActivityAt?.toISOString() ?? null,
+        repository: row.repository
+          ? {
+              provider: row.repository.provider,
+              full_name: row.repository.fullName,
+              status: row.repository.status
+            }
+          : null
+      }))
     };
   }
 

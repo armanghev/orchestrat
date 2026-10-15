@@ -149,10 +149,43 @@ async function mockHierarchy(page: Page, state: HierarchyState) {
     if (path === "/api/v1/organizations" && method === "GET")
       return route.fulfill({ json: { organizations: state.organizations } });
     if (path === "/api/v1/organizations" && method === "POST") {
-      const body = route.request().postDataJSON() as { name: string };
-      const created = organization(ids.organization, body.name);
+      const body = route.request().postDataJSON() as {
+        name: string;
+        slug: string;
+      };
+      const created = {
+        ...organization(ids.organization, body.name),
+        slug: body.slug
+      };
       state.organizations = [created];
       return route.fulfill({ json: created });
+    }
+    const summariesMatch = path.match(
+      /^\/api\/v1\/organizations\/([^/]+)\/project-summaries$/
+    );
+    if (summariesMatch && method === "GET") {
+      const organizationId = summariesMatch[1];
+      if (state.failingOrganizationId === organizationId)
+        return route.abort("failed");
+      return route.fulfill({
+        json: {
+          projects: (state.projects[organizationId] ?? []).map((item) => {
+            const name = String(item.name ?? "Project");
+            const prefix = name.replace(/[^a-z0-9]/gi, "").slice(0, 3);
+            return {
+              role: "owner",
+              ...item,
+              task_key_prefix:
+                prefix.length >= 2 ? prefix.toUpperCase() : "PRJ",
+              default_branch_name: "main",
+              member_count: 1,
+              open_task_count: 0,
+              last_activity_at: item.updated_at ?? now,
+              repository: null
+            };
+          })
+        }
+      });
     }
     const projectMatch = path.match(
       /^\/api\/v1\/organizations\/([^/]+)\/projects$/
@@ -470,6 +503,18 @@ async function mockHierarchy(page: Page, state: HierarchyState) {
       return route.fulfill({
         json: { ticket: "e".repeat(32), expires_at: now }
       });
+    if (path === "/api/v1/repository/providers")
+      return route.fulfill({
+        json: {
+          providers: [
+            {
+              provider: "github",
+              configured: false,
+              unavailable_reason: "GitHub isn’t set up on this server."
+            }
+          ]
+        }
+      });
     throw new Error(`Unexpected API request: ${method} ${path}`);
   });
   return {
@@ -632,20 +677,93 @@ test("the e2e adapter rejects arbitrary persisted auth modes", async ({
   ).toBeVisible();
 });
 
-test("creates organization and project sequentially", async ({ page }) => {
+test("creates organization and project sequentially @phone", async ({
+  page
+}, testInfo) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
   await seed(page);
   await mockHierarchy(page, {
     organizations: [],
     projects: {}
   });
   await page.goto("/setup");
+  await expect(
+    page.getByRole("heading", { name: "Create your organization" })
+  ).toBeVisible();
+  await page.getByLabel("Organization name").fill("Café Studio");
+  await expect(page.getByLabel("Organization slug")).toHaveValue("cafe-studio");
+  await expect(page.getByText("org/", { exact: true })).toBeVisible();
+  await page.getByLabel("Organization slug").fill("acme-studio");
   await page.getByLabel("Organization name").fill("Acme");
-  await page.getByRole("button", { name: "Create organization" }).click();
+  await expect(page.getByLabel("Organization slug")).toHaveValue("acme-studio");
+  await expectNoAxe(page);
+  await page.screenshot({
+    path: testInfo.outputPath("create-organization.png")
+  });
+  expect(
+    await page
+      .locator("main")
+      .evaluate((element) => element.scrollWidth <= element.clientWidth)
+  ).toBe(true);
+  expect(errors).toEqual([]);
+  const [request] = await Promise.all([
+    page.waitForRequest(
+      (request) =>
+        request.method() === "POST" &&
+        new URL(request.url()).pathname === "/api/v1/organizations"
+    ),
+    page.getByRole("button", { name: "Create organization" }).click()
+  ]);
+  expect(request.postDataJSON()).toEqual({ name: "Acme", slug: "acme-studio" });
+  await expect(page).toHaveURL(
+    new RegExp(`/organizations/${ids.organization}/projects/new$`)
+  );
   await page.getByLabel("Project name").fill("Alpha");
-  await page.getByRole("button", { name: "Create project" }).click();
+  await page.getByRole("button", { name: "Create empty project" }).click();
   await expect(page.locator('[data-slot="top-toolbar-page"]')).toHaveText(
     "Overview"
   );
+  await expectNoAxe(page);
+});
+
+test("organization home lists projects and links back from a project", async ({
+  page
+}) => {
+  await seed(page);
+  await mockHierarchy(page, populatedState());
+  await page.goto(`/projects/${ids.alpha}/overview`);
+  await page.getByRole("button", { name: /^Organization: / }).click();
+  await expect(page).toHaveURL(
+    new RegExp(`/organizations/${ids.organization}$`)
+  );
+  await expect(
+    page.getByRole("complementary", { name: "Organization navigation" })
+  ).toBeVisible();
+  await expect(page.locator('[data-slot="top-toolbar-page"]')).toHaveText(
+    "Projects"
+  );
+  await page.getByRole("link", { name: /Beta/ }).click();
+  await expect(page).toHaveURL(new RegExp(`/projects/${ids.beta}/overview$`));
+  await page.goto(`/organizations/${ids.organization}`);
+  await expect(page.getByRole("link", { name: /Alpha/ })).toBeVisible();
+  await settle(page);
+  await expectNoAxe(page);
+
+  await page.goto(`/organizations/${ids.organization}/members`);
+  await expect(page.locator('[data-slot="top-toolbar-page"]')).toHaveText(
+    "Members"
+  );
+  await expect(page.getByRole("table")).toBeVisible();
+  await settle(page);
+  await expectNoAxe(page);
+
+  await page.goto(`/organizations/${ids.organization}/settings`);
+  await expect(page.getByLabel("Name")).toBeVisible();
+  await settle(page);
   await expectNoAxe(page);
 });
 

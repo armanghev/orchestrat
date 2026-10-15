@@ -97,7 +97,10 @@ export type GithubInstallationRequest = z.infer<
   typeof githubInstallationRequestSchema
 >;
 export const githubInstallationResponseSchema = z.discriminatedUnion("next", [
-  z.object({ next: z.literal("pick_repository") }),
+  z.object({
+    next: z.literal("pick_repository"),
+    return_path: returnPathSchema.optional()
+  }),
   z.object({ next: z.literal("authorize"), authorize_url: z.string().url() })
 ]);
 export type GithubInstallationResponse = z.infer<
@@ -130,6 +133,7 @@ export const pendingRepositoryAuthorizationQuerySchema = z.object({
   provider: repositoryProviderSchema
 });
 export const pendingRepositoryAuthorizationResponseSchema = z.object({
+  return_path: returnPathSchema.optional(),
   authorization_id: z.string().regex(/^ra_[A-Za-z0-9_-]{20,}$/),
   project_id: idSchema,
   provider: repositoryProviderSchema,
@@ -203,3 +207,10 @@ export const repositoryDeliveryParamsSchema = z.object({
 export const repositorySyncResponseSchema = z.object({
   queued: z.literal(true)
 });
+
+export const repositoryProvidersResponseSchema = repositoryResponseSchema.pick({
+  providers: true
+});
+export type RepositoryProvidersResponse = z.infer<
+  typeof repositoryProvidersResponseSchema
+>;

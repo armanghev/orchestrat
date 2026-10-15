@@ -18,7 +18,7 @@ vi.mock("@/features/theme/theme-provider", () => ({
   useTheme: () => ({ theme: "dark", setTheme: vi.fn() })
 }));
 
-it("switches organizations, scopes project choices, and keeps empty organizations accessible", async () => {
+it("scopes project choices, links the organization home, and switches organizations", async () => {
   const user = userEvent.setup();
   const acme = organization({ name: "Acme" });
   const other = organization({
@@ -80,35 +80,63 @@ it("switches organizations, scopes project choices, and keeps empty organization
   await user.click(screen.getByRole("menuitemradio", { name: "Beta" }));
   expect(selectProject).toHaveBeenLastCalledWith(beta.id);
 
-  await user.click(screen.getByRole("button", { name: "Organization: Acme" }));
-  expect(screen.getAllByRole("menuitemradio")).toHaveLength(3);
-  await user.click(screen.getByRole("menuitemradio", { name: "Other" }));
-  expect(selectProject).toHaveBeenLastCalledWith(gamma.id);
-  await user.click(screen.getByRole("button", { name: "Project: Gamma" }));
-  expect(screen.getAllByRole("menuitemradio")).toHaveLength(1);
-  expect(screen.getByRole("menuitemradio", { name: "Gamma" })).toHaveAttribute(
-    "aria-checked",
-    "true"
-  );
-  await user.click(screen.getByRole("menuitem", { name: "Project settings" }));
+  await user.click(screen.getByRole("button", { name: "Project: Beta" }));
+  await user.click(screen.getByRole("menuitem", { name: "New project" }));
   expect(navigate).toHaveBeenLastCalledWith({
-    to: "/projects/$projectId/settings",
-    params: { projectId: gamma.id }
+    to: "/organizations/$organizationId/projects/new",
+    params: { organizationId: acme.id }
   });
 
-  await user.click(screen.getByRole("button", { name: "Organization: Other" }));
+  // The organization name opens its home; the chevron switches organizations.
+  await user.click(screen.getByRole("button", { name: "Organization: Acme" }));
+  expect(navigate).toHaveBeenLastCalledWith({
+    to: "/organizations/$organizationId",
+    params: { organizationId: acme.id }
+  });
+  await user.click(screen.getByRole("button", { name: "Switch organization" }));
+  expect(screen.getAllByRole("menuitemradio")).toHaveLength(3);
+  await user.click(screen.getByRole("menuitemradio", { name: "Empty" }));
+  expect(navigate).toHaveBeenLastCalledWith({
+    to: "/organizations/$organizationId",
+    params: { organizationId: empty.id }
+  });
+
+  await user.click(screen.getByRole("button", { name: "Switch organization" }));
   await user.click(
     screen.getByRole("menuitem", { name: "Organization settings" })
   );
   expect(navigate).toHaveBeenLastCalledWith({
     to: "/organizations/$organizationId/settings",
-    params: { organizationId: other.id }
+    params: { organizationId: acme.id }
   });
 
-  await user.click(screen.getByRole("button", { name: "Organization: Other" }));
-  await user.click(screen.getByRole("menuitemradio", { name: "Empty" }));
-  expect(navigate).toHaveBeenCalledWith({
-    to: "/organizations/$organizationId/settings",
-    params: { organizationId: empty.id }
+  await user.click(screen.getByRole("button", { name: "Switch organization" }));
+  await user.click(screen.getByRole("menuitem", { name: "New organization" }));
+  expect(navigate).toHaveBeenLastCalledWith({
+    to: "/organizations/new",
+    search: { fromOrganization: acme.id }
   });
+});
+
+it("shows Organization › Page on organization pages", () => {
+  const acme = organization({ name: "Acme" });
+  render(
+    <SidebarProvider>
+      <TopToolbar
+        catalog={{ organizations: [acme], projects: [], failures: [] }}
+        organization={acme}
+        pageTitle="Members"
+        collapsed={false}
+        onOpenCommands={vi.fn()}
+        onSelectProject={vi.fn()}
+      />
+    </SidebarProvider>
+  );
+  expect(
+    screen.getByRole("button", { name: "Organization: Acme" })
+  ).toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: /^Project:/ })
+  ).not.toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Members" })).toBeInTheDocument();
 });

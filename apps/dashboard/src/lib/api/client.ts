@@ -1434,4 +1434,30 @@ export class ApiClient {
       response.headers.get("x-request-id")
     );
   }
+  listProjectSummaries(
+    organizationId: string
+  ): Promise<ProjectSummariesResponse> {
+    return this.request(
+      `/api/v1/organizations/${encodeURIComponent(organizationId)}/project-summaries`,
+      { method: "GET" },
+      projectSummariesResponseSchema
+    );
+  }
+  listRepositoryProviders(): Promise<RepositoryProvidersResponse> {
+    return this.request(
+      "/api/v1/repository/providers",
+      { method: "GET" },
+      repositoryProvidersResponseSchema
+    );
+  }
 }
+
+import {
+  projectSummariesResponseSchema,
+  type ProjectSummariesResponse
+} from "@orchestrat/protocol";
+
+import {
+  repositoryProvidersResponseSchema,
+  type RepositoryProvidersResponse
+} from "@orchestrat/protocol";

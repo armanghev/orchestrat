@@ -38,6 +38,7 @@ const baseErrorCodeSchema = z.enum([
   "VALIDATION_ERROR",
   "NOT_FOUND",
   "CONFLICT",
+  "ORGANIZATION_SLUG_TAKEN",
   "RATE_LIMITED",
   "INTERNAL_ERROR"
 ]);
@@ -1408,3 +1409,51 @@ export * from "./attention.js";
 export * from "./branches.js";
 export * from "./merges.js";
 export * from "./repository.js";
+
+import {
+  repositoryProviderSchema,
+  repositoryConnectionStatusSchema
+} from "./repository.js";
+
+export const projectSummarySchema = projectSchema.extend({
+  task_key_prefix: z.string(),
+  default_branch_name: z.string().nullable(),
+  member_count: z.number().int().nonnegative(),
+  open_task_count: z.number().int().nonnegative(),
+  last_activity_at: dateSchema.nullable(),
+  repository: z
+    .object({
+      provider: repositoryProviderSchema,
+      full_name: z.string(),
+      status: repositoryConnectionStatusSchema
+    })
+    .nullable()
+});
+export type ProjectSummary = z.infer<typeof projectSummarySchema>;
+export const projectSummariesResponseSchema = z.object({
+  projects: z.array(projectSummarySchema)
+});
+export type ProjectSummariesResponse = z.infer<
+  typeof projectSummariesResponseSchema
+>;
+
+/** The slug a name maps to, or "" when it has no letters or digits. */
+export const slugBase = (value: string) =>
+  value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 63)
+    .replace(/-$/g, "");
+
+/** A short random suffix; `crypto.randomUUID` is missing outside secure
+ * contexts (a dashboard served over plain http). */
+export const slugSuffix = () =>
+  (globalThis.crypto?.randomUUID?.() ?? Math.random().toString(16).slice(2))
+    .replace(/-/g, "")
+    .slice(0, 8);
+
+export const slugifyName = (value: string) =>
+  slugBase(value) || `item-${slugSuffix()}`;

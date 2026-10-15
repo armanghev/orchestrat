@@ -111,6 +111,57 @@ describe("GitHub App installs", () => {
     ).toBeVisible();
   });
 
+  it.each([
+    { source: "installation", returnPath: `/projects/${projectId}/connect` },
+    { source: "installation", returnPath: `/projects/${projectId}/overview` },
+    {
+      source: "installation",
+      returnPath: `/projects/${projectId}/settings?repository_error=expired`
+    },
+    { source: "pending", returnPath: `/projects/${projectId}/overview` }
+  ])(
+    "honors the $source return path $returnPath",
+    async ({ source, returnPath }) => {
+      const view = await render(
+        "/repository/github/setup?installation_id=4242",
+        [
+          http.get(`${apiUrl}/repository/authorizations/pending`, () =>
+            HttpResponse.json({
+              authorization_id: authorizationId,
+              project_id: projectId,
+              provider: "github",
+              expires_at: "2026-10-30T10:00:00.000Z",
+              return_path:
+                source === "pending"
+                  ? returnPath
+                  : `/projects/${projectId}/settings`
+            })
+          ),
+          http.post(
+            `${apiUrl}/projects/:projectId/repository/authorizations/:authorizationId/github-installation`,
+            () =>
+              HttpResponse.json({
+                next: "pick_repository",
+                ...(source === "installation"
+                  ? { return_path: returnPath }
+                  : {})
+              })
+          ),
+          ...settings([])
+        ]
+      );
+      await waitFor(() =>
+        expect(view.router.state.location.pathname).toBe(
+          returnPath.split("?")[0]
+        )
+      );
+      const search = new URLSearchParams(view.router.state.location.searchStr);
+      expect(search.get("repository_authorization")).toBe(authorizationId);
+      if (returnPath.includes("?"))
+        expect(search.get("repository_error")).toBe("expired");
+    }
+  );
+
   it("explains when no connection is in progress", async () => {
     await render("/repository/github/setup?installation_id=4242", [
       http.get(`${apiUrl}/repository/authorizations/pending`, () =>

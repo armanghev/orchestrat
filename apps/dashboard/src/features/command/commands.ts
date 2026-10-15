@@ -4,7 +4,13 @@ import type { Theme } from "@/features/theme/theme";
 
 export type AppCommand = {
   id: string;
-  group: "Projects" | "Branches" | "Navigate" | "Appearance" | "Application";
+  group:
+    | "Organizations"
+    | "Projects"
+    | "Branches"
+    | "Navigate"
+    | "Appearance"
+    | "Application";
   label: string;
   keywords: string[];
   destructive?: boolean;
@@ -23,9 +29,22 @@ export const navigationDestinations = [
 ] as const;
 export type NavigationDestination = (typeof navigationDestinations)[number];
 
+export const organizationDestinations = [
+  "projects",
+  "members",
+  "settings"
+] as const;
+export type OrganizationDestination = (typeof organizationDestinations)[number];
+
 export type BuildCommandsOptions = {
   catalog: ProjectCatalog;
   activeProjectId?: string;
+  /** Set on organization pages, where there is no active project. */
+  activeOrganizationId?: string;
+  navigateToOrganization?: (
+    organizationId: string,
+    destination: OrganizationDestination
+  ) => void | Promise<void>;
   navigateToProject: (projectId: string) => void | Promise<void>;
   navigateToRoute: (
     route: NavigationDestination,
@@ -51,6 +70,8 @@ const title = (route: string) => route[0].toUpperCase() + route.slice(1);
 export function buildCommands({
   catalog,
   activeProjectId,
+  activeOrganizationId,
+  navigateToOrganization,
   navigateToProject,
   navigateToRoute,
   setTheme,
@@ -60,6 +81,15 @@ export function buildCommands({
   branches
 }: BuildCommandsOptions): AppCommand[] {
   return [
+    ...(navigateToOrganization
+      ? catalog.organizations.map((organization) => ({
+          id: `organization:${organization.id}`,
+          group: "Organizations" as const,
+          label: `Open ${organization.name}`,
+          keywords: ["organization", "projects", organization.name],
+          run: () => navigateToOrganization(organization.id, "projects")
+        }))
+      : []),
     ...catalog.projects.map(({ project, organization }) => ({
       id: `project:${project.id}`,
       group: "Projects" as const,
@@ -90,13 +120,21 @@ export function buildCommands({
           }
         ]
       : []),
-    ...navigationDestinations.map((route) => ({
-      id: `navigate:${route}`,
-      group: "Navigate" as const,
-      label: title(route),
-      keywords: ["navigate", route],
-      run: () => navigateToRoute(route, activeProjectId)
-    })),
+    ...(activeProjectId || !activeOrganizationId
+      ? navigationDestinations.map((route) => ({
+          id: `navigate:${route}`,
+          group: "Navigate" as const,
+          label: title(route),
+          keywords: ["navigate", route],
+          run: () => navigateToRoute(route, activeProjectId)
+        }))
+      : organizationDestinations.map((destination) => ({
+          id: `navigate:organization-${destination}`,
+          group: "Navigate" as const,
+          label: title(destination),
+          keywords: ["navigate", "organization", destination],
+          run: () => navigateToOrganization?.(activeOrganizationId, destination)
+        }))),
     ...(["system", "light", "dark"] as const).map((theme) => ({
       id: `theme:${theme}`,
       group: "Appearance" as const,

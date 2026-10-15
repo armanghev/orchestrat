@@ -26,7 +26,8 @@ describe("preferences", () => {
       railMode: "projects",
       pinnedProjectIds: ["pinned"],
       recentProjectIds: ["recent"],
-      contextSidebarCollapsed: true
+      contextSidebarCollapsed: true,
+      organizationProjectsViews: {}
     });
   });
 
@@ -36,7 +37,13 @@ describe("preferences", () => {
       railMode: "projects",
       pinnedProjectIds: ["later"],
       recentProjectIds: ["also-later"],
-      contextSidebarCollapsed: false
+      contextSidebarCollapsed: false,
+      organizationProjectsViews: {
+        "00000000-0000-4000-8000-000000000001": {
+          sort: "name" as const,
+          filter: "archived" as const
+        }
+      }
     };
     expect(parsePreferences(stored)).toEqual(stored);
     expect(cleanPreferences(stored, new Set())).toMatchObject({
@@ -54,9 +61,42 @@ describe("preferences", () => {
     const invalid = cleanPreferences(null, new Set());
     invalid.pinnedProjectIds.push("poison");
     invalid.recentProjectIds.push("also-poison");
+    invalid.organizationProjectsViews.poison = {
+      sort: "name",
+      filter: "archived"
+    };
 
     expect(defaultPreferences.pinnedProjectIds).toEqual([]);
     expect(defaultPreferences.recentProjectIds).toEqual([]);
+    expect(defaultPreferences.organizationProjectsViews).toEqual({});
     expect(cleanPreferences(null, new Set())).toEqual(defaultPreferences);
+  });
+
+  it("defaults missing organization project views and drops corrupt maps", () => {
+    expect(
+      parsePreferences({
+        theme: "dark",
+        railMode: "projects",
+        pinnedProjectIds: [],
+        recentProjectIds: [],
+        contextSidebarCollapsed: false
+      })
+    ).toMatchObject({
+      theme: "dark",
+      organizationProjectsViews: {}
+    });
+    expect(
+      parsePreferences({
+        theme: "dark",
+        railMode: "projects",
+        pinnedProjectIds: [],
+        recentProjectIds: [],
+        contextSidebarCollapsed: false,
+        organizationProjectsViews: {
+          good: { sort: "recent", filter: "active" },
+          bad: { sort: "nope", filter: "active" }
+        }
+      }).organizationProjectsViews
+    ).toEqual({});
   });
 });

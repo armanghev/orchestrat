@@ -5,11 +5,13 @@ import {
   Moon,
   Monitor,
   ChevronDown,
+  ChevronsUpDown,
   Settings,
   Plus
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import type { Organization } from "@orchestrat/protocol";
 import type {
   ProjectCatalog,
   ProjectContext
@@ -91,19 +93,13 @@ export function WindowDragRegion({ className }: { className?: string }) {
   );
 }
 
-export function TopToolbar({
-  catalog,
-  context,
-  onSelectProject,
-  activeRoute = "overview",
-  collapsed,
-  onOpenCommands,
-  routeActions,
-  commandTriggerRef,
-  branchMenu
-}: {
+export type TopToolbarProps = {
   catalog: ProjectCatalog;
   context?: ProjectContext;
+  /** Organization pages have an organization but no project. */
+  organization?: Organization;
+  /** Overrides the page name derived from `activeRoute`. */
+  pageTitle?: string;
   onSelectProject: (projectId: string) => void;
   activeRoute?: NavigationDestination;
   collapsed: boolean;
@@ -112,12 +108,32 @@ export function TopToolbar({
   commandTriggerRef?: RefObject<HTMLButtonElement | null>;
   /** Organization › Project › Branch › Page (docs/project-branches.md §11.2). */
   branchMenu?: ReactNode;
-}) {
+};
+
+export function TopToolbar({
+  catalog,
+  context,
+  organization: organizationProp,
+  pageTitle,
+  onSelectProject,
+  activeRoute = "overview",
+  collapsed,
+  onOpenCommands,
+  routeActions,
+  commandTriggerRef,
+  branchMenu
+}: TopToolbarProps) {
   const navigate = useNavigate();
   const dragHandlers = useWindowDragHandlers();
   const desktop = usePlatform().kind === "desktop";
   const { isMobile, openMobile } = useSidebar();
   const { theme, setTheme } = useTheme();
+  const organization = context?.organization ?? organizationProp;
+  const openOrganization = (organizationId: string) =>
+    void navigate({
+      to: "/organizations/$organizationId",
+      params: { organizationId }
+    });
   const shortcut = navigator.platform.toLowerCase().includes("mac")
     ? "⌘K"
     : "Ctrl K";
@@ -191,50 +207,41 @@ export function TopToolbar({
           />
           <Breadcrumb className="min-w-0">
             <BreadcrumbList className="flex-nowrap">
-              {context ? (
+              {organization ? (
                 <>
-                  <BreadcrumbItem className="hidden min-w-0 sm:inline-flex">
+                  <BreadcrumbItem className="hidden min-w-0 gap-0 sm:inline-flex">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      aria-label={"Organization: " + organization.name}
+                      className="w-max max-w-full min-w-0 px-1.5 font-normal text-muted-foreground hover:text-primary-text"
+                      onClick={() => openOrganization(organization.id)}
+                    >
+                      <span className="truncate">{organization.name}</span>
+                    </Button>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button
                           variant="ghost"
-                          size="sm"
-                          aria-label={
-                            "Organization: " + context.organization.name
-                          }
-                          className="w-max max-w-full min-w-0 px-1.5 font-normal text-muted-foreground hover:text-primary-text data-[state=open]:text-primary-text"
+                          size="icon-xs"
+                          aria-label="Switch organization"
+                          className="text-muted-foreground hover:text-primary-text data-[state=open]:text-primary-text"
                         >
-                          <span className="truncate">
-                            {context.organization.name}
-                          </span>
-                          <ChevronDown className="size-3" />
+                          <ChevronsUpDown />
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent className="w-64" align="start">
                         <DropdownMenuLabel>Organizations</DropdownMenuLabel>
                         <DropdownMenuRadioGroup
-                          value={context.organization.id}
-                          onValueChange={(organizationId) => {
-                            const first = catalog.projects.find(
-                              ({ organization }) =>
-                                organization.id === organizationId
-                            );
-                            if (first) onSelectProject(first.project.id);
-                            else
-                              void navigate({
-                                to: "/organizations/$organizationId/settings",
-                                params: { organizationId }
-                              });
-                          }}
+                          value={organization.id}
+                          onValueChange={openOrganization}
                         >
-                          {catalog.organizations.map((organization) => (
+                          {catalog.organizations.map((item) => (
                             <DropdownMenuRadioItem
-                              key={organization.id}
-                              value={organization.id}
+                              key={item.id}
+                              value={item.id}
                             >
-                              <span className="truncate">
-                                {organization.name}
-                              </span>
+                              <span className="truncate">{item.name}</span>
                             </DropdownMenuRadioItem>
                           ))}
                         </DropdownMenuRadioGroup>
@@ -242,8 +249,8 @@ export function TopToolbar({
                         <DropdownMenuItem
                           onSelect={() =>
                             void navigate({
-                              to: "/setup",
-                              search: { create: "organization" }
+                              to: "/organizations/new",
+                              search: { fromOrganization: organization.id }
                             })
                           }
                         >
@@ -254,9 +261,7 @@ export function TopToolbar({
                           onSelect={() =>
                             void navigate({
                               to: "/organizations/$organizationId/settings",
-                              params: {
-                                organizationId: context.organization.id
-                              }
+                              params: { organizationId: organization.id }
                             })
                           }
                         >
@@ -267,6 +272,10 @@ export function TopToolbar({
                     </DropdownMenu>
                   </BreadcrumbItem>
                   <BreadcrumbSeparator className="hidden sm:block" />
+                </>
+              ) : null}
+              {context ? (
+                <>
                   <BreadcrumbItem className="hidden min-w-0 sm:inline-flex">
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
@@ -306,8 +315,10 @@ export function TopToolbar({
                         <DropdownMenuItem
                           onSelect={() =>
                             void navigate({
-                              to: "/setup",
-                              search: { create: "project" }
+                              to: "/organizations/$organizationId/projects/new",
+                              params: {
+                                organizationId: context.organization.id
+                              }
                             })
                           }
                         >
@@ -346,7 +357,8 @@ export function TopToolbar({
                   aria-current="page"
                   className="text-sm font-normal text-primary-text outline-none"
                 >
-                  {activeRoute[0].toUpperCase() + activeRoute.slice(1)}
+                  {pageTitle ??
+                    activeRoute[0].toUpperCase() + activeRoute.slice(1)}
                 </h1>
               </BreadcrumbItem>
             </BreadcrumbList>

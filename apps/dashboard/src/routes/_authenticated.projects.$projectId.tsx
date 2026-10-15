@@ -223,7 +223,7 @@ function ProjectAccessUnavailable({
           to="/setup"
           className="text-sm font-medium underline focus-visible:ring-2 focus-visible:ring-ring"
         >
-          Setup
+          Your workspace
         </Link>
       </div>
     </main>
@@ -502,6 +502,19 @@ function ProjectLayout() {
         activeRoute={route}
         navigateToProject={navigateToProject}
         navigateToRoute={navigateToRoute}
+        navigateToOrganization={(organizationId, page) =>
+          navigate(
+            page === "projects"
+              ? {
+                  to: "/organizations/$organizationId",
+                  params: { organizationId }
+                }
+              : {
+                  to: `/organizations/$organizationId/${page}`,
+                  params: { organizationId }
+                }
+          )
+        }
         openPreferences={() => navigate({ to: "/profile" as never })}
         signOut={() => router.options.context.auth.signOut()}
         profile={profileQuery.data}

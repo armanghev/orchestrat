@@ -1,54 +1,53 @@
 import { useQuery } from "@tanstack/react-query";
-import { createFileRoute, useNavigate, useRouter } from "@tanstack/react-router";
-import { organizationsQueryOptions, hierarchyKeys } from "@/features/hierarchy/query-options";
-import { OrganizationSettingsShell } from "@/features/settings/organization-settings-shell";
+import {
+  createFileRoute,
+  useNavigate,
+  useRouter
+} from "@tanstack/react-router";
+import { hierarchyKeys } from "@/features/hierarchy/query-options";
 import { OrganizationSettingsPage } from "@/features/settings/organization-settings-page";
+import { useOrganizationRoute } from "./_authenticated.organizations.$organizationId";
 
 function OrganizationSettingsRoute() {
-  const { organizationId } = Route.useParams();
+  const { organization } = useOrganizationRoute();
   const router = useRouter();
   const navigate = useNavigate();
   const { api, queryClient } = router.options.context;
-  const organizationsQuery = useQuery(organizationsQueryOptions(api));
   const profileQuery = useQuery({
     queryKey: ["profile"],
     queryFn: () => api.getProfile()
   });
 
-  if (organizationsQuery.isPending || profileQuery.isPending)
-    return <div className="h-dvh animate-pulse bg-background" aria-label="Loading organization settings" />;
-
-  const organization = organizationsQuery.data?.organizations.find(
-    (item) => item.id === organizationId
-  );
-  if (!organization || profileQuery.isError)
+  if (profileQuery.isPending)
     return (
-      <main className="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-6">
-        <h1 className="text-2xl font-semibold tracking-tight">Organization unavailable</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          We couldn’t load these organization settings.
-        </p>
-      </main>
+      <div
+        className="dashboard-page h-64 animate-pulse rounded bg-muted"
+        aria-label="Loading organization settings"
+      />
+    );
+  if (profileQuery.isError)
+    return (
+      <p role="alert" className="dashboard-page text-sm text-muted-foreground">
+        We couldn’t load these organization settings.
+      </p>
     );
 
-  const leaveSettings = async () => {
-    await queryClient.invalidateQueries({ queryKey: hierarchyKeys.all });
-    await navigate({ to: "/" });
+  const leaveOrganization = async () => {
+    // Drop the cache rather than refetch it: this organization's queries
+    // would now fail, and /setup must decide from a fresh catalog.
+    queryClient.removeQueries({ queryKey: hierarchyKeys.all });
+    await navigate({ to: "/setup" });
   };
 
   return (
-    <OrganizationSettingsShell>
-      <OrganizationSettingsPage
-        organization={organization}
-        api={api}
-        currentUserId={profileQuery.data.user_id}
-        onUpdated={() => {
-          void queryClient.invalidateQueries({ queryKey: hierarchyKeys.all });
-        }}
-        onDeleted={() => void leaveSettings()}
-        onLeft={() => void leaveSettings()}
-      />
-    </OrganizationSettingsShell>
+    <OrganizationSettingsPage
+      organization={organization}
+      api={api}
+      onUpdated={() => {
+        void queryClient.invalidateQueries({ queryKey: hierarchyKeys.all });
+      }}
+      onDeleted={() => void leaveOrganization()}
+    />
   );
 }
 

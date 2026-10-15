@@ -3,23 +3,25 @@ import {
   useContext,
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
   type ReactNode
 } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
+import type { Organization } from "@orchestrat/protocol";
 import type { ProjectCatalog } from "@/features/hierarchy/catalog";
 import {
   buildCommands,
-  type NavigationDestination
+  type BuildCommandsOptions,
+  type NavigationDestination,
+  type OrganizationDestination
 } from "@/features/command/commands";
 import { orderProjects } from "@/features/hierarchy/project-order";
 import { useTheme } from "@/features/theme/theme-provider";
 import { usePreferences } from "@/platform/preferences-provider";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
-import { ContextSidebar } from "./context-sidebar";
-import { TopToolbar } from "./top-toolbar";
+import { ContextSidebar, OrganizationSidebar } from "./context-sidebar";
+import { TopToolbar, type TopToolbarProps } from "./top-toolbar";
 import { CommandMenu } from "./command-menu";
 import { usePlatform } from "@/platform/provider";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -49,41 +51,50 @@ export function TopToolbarActions({ children }: { children: ReactNode }) {
   return null;
 }
 
-export type AppShellProps = {
-  catalog: ProjectCatalog;
-  api: ApiClient;
-  activeProjectId?: string;
-  activeRoute?: NavigationDestination;
-  navigateToProject: (projectId: string) => void | Promise<void>;
-  navigateToRoute: (
-    route: NavigationDestination,
-    projectId?: string
-  ) => void | Promise<void>;
-  openPreferences: () => void | Promise<void>;
-  signOut: () => void | Promise<void>;
-  profile?: {
-    username: string | null;
-    full_name: string | null;
-    email: string;
-    avatar_url: string | null;
-  };
-  retryCatalog?: () => void | Promise<void>;
-  children: ReactNode;
+type Profile = {
+  username: string | null;
+  full_name: string | null;
+  email: string;
+  avatar_url: string | null;
 };
 
-export function AppShell({
+type ShellCommandOptions = Omit<
+  BuildCommandsOptions,
+  "catalog" | "setTheme" | "toggleSidebar" | "openPreferences" | "signOut"
+>;
+
+/** The frame every signed-in page with navigation shares: the collapsible
+ * sidebar, the toolbar, the main region with shell banners, and ⌘K search. */
+function ShellFrame({
   catalog,
-  api,
-  activeProjectId,
-  activeRoute = "overview",
-  navigateToProject,
-  navigateToRoute,
+  navigationLabel,
+  sidebar,
+  toolbar,
+  banners,
+  commandOptions,
   openPreferences,
   signOut,
-  profile,
   retryCatalog,
   children
-}: AppShellProps) {
+}: {
+  catalog: ProjectCatalog;
+  navigationLabel: string;
+  sidebar: (openCommands: () => void) => ReactNode;
+  toolbar: Omit<
+    TopToolbarProps,
+    | "catalog"
+    | "onOpenCommands"
+    | "collapsed"
+    | "routeActions"
+    | "commandTriggerRef"
+  >;
+  banners?: ReactNode;
+  commandOptions: ShellCommandOptions;
+  openPreferences: () => void | Promise<void>;
+  signOut: () => void | Promise<void>;
+  retryCatalog?: () => void | Promise<void>;
+  children: ReactNode;
+}) {
   const { preferences, update } = usePreferences();
   const desktop = usePlatform().kind === "desktop";
   const { setTheme } = useTheme();
@@ -99,6 +110,148 @@ export function AppShell({
         : defaultCommandTriggerRef.current;
     setOpen(true);
   }, []);
+  const toggleSidebar = () => {
+    void update({
+      contextSidebarCollapsed: !preferences.contextSidebarCollapsed
+    });
+  };
+  const commands = buildCommands({
+    ...commandOptions,
+    catalog,
+    setTheme,
+    toggleSidebar,
+    openPreferences,
+    signOut
+  });
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        (target.isContentEditable ||
+          target.matches("input, textarea, select, [role='textbox']"))
+      )
+        return;
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        openCommands();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [openCommands]);
+  return (
+    <SidebarProvider
+      className="h-full min-h-0 overflow-hidden"
+      open={!preferences.contextSidebarCollapsed}
+      onOpenChange={(open) => void update({ contextSidebarCollapsed: !open })}
+    >
+      <a
+        href="#main-content"
+        className="sr-only fixed left-4 top-4 z-50 rounded-lg bg-primary px-4 py-2 text-sm text-primary-foreground focus:not-sr-only"
+      >
+        Skip to content
+      </a>
+      {desktop ? (
+        <div className="pointer-events-none fixed inset-x-0 top-0 z-50 hidden h-12 items-center md:flex">
+          <WindowDragRegion />
+          <SidebarTrigger
+            aria-label={
+              preferences.contextSidebarCollapsed
+                ? "Restore sidebar"
+                : "Collapse sidebar"
+            }
+            className="pointer-events-auto relative left-22"
+          />
+        </div>
+      ) : null}
+      <aside aria-label={navigationLabel} className="contents">
+        {sidebar(openCommands)}
+      </aside>
+      <div className="flex w-full min-w-0 flex-1 flex-col">
+        <TopToolbar
+          {...toolbar}
+          catalog={catalog}
+          onOpenCommands={openCommands}
+          collapsed={preferences.contextSidebarCollapsed}
+          routeActions={routeActions}
+          commandTriggerRef={defaultCommandTriggerRef}
+        />
+        <main
+          id="main-content"
+          tabIndex={0}
+          className="min-h-0 flex-1 overflow-auto"
+        >
+          <ConnectivityBanner />
+          {banners}
+          {catalog.failures.length ? (
+            <Alert role="status" className="m-4 w-auto">
+              <AlertDescription>
+                Some projects could not be loaded.
+                {retryCatalog ? (
+                  <button
+                    type="button"
+                    className="font-medium text-foreground underline focus-visible:ring-2 focus-visible:ring-ring"
+                    onClick={() => void retryCatalog()}
+                  >
+                    Retry
+                  </button>
+                ) : null}
+              </AlertDescription>
+            </Alert>
+          ) : null}
+          <TopToolbarActionsContext.Provider value={setRouteActions}>
+            {children}
+          </TopToolbarActionsContext.Provider>
+        </main>
+      </div>
+      <CommandMenu
+        open={open}
+        onOpenChange={setOpen}
+        commands={commands}
+        triggerRef={commandInvokerRef}
+      />
+    </SidebarProvider>
+  );
+}
+
+export type AppShellProps = {
+  catalog: ProjectCatalog;
+  api: ApiClient;
+  activeProjectId?: string;
+  activeRoute?: NavigationDestination;
+  navigateToProject: (projectId: string) => void | Promise<void>;
+  navigateToRoute: (
+    route: NavigationDestination,
+    projectId?: string
+  ) => void | Promise<void>;
+  navigateToOrganization?: (
+    organizationId: string,
+    destination: OrganizationDestination
+  ) => void | Promise<void>;
+  openPreferences: () => void | Promise<void>;
+  signOut: () => void | Promise<void>;
+  profile?: Profile;
+  retryCatalog?: () => void | Promise<void>;
+  children: ReactNode;
+};
+
+/** Project pages: project navigation, Organization › Project › Branch. */
+export function AppShell({
+  catalog,
+  api,
+  activeProjectId,
+  activeRoute = "overview",
+  navigateToProject,
+  navigateToRoute,
+  navigateToOrganization,
+  openPreferences,
+  signOut,
+  profile,
+  retryCatalog,
+  children
+}: AppShellProps) {
+  const { preferences, update } = usePreferences();
   const current = catalog.projects.find(
     ({ project }) => project.id === activeProjectId
   );
@@ -143,87 +296,11 @@ export function AppShell({
       recentProjectIds: ordered.recentProjectIds
     });
   };
-  const toggleSidebar = () => {
-    void update({
-      contextSidebarCollapsed: !preferences.contextSidebarCollapsed
-    });
-  };
-  const commands = useMemo(
-    () =>
-      buildCommands({
-        catalog,
-        activeProjectId,
-        navigateToProject: selectProject,
-        navigateToRoute,
-        setTheme,
-        toggleSidebar,
-        openPreferences,
-        signOut,
-        branches: branchContext
-          ? {
-              branches: branchContext.branches,
-              currentBranchId: branchContext.branchId,
-              canCreate: !branchContext.projectArchived,
-              selectBranch: branchContext.selectBranch,
-              openCreateBranch: branchContext.openCreateBranch
-            }
-          : undefined
-      }),
-    [
-      catalog,
-      activeProjectId,
-      preferences,
-      navigateToProject,
-      navigateToRoute,
-      setTheme,
-      openPreferences,
-      signOut,
-      branchContext
-    ]
-  );
-  useEffect(() => {
-    const handler = (event: KeyboardEvent) => {
-      const target = event.target;
-      if (
-        target instanceof HTMLElement &&
-        (target.isContentEditable ||
-          target.matches("input, textarea, select, [role='textbox']"))
-      )
-        return;
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        openCommands();
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [openCommands]);
   return (
-    <SidebarProvider
-      className="h-full min-h-0 overflow-hidden"
-      open={!preferences.contextSidebarCollapsed}
-      onOpenChange={(open) => void update({ contextSidebarCollapsed: !open })}
-    >
-      <a
-        href="#main-content"
-        className="sr-only fixed left-4 top-4 z-50 rounded-lg bg-primary px-4 py-2 text-sm text-primary-foreground focus:not-sr-only"
-      >
-        Skip to content
-      </a>
-      {desktop ? (
-        <div className="pointer-events-none fixed inset-x-0 top-0 z-50 hidden h-12 items-center md:flex">
-          <WindowDragRegion />
-          <SidebarTrigger
-            aria-label={
-              preferences.contextSidebarCollapsed
-                ? "Restore sidebar"
-                : "Collapse sidebar"
-            }
-            className="pointer-events-auto relative left-22"
-          />
-        </div>
-      ) : null}
-      <aside aria-label="Project navigation" className="contents">
+    <ShellFrame
+      catalog={catalog}
+      navigationLabel="Project navigation"
+      sidebar={(openCommands) => (
         <ContextSidebar
           activeRoute={activeRoute}
           onNavigate={navigateToRoute}
@@ -235,54 +312,113 @@ export function AppShell({
           taskCounts={taskCounts}
           decisionCount={branchContext?.branch.open_decision_count}
         />
-      </aside>
-      <div className="flex w-full min-w-0 flex-1 flex-col">
-        <TopToolbar
-          catalog={catalog}
-          context={current}
-          onSelectProject={selectProject}
-          activeRoute={activeRoute}
-          onOpenCommands={openCommands}
-          collapsed={preferences.contextSidebarCollapsed}
-          routeActions={routeActions}
-          commandTriggerRef={defaultCommandTriggerRef}
-          branchMenu={branchContext ? <BranchSelector api={api} /> : null}
-        />
-        <main
-          id="main-content"
-          tabIndex={0}
-          className="min-h-0 flex-1 overflow-auto"
-        >
-          <ConnectivityBanner />
+      )}
+      toolbar={{
+        context: current,
+        onSelectProject: selectProject,
+        activeRoute,
+        branchMenu: branchContext ? <BranchSelector api={api} /> : null
+      }}
+      banners={
+        <>
           <ArchivedBranchBanner />
           <BranchOnboardingPanel api={api} />
-          {catalog.failures.length ? (
-            <Alert role="status" className="m-4 w-auto">
-              <AlertDescription>
-                Some projects could not be loaded.
-                {retryCatalog ? (
-                  <button
-                    type="button"
-                    className="font-medium text-foreground underline focus-visible:ring-2 focus-visible:ring-ring"
-                    onClick={() => void retryCatalog()}
-                  >
-                    Retry
-                  </button>
-                ) : null}
-              </AlertDescription>
-            </Alert>
-          ) : null}
-          <TopToolbarActionsContext.Provider value={setRouteActions}>
-            {children}
-          </TopToolbarActionsContext.Provider>
-        </main>
-      </div>
-      <CommandMenu
-        open={open}
-        onOpenChange={setOpen}
-        commands={commands}
-        triggerRef={commandInvokerRef}
-      />
-    </SidebarProvider>
+        </>
+      }
+      commandOptions={{
+        activeProjectId,
+        navigateToOrganization,
+        navigateToProject: selectProject,
+        navigateToRoute,
+        branches: branchContext
+          ? {
+              branches: branchContext.branches,
+              currentBranchId: branchContext.branchId,
+              canCreate: !branchContext.projectArchived,
+              selectBranch: branchContext.selectBranch,
+              openCreateBranch: branchContext.openCreateBranch
+            }
+          : undefined
+      }}
+      openPreferences={openPreferences}
+      signOut={signOut}
+      retryCatalog={retryCatalog}
+    >
+      {children}
+    </ShellFrame>
+  );
+}
+
+const organizationPageTitles: Record<OrganizationDestination, string> = {
+  projects: "Projects",
+  members: "Members",
+  settings: "Settings"
+};
+
+/** Organization pages: Projects, Members, Settings; Organization › Page. */
+export function OrganizationShell({
+  catalog,
+  organization,
+  activeDestination,
+  pageTitle,
+  navigateToOrganization,
+  navigateToProject,
+  openPreferences,
+  signOut,
+  profile,
+  retryCatalog,
+  children
+}: {
+  catalog: ProjectCatalog;
+  organization: Organization;
+  /** Undefined on pages outside the sidebar's three, which pass a title. */
+  activeDestination?: OrganizationDestination;
+  pageTitle?: string;
+  navigateToOrganization: (
+    organizationId: string,
+    destination: OrganizationDestination
+  ) => void | Promise<void>;
+  navigateToProject: (projectId: string) => void | Promise<void>;
+  openPreferences: () => void | Promise<void>;
+  signOut: () => void | Promise<void>;
+  profile?: Profile;
+  retryCatalog?: () => void | Promise<void>;
+  children: ReactNode;
+}) {
+  return (
+    <ShellFrame
+      catalog={catalog}
+      navigationLabel="Organization navigation"
+      sidebar={(openCommands) => (
+        <OrganizationSidebar
+          activeDestination={activeDestination}
+          onNavigate={(destination) =>
+            void navigateToOrganization(organization.id, destination)
+          }
+          onOpenCommands={openCommands}
+          onOpenPreferences={openPreferences}
+          onSignOut={signOut}
+          profile={profile}
+        />
+      )}
+      toolbar={{
+        organization,
+        onSelectProject: (id) => void navigateToProject(id),
+        pageTitle:
+          pageTitle ?? organizationPageTitles[activeDestination ?? "projects"]
+      }}
+      commandOptions={{
+        activeOrganizationId: organization.id,
+        navigateToOrganization,
+        navigateToProject,
+        navigateToRoute: (_route, projectId) =>
+          projectId ? navigateToProject(projectId) : undefined
+      }}
+      openPreferences={openPreferences}
+      signOut={signOut}
+      retryCatalog={retryCatalog}
+    >
+      {children}
+    </ShellFrame>
   );
 }

@@ -175,6 +175,12 @@ export class RepositoryService {
     const row = await this.active(projectId);
     return {
       repository: row ? await this.json(row) : null,
+      ...this.listProviders()
+    };
+  }
+
+  listProviders() {
+    return {
       providers: PROVIDERS.filter(
         (provider) => !this.config.hidden.includes(provider)
       ).map((provider) => {
@@ -381,7 +387,10 @@ export class RepositoryService {
     if ("authorizeUrl" in result)
       return { next: "authorize" as const, authorize_url: result.authorizeUrl };
     await this.mark(attempt.id, { installationId: result.installationId });
-    return { next: "pick_repository" as const };
+    return {
+      next: "pick_repository" as const,
+      return_path: this.returnTo(attempt)
+    };
   }
 
   async candidates(userId: string, projectId: string, attemptId: string) {
@@ -429,6 +438,7 @@ export class RepositoryService {
     return {
       authorization_id: attempt.id,
       project_id: attempt.projectId,
+      return_path: this.returnTo(attempt),
       provider: attempt.provider,
       expires_at: attempt.expiresAt.toISOString()
     };

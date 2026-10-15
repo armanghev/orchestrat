@@ -23,6 +23,7 @@ import { FakeProvider } from "../services/repository/testing/fake-provider.js";
 import { AgentService } from "../services/agent-service.js";
 import { BranchService } from "../services/branch-service.js";
 import { MergeEngine, type AttachmentKey } from "../services/merges/engine.js";
+import { checkProjectSummaries } from "../test/project-summaries.js";
 import { workspaceOn } from "../test/workspace.js";
 
 // Branch concurrency needs real row locks (docs/project-branches.md §13.2).
@@ -78,6 +79,13 @@ test(
         .filter((value) => value.endsWith(".sql"))
         .sort())
         await pool.query(await readFile(new URL(file, migrations), "utf8"));
+
+      await t.test(
+        "project summaries enforce membership and aggregate counts",
+        async () => {
+          await checkProjectSummaries(await workspaceOn(app, db));
+        }
+      );
 
       const space = async () => {
         const s = await workspaceOn(app, db);

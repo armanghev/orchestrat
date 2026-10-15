@@ -30,6 +30,53 @@ describe("ApiClient", () => {
     });
   });
 
+  it("loads schema-validated project summaries", async () => {
+    const item = {
+      ...project(),
+      task_key_prefix: "ORC",
+      default_branch_name: "main",
+      member_count: 2,
+      open_task_count: 3,
+      last_activity_at: null,
+      repository: null
+    };
+    server.use(
+      http.get(
+        `${apiUrl}/api/v1/organizations/${item.organization_id}/project-summaries`,
+        ({ request }) => {
+          expect(request.headers.get("authorization")).toBe(
+            "Bearer test-token"
+          );
+          return HttpResponse.json({ projects: [item] });
+        }
+      )
+    );
+    const api = new ApiClient(apiUrl, authTokenFixture(["test-token"]));
+    await expect(
+      api.listProjectSummaries(item.organization_id)
+    ).resolves.toEqual({ projects: [item] });
+  });
+
+  it("loads repository providers without a project", async () => {
+    const response = {
+      providers: [
+        {
+          provider: "github",
+          configured: false,
+          unavailable_reason: "Not configured"
+        }
+      ]
+    };
+    server.use(
+      http.get(`${apiUrl}/api/v1/repository/providers`, ({ request }) => {
+        expect(request.headers.get("authorization")).toBe("Bearer test-token");
+        return HttpResponse.json(response);
+      })
+    );
+    const api = new ApiClient(apiUrl, authTokenFixture(["test-token"]));
+    await expect(api.listRepositoryProviders()).resolves.toEqual(response);
+  });
+
   it("posts the exact organization JSON to the organization endpoint", async () => {
     const input = { name: "Product Studio", slug: "product-studio" };
     const expected = organization();

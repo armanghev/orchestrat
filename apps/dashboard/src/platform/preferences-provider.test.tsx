@@ -21,7 +21,8 @@ const defaults = {
   railMode: "projects" as const,
   pinnedProjectIds: [],
   recentProjectIds: [],
-  contextSidebarCollapsed: false
+  contextSidebarCollapsed: false,
+  organizationProjectsViews: {}
 };
 
 function platform(preferences: PreferenceStore): Platform {

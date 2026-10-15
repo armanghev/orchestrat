@@ -42,3 +42,11 @@ export const repositoryCandidatesQueryOptions = (
     retry: false,
     staleTime: Infinity
   });
+
+/** Which providers this server can connect, before any project exists. */
+export const repositoryProvidersQueryOptions = (api: ApiClient) =>
+  queryOptions({
+    queryKey: [...repositoryKeys.all, "providers"] as const,
+    queryFn: () => api.listRepositoryProviders(),
+    staleTime: 5 * 60_000
+  });
