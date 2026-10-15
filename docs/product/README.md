@@ -145,11 +145,9 @@ Implemented today:
 
 The source candidate is implemented and covered by repository checks. Hosted
 deployment, database migration, package publication, signed/notarized native
-distribution, and clean-Mac multi-agent acceptance remain unverified. See the
-[private-alpha operations runbook](../private-alpha-runbook.md) for those gates.
+distribution, and clean-Mac multi-agent acceptance remain unverified.
 Repository connections are tested only against simulated providers, and the
-hosted database is not yet migrated for branches; see the
-[branches acceptance record](../acceptance/2026-09-30-project-branches.md).
+hosted database is not yet migrated for branches.
 
 ## Deferred until after private alpha
 

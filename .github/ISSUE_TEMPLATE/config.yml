@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and setup help
+    url: https://orchestrat.dev/docs
+    about: Installing, self-hosting and connecting agents are covered in the docs.
+  - name: Report a security vulnerability
+    url: https://github.com/armanghev/orchestrat/security/advisories/new
+    about: Report vulnerabilities privately, not as public issues.

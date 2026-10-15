@@ -403,10 +403,7 @@ The source candidate contains the API, CLI/MCP, dashboard, realtime, document,
 attachment, and native packaging paths. Package publication, hosted deployment
 and migration, R2 production configuration, signed/notarized DMG distribution,
 and clean-Mac multi-agent acceptance are not verified by the source checkout.
-The [operations runbook](../private-alpha-runbook.md) tracks those gates.
 
 Project branches add their own: migrating the hosted database to `0016`, live
 acceptance against GitHub, GitLab.com and Cursor Origin, and the migration
-that drops the rollout trigger. The
-[branches acceptance record](../acceptance/2026-09-30-project-branches.md)
-lists what ran and what didn't.
+that drops the rollout trigger.
