@@ -8,7 +8,6 @@ const paths = [
   "",
   "/about",
   "/docs",
-  "/pricing",
   "/faq",
   "/guides",
   "/guides/coordinate-multiple-coding-agents",
@@ -86,8 +85,8 @@ test("public pages, crawl files, structured data, and real 404 responses", async
         "See who is working",
         "orchestrat mcp --integration codex",
         "arman@orchestrat.dev",
-        "By joining, you’re requesting Orchestrat early-access emails.",
-        "Request removal anytime",
+        'href="/docs/quickstart"',
+        'href="https://github.com/armanghev/orchestrat"',
         'href="/privacy#cookies"'
       ]) {
         assert.ok(markup.includes(text), `homepage HTML: ${text}`);

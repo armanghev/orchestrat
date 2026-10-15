@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
-import { ArrowRight } from "lucide-react";
 import { AgentMark, agents, type AgentId } from "@/components/landing/agents";
 import { HeroStage } from "@/components/sections/hero-stage";
+import { CtaLinks } from "@/components/cta-links";
 
 const supported: AgentId[] = ["claude", "codex", "cursor", "antigravity"];
 const lines = [
@@ -59,16 +59,10 @@ export function HeroSection() {
           feed of who is doing what.
         </p>
         <div
-          className="hero-fade mt-9 flex flex-wrap items-center justify-center gap-3"
+          className="hero-fade mt-9"
           style={{ "--delay": "700ms" } as CSSProperties}
         >
-          <a href="#waitlist" className="button button-primary">
-            Join the waitlist
-            <ArrowRight size={16} aria-hidden="true" />
-          </a>
-          <a href="#compare" className="button button-ghost">
-            See it in action
-          </a>
+          <CtaLinks className="justify-center" />
         </div>
         <div
           className="hero-fade mt-8 flex max-w-2xl flex-wrap items-center justify-center gap-2"

@@ -4,6 +4,8 @@ import { useState } from "react";
 import Link from "next/link";
 import { ArrowRight, Menu, X } from "lucide-react";
 import { OrchestratLogo } from "@/components/graphics/orchestrat-logo";
+import { GitHubMark } from "@/components/graphics/github-mark";
+import { githubUrl, quickstartHref } from "@/lib/links";
 
 const links = [
   { label: "How it works", href: "/#how-it-works" },
@@ -35,7 +37,7 @@ export function Navbar() {
           >
             <OrchestratLogo />
           </Link>
-          <div className="hidden items-center gap-8 md:flex">
+          <div className="hidden items-center gap-8 lg:flex">
             {links.map((link) => (
               <Link
                 key={link.href}
@@ -46,19 +48,25 @@ export function Navbar() {
               </Link>
             ))}
           </div>
-          <Link
-            href="/#waitlist"
-            className="button button-primary hidden min-h-9 px-4 md:inline-flex"
-          >
-            Join waitlist
-          </Link>
+          <div className="ml-auto hidden items-center gap-2 md:flex lg:ml-0">
+            <a href={githubUrl} className="button button-ghost min-h-9 px-3">
+              <GitHubMark />
+              GitHub
+            </a>
+            <Link
+              href={quickstartHref}
+              className="button button-primary min-h-9 px-4"
+            >
+              Self-host it
+            </Link>
+          </div>
           <button
             id="menu-toggle"
             type="button"
             aria-label={open ? "Close menu" : "Open menu"}
             aria-expanded={open}
             aria-controls="mobile-navigation"
-            className="group relative flex size-11 items-center justify-center rounded-md hover:bg-secondary md:hidden"
+            className="group relative flex size-11 items-center justify-center rounded-md hover:bg-secondary lg:hidden"
             onClick={() => setOpen((current) => !current)}
           >
             <Menu
@@ -78,7 +86,7 @@ export function Navbar() {
           data-open={open}
           aria-hidden={!open}
           inert={!open}
-          className="grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] data-[open=true]:grid-rows-[1fr] data-[open=true]:opacity-100 md:hidden"
+          className="grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] data-[open=true]:grid-rows-[1fr] data-[open=true]:opacity-100 lg:hidden"
         >
           <div className="min-h-0 overflow-hidden">
             <div className="flex flex-col gap-1 border-t pb-5 pt-3">
@@ -92,14 +100,24 @@ export function Navbar() {
                   {link.label}
                 </Link>
               ))}
-              <Link
-                href="/#waitlist"
-                className="button button-primary mt-2"
-                onClick={() => setOpen(false)}
-              >
-                Join waitlist
-                <ArrowRight size={16} />
-              </Link>
+              <div className="mt-2 grid grid-cols-2 gap-2 md:hidden">
+                <a
+                  href={githubUrl}
+                  className="button button-outline"
+                  onClick={() => setOpen(false)}
+                >
+                  <GitHubMark />
+                  GitHub
+                </a>
+                <Link
+                  href={quickstartHref}
+                  className="button button-primary"
+                  onClick={() => setOpen(false)}
+                >
+                  Self-host it
+                  <ArrowRight size={16} aria-hidden="true" />
+                </Link>
+              </div>
             </div>
           </div>
         </div>

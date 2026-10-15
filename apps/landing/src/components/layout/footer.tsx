@@ -18,7 +18,6 @@ export function Footer() {
             { href: "/about", label: "About" },
             { href: "/docs", label: "Docs" },
             { href: "/guides", label: "Guides" },
-            { href: "/pricing", label: "Pricing" },
             { href: "/faq", label: "FAQ" }
           ].map((link) => (
             <Link

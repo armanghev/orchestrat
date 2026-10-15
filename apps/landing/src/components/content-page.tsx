@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Fragment } from "react";
 import { StructuredData } from "@/components/structured-data";
+import { CtaLinks } from "@/components/cta-links";
 import { contentPages } from "@/lib/content";
 import { founder, organization, pageMetadata, siteUrl } from "@/lib/seo";
 
@@ -251,9 +252,7 @@ export function ContentPage({ slug }: { slug: string }) {
           <p className="text-sm text-muted-foreground">
             Bring your agents onto the same page.
           </p>
-          <Link className="button button-primary" href="/#waitlist">
-            Join the waitlist
-          </Link>
+          <CtaLinks secondary="button-outline" />
         </div>
       </article>
     </div>

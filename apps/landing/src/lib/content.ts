@@ -103,12 +103,12 @@ export const contentPages: ContentPage[] = [
           "Orchestrat is in private early access with a public waitlist. Features may change during the alpha. Public pricing and a general release date have not been announced."
         ],
         links: [
-          { label: "Join the waitlist", href: "/#waitlist" },
+          { label: "Self-host it", href: "/docs/quickstart" },
           { label: "Privacy Policy", href: "/privacy" }
         ]
       }
     ],
-    related: ["docs", "pricing", "faq"]
+    related: ["docs", "faq"]
   },
   {
     slug: "docs",
@@ -124,7 +124,7 @@ export const contentPages: ContentPage[] = [
           "You need an Orchestrat account with access to a project, macOS, Node.js 20.19+ or a supported newer Node.js release, and at least one supported coding tool. Follow the installation details supplied with your invitation if they specify a particular alpha version.",
           "An npm package installation alone does not grant access to a project. If you have not been invited, join the waitlist first."
         ],
-        links: [{ label: "Request early access", href: "/#waitlist" }]
+        links: [{ label: "Self-host it", href: "/docs/quickstart" }]
       },
       {
         heading: "Install and connect",
@@ -180,41 +180,6 @@ export const contentPages: ContentPage[] = [
     ]
   },
   {
-    slug: "pricing",
-    title: "Orchestrat pricing and early access",
-    description:
-      "Orchestrat is in private early access. Public pricing is not yet announced. Learn what joining the waitlist means and how to request an invitation.",
-    intro:
-      "Orchestrat is in private early access. Public pricing has not been announced. Join the waitlist to request an invitation and hear about availability.",
-    sections: [
-      {
-        heading: "What the waitlist means",
-        paragraphs: [
-          "Joining the waitlist registers your interest in Orchestrat. It does not create a paid subscription, reserve a price, or guarantee an invitation or release date. We use your email for early-access communications."
-        ],
-        links: [{ label: "Join the waitlist", href: "/#waitlist" }]
-      },
-      {
-        heading: "What is available during the alpha?",
-        paragraphs: [
-          "The private alpha focuses on shared tasks, ownership, versioned documents, and agent activity for a developer using local coding agents. Setup connects supported tools through the CLI and MCP bridge. Features and availability may change as the product develops.",
-          "Orchestrat does not provide the AI models used by connected coding tools. Your arrangements with those providers remain separate."
-        ]
-      },
-      {
-        heading: "Future plans and billing",
-        paragraphs: [
-          "Any future paid offering will disclose its pricing and payment terms before you agree to pay. We have not published subscription tiers, usage allowances, or a general-availability date. For product or access questions, contact arman@orchestrat.dev."
-        ],
-        links: [
-          { label: "Contact support", href: "mailto:arman@orchestrat.dev" },
-          { label: "Terms of Service", href: "/terms" }
-        ]
-      }
-    ],
-    related: ["about", "docs", "faq"]
-  },
-  {
     slug: "faq",
     title: "Orchestrat frequently asked questions",
     description:
@@ -222,7 +187,7 @@ export const contentPages: ContentPage[] = [
     intro:
       "Straight answers about what Orchestrat does, how agents connect, and what to expect during private early access.",
     sections: faqs,
-    related: ["docs", "pricing", "about"]
+    related: ["docs", "about"]
   },
   {
     slug: "guides",
