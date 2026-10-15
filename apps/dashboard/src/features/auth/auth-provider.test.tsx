@@ -1,99 +1,74 @@
 import { StrictMode } from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { FakeAuthClient } from "@/test/fake-auth-client";
 import { useAuthSnapshot } from "./auth-context";
 import { AuthProvider } from "./auth-provider";
 
-const mockedBridge = vi.hoisted(() => ({
-  beginGitHub: vi.fn(async () => undefined),
-  sendMagicLink: vi.fn(async () => undefined),
-  complete: vi.fn(async () => ({
-    accessToken: "access-1",
-    expiresAtMs: 60_000
-  })),
-  refresh: vi.fn(async () => ({
-    accessToken: "access-2",
-    expiresAtMs: 60_000
-  })),
-  restore: vi.fn(async () => null),
-  expire: vi.fn(async () => undefined),
-  signOut: vi.fn(async () => undefined)
-}));
+const createBrowserWebAuthClient = vi.hoisted(() => vi.fn());
+vi.mock("./web-auth-client", () => ({ createBrowserWebAuthClient }));
 
-vi.mock("./desktop-bridge", () => ({ desktopAuthBridge: mockedBridge }));
-
-const desktopConfig = {
-  apiUrl: "https://api.test",
-  supabaseUrl: null,
-  supabasePublishableKey: null,
-  webAuthCallbackUrl: null,
-  e2eAuth: false,
-  runtime: "desktop" as const
-};
+const config = (
+  runtime: "desktop" | "web",
+  { e2eAuth = false, host = `${runtime}-api` } = {}
+) => ({
+  apiUrl: `https://${host}.example.com`,
+  e2eAuth,
+  runtime
+});
 
 function AuthStatus() {
-  const snapshot = useAuthSnapshot();
-  return <p>{snapshot.status}</p>;
+  return <p>{useAuthSnapshot().status}</p>;
 }
 
 describe("AuthProvider", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => createBrowserWebAuthClient.mockReset());
 
-  it("keeps the desktop client usable through StrictMode effect replay", async () => {
-    let callback: ((url: URL) => void) | undefined;
-    const platform = {
-      kind: "desktop" as const,
-      preferences: { load: vi.fn(), save: vi.fn() },
-      openExternal: vi.fn(async () => undefined),
-      onAuthCallback: vi.fn(async (handler: (url: URL) => void) => {
-        callback = handler;
-        return vi.fn();
-      })
-    };
-    render(
-      <StrictMode>
-        <AuthProvider config={desktopConfig} platform={platform}>
-          <AuthStatus />
-        </AuthProvider>
-      </StrictMode>
-    );
+  it.each(["web", "desktop"] as const)(
+    "signs in with the password client on %s",
+    async (runtime) => {
+      const client = new FakeAuthClient({ status: "signedOut" });
+      createBrowserWebAuthClient.mockReturnValueOnce(client);
+      render(
+        <StrictMode>
+          <AuthProvider config={config(runtime)}>
+            <AuthStatus />
+          </AuthProvider>
+        </StrictMode>
+      );
+      await screen.findByText("signedOut");
+      expect(createBrowserWebAuthClient).toHaveBeenCalledOnce();
+      expect(createBrowserWebAuthClient).toHaveBeenCalledWith(
+        `https://${runtime}-api.example.com`
+      );
+      expect(client.initialize).toHaveBeenCalledOnce();
+    }
+  );
 
-    await screen.findByText("signedOut");
-    expect(platform.onAuthCallback).toHaveBeenCalledOnce();
-    callback?.(
-      new URL("dev.orchestrat.app://auth/callback?code=a&sb_flow_id=b")
-    );
-
-    await waitFor(() => expect(mockedBridge.complete).toHaveBeenCalledOnce());
-    expect(screen.getByText("signedIn")).toBeInTheDocument();
-  });
-
-  it("disposes the desktop client when unmounted", async () => {
-    let callback: ((url: URL) => void) | undefined;
-    const unlisten = vi.fn();
-    const platform = {
-      kind: "desktop" as const,
-      preferences: { load: vi.fn(), save: vi.fn() },
-      openExternal: vi.fn(async () => undefined),
-      onAuthCallback: vi.fn(async (handler: (url: URL) => void) => {
-        callback = handler;
-        return unlisten;
-      })
-    };
+  it("disposes the client when unmounted", async () => {
+    const client = Object.assign(new FakeAuthClient({ status: "signedOut" }), {
+      dispose: vi.fn()
+    });
+    createBrowserWebAuthClient.mockReturnValueOnce(client);
     const view = render(
-      <AuthProvider config={desktopConfig} platform={platform}>
-        <p>dashboard</p>
+      <AuthProvider config={config("desktop", { host: "unmount-api" })}>
+        <AuthStatus />
       </AuthProvider>
     );
-    await waitFor(() => expect(platform.onAuthCallback).toHaveBeenCalledOnce());
-
+    await screen.findByText("signedOut");
     view.unmount();
-    await waitFor(() => expect(unlisten).toHaveBeenCalledOnce());
-    callback?.(
-      new URL("dev.orchestrat.app://auth/callback?code=a&sb_flow_id=b")
-    );
-    await Promise.resolve();
+    await waitFor(() => expect(client.dispose).toHaveBeenCalledOnce());
+  });
 
-    expect(mockedBridge.complete).not.toHaveBeenCalled();
+  it("refuses stubbed e2e auth outside the e2e build", () => {
+    render(
+      <AuthProvider config={config("web", { e2eAuth: true })}>
+        <AuthStatus />
+      </AuthProvider>
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "E2E authentication is only available in e2e mode."
+    );
+    expect(createBrowserWebAuthClient).not.toHaveBeenCalled();
   });
 });

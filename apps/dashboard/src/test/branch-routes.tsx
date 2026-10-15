@@ -1,7 +1,7 @@
 import { http, HttpResponse, type RequestHandler } from "msw";
 import { vi } from "vitest";
 import type { Branch, Chat } from "@orchestrat/protocol";
-import type { AuthClient, AuthSnapshot } from "@/features/auth/auth-client";
+import { FakeAuthClient } from "@/test/fake-auth-client";
 import { branch, project, taskCard } from "@/test/factories";
 import { handlers } from "@/test/handlers";
 import { renderDashboardRoute } from "@/test/render";
@@ -33,23 +33,7 @@ export const old = branch({
   provider: { provider: "github", state: "missing", head_sha: null }
 });
 
-export class Auth implements AuthClient {
-  readonly capabilities = { github: true, magicLink: true };
-  constructor(private readonly snapshot: AuthSnapshot) {}
-  initialize = async () => undefined;
-  completeSignIn = async () => ({
-    status: "success" as const,
-    identityKey: "user"
-  });
-  getSnapshot = () => this.snapshot;
-  subscribe = () => () => undefined;
-  signInWithGitHub = async () => undefined;
-  sendMagicLink = async () => undefined;
-  signOut = async () => undefined;
-  expireSession = async () => undefined;
-  getAccessToken = async () =>
-    this.snapshot.status === "signedIn" ? "test-token" : null;
-}
+export class Auth extends FakeAuthClient {}
 
 export function platform() {
   return {

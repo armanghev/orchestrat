@@ -158,9 +158,8 @@ function AuthBoundary({ config }: { config: PublicConfig }) {
 }
 
 function ProviderGraph({ config }: { config: PublicConfig }) {
-  const platform = usePlatform();
   return (
-    <AuthProvider config={config} platform={platform}>
+    <AuthProvider config={config}>
       <AuthBoundary config={config} />
     </AuthProvider>
   );

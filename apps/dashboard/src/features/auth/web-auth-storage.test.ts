@@ -1,6 +1,11 @@
-import { createClient } from "@supabase/supabase-js";
 import { describe, expect, it, vi } from "vitest";
-import { ProviderTokenStrippingStorage } from "./web-auth-storage";
+import {
+  AUTH_SESSION_STORAGE_KEY,
+  AuthSessionStorage,
+  parseStoredSession,
+  removeLegacySupabaseSessions,
+  type StoredSession
+} from "./web-auth-storage";
 
 function backingStorage(initial: Record<string, string> = {}) {
   const values = new Map(Object.entries(initial));
@@ -18,117 +23,135 @@ function backingStorage(initial: Record<string, string> = {}) {
   };
 }
 
-const unsafeSession = () => ({
-  access_token: "supabase-access",
-  refresh_token: "supabase-refresh",
-  expires_in: 3600,
-  expires_at: Math.floor(Date.now() / 1000) + 3600,
-  token_type: "bearer",
-  provider_token: "github-access",
-  provider_refresh_token: "github-refresh",
+const session = (overrides: Partial<StoredSession> = {}): StoredSession => ({
+  version: 1,
+  access_token: "orch_sess_one",
+  refresh_token: "orch_refresh_one",
+  access_expires_at: 3_600_000,
+  refresh_expires_at: 2_592_000_000,
   user: {
-    id: "user-storage",
-    aud: "authenticated",
-    role: "authenticated",
-    email: "person@example.com",
-    app_metadata: {},
-    user_metadata: {},
-    identities: [{ id: "identity-1", provider_token: "nested-provider" }],
-    created_at: "2026-01-01T00:00:00.000Z"
-  }
+    user_id: "00000000-0000-4000-8000-000000000001",
+    email: "ada@example.com",
+    full_name: "Ada",
+    is_instance_admin: false
+  },
+  ...overrides
 });
 
-describe("ProviderTokenStrippingStorage", () => {
-  it("recursively removes OAuth provider tokens while preserving the Supabase session", () => {
+describe("AuthSessionStorage", () => {
+  it("writes and reads the session under a versioned key", () => {
     const backing = backingStorage();
-    const storage = new ProviderTokenStrippingStorage(backing.storage);
-    storage.setItem("session", JSON.stringify(unsafeSession()));
-    const stored = JSON.parse(backing.values.get("session") ?? "{}");
-    expect(stored.access_token).toBe("supabase-access");
-    expect(stored.user.identities).toEqual([{ id: "identity-1" }]);
-    expect(backing.values.get("session")).not.toContain("github-access");
-    expect(backing.values.get("session")).not.toContain("github-refresh");
-    expect(backing.values.get("session")).not.toContain("nested-provider");
+    const storage = new AuthSessionStorage(backing.storage);
+    expect(storage.write(session())).toBe(true);
+    expect(AUTH_SESSION_STORAGE_KEY).toBe("orchestrat.auth.session.v1");
+    expect(backing.values.has(AUTH_SESSION_STORAGE_KEY)).toBe(true);
+    expect(storage.read()).toEqual(session());
   });
 
-  it("migrates and sanitizes a preexisting session on read before returning it", () => {
-    const raw = JSON.stringify(unsafeSession());
-    const backing = backingStorage({ session: raw });
-    const storage = new ProviderTokenStrippingStorage(backing.storage);
-    const returned = storage.getItem("session");
-    expect(returned).not.toContain("github-access");
-    expect(returned).not.toContain("github-refresh");
-    expect(backing.values.get("session")).toBe(returned);
-    expect(backing.storage.setItem).toHaveBeenCalledWith("session", returned);
-  });
-
-  it("roundtrips JSON-serialized PKCE verifiers, indexes, and normal sessions", () => {
-    const backing = backingStorage();
-    const storage = new ProviderTokenStrippingStorage(backing.storage);
-    const values = [
-      JSON.stringify("verifier/value-with-symbols"),
-      JSON.stringify(["session-key"]),
-      JSON.stringify({ currentSession: null })
-    ];
-    values.forEach((value, index) => {
-      const key = `safe-${index}`;
-      storage.setItem(key, value);
-      expect(storage.getItem(key)).toBe(value);
-    });
+  it("returns null when there is no session", () => {
+    expect(new AuthSessionStorage(backingStorage().storage).read()).toBeNull();
   });
 
   it.each([
-    "{malformed",
-    `${"[".repeat(80)}0${"]".repeat(80)}`,
-    JSON.stringify("x".repeat(1_100_000))
-  ])(
-    "fails closed and removes malformed, deep, or excessive stored input",
-    (raw) => {
-      const backing = backingStorage({ unsafe: raw });
-      const storage = new ProviderTokenStrippingStorage(backing.storage);
-      expect(storage.getItem("unsafe")).toBeNull();
-      expect(backing.values.has("unsafe")).toBe(false);
-      expect(backing.storage.setItem).not.toHaveBeenCalled();
-    }
-  );
-
-  it("never preserves a prior raw value when a new write cannot be sanitized", () => {
-    const backing = backingStorage({
-      session: JSON.stringify(unsafeSession())
-    });
-    const storage = new ProviderTokenStrippingStorage(backing.storage);
-    storage.setItem("session", "not-json-auth-data");
-    expect(backing.values.has("session")).toBe(false);
+    ["malformed JSON", "{"],
+    ["an empty value", ""],
+    ["another shape", JSON.stringify({ access_token: "x" })],
+    ["an older version", JSON.stringify({ ...session(), version: 0 })],
+    ["an oversized value", JSON.stringify({ pad: "x".repeat(20_000) })]
+  ])("removes %s instead of trusting it", (_label, raw) => {
+    const backing = backingStorage({ [AUTH_SESSION_STORAGE_KEY]: raw });
+    const storage = new AuthSessionStorage(backing.storage);
+    expect(storage.read()).toBeNull();
+    expect(backing.values.has(AUTH_SESSION_STORAGE_KEY)).toBe(false);
   });
 
-  it("sanitizes a preexisting auth-js 2.112.3 session in storage and getSession", async () => {
-    const key = "sb-project-auth-token";
-    const backing = backingStorage({ [key]: JSON.stringify(unsafeSession()) });
-    const safeStorage = new ProviderTokenStrippingStorage(backing.storage);
-    const client = createClient(
-      "https://project.supabase.co",
-      "sb_publishable_abcdefghijklmnopqrstuvwxyz123456",
-      {
-        auth: {
-          storage: safeStorage,
-          persistSession: true,
-          autoRefreshToken: false,
-          detectSessionInUrl: false
-        }
-      }
-    );
-    const result = await client.auth.getSession();
-    expect(result.error).toBeNull();
-    expect(result.data.session).toMatchObject({
-      access_token: "supabase-access",
-      user: { id: "user-storage" }
+  it("reports unreadable storage as undefined, not as signed out", () => {
+    const storage = new AuthSessionStorage({
+      getItem: () => {
+        throw new Error("SecurityError");
+      },
+      setItem: () => undefined,
+      removeItem: () => undefined
     });
-    expect(result.data.session).not.toHaveProperty("provider_token");
-    expect(result.data.session?.user.identities?.[0]).not.toHaveProperty(
-      "provider_token"
+    expect(storage.read()).toBeUndefined();
+    expect(new AuthSessionStorage(null).read()).toBeUndefined();
+  });
+
+  it("reports a failed write so the client can keep the session in memory", () => {
+    const backing = backingStorage();
+    backing.storage.setItem.mockImplementation(() => {
+      throw new Error("QuotaExceededError");
+    });
+    const storage = new AuthSessionStorage(backing.storage);
+    expect(storage.write(session())).toBe(false);
+    expect(new AuthSessionStorage(null).write(session())).toBe(false);
+  });
+
+  it("clears the session and tolerates storage that throws", () => {
+    const backing = backingStorage({
+      [AUTH_SESSION_STORAGE_KEY]: JSON.stringify(session())
+    });
+    new AuthSessionStorage(backing.storage).clear();
+    expect(backing.values.size).toBe(0);
+    expect(() =>
+      new AuthSessionStorage({
+        getItem: () => null,
+        setItem: () => undefined,
+        removeItem: () => {
+          throw new Error("blocked");
+        }
+      }).clear()
+    ).not.toThrow();
+  });
+
+  it("notifies only for its own key or a full clear from another tab", () => {
+    const listener = vi.fn();
+    const stop = new AuthSessionStorage(backingStorage().storage).subscribe(
+      listener
     );
-    expect(backing.values.get(key)).not.toContain("github-access");
-    expect(backing.values.get(key)).not.toContain("nested-provider");
-    await client.auth.dispose();
+    window.dispatchEvent(
+      new StorageEvent("storage", { key: "orchestrat.preferences" })
+    );
+    expect(listener).not.toHaveBeenCalled();
+    window.dispatchEvent(
+      new StorageEvent("storage", { key: AUTH_SESSION_STORAGE_KEY })
+    );
+    window.dispatchEvent(new StorageEvent("storage", { key: null }));
+    expect(listener).toHaveBeenCalledTimes(2);
+    stop();
+    window.dispatchEvent(
+      new StorageEvent("storage", { key: AUTH_SESSION_STORAGE_KEY })
+    );
+    expect(listener).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("parseStoredSession", () => {
+  it("rejects negative expiry times", () => {
+    expect(
+      parseStoredSession(JSON.stringify(session({ access_expires_at: -1 })))
+    ).toBeNull();
+  });
+});
+
+describe("removeLegacySupabaseSessions", () => {
+  it("drops hosted-alpha Supabase sessions and keeps everything else", () => {
+    localStorage.clear();
+    localStorage.setItem("sb-abcdefgh-auth-token", "{}");
+    localStorage.setItem("sb-abcdefgh-auth-token-code-verifier", "x");
+    localStorage.setItem("orchestrat.preferences", "{}");
+    localStorage.setItem(AUTH_SESSION_STORAGE_KEY, "{}");
+    removeLegacySupabaseSessions(localStorage);
+    const keys = Array.from({ length: localStorage.length }, (_, index) =>
+      localStorage.key(index)
+    );
+    expect(keys.sort()).toEqual(
+      [AUTH_SESSION_STORAGE_KEY, "orchestrat.preferences"].sort()
+    );
+    localStorage.clear();
+  });
+
+  it("ignores missing storage", () => {
+    expect(() => removeLegacySupabaseSessions(null)).not.toThrow();
   });
 });

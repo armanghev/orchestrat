@@ -29,11 +29,13 @@ function memberName(member: OrganizationMember | ProjectMember) {
   return member.full_name || member.username || member.email;
 }
 
+// Invite links point at this dashboard. The desktop webview has no web
+// origin to share, so it can't make them (the desktop app returns in v1.1).
 function publicInvitationUrl(token: string): string | null {
-  const callbackUrl = import.meta.env.VITE_WEB_AUTH_CALLBACK_URL;
-  if (typeof callbackUrl !== "string") return null;
+  const origin = window.location.origin;
+  if (!/^https?:\/\//u.test(origin)) return null;
   try {
-    const url = new URL("/project-invitations/join", callbackUrl);
+    const url = new URL("/project-invitations/join", origin);
     url.hash = new URLSearchParams({ token }).toString();
     return url.toString();
   } catch {

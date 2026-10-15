@@ -9,7 +9,7 @@ import userEvent from "@testing-library/user-event";
 import { http, HttpResponse, type RequestHandler } from "msw";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Chat, ChatMessage, MessageCandidate } from "@orchestrat/protocol";
-import type { AuthClient, AuthSnapshot } from "@/features/auth/auth-client";
+import { FakeAuthClient } from "@/test/fake-auth-client";
 import { messagingKeys } from "@/features/messaging/query-options";
 import { handlers } from "@/test/handlers";
 import { renderDashboardRoute } from "@/test/render";
@@ -27,25 +27,7 @@ const self = candidate({ id: selfId, name: "Test User" });
 const alice = candidate({ id: aliceId, name: "Alice" });
 const bob = candidate({ id: bobId, name: "Bob" });
 
-class Auth implements AuthClient {
-  readonly capabilities = { github: true, magicLink: true };
-
-  constructor(private readonly snapshot: AuthSnapshot) {}
-
-  initialize = async () => undefined;
-  completeSignIn = async () => ({
-    status: "success" as const,
-    identityKey: "user"
-  });
-  getSnapshot = () => this.snapshot;
-  subscribe = () => () => undefined;
-  signInWithGitHub = async () => undefined;
-  sendMagicLink = async () => undefined;
-  signOut = async () => undefined;
-  expireSession = async () => undefined;
-  getAccessToken = async () =>
-    this.snapshot.status === "signedIn" ? "test-token" : null;
-}
+class Auth extends FakeAuthClient {}
 
 function platform() {
   return {

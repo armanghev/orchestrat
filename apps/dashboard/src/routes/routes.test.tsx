@@ -9,7 +9,7 @@ import userEvent from "@testing-library/user-event";
 import { forwardRef, useImperativeHandle, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { http, HttpResponse } from "msw";
-import type { AuthClient, AuthSnapshot } from "@/features/auth/auth-client";
+import { FakeAuthClient } from "@/test/fake-auth-client";
 import {
   attentionSummary,
   attentionTaskItem,
@@ -94,28 +94,6 @@ vi.mock("@/features/documents/document-diff", () => ({
   )
 }));
 
-class FakeAuthClient implements AuthClient {
-  readonly capabilities = { github: true, magicLink: true };
-  constructor(private readonly snapshot: AuthSnapshot) {}
-  async initialize() {}
-  async completeSignIn() {
-    return { status: "error" as const };
-  }
-  getSnapshot() {
-    return this.snapshot;
-  }
-  subscribe() {
-    return () => undefined;
-  }
-  async signInWithGitHub() {}
-  async sendMagicLink() {}
-  async signOut() {}
-  async expireSession() {}
-  async getAccessToken() {
-    return this.snapshot.status === "signedIn" ? "test-token" : null;
-  }
-}
-
 function platform() {
   return {
     kind: "web" as const,
@@ -143,15 +121,16 @@ function revisionSummary(
 }
 
 describe("dashboard routes", () => {
-  it("shows browser sign-in at the signed-out root", async () => {
+  it("shows password sign-in at the signed-out root", async () => {
     await renderDashboardRoute({
       path: "/",
       auth: new FakeAuthClient({ status: "signedOut" }),
       platform: platform()
     });
     expect(
-      await screen.findByRole("button", { name: "Continue with GitHub" })
+      await screen.findByRole("heading", { name: "Sign in to Orchestrat" })
     ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Sign in" })).toBeVisible();
   });
 
   it("lands on the organization home when there is no recent project", async () => {

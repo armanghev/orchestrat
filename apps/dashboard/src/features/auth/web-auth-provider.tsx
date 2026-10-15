@@ -4,20 +4,8 @@ import { AuthContext } from "./auth-context";
 import { createBrowserWebAuthClient } from "./web-auth-client";
 
 type WebAuthProviderProps =
-  | {
-      children: ReactNode;
-      client: AuthClient;
-      supabaseUrl?: never;
-      supabasePublishableKey?: never;
-      callbackUrl?: never;
-    }
-  | {
-      children: ReactNode;
-      client?: never;
-      supabaseUrl: string;
-      supabasePublishableKey: string;
-      callbackUrl: string;
-    };
+  | { children: ReactNode; client: AuthClient; apiUrl?: never }
+  | { children: ReactNode; client?: never; apiUrl: string };
 
 type AuthLeaseEntry = {
   client: AuthClient;
@@ -35,28 +23,12 @@ function disposeClient(client: AuthClient): void {
   if (typeof disposable.dispose === "function") disposable.dispose();
 }
 
-function productionSignature(
-  supabaseUrl: string,
-  supabasePublishableKey: string,
-  callbackUrl: string
-): string {
-  return JSON.stringify([supabaseUrl, supabasePublishableKey, callbackUrl]);
-}
-
-function getProductionEntry(
-  signature: string,
-  supabaseUrl: string,
-  supabasePublishableKey: string,
-  callbackUrl: string
-): AuthLeaseEntry {
+function getProductionEntry(apiUrl: string): AuthLeaseEntry {
+  const signature = apiUrl;
   const existing = productionEntries.get(signature);
   if (existing) return existing;
   const entry: AuthLeaseEntry = {
-    client: createBrowserWebAuthClient(
-      supabaseUrl,
-      supabasePublishableKey,
-      callbackUrl
-    ),
+    client: createBrowserWebAuthClient(apiUrl),
     initialization: null,
     leases: 0,
     pendingDisposal: null,
@@ -119,13 +91,7 @@ function acquire(
 }
 
 export function WebAuthProvider(props: WebAuthProviderProps) {
-  const signature = props.client
-    ? props.client
-    : productionSignature(
-        props.supabaseUrl,
-        props.supabasePublishableKey,
-        props.callbackUrl
-      );
+  const signature = props.client ?? props.apiUrl;
   const [ready, setReady] = useState<{
     signature: string | AuthClient;
     client: AuthClient;
@@ -135,20 +101,9 @@ export function WebAuthProvider(props: WebAuthProviderProps) {
     setReady((current) => (current?.signature === signature ? current : null));
     const entry = props.client
       ? getInjectedEntry(props.client)
-      : getProductionEntry(
-          signature as string,
-          props.supabaseUrl,
-          props.supabasePublishableKey,
-          props.callbackUrl
-        );
+      : getProductionEntry(props.apiUrl);
     return acquire(entry, (client) => setReady({ signature, client }));
-  }, [
-    props.callbackUrl,
-    props.client,
-    props.supabasePublishableKey,
-    props.supabaseUrl,
-    signature
-  ]);
+  }, [props.apiUrl, props.client, signature]);
 
   const client =
     ready?.signature === signature ? ready.client : loadingAuthClient;

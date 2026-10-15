@@ -23,7 +23,7 @@ describe("LocalIntegrationStatusSection", () => {
     expect(
       buildCliEnvironment("web", {
         apiUrl: "http://localhost:8801",
-        webCallbackUrl: "http://localhost:8813/auth/callback"
+        webUrl: "http://localhost:8813"
       })
     ).toBe(
       "ORCHESTRAT_API_URL='http://localhost:8801' ORCHESTRAT_WEB_URL='http://localhost:8813' "
@@ -31,7 +31,7 @@ describe("LocalIntegrationStatusSection", () => {
     expect(
       buildCliEnvironment("desktop", {
         apiUrl: "https://api.orchestrat.dev",
-        webCallbackUrl: "https://app.orchestrat.dev/auth/callback"
+        webUrl: "https://app.orchestrat.dev"
       })
     ).toBe("");
   });

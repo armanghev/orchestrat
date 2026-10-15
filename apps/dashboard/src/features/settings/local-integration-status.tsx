@@ -24,9 +24,8 @@ const httpOrigin = (value: string | undefined) => {
 };
 export function buildCliEnvironment(
   kind: "desktop" | "web",
-  input: { apiUrl?: string; webCallbackUrl?: string } = {
-    apiUrl: import.meta.env.VITE_API_URL,
-    webCallbackUrl: import.meta.env.VITE_WEB_AUTH_CALLBACK_URL
+  input: { apiUrl?: string; webUrl?: string } = {
+    apiUrl: import.meta.env.VITE_API_URL
   },
   currentOrigin = typeof window !== "undefined"
     ? window.location.origin
@@ -36,7 +35,7 @@ export function buildCliEnvironment(
   const apiUrl = input.apiUrl;
   if (apiUrl && apiUrl !== defaultApiUrl)
     values.push(`ORCHESTRAT_API_URL=${shellQuote(apiUrl)}`);
-  const configuredWebUrl = httpOrigin(input.webCallbackUrl);
+  const configuredWebUrl = httpOrigin(input.webUrl);
   const webUrl =
     configuredWebUrl ??
     (kind === "web" ? httpOrigin(currentOrigin) : undefined);
