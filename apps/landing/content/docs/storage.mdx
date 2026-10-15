@@ -27,7 +27,7 @@ Revisions written before you added storage stay in Postgres and keep working. On
 docker compose -f compose.yml -f compose.storage.yml up -d
 ```
 
-It needs nothing beyond the `.env` that `init` wrote: `S3_ACCESS_KEY`, `S3_SECRET_KEY` and `ORCHESTRAT_S3_PUBLIC_ENDPOINT=http://localhost:8333`. The overlay sets the server's `ORCHESTRAT_S3_*` values itself, including a bucket named `orchestrat` that the server creates on first start. While SeaweedFS starts, the server can fail to reach it and restart a few times before it settles.
+It needs nothing beyond the `.env` that `init` wrote: `S3_ACCESS_KEY` and `S3_SECRET_KEY`. The overlay sets the server's `ORCHESTRAT_S3_*` values itself, including `ORCHESTRAT_S3_PUBLIC_ENDPOINT=http://localhost:8333` and a bucket named `orchestrat` that the server creates on first start. The server waits for SeaweedFS to report healthy before it starts. To have browsers upload somewhere other than `http://localhost:8333`, set `ORCHESTRAT_S3_PUBLIC_ENDPOINT` in `.env`; only do that together with the overlay, because on its own it looks like half a storage configuration and the server refuses to start.
 
 Pass both files to every later `docker compose` command, or a plain `up -d` recreates the server without storage. To make that automatic, add this line to `.env`:
 
@@ -95,8 +95,6 @@ ORCHESTRAT_S3_ACCESS_KEY_ID=<access key ID>
 ORCHESTRAT_S3_SECRET_ACCESS_KEY=<secret access key>
 ORCHESTRAT_S3_PUBLIC_ENDPOINT=https://s3.us-east-1.amazonaws.com
 ```
-
-`init` set `ORCHESTRAT_S3_PUBLIC_ENDPOINT` to the bundled SeaweedFS address. Change it to the same endpoint, or remove the line.
 
 The calls Orchestrat makes need this policy on the bucket:
 

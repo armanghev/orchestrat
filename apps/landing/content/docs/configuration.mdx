@@ -24,7 +24,6 @@ It contains:
 | `ORCHESTRAT_REPOSITORY_SECRET_KEY`    | 32 random bytes, base64. Encrypts Git provider tokens.                    |
 | `ORCHESTRAT_REPOSITORY_SECRET_KEY_ID` | `k1`                                                                      |
 | `S3_ACCESS_KEY`, `S3_SECRET_KEY`      | Credentials for the bundled SeaweedFS, used only with the storage overlay |
-| `ORCHESTRAT_S3_PUBLIC_ENDPOINT`       | `http://localhost:8333`, where browsers reach the bundled SeaweedFS       |
 
 Compose reads `.env` twice: to fill in the `${...}` values in the compose files, and as the server container's environment, so every variable in it reaches the server. Values in a compose file's `environment:` block win over `.env`. For example, `compose.yml` always sets `ORCHESTRAT_DATABASE_URL` to the bundled Postgres.
 
@@ -75,7 +74,7 @@ All optional. Set the endpoint, bucket and both keys, or none of them; the other
 | Variable                            | Default                  | Set by  | Description                                                                                                                                                                                                 |
 | ----------------------------------- | ------------------------ | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ORCHESTRAT_S3_ENDPOINT`            | None                     | overlay | S3 API endpoint the server calls, such as `https://s3.us-east-1.amazonaws.com`. The overlay sets `http://seaweedfs:8333`. For R2, the account endpoint without a bucket path.                               |
-| `ORCHESTRAT_S3_PUBLIC_ENDPOINT`     | `ORCHESTRAT_S3_ENDPOINT` | `init`  | The endpoint browsers and the CLI upload to, through presigned URLs. Set it when they reach storage at a different address than the server does. It must be reachable from every browser and agent machine. |
+| `ORCHESTRAT_S3_PUBLIC_ENDPOINT`     | `ORCHESTRAT_S3_ENDPOINT` | overlay | The endpoint browsers and the CLI upload to, through presigned URLs. Set it when they reach storage at a different address than the server does. It must be reachable from every browser and agent machine. |
 | `ORCHESTRAT_S3_REGION`              | `us-east-1`              | overlay | Bucket region. Use `auto` for Cloudflare R2.                                                                                                                                                                |
 | `ORCHESTRAT_S3_BUCKET`              | None                     | overlay | Bucket name. Keep the bucket private. The overlay uses `orchestrat`.                                                                                                                                        |
 | `ORCHESTRAT_S3_ACCESS_KEY_ID`       | None                     | overlay | Access key ID with read and write access to the bucket. The overlay passes `S3_ACCESS_KEY`.                                                                                                                 |
