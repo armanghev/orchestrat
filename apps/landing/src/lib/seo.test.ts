@@ -24,7 +24,17 @@ test("public pages, crawl files, structured data, and real 404 responses", async
     assert.equal(response.status, 200, path);
     const html = await response.text();
     const markup = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
-    assert.doesNotMatch(html, /Arman Ghevondyan/, `${path}: public handle`);
+    // The legal name appears once, in the footer's license line; copy uses the handle.
+    assert.equal(
+      (markup.match(/Arman Ghevondyan/g) ?? []).length,
+      1,
+      `${path}: public handle`
+    );
+    assert.match(
+      markup,
+      /© \d{4} Arman Ghevondyan ·/,
+      `${path}: footer license line`
+    );
     assert.match(
       markup,
       /<a[^>]*href="https:\/\/x\.com\/armanghev"[^>]*>@armanghev<\/a>/,
@@ -120,7 +130,11 @@ test("public pages, crawl files, structured data, and real 404 responses", async
     }
     if (path === "/privacy") {
       assert.ok(markup.includes('id="cookies"'), "linked cookie information");
-      assert.ok(markup.includes("September 20, 2026"), "current policy date");
+      assert.ok(markup.includes("October 14, 2026"), "current policy date");
+      assert.doesNotMatch(
+        markup,
+        /waitlist|Supabase|Neon|Resend|Cloudflare R2/
+      );
       assert.ok(
         !markup.includes("feature-interest buttons"),
         "no stale form disclosure"

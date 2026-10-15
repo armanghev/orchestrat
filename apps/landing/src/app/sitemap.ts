@@ -9,7 +9,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
       url: `${siteUrl}/${page.slug}`,
       ...(page.published ? { lastModified: page.published } : {})
     })),
-    { url: `${siteUrl}/terms`, lastModified: "2026-09-20" },
-    { url: `${siteUrl}/privacy`, lastModified: "2026-09-20" }
+    { url: `${siteUrl}/terms`, lastModified: "2026-10-14" },
+    { url: `${siteUrl}/privacy`, lastModified: "2026-10-14" }
   ];
 }
