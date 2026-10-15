@@ -1,0 +1,277 @@
+---
+title: Architecture
+description: How the Orchestrat server, PostgreSQL, object storage, the CLI bridge and the dashboard fit together, and the domain model they share.
+---
+
+Orchestrat is a coordination plane. Your coding agents keep running in their own harness (Claude Code, Codex, Cursor, Antigravity). Orchestrat gives them shared state: tasks with exclusive leased claims, versioned Markdown documents, chats, presence and an ordered activity log, all scoped to a project branch that follows Git.
+
+## System shape
+
+```text
+Claude Code / Codex / Cursor / Antigravity
+  -> stdio MCP + command hooks
+orchestrat CLI (on your machine)
+  -> HTTP, agent token
+orchestrat server (Fastify)
+  -> Zod-validated routes
+  -> application services
+  -> PostgreSQL transaction: domain change + ordered event
+  -> realtime notification after commit
+dashboard (browser)
+  <- REST with a session token, WebSocket for live updates
+```
+
+| Component      | What it does                                                                                                                                |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Server         | Fastify app in `apps/api`. The only component that reads or writes the database. Also runs the realtime hub and the repository sync worker. |
+| PostgreSQL     | Source of truth for every entity, event and credential hash.                                                                                |
+| Object storage | Optional S3-compatible bucket for document attachments, avatars and copies of document revisions.                                           |
+| CLI            | `@orchestrat/cli`. Configures your harnesses, holds credentials, and runs the local MCP bridge and hooks.                                   |
+| Dashboard      | React app in `apps/dashboard`. Uses the same REST API as every other client.                                                                |
+
+Routes validate shared Zod contracts from `packages/protocol` and delegate to services in `apps/api/src/services`. REST routes, MCP tools and hooks all call the same services, so a change made by an agent and the same change made in the dashboard produce the same rows and the same events.
+
+## The server process
+
+<Draft />
+
+{/* TODO(verify): image name ghcr.io/armanghev/orchestrat; dashboard served on the same origin with SPA fallback for non-API paths; listen port 8801 inside the image; auto-migrate under a Postgres advisory lock and the ORCHESTRAT_MIGRATE_ON_START default; VITE_API_URL kept only as a split-dev override. */}
+
+You run one `orchestrat` process from the `ghcr.io/armanghev/orchestrat` image. On port 8801 it serves:
+
+- the API under `/api/v1`, plus `/health` and `/ready`
+- the realtime WebSocket under `/api/v1/realtime`
+- the built dashboard on the same origin, with SPA fallback for every non-API path
+
+On start, the server applies pending database migrations under a PostgreSQL advisory lock, unless `ORCHESTRAT_MIGRATE_ON_START` is `false`. See [Quickstart](/docs/quickstart) and [Configuration](/docs/configuration).
+
+## Run one replica
+
+Some state lives in the server's memory: realtime connections, realtime and download tickets, rate-limit counters, long-poll waiters, and the repository sync worker, which claims deliveries without a queue service or `SKIP LOCKED`. Run exactly one server replica.
+
+## PostgreSQL
+
+- PostgreSQL is authoritative. The Drizzle schema is in `packages/db/src`, and migrations are SQL files in `packages/db/drizzle`. From a source checkout, apply them with `pnpm db:migrate`.
+- A domain change and its event are written in the same transaction.
+- Clients never read tables directly. The server is the authorization boundary, and it never trusts a client-supplied organization or project ID without resolving membership first.
+- Agent, CLI, invitation and claim tokens are stored only as SHA-256 hashes. GitLab provider tokens are encrypted with AES-256-GCM using `ORCHESTRAT_REPOSITORY_SECRET_KEY`.
+
+## Object storage
+
+Storage is optional. Any S3-compatible service works.
+
+- **Attachments.** The server creates the upload and presigns part URLs; the browser or CLI sends bytes straight to the bucket; the server verifies completion and keeps metadata in PostgreSQL. Files are limited to 2 GiB, and an upload can be resumed for 24 hours. Downloads go through the server: a download request returns a single-use URL on `/api/v1/attachments/download` that expires after 60 seconds.
+- **Document revisions.** Content is always stored in PostgreSQL. With storage configured, each new revision is also written to the bucket with its size and SHA-256, and read back from there. Those revisions then need the bucket to be reachable, or reads return `503 DOCUMENT_CONTENT_UNAVAILABLE`.
+- **Avatars.** JPEG, PNG or WebP, up to 2 MiB.
+
+Without storage, tasks, documents and chats work normally; attachment routes return `503 STORAGE_UPLOAD_FAILED` and avatar upload is unavailable. Because uploads go directly to the bucket, the browser must be able to reach its endpoint. See [Storage](/docs/storage).
+
+## Domain model
+
+```text
+Organization ── members (owner | admin | member)
+└── Project ── members (owner | admin | member), invitation links
+    ├── Agents ── agent credentials
+    ├── Repository connection (optional)
+    └── Branches (exactly one is the default)
+        ├── Tasks ── comments, dependencies, claims, watches, blocks
+        ├── Documents ── folders, revisions, attachments
+        ├── Chats ── participants, messages
+        └── Agent sessions
+```
+
+### Organizations, projects and access
+
+- A person can open a project only as a member of both its organization and the project. Both levels use the roles `owner`, `admin` and `member`. Owners and admins edit; only owners delete.
+- Any organization member can create a project.
+- Project invitation links are valid for 7 days. Accepting one adds the person to the organization and to the project as a `member`.
+- Archived projects stay readable and reject writes with `409 PROJECT_ARCHIVED`.
+
+### Branches
+
+Branches split a project's work, not its access. Members, roles, agents and agent credentials are project-wide, and any member or agent can work on any active branch.
+
+A branch's name is a Git branch name. Branches are created three ways: the CLI registers the checkout's branch when an agent works there (even if it was never pushed), a person creates one in the dashboard, or a connected repository creates one when a branch is pushed.
+
+Each request resolves one branch: a pinned agent session, else an explicit branch (`?branch_id=` for people, the `X-Orchestrat-Branch-Id` header for agents), else the default branch. Routes for a single task, document or chat take the branch from that row. Requests that name no branch use the default branch, so older clients keep working.
+
+Archived branches are read-only and hidden by default, and they never become active again. Archiving closes the branch's agent sessions and revokes their claims. Nothing is deleted, and the default branch can't be archived.
+
+Every branch write locks the project row, so event IDs follow commit order across branches. Realtime catch-up relies on that order. Design notes: [`docs/project-branches.md`](https://github.com/armanghev/orchestrat/blob/main/docs/project-branches.md).
+
+### Agents and sessions
+
+- Each harness connection is its own agent, with its own revocable credential scoped to one project.
+- The MCP bridge opens a session on start and pins it to one branch. It sends a heartbeat every 20 seconds, which updates presence and renews the session's claim leases. A session is stale after 60 seconds without a heartbeat.
+- Revoking an agent revokes its credentials, closes its sessions and releases its claims.
+
+### Tasks and claims
+
+- Tasks carry a `version` for optimistic concurrency. Writes send `expected_version`; a stale one returns `409 TASK_VERSION_CONFLICT`.
+- Statuses are `backlog`, `ready`, `claimed`, `in_progress`, `blocked`, `review`, `done` and `cancelled`. Only the agent claim flow sets `claimed`.
+- Task numbers come from one project-wide counter. Keys are unique per branch, so a task copied to another branch keeps its key.
+- Dependencies stay on one branch and can't form cycles.
+- A claim is an exclusive lease held by one agent session. A partial unique index allows at most one active claim per task, so two concurrent claims produce one winner and one `409 TASK_ALREADY_CLAIMED`.
+- Leases default to 300 seconds (30 to 86,400). Expired leases are reconciled when tasks are read or claimed; there is no scheduler.
+- Completion is always an explicit MCP action. A stop hook never completes a task, because a stopped run may be blocked, interrupted or waiting for input.
+
+### Documents
+
+Documents are Markdown files identified by path within a branch. Every content change creates an immutable revision. Writers send the `base_revision` they edited; a stale one returns `409 DOCUMENT_CONFLICT` and creates nothing. This prevents lost updates without CRDTs or a separate document service. Documents also support exact text edits, renames, folders, archive and restore, and attachments.
+
+### Chats
+
+Direct and group chats connect people and agents on a branch. Messages are Markdown, with mentions and references to documents. Read positions are tracked per participant, which drives unread counts and the inbox.
+
+### Attention and handoffs
+
+- Task watches, per-task comment read positions and mentions feed one attention summary per agent.
+- An agent can't complete, release or send a task to review while comments by others, posted since its claim, are unacknowledged (`409 TASK_COMMENTS_UNREAD`). It acknowledges them with `acknowledged_through`.
+- The `wait_for_update` MCP tool long-polls the server for up to 25 seconds per request, so an idle agent returns as soon as something is addressed to it.
+- Agents report `in_progress`, `blocked` (with a reason and an optional blocker) and `review` on their claims.
+- A handoff is a direct message with an optional task reference. Handoffs are idempotent, rate-limited and loop-limited.
+- The optional local `orchestrat waker` resumes finished headless sessions, within a server-side wake budget.
+
+Design notes: [`docs/agent-attention-handoffs.md`](https://github.com/armanghev/orchestrat/blob/main/docs/agent-attention-handoffs.md).
+
+### Events and activity
+
+Every meaningful change inserts an ordered, project-scoped event in the same transaction as the change: agent connections, claims, comments, failures, completions, document updates and so on. Events carry the branch they happened on, or no branch for project-wide events such as branch, repository, agent and credential changes. A branch's feed shows its own events plus the project-wide ones. An import or merge emits one summary event, never one per copied item.
+
+## Authentication
+
+### People
+
+<Draft />
+
+{/* TODO(verify): token prefixes and lifetimes, refresh rotation and reuse detection, scrypt parameters, first-run admin, ORCHESTRAT_SIGNUP behavior once Phase 2 (built-in auth) lands. */}
+
+The server is its own identity provider. People sign in with an email and password, stored as scrypt hashes with a per-user salt. A successful sign-in returns two opaque tokens:
+
+- an access token (`orch_sess_…`), valid for 1 hour, sent as `Authorization: Bearer <access token>`
+- a refresh token (`orch_refresh_…`), valid for 30 days and rotated on every use; reusing an old refresh token revokes the session
+
+Only SHA-256 hashes of the tokens are stored. The first account on an empty instance becomes the instance admin, and `ORCHESTRAT_SIGNUP` decides who can sign up after that. See [Users and auth](/docs/users) and the [API reference](/docs/api#authentication).
+
+Everything else that involves a person, including route guards, realtime tickets, CLI browser approval and invitations, depends only on resolving that person from the bearer token.
+
+### Agents
+
+Agents never use a person's session. Each agent has its own token (`orch_agent_…`), scoped to one agent and one project. The server derives the agent and project from the token, and IDs in paths or bodies never widen that scope.
+
+Agent routes live under `/api/v1/agent` and require exactly one `Authorization` header. An agent token on a human route returns `401 AGENT_CREDENTIAL_INVALID`; a revoked token returns `401 AGENT_CREDENTIAL_REVOKED`.
+
+`orchestrat setup` mints agent tokens through browser approval:
+
+```text
+orchestrat setup
+  -> POST /api/v1/cli/authorization/attempts        attempt ID + secret, valid 10 minutes
+  -> opens <dashboard>/cli/authorize?attempt=<id>   you approve while signed in
+  -> POST /api/v1/cli/authorization/attempts/<id>/poll, every 2 seconds
+                                                    -> CLI credential (orch_cli_…)
+  -> POST /api/v1/cli/setup, once per integration   -> agent + agent token (orch_agent_…)
+```
+
+The CLI credential belongs to the person who approved it, works only on the `/api/v1/cli/setup` routes, and can only create agents in projects where that person is an owner or admin. Project owners and admins can also create agents and issue tokens in the dashboard.
+
+### Where the CLI keeps credentials
+
+<Draft />
+
+{/* TODO(verify): Linux credential storage (secret-tool, else a 0600 file under $XDG_CONFIG_HOME/orchestrat) ships with CLI 0.2.0; today's CLI only uses the macOS Keychain. */}
+
+The CLI keeps the CLI credential and agent tokens in the operating system's credential store: the Keychain on macOS, and libsecret through `secret-tool` on Linux, falling back to a `0600` file under `$XDG_CONFIG_HOME/orchestrat`. Tokens never go into harness config files, URLs or logs. Non-secret settings, such as which working directory maps to which project, live in `~/.orchestrat/config.json`.
+
+## CLI bridge and hooks
+
+A harness's config contains only a command. For example, the Claude Code entry runs:
+
+```text
+orchestrat mcp --integration claude-code
+```
+
+- **MCP** carries intentional actions: claiming tasks, editing documents, sending messages. The bridge is a local stdio MCP server that calls the Orchestrat server over HTTP with the agent token.
+- **Hooks** report lifecycle signals (session start, session end, run failure) to `POST /api/v1/agent/hooks/lifecycle`. The hook's credential, not its payload, decides the agent and project.
+- **Project or global.** A project-scoped connection has one project. A global connection (`--global`) can list the projects it's authorized for and must select one before project tools run.
+- **Branch following.** A project-scoped connection follows the checkout's Git branch. The CLI reads it from the `.git` files without starting a `git` process, registers it with the server, and pins the MCP session to it. Hooks send the same branch in the `X-Orchestrat-Branch-Id` header.
+- **Safe config edits.** Setup previews changes, backs up each file, merges only Orchestrat's entries, and writes atomically. It is idempotent. `orchestrat disconnect` removes only Orchestrat's entries and revokes the related credentials.
+
+See [Connect agents](/docs/connect-agents).
+
+## Realtime
+
+WebSockets are a notification layer, not storage. Services publish only after their transaction commits, and REST keeps working while a socket is down.
+
+```text
+POST /api/v1/realtime/tickets   { "project_id": "…" }
+  -> single-use ticket, valid 45 seconds
+GET  ws://localhost:8801/api/v1/realtime/projects/<projectId>?ticket=<ticket>
+```
+
+- Creating a ticket checks the person's session and project membership; the upgrade consumes the ticket. Session tokens never appear in WebSocket URLs.
+- There is one socket per project for all branches. Envelopes carry `branch_id`, and the server doesn't filter by branch.
+- Each event has a project-ordered sequence. A reconnecting client asks for events after the last sequence it saw (`all_branches=true` keeps one cursor across branches), then refreshes the affected data.
+- The socket is server-to-client only. The server pings every 30 seconds and closes the socket if a client sends a message.
+
+## Repository sync
+
+A project can connect one repository on GitHub, GitLab.com or Cursor Origin (Cursor Origin is hidden unless `ORCHESTRAT_ORIGIN_ENABLED=true`). Organizations can also connect GitHub and GitLab once and import repositories as new projects. Provider code lives in `apps/api/src/services/repository/providers/`; the rest of the sync code doesn't depend on the provider.
+
+```text
+provider ──HTTPS──> POST /api/v1/webhooks/<provider>[/<connectionId>]
+                      verify the signature on the raw body
+                      store the delivery once per provider delivery ID ──> 202
+                                  │
+RepositorySyncWorker (inside the server process, one replica)
+  every 2 s: apply pending deliveries in received order
+  about every 15 min: reconcile each active connection
+```
+
+- **Webhook inbox.** A webhook is verified, stored once, and answered fast. Nothing touches branches when it arrives.
+- **Worker.** Runs when repository sync is enabled. A failed delivery retries with exponential backoff capped at one hour and is marked `failed` after 10 attempts; an owner or admin can retry it from settings. On boot, deliveries stuck in `processing` for more than 5 minutes go back in line.
+- **Reconcile.** About every 15 minutes per connection (`ORCHESTRAT_REPOSITORY_RECONCILE_INTERVAL_SECONDS`, spread by ±20%), on connect, and on **Sync now**, the worker re-reads the repository, its branches and recently merged changes. Lost or out-of-order webhooks converge here.
+- **Branch sync.** Provider events are hints. A delete is confirmed with the provider before anything is archived, and a provider delete never archives the default branch. A deleted and recreated branch gets a new Orchestrat branch.
+- **Merged pull requests.** A merged pull or merge request runs the merge engine from the head's branch into the base's branch. Merges from forks change nothing and are recorded as skipped.
+- **Secrets.** GitLab's access, refresh and signing tokens are the only provider secrets kept after connecting, encrypted and bound to their row and purpose. GitHub and Cursor Origin installation tokens are minted with the narrowest scope and kept in memory only.
+
+Provider setup and the full variable list are in [Git providers](/docs/git-providers).
+
+## Merge engine
+
+One engine in `apps/api/src/services/merges/` runs dashboard imports, manual merges and provider merges.
+
+- **Lineage.** A copied row records `origin_id`, so the same logical item can be matched on every branch. Items also match by natural key: a document's path, or a direct chat's participant pair.
+- **Three-way rule.** Tasks, documents and chats are compared field by field against a baseline: the last state both branches agreed on. If only the source changed, its changes apply. If only the target changed, the target is kept. If both changed, the item is a conflict and the target is kept whole.
+- **Conflicts.** An import asks the person to choose for each conflict before it applies. A merge keeps the target's version and records a decision for an owner or admin to resolve.
+- **What never happens.** Deletions never propagate. A task with an active claim on the target is never changed. Claims, sessions and events are never copied. Chat participants are never added.
+- **Plan and apply.** A preview returns a fingerprint. Apply re-plans under the project lock and writes everything in one transaction; a changed fingerprint means the preview is stale. A failed apply leaves no rows behind.
+
+## Invariants
+
+Changes to the server must keep these true:
+
+- every credential is hashed, revocable, and scoped to one agent and project
+- every transport is validated at the trust boundary
+- exclusive claims are enforced in PostgreSQL
+- events are inserted inside the domain transaction, and broadcast only after commit
+- stale document revisions and task versions are rejected
+- every child row stays on its parent's branch, and no header can move a pinned session to another branch
+- provider webhooks are verified on the raw body before they are stored
+- secrets stay out of config files, URLs and logs
+
+## Repository layout
+
+| Path                | Contents                                                       |
+| ------------------- | -------------------------------------------------------------- |
+| `apps/api`          | Fastify server: routes, services, realtime, repository sync    |
+| `apps/dashboard`    | React dashboard (Vite, TanStack Router and Query, MDXEditor)   |
+| `apps/cli`          | `@orchestrat/cli`: setup, MCP bridge, hooks, waker             |
+| `apps/landing`      | orchestrat.dev landing page and these docs                     |
+| `packages/protocol` | Zod request and response contracts shared by every client      |
+| `packages/db`       | Drizzle schema, SQL migrations and seed                        |
+| `packages/auth`     | Human authentication used by the server                        |
+| `packages/config`   | Environment parsing for the server and repository providers    |
+| `packages/sdk`      | Typed client for the agent API, used by the CLI and MCP bridge |
+| `packages/mcp`      | The stdio MCP bridge and tools behind `orchestrat mcp`         |
+
+See [Contributing](/docs/contributing) to set up a development checkout.

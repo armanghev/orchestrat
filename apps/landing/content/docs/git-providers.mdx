@@ -1,0 +1,190 @@
+---
+title: Git providers
+description: Register your own GitHub App and GitLab.com application so project branches follow your repositories.
+---
+
+{/* TODO(verify): every URL on this page assumes v1's single ORCHESTRAT_PUBLIC_URL. Today API callbacks and webhooks use ORCHESTRAT_PUBLIC_API_URL (apps/api/src/services/repository/connection-service.ts:144, providers/gitlab.ts:403) and the GitHub setup URL and post-callback redirects use ORCHESTRAT_DASHBOARD_URL (connection-service.ts:264); see packages/config/src/repository.ts:14-15. */}
+{/* TODO(verify): whether `init` also writes ORCHESTRAT_REPOSITORY_SECRET_KEY_ID, or only the key. */}
+
+Connect a GitHub or GitLab.com repository to a project, and the project's branches follow Git. Orchestrat doesn't ship shared provider credentials: you register your own GitHub App and GitLab application, pointed at your server.
+
+Supported hosts are GitHub.com and GitLab.com. GitHub Enterprise Server and self-managed GitLab are not supported.
+
+## What syncing does
+
+- **Default branch.** The project's default branch tracks the repository's default branch, and existing work stays on it. When the names differ, the connect dialog shows what will be renamed or linked before you confirm.
+- **New branches.** Creating or pushing a branch on the provider creates an Orchestrat branch with the same name, ready for agents. Other branches that already exist when you connect get one on their first push, unless you choose **Also create Orchestrat branches for the repository's other existing branches**.
+- **Merges.** When a pull request or merge request is merged, the source branch's tasks, documents and chats are merged into the target branch. Items changed on both sides keep the target version and wait under **Needs your decision** for an owner or admin. Pull requests from forks are skipped.
+- **Deleted branches.** Deleting a branch on the provider archives its Orchestrat branch: read-only, hidden by default, nothing deleted. The default branch is never archived this way.
+- **Missed events.** Webhooks are stored first, then processed by a worker inside the server. Every `ORCHESTRAT_REPOSITORY_RECONCILE_INTERVAL_SECONDS` (15 minutes by default), Orchestrat re-reads each repository to catch events that never arrived. Owners and admins can also choose **Sync now**.
+
+Orchestrat never writes to your repositories. On GitLab, the only write it makes is creating and deleting its own project webhook.
+
+## Before you start
+
+- **A public HTTPS URL.** GitHub and GitLab deliver webhooks to your server over the internet, and your browser returns to it after you authorize. Set `ORCHESTRAT_PUBLIC_URL` to a stable public HTTPS origin with a valid certificate before you register anything. The URLs below are saved in each app's registration, so changing the hostname later means editing them. See [HTTPS](/docs/https).
+- **An encryption key.** Provider tokens and webhook secrets are stored encrypted. Set `ORCHESTRAT_REPOSITORY_SECRET_KEY` (base64 of 32 random bytes) and `ORCHESTRAT_REPOSITORY_SECRET_KEY_ID` (a short name such as `k1`). Generate a key with `openssl rand -base64 32`. See [Configuration](/docs/configuration).
+- **Roles.** Only owners and admins of an Orchestrat project connect, sync and disconnect its repository. On GitLab you also need the Maintainer role on each project you connect.
+
+## URLs you'll register
+
+The examples on this page use `https://orchestrat.example.com` as `ORCHESTRAT_PUBLIC_URL`. Replace it with yours, with no trailing slash.
+
+| Purpose             | URL                                                                                                                |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| GitHub callback URL | `https://orchestrat.example.com/api/v1/repository/callback/github`                                                 |
+| GitHub setup URL    | `https://orchestrat.example.com/repository/github/setup`                                                           |
+| GitHub webhook URL  | `https://orchestrat.example.com/api/v1/webhooks/github`                                                            |
+| GitLab redirect URI | `https://orchestrat.example.com/api/v1/repository/callback/gitlab`                                                 |
+| GitLab webhook      | Created by Orchestrat for each connection: `https://orchestrat.example.com/api/v1/webhooks/gitlab/<connection id>` |
+
+## GitHub App
+
+GitHub's reference: [Registering a GitHub App](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/registering-a-github-app).
+
+### Register the app
+
+Register it under the account that owns your repositories. For a GitHub organization, that's **Organization settings → Developer settings → GitHub Apps → New GitHub App**. For your personal account, it's **Settings → Developer settings → GitHub Apps → New GitHub App**.
+
+| Field                                                  | Value                                                                                                        |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| GitHub App name                                        | For example `Orchestrat (Acme)`. At most 34 characters and unique across GitHub. The URL slug comes from it. |
+| Homepage URL                                           | Your Orchestrat URL, `https://orchestrat.example.com`                                                        |
+| Callback URL                                           | `https://orchestrat.example.com/api/v1/repository/callback/github` (exactly one)                             |
+| Expire user authorization tokens                       | **Checked** (GitHub's recommendation)                                                                        |
+| Request user authorization (OAuth) during installation | **Unchecked**. Orchestrat runs its own authorization with PKCE and state.                                    |
+| Enable Device Flow                                     | Unchecked                                                                                                    |
+| Setup URL                                              | `https://orchestrat.example.com/repository/github/setup`                                                     |
+| Redirect on update                                     | **Checked**                                                                                                  |
+| Webhook → Active                                       | **Checked**                                                                                                  |
+| Webhook URL                                            | `https://orchestrat.example.com/api/v1/webhooks/github`                                                      |
+| Webhook secret                                         | The output of `openssl rand -hex 32`. Save it for `ORCHESTRAT_GITHUB_APP_WEBHOOK_SECRET`.                    |
+| SSL verification                                       | Enabled                                                                                                      |
+
+### Permissions
+
+Under **Permissions → Repository permissions**:
+
+| Permission    | Access                    | Why                                                                                                                          |
+| ------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Contents      | **Read-only**             | `create`, `delete` and `push` events require it, and GitHub needs it to read branches. Orchestrat never reads file contents. |
+| Metadata      | **Read-only** (mandatory) | Reading repositories, and `repository` events                                                                                |
+| Pull requests | **Read-only**             | `pull_request` events and listing merged pull requests                                                                       |
+
+Leave every other repository, organization and account permission at **No access**. Orchestrat requests short-lived installation tokens with only the permission each call needs.
+
+### Events
+
+Under **Subscribe to events**, check **Create**, **Delete**, **Push**, **Pull request** and **Repository**. Installation events, including repositories being added to an installation, arrive without subscribing.
+
+### Where can this GitHub App be installed?
+
+- **Only on this account:** the app can be installed only on the account that registered it. Choose this when every repository you'll connect belongs to that one user or organization.
+- **Any account:** the app can be installed on any GitHub user or organization. Choose this when you need repositories from more than one account, such as your personal account and your company's organization.
+
+**Any account** makes the app's install page public. That gives nobody access to your Orchestrat instance: an installation is only used after a signed-in user of your instance connects it, and webhook events from installations your server doesn't know have no effect. You can change this setting later in the app's **Advanced** settings.
+
+Click **Create GitHub App**.
+
+### Collect the credentials
+
+On the app's **General** page:
+
+1. **App ID** → `ORCHESTRAT_GITHUB_APP_ID`.
+2. **Client ID** (starts with `Iv`) → `ORCHESTRAT_GITHUB_APP_CLIENT_ID`.
+3. **Generate a new client secret**, and copy it right away → `ORCHESTRAT_GITHUB_APP_CLIENT_SECRET`.
+4. The slug, the last segment of `https://github.com/apps/<slug>` → `ORCHESTRAT_GITHUB_APP_SLUG`.
+5. **Private keys → Generate a private key.** A `.pem` file downloads. Encode it on one line → `ORCHESTRAT_GITHUB_APP_PRIVATE_KEY_BASE64`:
+
+   ```bash
+   base64 < orchestrat-acme.2026-10-14.private-key.pem | tr -d '\n'
+   ```
+
+   Keep the `.pem` out of any repository. You can generate a new key on the same page at any time.
+
+Add the values to your server's environment, then restart Orchestrat:
+
+```bash
+ORCHESTRAT_GITHUB_APP_ID=123456
+ORCHESTRAT_GITHUB_APP_CLIENT_ID=Iv23li...
+ORCHESTRAT_GITHUB_APP_CLIENT_SECRET=...
+ORCHESTRAT_GITHUB_APP_SLUG=orchestrat-acme
+ORCHESTRAT_GITHUB_APP_PRIVATE_KEY_BASE64=LS0tLS1CRUdJTi...
+ORCHESTRAT_GITHUB_APP_WEBHOOK_SECRET=<hex from the webhook secret step>
+```
+
+GitHub is available once all six are set, along with `ORCHESTRAT_PUBLIC_URL` and the encryption key. Until then, the dashboard shows **Connect GitHub** turned off, with the missing settings named.
+
+### Connect a project
+
+Start from Orchestrat rather than from GitHub's install page, so the installation is verified against your GitHub account:
+
+1. Open **Project settings → Repository → Connect GitHub**.
+2. Authorize the app. The picker lists repositories from your installations. If there are none, choose **Install the GitHub App**.
+3. On GitHub, choose **All repositories** or **Only select repositories**.
+4. GitHub returns you to the setup URL. Pick the repository and confirm how the default branch is linked.
+
+To check that webhooks reach your server, open the app's **Advanced** tab on GitHub. It lists recent deliveries and lets you redeliver them for up to 3 days. Orchestrat also asks GitHub to redeliver failed deliveries from that window once an hour.
+
+## GitLab.com application
+
+GitLab's reference: [GitLab as an OAuth 2.0 provider](https://docs.gitlab.com/integration/oauth_provider/).
+
+### Register the application
+
+A group-owned application survives changes to one person's account: **Group → Settings → Applications → Add new application**. For a user-owned one: **Avatar → Edit profile → Access → Applications**.
+
+| Field        | Value                                                                                                         |
+| ------------ | ------------------------------------------------------------------------------------------------------------- |
+| Name         | `Orchestrat`                                                                                                  |
+| Redirect URI | `https://orchestrat.example.com/api/v1/repository/callback/gitlab`                                            |
+| Confidential | **Checked**. The server keeps the secret.                                                                     |
+| Scopes       | **`api`** only. Orchestrat creates and deletes a webhook on each connected project, which needs write access. |
+
+Save, then copy the **Application ID** and **Secret**. GitLab shows the secret only once.
+
+```bash
+ORCHESTRAT_GITLAB_OAUTH_CLIENT_ID=<Application ID>
+ORCHESTRAT_GITLAB_OAUTH_CLIENT_SECRET=<Secret>
+```
+
+Add them to your server's environment and restart Orchestrat.
+
+### Connect a project
+
+1. Open **Project settings → Repository → Connect GitLab.com**, authorize, and pick the project. You need the Maintainer role on it.
+2. Orchestrat creates the project webhook. You can check it in GitLab under **Project → Settings → Webhooks**:
+   - URL `https://orchestrat.example.com/api/v1/webhooks/gitlab/<connection id>`
+   - **Push events** and **Merge request events** checked, tag push events unchecked
+   - branch filter **All branches**
+   - SSL verification on, and a signing token set
+
+Don't add or edit the webhook by hand. Orchestrat owns the one it creates and deletes it when you disconnect.
+
+**Recent events** on that webhook lists deliveries and lets you resend them. GitLab disables a webhook temporarily after 4 failures in a row and permanently after 40. The **Repository** settings card shows the webhook's health and offers **Re-enable**.
+
+## Organization integrations
+
+Instead of authorizing each project separately, an organization's owners and admins can connect GitHub or GitLab once for the whole organization, then import repositories as projects. Only owners and admins see the organization's integrations and can import.
+
+### GitHub
+
+1. Open the organization's **Integrations** page, choose **Connect GitHub**, and authorize the app.
+2. Choose a GitHub account where the app is installed, or **Install on another account**. GitHub's install screen is where you pick **All repositories** or **Only select repositories**. Change it later with **Manage on GitHub**.
+3. The organization home lists the repositories that installation reaches. Choose **Import** to create a project connected to one. You can also pick an organization repository when you create a project.
+
+Repositories you add to the installation later show up as **New**. GitHub sends Orchestrat an event when that happens, and the reconcile interval is the fallback. No extra permissions are needed: listing uses a metadata-only token.
+
+Removing a GitHub integration doesn't disconnect projects already imported through it.
+
+### GitLab
+
+1. On the organization's **Integrations** page, choose **Connect GitLab** and authorize as yourself.
+2. Choose **All projects you maintain** or **Only selected projects**.
+3. Import projects from the organization home, as with GitHub.
+
+The organization stores your GitLab tokens, encrypted, and every project imported through the integration uses them. So:
+
+- Imports need the Maintainer role, and a webhook is created for each imported project.
+- GitLab sends no event when you gain access to a new project, so new projects appear after the next reconcile or when you choose **Refresh**.
+- You can't remove a GitLab integration while imported projects still use it. Disconnect their repositories first.

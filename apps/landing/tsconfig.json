@@ -3,6 +3,8 @@
   "compilerOptions": {
     "lib": ["dom", "dom.iterable", "es2022"],
     "allowJs": false,
+    "declaration": false,
+    "declarationMap": false,
     "incremental": true,
     "jsx": "preserve",
     "module": "esnext",

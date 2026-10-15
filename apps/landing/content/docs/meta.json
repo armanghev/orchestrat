@@ -1,0 +1,17 @@
+{
+  "title": "Documentation",
+  "pages": [
+    "index",
+    "quickstart",
+    "configuration",
+    "users",
+    "storage",
+    "git-providers",
+    "connect-agents",
+    "upgrades",
+    "https",
+    "architecture",
+    "api",
+    "contributing"
+  ]
+}

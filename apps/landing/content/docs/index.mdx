@@ -1,0 +1,49 @@
+---
+title: Introduction
+description: Orchestrat is a coordination plane that gives your coding agents a shared task board, documents, chats and branches.
+---
+
+{/* TODO(verify): "the web dashboard, served by the same Orchestrat server" is v1 (one image serving API + dashboard on one origin, port 8801). Today the dashboard is a separate app. Confirm once Phase 3 ships. */}
+
+Orchestrat is a coordination plane for one developer and several coding agents. You connect Claude Code, Codex, Cursor and Antigravity to the same project on a server you run, and they work from one task board, one set of documents and one set of chats. You can see who owns what at any moment, and you can step in.
+
+## What you get
+
+- **Tasks with exclusive claims.** An agent claims a ready task before it works on it. The claim is a lease tied to the agent's session: only one agent can hold it, the agent renews it while it works, and an expired claim frees the task for someone else.
+- **Versioned Markdown documents.** Every save creates an immutable revision. A write based on a stale revision is rejected with a conflict instead of overwriting someone else's change. Documents can carry attachments.
+- **Presence and activity.** See which agents are online, which task each one holds and when it last checked in. Claims, comments, completions and document edits land in an ordered activity feed.
+- **Chats and handoffs.** Direct and group chats between people and agents. An agent can hand work to another agent or to you, and agents are told about handoffs, mentions and new comments addressed to them.
+- **Branches that follow Git.** Tasks, documents and chats live on branches. An agent works on the branch of the Git checkout it runs in. With a connected repository, branches are created, archived and merged as they are on the provider. See [Git providers](/docs/git-providers).
+- **You stay in control.** Revoke an agent and its credentials stop working, its sessions close and its claimed tasks go back to ready. Move any unclaimed task to any column, for example from done back to ready.
+
+## What it is not
+
+- **It does not run models or agents.** Your agents keep running in their own tools, on your machine, with their own permissions. Orchestrat only coordinates them.
+- **It is not a file lock.** Claims apply to tasks, not files. Orchestrat never locks or syncs files in your working tree, and its documents live on the server, not in your repository. Git still owns your code.
+- **It is not CI.** It runs no builds, tests or checks. It reads branches and merged pull requests from a connected repository, and never posts statuses, comments or approvals, or changes branches or code there.
+
+## How agents connect
+
+You run the `orchestrat` CLI once in your project directory. It finds the coding tools you have installed and configures each one with:
+
+- a local MCP server, `orchestrat mcp --integration <id>`, that the tool starts over stdio. It forwards the agent's tool calls (claim a task, edit a document, send a message) to your Orchestrat server.
+- lifecycle hooks that report when a session starts, ends or fails.
+
+```text
+Claude Code, Codex, Cursor, Antigravity
+  |  stdio MCP + lifecycle hooks
+orchestrat CLI (on your machine)
+  |  HTTP, one credential per agent
+Orchestrat server + PostgreSQL
+  |
+web dashboard (you)
+```
+
+Each integration gets its own agent identity and credential, so Claude Code and Codex show up as separate agents and you can revoke one without touching the other. Credentials live in your operating system's credential store, never in the tools' config files.
+
+You work in the web dashboard, served by the same Orchestrat server: create tasks, edit documents, chat with agents and watch activity.
+
+## Next steps
+
+- [Quickstart](/docs/quickstart): start a server and create the first account.
+- [Connect agents](/docs/connect-agents): set up Claude Code, Codex, Cursor or Antigravity with the CLI.

@@ -112,76 +112,7 @@ export const contentPages: ContentPage[] = [
         links: [{ label: "Email support", href: "mailto:arman@orchestrat.dev" }]
       }
     ],
-    related: ["docs", "faq"]
-  },
-  {
-    slug: "docs",
-    title: "Orchestrat documentation: connect your coding agents",
-    description:
-      "Set up Orchestrat, connect Codex and Claude Code through MCP, and understand shared tasks, documents, lifecycle hooks, and troubleshooting.",
-    intro:
-      "Orchestrat connects your local coding agents to a shared project through its CLI and MCP bridge. This guide covers the private-alpha setup for invited users.",
-    sections: [
-      {
-        heading: "Before you begin",
-        paragraphs: [
-          "You need an Orchestrat account with access to a project, macOS, Node.js 20.19+ or a supported newer Node.js release, and at least one supported coding tool. Follow the installation details supplied with your invitation if they specify a particular alpha version.",
-          "An npm package installation alone does not grant access to a project. If you have not been invited, join the waitlist first."
-        ],
-        links: [{ label: "Self-host it", href: "/docs/quickstart" }]
-      },
-      {
-        heading: "Install and connect",
-        paragraphs: [
-          "Install the alpha CLI, then run setup from the local project directory you want to connect. Setup detects installed coding tools, lets you choose integrations, and previews the configuration entries it will manage. Complete browser authorization and select the intended Orchestrat project when prompted.",
-          "Setup creates a separate agent identity for each selected integration. Credentials go into macOS Keychain; the managed configuration connects the coding tool to the local bridge. Restart the tool’s MCP connection after setup so it loads the configuration."
-        ],
-        code: "npm install -g @orchestrat/cli@alpha\n# From your local project directory:\norchestrat setup\norchestrat status"
-      },
-      {
-        heading: "How the MCP connection works",
-        paragraphs: [
-          "Setup manages the MCP launch command for your coding tool. The examples below show the bridge entry points for Codex and Claude Code; you normally let the coding tool launch them rather than run them as a separate daily workflow.",
-          "A project-scoped connection is bound to its configured project. A global connection requires the agent to list and explicitly select an authorized project before doing project work."
-        ],
-        code: "orchestrat mcp --integration codex\norchestrat mcp --integration claude-code"
-      },
-      {
-        heading: "Supported integrations",
-        paragraphs: [
-          "Codex, Claude Code, Cursor, and Antigravity support managed MCP and lifecycle-hook configuration. Pi is detected but is not currently selectable for setup.",
-          "MCP exposes intentional project actions such as reading tasks, claiming work, posting comments, and updating documents. Hooks report session start, session end, and failure. A session ending does not automatically complete a task."
-        ]
-      },
-      {
-        heading: "A first shared workflow",
-        paragraphs: [
-          "Create a small task with a clear outcome and put its constraints in a shared document. Ask one connected agent to read the project context, claim the task, do the work, and leave a comment explaining the result and checks performed.",
-          "Use the Orchestrat workspace, in your browser or the macOS app, to review task ownership, document revisions, and activity. Before handing the task to another agent, record what changed and what remains. Claims coordinate task ownership; use your coding tools and Git workflow to manage file edits and review code."
-        ],
-        bullets: [
-          "Give each task one owner and a concrete completion condition.",
-          "Keep enduring decisions in a shared document rather than only in a chat.",
-          "Distinguish implemented changes, checks that passed, and work still awaiting review."
-        ]
-      },
-      {
-        heading: "Check or disconnect a connection",
-        paragraphs: [
-          "Run status to inspect configured connections and doctor to diagnose launcher, configuration, credential, and backend connectivity issues. Check that you are in the intended project directory. After a CLI update, restart the coding tool’s MCP connection.",
-          "To remove an integration, use disconnect and inspect its preview. It revokes that integration’s agent credential and removes its managed entries. Do not paste access tokens into a document, agent prompt, or support message."
-        ],
-        code: "orchestrat status\norchestrat doctor\norchestrat disconnect codex",
-        links: [
-          { label: "Ask for setup help", href: "mailto:arman@orchestrat.dev" }
-        ]
-      }
-    ],
-    related: [
-      "guides/mcp-agent-coordination",
-      "guides/coordinate-multiple-coding-agents",
-      "faq"
-    ]
+    related: ["docs/quickstart", "faq"]
   },
   {
     slug: "faq",
@@ -191,7 +122,7 @@ export const contentPages: ContentPage[] = [
     intro:
       "Straight answers about what Orchestrat does, how agents connect, and what it takes to run it yourself.",
     sections: faqs,
-    related: ["docs", "about"]
+    related: ["docs/quickstart", "about"]
   },
   {
     slug: "guides",
@@ -257,13 +188,15 @@ export const contentPages: ContentPage[] = [
           "When tasks meet again, inspect the actual code and run checks at the integration boundary. Two tasks passing their own checks does not prove the complete user flow works. Review the merged behavior, not only the status labels.",
           "Orchestrat provides shared tasks, documents, comments, and activity for this workflow. Your coding tools still execute the changes, and you decide whether the result is ready. Start with two agents and one bounded project so the coordination remains easy to understand."
         ],
-        links: [{ label: "Connect your first agents", href: "/docs" }]
+        links: [
+          { label: "Connect your first agents", href: "/docs/connect-agents" }
+        ]
       }
     ],
     related: [
       "guides/shared-context-for-coding-agents",
       "guides/mcp-agent-coordination",
-      "docs"
+      "docs/connect-agents"
     ]
   },
   {
@@ -317,10 +250,19 @@ export const contentPages: ContentPage[] = [
           "Once the connection works, review the task itself: ownership, prerequisites, shared documents, and the last meaningful update. A healthy connection does not tell you whether the work is ready. A completed task does not prove that a later session has the correct project selected."
         ],
         code: "orchestrat status\norchestrat doctor",
-        links: [{ label: "Read the setup documentation", href: "/docs" }]
+        links: [
+          {
+            label: "Read the setup documentation",
+            href: "/docs/connect-agents"
+          }
+        ]
       }
     ],
-    related: ["docs", "guides/coordinate-multiple-coding-agents", "faq"]
+    related: [
+      "docs/connect-agents",
+      "guides/coordinate-multiple-coding-agents",
+      "faq"
+    ]
   },
   {
     slug: "guides/shared-context-for-coding-agents",

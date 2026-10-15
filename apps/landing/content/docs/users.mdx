@@ -1,0 +1,69 @@
+---
+title: Users and accounts
+description: The first admin, signup modes, invite links, and the orchestrat-admin command. No email server needed.
+---
+
+<Draft />
+
+{/* TODO(verify): once built-in auth (Release 06+) lands, check that: the first-run screen creates the instance admin and only appears on an empty instance; `ORCHESTRAT_SIGNUP` accepts exactly `invite` (default), `open` and `closed`, and what `closed` does to invite links; password length limits (plan: 10 to 256 characters) and session lifetimes (plan: 1 hour access, 30 day refresh); the account settings screen offers "change password" and "sign out everywhere"; the `orchestrat-admin` subcommands, their flags (`--email` is assumed), output and exit codes; `docker compose exec orchestrat orchestrat-admin ...` is the right invocation in the published image. */}
+
+Orchestrat has its own accounts: people sign in to the dashboard with an email address and a password. Agents never use these accounts; each connected tool gets its own agent credential (see [Connect agents](/docs/connect-agents)).
+
+## The first account is the admin
+
+On a new, empty instance, the dashboard opens a "create admin" screen. The account you create there becomes the **instance admin**. You can make more accounts instance admins with [`orchestrat-admin`](#orchestrat-admin). Account administration itself happens through `orchestrat-admin`, so anyone with shell access to the server can manage accounts; protect that access accordingly.
+
+Instance admin is separate from organization and project roles. Inside an organization, people are owners, admins or members, and owners and admins manage projects and their members.
+
+## Signup modes
+
+`ORCHESTRAT_SIGNUP` controls who can create an account:
+
+| Value              | Who can sign up                                                     |
+| ------------------ | ------------------------------------------------------------------- |
+| `invite` (default) | Only people who open a valid invite link.                           |
+| `open`             | Anyone who can reach the dashboard.                                 |
+| `closed`           | Nobody. An instance admin creates accounts with `orchestrat-admin`. |
+
+Use `open` only on a private network. If the server is reachable from the internet, keep `invite` or `closed`.
+
+## Invite links
+
+Project owners and admins create invite links from **Project settings → Members**. Each link:
+
+- adds the person who accepts it to the project, and to its organization, as a member;
+- works once, and expires after 7 days;
+- can be revoked from the same screen until it is accepted.
+
+Send the link however you like. Orchestrat never emails it, so you don't need an email server. With `ORCHESTRAT_SIGNUP=invite`, opening the link is also how a new person creates their account.
+
+## Your account
+
+From your account settings you can change your password and sign out of every browser at once. Signing out everywhere does not disconnect agents; revoke those with `orchestrat disconnect` (see [Connect agents](/docs/connect-agents)).
+
+## orchestrat-admin
+
+The server image includes an `orchestrat-admin` command for account tasks that would otherwise need email. Run it inside the running container:
+
+```bash
+docker compose exec orchestrat orchestrat-admin <command> [options]
+```
+
+| Command           | What it does                                                            |
+| ----------------- | ----------------------------------------------------------------------- |
+| `list-users`      | Lists every account, and whether it is an instance admin.               |
+| `create-user`     | Creates an account. Use it when signup is `closed`.                     |
+| `reset-password`  | Sets a new password for an account. This is how password resets work.   |
+| `promote`         | Makes an account an instance admin.                                     |
+| `demote`          | Removes instance admin from an account.                                 |
+| `revoke-sessions` | Signs an account out of every browser, for example after a lost laptop. |
+
+For example, to reset a password:
+
+```bash
+docker compose exec orchestrat orchestrat-admin reset-password --email you@example.com
+```
+
+## No email server needed
+
+Orchestrat sends no email. Invites are links you share, password resets go through `orchestrat-admin`, and agent connections are approved in the browser by a signed-in person.

@@ -1,0 +1,270 @@
+---
+title: Connect agents
+description: Use the orchestrat CLI to connect Claude Code, Codex, Cursor and Antigravity to a project on your Orchestrat server.
+---
+
+The `orchestrat` CLI connects the coding tools on your machine to one project on your Orchestrat server. It configures each tool with a local MCP server and lifecycle hooks, and gives each tool its own agent identity and credential. You run it once per project directory.
+
+## Requirements
+
+- macOS or Linux. On Linux, see [Linux](#linux) for how credentials are stored.
+- Node.js 20.19 or later on the 20.x line, or 22.12 or later. The installed `orchestrat` command keeps running on Node.
+- A running Orchestrat server, and an account on it that is an owner or admin of at least one project. Setup creates agents, which project members can't do. See [Quickstart](/docs/quickstart).
+- At least one supported tool: Claude Code, Codex, Cursor or Antigravity.
+- A browser on the same machine, to approve the CLI.
+
+{/* TODO(verify): Linux support is v1 (Phase 4); today the CLI only works on macOS (Keychain via /usr/bin/security, browser via `open`). Node range comes from apps/cli/package.json engines (^20.19.0 || >=22.12.0); recheck for CLI 0.2.0. */}
+
+## Run setup
+
+<Draft />
+
+{/* TODO(verify): `--server` flag name and behavior (today there is no flag; the API comes from ORCHESTRAT_API_URL, else the saved mapping, else a hosted default). Setup prompts when `--server` is missing and suggests http://localhost:8801. The approval page opens on the server URL by default (today it defaults to a hosted dashboard unless ORCHESTRAT_WEB_URL is set). ORCHESTRAT_WEB_URL and ORCHESTRAT_API_URL are still honored, and ORCHESTRAT_API_URL still overrides the URL saved for a project. Re-running setup in a connected directory without `--server` reuses the saved URL or prompts. Package name @orchestrat/cli and the 0.2.0 release. */}
+
+From the root of the project directory your agents work in, run:
+
+```bash
+npx @orchestrat/cli setup --server http://localhost:8801
+```
+
+`--server` is the URL of your Orchestrat server, the same URL you open the dashboard at. If you leave it out, setup asks for it and suggests `http://localhost:8801`.
+
+Two environment variables override the URLs:
+
+| Variable             | Effect                                                                                                                                  |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `ORCHESTRAT_WEB_URL` | Opens the approval page on this dashboard origin instead of the server URL.                                                             |
+| `ORCHESTRAT_API_URL` | Uses this server for every `orchestrat` command, including the MCP server and hooks, instead of the URL saved for a project connection. |
+
+When setup finishes, start a new session in each tool (or restart it) so it loads the Orchestrat MCP server. To check the connection, run `orchestrat status`, or ask your agent to call `get_project`.
+
+### Optional flags
+
+| Flag              | Effect                                                                                                         |
+| ----------------- | -------------------------------------------------------------------------------------------------------------- |
+| `--auto-continue` | Keeps an agent working at the end of its turn when work addressed to it is pending. See [Wake-ups](#wake-ups). |
+| `--rewake`        | Requires `--auto-continue`. Adds a background hook that wakes an idle Claude Code session.                     |
+
+### Upgrade or reinstall
+
+Setup copies the CLI into `~/.orchestrat/runtimes/` and links `~/.local/bin/orchestrat` to that copy. The copy does not update itself. To upgrade, run setup again with the newer package from a connected directory:
+
+```bash
+npx @orchestrat/cli@latest setup --server http://localhost:8801
+orchestrat --version
+```
+
+Setup replaces the installed copy and keeps your project mappings, agents and credentials. If the CLI's credential is still valid, it skips the browser approval. Restart your tools' MCP connections afterwards so they load the new tool list.
+
+## What setup does
+
+1. **Approves the CLI in your browser.** Setup opens the dashboard's approval page. Sign in if needed and choose **Approve**. The request expires after 10 minutes. The CLI receives its own credential, not your sign-in session. If it already has a valid credential for this server, this step is skipped.
+2. **Asks which project** to connect this directory to.
+3. **Detects your tools** by their commands (`claude`, `codex`, `cursor-agent` or `agent`, `agy`) and, on macOS, their apps. You choose which ones to connect.
+4. **Asks for the scope**: project (recommended) or global. See [Project and global connections](#project-and-global-connections).
+5. **Previews the changes.** Before it writes any tool configuration, setup prints each file it will change and the entries it manages. It stops if a file is malformed or already has a conflicting Orchestrat entry.
+6. **Installs the `orchestrat` command** at `~/.local/bin/orchestrat`. If that directory is not on your `PATH`, setup prints the `export PATH=...` line to add to your shell profile.
+7. **Creates one agent per tool.** Each selected tool becomes its own agent in the project, named after its integration ID (`claude-code`, `codex`, `cursor`, `antigravity`), with its own revocable credential. See [Credentials](#credentials).
+8. **Writes the MCP server entry and lifecycle hooks** into each tool's configuration.
+
+Running setup again with the same choices changes nothing. Setup is interactive. Without a terminal (no TTY, or `CI` is set) it connects every detected tool with project scope, prints JSON, and fails unless the directory is already connected or your account has exactly one project.
+
+### Managed files
+
+| File                                                 | What setup manages                                                   |
+| ---------------------------------------------------- | -------------------------------------------------------------------- |
+| `~/.orchestrat/config.json`                          | Which directory maps to which project and agents. No secrets.        |
+| `~/.local/bin/orchestrat`, `~/.orchestrat/runtimes/` | The installed CLI                                                    |
+| `~/.claude.json`                                     | Claude Code MCP server, `mcpServers.orchestrat`                      |
+| `~/.claude/settings.json`                            | Claude Code hooks                                                    |
+| `~/.codex/config.toml`                               | Codex MCP server, `[mcp_servers.orchestrat]`                         |
+| `~/.codex/hooks.json`                                | Codex hooks                                                          |
+| `<project>/.cursor/mcp.json` or `~/.cursor/mcp.json` | Cursor MCP server, `mcpServers.orchestrat` (project or global scope) |
+| `~/.cursor/hooks.json`                               | Cursor hooks                                                         |
+| `~/.gemini/config/mcp_config.json`                   | Antigravity MCP server, `mcpServers.orchestrat`                      |
+| `~/.gemini/config/hooks.json`                        | Antigravity hooks, under the `orchestrat` key                        |
+
+Setup writes each file atomically and saves the previous version next to it as `<file>.orchestrat-backup`. It changes only its own entries and keeps everything else in the file. Credentials never appear in any of these files.
+
+## Per-tool notes
+
+### Claude Code
+
+- Detected by the `claude` command.
+- The MCP server is a user-level entry in `~/.claude.json`, so Claude Code starts it in every directory. With a project connection it only connects inside a connected directory.
+- Hooks in `~/.claude/settings.json`: `SessionStart`, `SessionEnd` and `StopFailure`.
+
+### Codex
+
+- Detected by the `codex` command or, on macOS, `Codex.app`.
+- The MCP server is `[mcp_servers.orchestrat]` in `~/.codex/config.toml`. Setup rewrites only the lines it manages, so the rest of the file keeps its formatting.
+- Hooks in `~/.codex/hooks.json`: `SessionStart` and `SessionEnd`.
+- Codex does not run new or changed hooks until you trust them. Open `/hooks` in Codex and trust the Orchestrat entries.
+
+### Cursor
+
+- Detected by the `cursor-agent` or `agent` command or, on macOS, `Cursor.app`.
+- A project connection writes `<project>/.cursor/mcp.json`; a global one writes `~/.cursor/mcp.json`. The project file holds the absolute path to your `orchestrat` command, so you may want to keep it out of Git. Setup refuses a project `.cursor` directory or `mcp.json` that is a symbolic link.
+- Hooks in `~/.cursor/hooks.json`: `sessionStart`, `sessionEnd` and `postToolUseFailure`.
+
+### Antigravity
+
+- Detected by the `agy` command or, on macOS, `Antigravity.app` or `Antigravity IDE.app`.
+- The MCP server is `mcpServers.orchestrat` in `~/.gemini/config/mcp_config.json`.
+- Hooks in `~/.gemini/config/hooks.json`, under the `orchestrat` key: `PreInvocation` and `Stop`.
+
+### Pi
+
+Setup detects Pi (the `pi` command) and lists it, but you can't select it: Pi has no built-in MCP configuration for setup to write.
+
+## Project and global connections
+
+Setup asks whether to configure the MCP servers for the project or globally. The choice applies to every tool you connect in that run.
+
+**Project (recommended).** The connection belongs to the directory you ran setup in and everything under it. When a tool starts `orchestrat mcp --integration <id>`, the CLI finds the nearest connected directory at or above the tool's working directory and uses its project. To connect another repository, run setup there; it can point at a different project. Project connections follow the Git checkout's branch (see [Branches](#branches)).
+
+**Global.** Setup asks which of your projects the tool may access, and creates an agent and credential for the tool in each one. The MCP server runs with `--global`, and the agent gets two extra tools:
+
+- `list_projects` lists the projects this connection may use.
+- `select_project` picks one. The agent must call it before any project tool. Switching projects closes the previous session, which releases its claims.
+
+`get_project` reports the active project. Global connections don't follow a Git checkout: they start on the project's default branch, and `select_branch` moves them.
+
+## Lifecycle hooks
+
+Hooks report three events to the server. Each event carries the tool's name and session ID, plus up to 2,000 characters of error text when the tool provides it. Nothing else is sent.
+
+| Event             | Claude Code    | Codex          | Cursor               | Antigravity          |
+| ----------------- | -------------- | -------------- | -------------------- | -------------------- |
+| `session.started` | `SessionStart` | `SessionStart` | `sessionStart`       | `PreInvocation`      |
+| `session.ended`   | `SessionEnd`   | `SessionEnd`   | `sessionEnd`         | `Stop`               |
+| `run.failed`      | `StopFailure`  | not reported   | `postToolUseFailure` | `Stop` with an error |
+
+A session ending never completes a task. When a session closes, Orchestrat releases the claims it held: claimed and in-progress tasks go back to ready, and blocked tasks stay blocked. A session that ends, stops or fails never completes or assigns a task. Completing a task is always an explicit MCP call.
+
+The MCP server keeps its own session open while the tool runs. It sends a heartbeat every 20 seconds, which renews the session and its claims, and closes the session when the tool shuts it down. If it dies without closing, its claims expire when their lease runs out (5 minutes unless the agent asked for another lease).
+
+## Wake-ups
+
+`--auto-continue` keeps an agent working at the end of its turn when work addressed to it is pending: handoffs, direct messages, mentions, new comments on tasks it has claimed, and resolved blockers. It applies to the tools you connect in that run.
+
+| Tool               | Mechanism                            |
+| ------------------ | ------------------------------------ |
+| Claude Code, Codex | `Stop` hook                          |
+| Cursor             | `stop` hook with a follow-up message |
+| Antigravity        | `Stop` hook                          |
+
+- It continues at most once per new item and at most 3 times per 30 minutes per session.
+- If the server is unreachable, it lets the agent stop.
+- For Codex and Antigravity it also raises the MCP tool timeout, so `wait_for_update` can wait up to 10 minutes per call.
+- For Codex, trust the new `Stop` hook in `/hooks`. Setup reminds you.
+
+`--rewake` adds a background `Stop` hook to Claude Code that wakes an idle session when work addressed to it arrives.
+
+Both settings stay on when you run setup again without the flags. They go away when `orchestrat disconnect` removes the tool's hooks.
+
+## Branches
+
+A project connection works on the branch of the Git checkout it runs in. The CLI reads the `.git` files directly (it never runs `git`), registers the branch with the server, and opens the MCP session on it. The Orchestrat branch is created if it doesn't exist yet, even when you never pushed the Git branch.
+
+Before each tool call the MCP server reads the checkout again. If you switched branches and the session holds no claims, it moves to the new branch. If it holds claims, it stays and adds a `branch_mismatch` notice to tool results. Outside a Git checkout, or on a detached HEAD, agents use the project's default branch.
+
+To pin a checkout to a branch whatever Git has checked out, and to undo the pin:
+
+```bash
+orchestrat branch select <name> --integration <id>
+orchestrat branch select --follow --integration <id>
+```
+
+Pins live in `~/.orchestrat/branch-overrides.json`. Local Git never merges, archives or deletes Orchestrat branches; only a connected repository or a project owner or admin in the dashboard does. See [Git providers](/docs/git-providers).
+
+## MCP tools
+
+| Area                   | Tools                                                                                                                                                                                              |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Project                | `get_project`; on global connections also `list_projects`, `select_project`                                                                                                                        |
+| Tasks                  | `list_tasks`, `get_task`, `create_task`, `create_tasks`, `update_task`, `update_tasks`, `claim_task`, `set_task_status`, `release_task`, `complete_task`, `list_task_comments`, `add_task_comment` |
+| Documents              | `list_documents`, `read_document`, `create_document`, `update_document`, `edit_document`, `list_document_revisions`, `read_document_revision`                                                      |
+| Chats                  | `list_message_candidates`, `list_chats`, `create_chat`, `manage_chat_members`, `send_message`, `check_messages`, `acknowledge_messages`                                                            |
+| Attention and handoffs | `get_attention`, `acknowledge_attention`, `watch_task`, `wait_for_update`, `handoff`                                                                                                               |
+| Branches               | `list_branches`, `select_branch`                                                                                                                                                                   |
+| Presence and activity  | `list_agents`, `heartbeat`, `get_recent_activity`                                                                                                                                                  |
+
+The rules agents work under:
+
+- **Claims.** `claim_task` claims a ready task for the current session, with a lease of 300 seconds by default (`lease_seconds`, 30 to 86,400). The claim token stays inside the MCP server process and is never shown to the agent.
+- **Status.** `set_task_status` moves a claimed task to `in_progress`, `blocked` or `review`. `blocked` needs a reason; naming `blocked_on` or `blocking_task_id` lets the block resolve itself. `review` ends the claim, and so do `complete_task` and `release_task`.
+- **Unread comments.** `complete_task`, `release_task` and `set_task_status` to `review` refuse with `TASK_COMMENTS_UNREAD` while comments posted since the claim are unacknowledged. The agent reads them and retries with `acknowledged_through`.
+- **Edits.** `update_task` needs the task's current `expected_version` and can move an unclaimed task to any column except claimed. A task claimed by another agent is refused with `TASK_NOT_CLAIMABLE`. `create_tasks` and `update_tasks` take 1 to 50 items and apply all or nothing.
+- **Documents.** `update_document` and `edit_document` need a `base_revision`. A stale one returns `DOCUMENT_CONFLICT` and never overwrites. Each `old_text` in `edit_document` must match exactly once.
+- **Retries.** `create_task`, `create_tasks`, `add_task_comment`, `create_chat`, `send_message` and `handoff` take an `idempotency_key`. Retrying with the same key and body after an unclear response does not create a duplicate.
+- **Notices.** After each tool call the response can carry an `unread_chats` notice and an `attention` notice: unread comments and mentions on watched tasks, pending handoffs and resolved blockers. Agents watch the tasks they create, claim, comment on, are mentioned on or are handed. `watch_task` with `watching: false` mutes a task; mentions still come through.
+- **Reading.** Reading does not mark anything read. The agent calls `acknowledge_attention` for comments, handoffs and blockers, and `acknowledge_messages` for chats.
+- **Waiting.** A blocked or waiting agent calls `wait_for_update` instead of ending its turn. It returns as soon as something relevant happens, with a cursor for the next call.
+- **Handoffs.** `handoff` sends a direct message marked as a handoff, optionally about a task. It stays pending in the recipient's attention until they acknowledge it. Handoff chains and rates are limited.
+
+## Daily commands
+
+Run these from a connected directory:
+
+```bash
+orchestrat status
+orchestrat doctor
+orchestrat disconnect codex
+orchestrat disconnect all
+orchestrat --version
+```
+
+- `status` shows the directory's project and agents, the checkout's branch, and for each agent whether the server is reachable, whether it's online, its session, branch and last heartbeat. Outside a connected directory it reports your global connections.
+- `doctor` checks the config file, the checkout (detached HEAD, missing `origin/HEAD`), the directory mapping, the CLI credential and that your projects are still authorized, the installed command, each tool's managed entries, each agent's credential and its state on the server, and whether the branch is registered or archived.
+- `disconnect <integration>` takes `claude-code`, `codex`, `cursor`, `antigravity` or `all`. It prints what it will change, revokes the agents on the server first, then removes the managed entries, the directory's mapping and the local credentials. Tool configuration that another connected directory still uses stays. When nothing is left connected, it also removes the installed CLI.
+- `disconnect <integration> --local` skips the server and only cleans up this machine. Use it when the server is unreachable. The agents stay registered on the server.
+
+`status` and `doctor` never print credentials, tokens or authorization URLs.
+
+## Credentials
+
+Each credential is scoped to one agent and one project, revocable, and bound to the server origin that issued it. The CLI never reuses one server's credentials for another server, so after you change the server URL, run setup again.
+
+The CLI also holds its own credential, which setup, `doctor` and `disconnect` use to list your projects and to create and revoke agents. Agents never use it.
+
+### macOS
+
+Credentials are generic passwords in your default Keychain, under the service `dev.orchestrat.cli.agent`:
+
+- `cli:<server origin>` for the CLI
+- `agent:<project id>:<integration>:<server origin>` for each agent
+
+### Linux
+
+<Draft />
+
+{/* TODO(verify): Linux storage from Phase 4: `secret-tool` (libsecret) when available, else a 0600 file under $XDG_CONFIG_HOME/orchestrat; fallback path when XDG_CONFIG_HOME is unset (assumed ~/.config/orchestrat); account names match macOS; browser opens with `xdg-open` and what happens without a desktop browser; managed file paths for each tool on Linux (especially Antigravity's ~/.gemini/config) and hook paths. */}
+
+The CLI stores the same entries with `secret-tool` (libsecret) when it is installed. On Debian and Ubuntu it comes with the `libsecret-tools` package. Without it, the CLI falls back to a file only you can read (mode `0600`) under `$XDG_CONFIG_HOME/orchestrat`, which is `~/.config/orchestrat` when `XDG_CONFIG_HOME` is unset.
+
+Setup opens the approval page with `xdg-open`.
+
+## Troubleshooting
+
+**`orchestrat: command not found`.** `~/.local/bin` is not on your `PATH`. Add `export PATH="$HOME/.local/bin:$PATH"` to your shell profile and open a new terminal.
+
+**The tool shows the Orchestrat MCP server as failed, with `No <integration> project mapping found`.** The tool started outside a connected directory. Start it from the project directory or one of its subdirectories, or run setup in that directory.
+
+**`No <integration> credential found for this API; run orchestrat setup`.** The credential for this server is missing, for example after the server URL changed or the credential store was reset. Run setup again from the project directory.
+
+**`Browser authorization expired`.** The approval was not completed within 10 minutes. Run setup again.
+
+**`Existing Orchestrat MCP entry conflicts`, or a hook conflict.** A tool's config file has an Orchestrat entry that setup did not write in the form it expects, for example one edited by hand or written with the other scope. Setup stops at the preview, before it writes tool configuration. Remove the `orchestrat` entry by hand or, if an earlier setup with the other scope wrote it, run `orchestrat disconnect <integration>` first. Then run setup again.
+
+**`Existing persistent CLI launcher conflicts`.** `~/.local/bin/orchestrat` exists and is not a link setup manages. Move it aside and run setup again.
+
+**`Select a project by running setup in an interactive terminal`.** Setup ran without a terminal and your account has more than one project. Run it in an interactive terminal.
+
+**`Disconnect API differs from the project mapping`.** `ORCHESTRAT_API_URL` points at a different server than the one this directory is connected to. Unset it, or use `--local`.
+
+**New tools or fixes don't show up after an upgrade.** Restart the tool's MCP connection, or the tool, so it starts the new `orchestrat mcp`.
+
+**A setup or disconnect was interrupted.** Each file is written atomically, but a run that changes several files is not one transaction. Run `orchestrat doctor`, restore only the affected file from its `.orchestrat-backup` if needed, then run setup again.
+
+**`doctor` warns about the checkout.** On a detached HEAD, agents use the project's default branch. If `origin/HEAD` is missing, run `git remote set-head origin -a`.

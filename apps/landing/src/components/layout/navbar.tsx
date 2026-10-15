@@ -7,7 +7,7 @@ import { OrchestratLogo } from "@/components/graphics/orchestrat-logo";
 import { GitHubMark } from "@/components/graphics/github-mark";
 import { githubUrl, quickstartHref } from "@/lib/links";
 
-const links = [
+export const siteLinks = [
   { label: "How it works", href: "/#how-it-works" },
   { label: "Messaging", href: "/#messaging" },
   { label: "Features", href: "/#features" },
@@ -38,7 +38,7 @@ export function Navbar() {
             <OrchestratLogo />
           </Link>
           <div className="hidden items-center gap-8 lg:flex">
-            {links.map((link) => (
+            {siteLinks.map((link) => (
               <Link
                 key={link.href}
                 href={link.href}
@@ -90,7 +90,7 @@ export function Navbar() {
         >
           <div className="min-h-0 overflow-hidden">
             <div className="flex flex-col gap-1 border-t pb-5 pt-3">
-              {links.map((link) => (
+              {siteLinks.map((link) => (
                 <Link
                   key={link.href}
                   href={link.href}

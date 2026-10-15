@@ -7,14 +7,27 @@ const origin = "https://orchestrat.dev";
 const paths = [
   "",
   "/about",
-  "/docs",
   "/faq",
   "/guides",
   "/guides/coordinate-multiple-coding-agents",
   "/guides/mcp-agent-coordination",
   "/guides/shared-context-for-coding-agents",
   "/terms",
-  "/privacy"
+  "/privacy",
+  ...[
+    "",
+    "/quickstart",
+    "/configuration",
+    "/users",
+    "/storage",
+    "/git-providers",
+    "/connect-agents",
+    "/upgrades",
+    "/https",
+    "/architecture",
+    "/api",
+    "/contributing"
+  ].map((page) => `/docs${page}`)
 ];
 
 test("public pages, crawl files, structured data, and real 404 responses", async () => {
@@ -206,12 +219,14 @@ test("public pages, crawl files, structured data, and real 404 responses", async
       assert.ok(body.includes(origin + path), `${file}: ${path}`);
     if (file === "llms-full.txt") {
       for (const text of [
-        "orchestrat setup",
+        "npx @orchestrat/cli setup --server http://localhost:8801",
+        "Draft: this describes v1, which is still being built.",
         "orchestrat mcp --integration codex",
         "Read current state before writing",
         "Elastic License 2.0"
       ])
         assert.ok(body.includes(text), text);
+      assert.doesNotMatch(body, /TODO\(verify\)|<Draft|<Callout/);
     }
   }
   const slash = await fetch(`${base}/docs/`, { redirect: "manual" });

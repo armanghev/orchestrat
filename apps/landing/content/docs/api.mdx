@@ -1,0 +1,664 @@
+---
+title: API reference
+description: Every REST route the Orchestrat server exposes under /api/v1, with authentication, pagination, idempotency, concurrency and error rules.
+---
+
+The Orchestrat server speaks JSON over HTTP. The dashboard, the CLI and the MCP bridge all use the routes on this page. Examples use `http://localhost:8801`.
+
+Request and response shapes are Zod schemas in [`packages/protocol`](https://github.com/armanghev/orchestrat/tree/main/packages/protocol/src); treat them as the source of truth for field-level detail.
+
+## Conventions
+
+- **Prefixes.** Routes for people live under `/api/v1`. Routes for agents live under `/api/v1/agent`. A few public routes need no token; see [Public routes](#public-routes).
+- **Status codes.** Creates return `201` and queued work returns `202`. Repository and integration deletes return `204` with no body. Everything else returns `200`.
+- **IDs** are UUIDs, and timestamps are ISO 8601 strings.
+- **Request IDs.** Every response has an `x-request-id` header, also echoed in error bodies.
+- **Pagination.** List routes take `limit` (1–100, default 50) and an opaque `cursor`, and return `next_cursor` (`null` on the last page). Event lists use `after` instead of `cursor`. A malformed cursor returns `400 VALIDATION_ERROR`.
+- **Optimistic concurrency.** Task writes send the task's current `expected_version`; a stale one returns `409 TASK_VERSION_CONFLICT` with `current_version` when known. Document writes send `base_revision`; a stale one returns `409 DOCUMENT_CONFLICT` with `current_revision` and `base_revision`. Successful writes bump the version.
+- **Archived projects** stay readable; writes return `409 PROJECT_ARCHIVED`.
+
+### Idempotency keys
+
+Some creates require an `Idempotency-Key` header of 1–128 characters. Repeating a request with the same key returns the original response. Reusing the key for a different request returns `409 IDEMPOTENCY_CONFLICT`. A missing key returns `400 VALIDATION_ERROR`.
+
+Keys are scoped to the caller (person or agent). Task and chat creation keys are also scoped to the branch, so one key on two branches creates two items. Merge keys are scoped to the person and the target branch.
+
+The key is required on:
+
+- task, comment and bulk task creation (people and agents)
+- chat creation and chat messages (people and agents)
+- handoffs (people and agents)
+- `POST /api/v1/agent/hooks/lifecycle`
+- `POST /api/v1/projects/:projectId/merges`
+
+## Authentication
+
+### People
+
+<Draft />
+
+{/* TODO(verify): final auth route prefix and payloads */}
+{/* TODO(verify): HTTP methods for each /auth route, response shapes, rate-limit numbers, and which routes are public (instance, signup, login, refresh). */}
+
+People send a session token on every `/api/v1` route:
+
+```http
+Authorization: Bearer <session token>
+```
+
+Get a token from `POST /api/v1/auth/login`. The response holds an access token (`orch_sess_…`, valid 1 hour) and a refresh token (`orch_refresh_…`, valid 30 days). Refreshing rotates the refresh token; reusing an old one revokes the session.
+
+| Method | Path                      | Behavior                                                                                 |
+| ------ | ------------------------- | ---------------------------------------------------------------------------------------- |
+| `GET`  | `/api/v1/auth/instance`   | Public. `needs_setup` (no accounts yet) and `signup_mode` (`invite`, `open` or `closed`) |
+| `POST` | `/api/v1/auth/signup`     | Create an account. The first account on an empty instance becomes the instance admin     |
+| `POST` | `/api/v1/auth/login`      | Email and password; returns an access token and a refresh token                          |
+| `POST` | `/api/v1/auth/refresh`    | Exchange a refresh token for a new pair                                                  |
+| `POST` | `/api/v1/auth/logout`     | End the current session                                                                  |
+| `POST` | `/api/v1/auth/logout-all` | End every session of the account                                                         |
+| `POST` | `/api/v1/auth/password`   | Change the password                                                                      |
+| `GET`  | `/api/v1/auth/me`         | The signed-in account                                                                    |
+
+Signup follows `ORCHESTRAT_SIGNUP`: with `invite` (the default) people sign up only through an existing invitation link. Login and signup are rate-limited per IP and per email. See [Users and auth](/docs/users).
+
+A missing or invalid token returns `401 UNAUTHENTICATED`. A request for a project you can't access returns `403 PERMISSION_DENIED`. An agent token sent to a human route returns `401 AGENT_CREDENTIAL_INVALID`.
+
+### Agents
+
+Agents call routes under `/api/v1/agent` with exactly one `Authorization` header holding an agent token:
+
+```http
+Authorization: Bearer orch_agent_<token>
+```
+
+- An agent token belongs to one agent in one project. The server takes the agent and project from the token; IDs in paths and bodies never change them.
+- Tokens are random, stored only as hashes, and returned once, when issued.
+- A missing, malformed or unknown token returns `401 AGENT_CREDENTIAL_INVALID`. A revoked token, or a token of a revoked agent, returns `401 AGENT_CREDENTIAL_REVOKED` immediately.
+- Agents name a branch with `X-Orchestrat-Branch-Id` or pin requests to a session with `X-Orchestrat-Session-Id`; see [Choosing a branch](#choosing-a-branch).
+
+Agent tokens are minted in two ways: by the CLI's browser approval (below), or by a project owner or admin through [Agents and credentials](#agents-and-credentials).
+
+### CLI browser approval
+
+`orchestrat setup` uses these routes to get a CLI credential and then one agent token per integration.
+
+| Method | Path                                                    | Auth           | Behavior                                                                                                                                                                                   |
+| ------ | ------------------------------------------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `POST` | `/api/v1/cli/authorization/attempts`                    | none           | Start an attempt; `201 { attempt_id, secret, expires_at }`. Attempts expire after 10 minutes                                                                                               |
+| `POST` | `/api/v1/cli/authorization/attempts/:attemptId/approve` | session        | Approve with an empty JSON body, from the dashboard's `/cli/authorize?attempt=<attempt_id>` page                                                                                           |
+| `POST` | `/api/v1/cli/authorization/attempts/:attemptId/deny`    | session        | Deny the attempt                                                                                                                                                                           |
+| `POST` | `/api/v1/cli/authorization/attempts/:attemptId/poll`    | `{ secret }`   | `{ status }`: `pending`, `denied`, `expired`, or `approved` with a one-time `credential` (`orch_cli_…`). At most one poll per attempt every 2 seconds, otherwise `429`                     |
+| `GET`  | `/api/v1/cli/setup/projects`                            | CLI credential | Projects the approving person can access: `{ projects: [{ id, name, organization_name }] }`                                                                                                |
+| `GET`  | `/api/v1/cli/setup/project`                             | CLI credential | `{ project_id }`: the project the credential is bound to, or `null`                                                                                                                        |
+| `POST` | `/api/v1/cli/setup`                                     | CLI credential | `{ project_id, integration }`; creates an agent and returns `{ project_id, integration, agent, credential }`, where `credential.token` is the agent token. Requires project owner or admin |
+| `POST` | `/api/v1/cli/setup/disconnect`                          | CLI credential | `{ project_id, agent_ids, revoke_cli }`; revokes 1–5 agents, and the CLI credential itself when `revoke_cli` is `true`                                                                     |
+
+`integration` is one of `codex`, `claude-code`, `cursor`, `antigravity` or `opencode`. The CLI credential is sent as `Authorization: Bearer orch_cli_…` and works only on the `/api/v1/cli/setup` routes. An invalid one returns `401 UNAUTHENTICATED`.
+
+## Errors
+
+Errors share one envelope:
+
+```json
+{
+  "error": {
+    "code": "PERMISSION_DENIED",
+    "message": "You do not have access to this project.",
+    "details": {},
+    "request_id": "req_…"
+  }
+}
+```
+
+Schema validation failures return `400 VALIDATION_ERROR` with the validation `issues` in `details`; an oversized body returns `413 VALIDATION_ERROR`. Some codes add a `details.reason`, listed per area below.
+
+| Code                                                                                                       | Status | Meaning                                                                                                                                                         |
+| ---------------------------------------------------------------------------------------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `UNAUTHENTICATED`                                                                                          | 401    | Missing or invalid session, CLI credential, or realtime or download ticket                                                                                      |
+| `AGENT_CREDENTIAL_INVALID`, `AGENT_CREDENTIAL_REVOKED`                                                     | 401    | Bad or revoked agent token                                                                                                                                      |
+| `PERMISSION_DENIED`                                                                                        | 403    | No access, or the role is too low                                                                                                                               |
+| `CLAIM_NOT_OWNER`                                                                                          | 403    | The claim belongs to another agent or session                                                                                                                   |
+| `NOT_FOUND`, `AGENT_NOT_FOUND`, `AGENT_SESSION_NOT_FOUND`, `CLAIM_NOT_FOUND`, `BRANCH_NOT_FOUND`           | 404    | The resource doesn't exist or isn't visible to the caller                                                                                                       |
+| `VALIDATION_ERROR`, `REPOSITORY_NOT_CONFIGURED`                                                            | 400    | Invalid request, or the Git provider isn't set up on this server                                                                                                |
+| `CONFLICT`                                                                                                 | 409    | Generic conflict, often with `details.reason`; also a duplicate slug or email                                                                                   |
+| `ORGANIZATION_SLUG_TAKEN`                                                                                  | 409    | Another organization has the slug                                                                                                                               |
+| `PROJECT_ARCHIVED`                                                                                         | 409    | Write to an archived project                                                                                                                                    |
+| `IDEMPOTENCY_CONFLICT`                                                                                     | 409    | Idempotency key reused for a different request                                                                                                                  |
+| `TASK_VERSION_CONFLICT`, `TASK_DEPENDENCY_CYCLE`                                                           | 409    | Stale `expected_version`; dependency would form a cycle                                                                                                         |
+| `TASK_NOT_CLAIMABLE`, `TASK_ALREADY_CLAIMED`                                                               | 409    | The task can't be claimed or changed now; another session holds it                                                                                              |
+| `AGENT_SESSION_CLOSED`, `AGENT_SESSION_STALE`                                                              | 409    | The session is closed, or its last heartbeat is more than 60 seconds old                                                                                        |
+| `DOCUMENT_CONFLICT`, `DOCUMENT_EDIT_MISMATCH`, `DOCUMENT_ARCHIVED`                                         | 409    | Stale `base_revision`; an edit's `old_text` doesn't match exactly once; the document is archived                                                                |
+| `ATTACHMENT_QUOTA_EXCEEDED`, `ATTACHMENT_UPLOAD_EXPIRED`                                                   | 409    | Project attachment quota reached; the upload expired                                                                                                            |
+| `TASK_COMMENTS_UNREAD`, `WATCH_LIMIT`, `INVALID_STATUS_TRANSITION`, `BLOCKER_CYCLE`                        | 409    | Attention rules; see [Attention and handoffs](#attention-and-handoffs)                                                                                          |
+| `BRANCH_ARCHIVED`, `BRANCH_MISMATCH`, `BRANCH_NAME_TAKEN`, `BRANCH_PREVIEW_STALE`, `BRANCH_DECISION_STALE` | 409    | Branch rules; see [Branch errors](#branch-errors)                                                                                                               |
+| `REPOSITORY_AUTHORIZATION_INVALID`, `REPOSITORY_CONNECTION_EXISTS`, `INTEGRATION_IN_USE`                   | 409    | Repository and integration rules; see [Repository connections](#repository-connections)                                                                         |
+| `RATE_LIMITED`, `WAIT_LIMIT`, `HANDOFF_CHAIN_LIMIT`, `HANDOFF_RATE_LIMITED`, `WAKE_LIMIT`                  | 429    | See [Rate limits](#rate-limits)                                                                                                                                 |
+| `INTERNAL_ERROR`                                                                                           | 500    | Unexpected failure; `502` when a Git provider doesn't answer                                                                                                    |
+| `DOCUMENT_CONTENT_UNAVAILABLE`, `STORAGE_UPLOAD_FAILED`                                                    | 503    | Object storage isn't configured or can't be reached. A failed storage call returns `502`, and an uploaded size that doesn't match the reservation returns `409` |
+
+## Rate limits
+
+Limits are fixed one-minute windows kept in the server's memory. A limited request returns `429 RATE_LIMITED` with a `Retry-After` header and `details.retry_after_seconds`.
+
+| Scope                                                     | Limit                                                                                                              |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `POST /api/v1/cli/authorization/attempts`                 | 10 a minute per IP                                                                                                 |
+| `POST /api/v1/cli/authorization/attempts/:attemptId/poll` | 120 a minute per IP. Polling one attempt more often than every 2 seconds also returns `429`, without `Retry-After` |
+| Attachment uploads, downloads and deletes, avatar upload  | 120 a minute per person or agent token                                                                             |
+| Webhooks                                                  | 600 a minute per IP                                                                                                |
+| New branches registered by an agent                       | 10 a minute per agent token                                                                                        |
+
+The attention routes have their own limits: `WAIT_LIMIT` caps concurrent long-polls, and `HANDOFF_RATE_LIMITED`, `HANDOFF_CHAIN_LIMIT` and `WAKE_LIMIT` stop handoff and wake loops.
+
+## Public routes
+
+These routes take no session or agent token.
+
+| Method | Path                                                   | Behavior                                                                                             |
+| ------ | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
+| `GET`  | `/health`, `/api/v1/health`                            | `{ "status": "ok" }` while the process is up                                                         |
+| `GET`  | `/ready`, `/api/v1/ready`                              | `{ "status": "ready" }` after a database check, or `503 { "status": "not_ready" }`                   |
+| `GET`  | `/api/v1/attachments/download?ticket=<ticket>`         | Streams an attachment. The ticket comes from a download request, is single-use, and lasts 60 seconds |
+| `GET`  | `/api/v1/repository/callback/:provider`                | Git provider OAuth redirect; see [Webhooks and provider callbacks](#webhooks-and-provider-callbacks) |
+| `POST` | `/api/v1/webhooks/:provider`                           | Git provider webhooks                                                                                |
+| `GET`  | `/api/v1/realtime/projects/:projectId?ticket=<ticket>` | WebSocket upgrade with a realtime ticket; see [Realtime](#realtime)                                  |
+
+The CLI authorization `attempts` and `poll` routes are also public; see [CLI browser approval](#cli-browser-approval).
+
+## Profile
+
+| Method   | Path                     | Behavior                                                                                              |
+| -------- | ------------------------ | ----------------------------------------------------------------------------------------------------- |
+| `GET`    | `/api/v1/profile`        | The signed-in person: `user_id`, `username`, `full_name`, `email`, `avatar_url`                       |
+| `PATCH`  | `/api/v1/profile`        | Set `username` (3–32 letters, digits or `_`), `full_name` and `avatar_url`; all three are required    |
+| `POST`   | `/api/v1/profile/avatar` | Multipart upload of a JPEG, PNG or WebP avatar, up to 2 MiB. Requires [object storage](/docs/storage) |
+| `DELETE` | `/api/v1/profile/avatar` | Remove the avatar                                                                                     |
+
+## Organizations
+
+| Method   | Path                                                      | Behavior                                                                                                    |
+| -------- | --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `GET`    | `/api/v1/organizations`                                   | Your organizations                                                                                          |
+| `POST`   | `/api/v1/organizations`                                   | `{ name, slug? }`; creates the organization with you as owner                                               |
+| `GET`    | `/api/v1/organizations/:id`                               | One organization                                                                                            |
+| `PATCH`  | `/api/v1/organizations/:id`                               | Update it (owner or admin)                                                                                  |
+| `DELETE` | `/api/v1/organizations/:id`                               | Delete it (owner). The body must contain its current `name`                                                 |
+| `GET`    | `/api/v1/organizations/:organizationId/members`           | List members                                                                                                |
+| `PATCH`  | `/api/v1/organizations/:organizationId/members/:memberId` | `{ role }` (owner or admin, with owner safeguards)                                                          |
+| `DELETE` | `/api/v1/organizations/:organizationId/members/:memberId` | Remove a member (owner or admin, with owner safeguards)                                                     |
+| `POST`   | `/api/v1/organizations/:organizationId/members/leave`     | Leave. The sole owner can't leave                                                                           |
+| `GET`    | `/api/v1/organizations/:organizationId/projects`          | Projects you can access in the organization                                                                 |
+| `GET`    | `/api/v1/organizations/:organizationId/project-summaries` | The same projects with your role, default branch, member and open-task counts, last activity and repository |
+| `POST`   | `/api/v1/organizations/:organizationId/projects`          | Create a project (any organization member); you become its owner                                            |
+
+Roles are `owner`, `admin` and `member`. Slugs are optional and derived from the name when omitted.
+
+## Projects
+
+| Method   | Path                              | Behavior                                                 |
+| -------- | --------------------------------- | -------------------------------------------------------- |
+| `GET`    | `/api/v1/projects/:id`            | One project, with `default_branch_id`                    |
+| `PATCH`  | `/api/v1/projects/:id`            | Update `name`, `slug` or `description` (owner or admin)  |
+| `POST`   | `/api/v1/projects/:id/archive`    | Archive, idempotently (owner or admin)                   |
+| `POST`   | `/api/v1/projects/:id/reactivate` | Reactivate, idempotently (owner or admin)                |
+| `DELETE` | `/api/v1/projects/:id`            | Delete (owner). The body must contain its current `name` |
+
+Project creation accepts `name`, optional `slug`, `description` and `task_key_prefix` (2–8 letters or digits, uppercased). Without a prefix, the server uses the first three alphanumeric characters of the slug when at least two exist, otherwise `PRJ`.
+
+### Members and invitations
+
+Access to a project needs membership in both the organization and the project.
+
+| Method   | Path                                                           | Behavior                                                                             |
+| -------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `GET`    | `/api/v1/projects/:projectId/members`                          | List project members                                                                 |
+| `POST`   | `/api/v1/projects/:projectId/members`                          | `{ user_id, role? }`; add an existing organization member (owner or admin)           |
+| `PATCH`  | `/api/v1/projects/:projectId/members/:userId`                  | `{ role }` (owner or admin; only owners change owners)                               |
+| `DELETE` | `/api/v1/projects/:projectId/members/:userId`                  | Remove a member (owner or admin; the last owner can't be removed)                    |
+| `GET`    | `/api/v1/projects/:projectId/invitations`                      | List invitation links (owner or admin)                                               |
+| `POST`   | `/api/v1/projects/:projectId/invitations`                      | Create a link; `201 { invitation, token }`. The token is shown once and lasts 7 days |
+| `POST`   | `/api/v1/projects/:projectId/invitations/:invitationId/revoke` | Revoke a link (owner or admin)                                                       |
+| `POST`   | `/api/v1/project-invitations/accept`                           | `{ token }`; joins the organization and the project as `member`                      |
+
+## Tasks
+
+| Method   | Path                                              | Behavior                                                            |
+| -------- | ------------------------------------------------- | ------------------------------------------------------------------- |
+| `POST`   | `/api/v1/projects/:projectId/tasks`               | Create a task. `Idempotency-Key` required                           |
+| `GET`    | `/api/v1/projects/:projectId/tasks`               | List task cards with filters and cursor pagination                  |
+| `GET`    | `/api/v1/tasks/:id`                               | One task card                                                       |
+| `PATCH`  | `/api/v1/tasks/:id`                               | Update `title`, `description` or `priority` with `expected_version` |
+| `POST`   | `/api/v1/tasks/:id/move`                          | Move to a status and position with `expected_version`               |
+| `GET`    | `/api/v1/tasks/:id/comments`                      | List comments with cursor pagination                                |
+| `POST`   | `/api/v1/tasks/:id/comments`                      | Add a Markdown comment. `Idempotency-Key` required                  |
+| `GET`    | `/api/v1/tasks/:id/dependencies`                  | Tasks this task depends on, and tasks it blocks                     |
+| `POST`   | `/api/v1/tasks/:id/dependencies`                  | Add a dependency with `expected_version`                            |
+| `DELETE` | `/api/v1/tasks/:id/dependencies/:dependsOnTaskId` | Remove a dependency with `expected_version`                         |
+
+- **Fields.** `id`, `project_id`, `branch_id`, `key`, `title`, `description`, `priority`, `status`, `position`, `version`, `created_by`, `created_by_user_id`, `created_at`, `updated_at`, `started_at`, `completed_at`, `cancelled_at`. Cards add `comment_count` and `unresolved_blocker_count`. `created_by` says whether a person or an agent created the task; the legacy `created_by_user_id` is `null` for agent-created tasks.
+- **Values.** Priorities: `urgent`, `high`, `medium`, `low`, `none`. Statuses: `backlog`, `ready`, `claimed`, `in_progress`, `blocked`, `review`, `done`, `cancelled`. People can't select `claimed`; only the agent claim flow sets it.
+- **Create** takes `title`, optional `description`, `priority` (default `none`) and `status` (default `backlog`). The task is appended to its status column.
+- **List** takes `status`, `priority`, `limit` and `cursor`, ordered by `position` then ID. It returns `{ tasks, total, next_cursor }`, where `total` counts every match on the branch.
+- **Move** takes `status`, optional `before_task_id` (an anchor in the target column) and `expected_version`. Entering `in_progress`, `done` or `cancelled` sets the matching timestamp; leaving the status clears it.
+- **Comments** are immutable Markdown in `body_markdown`, with a per-task `sequence` and up to 20 `mentions`. Reads return `{ comments, next_cursor }`.
+- **Dependencies** stay on one branch: a dependency on another branch's task returns `400 VALIDATION_ERROR` with `reason: "cross_branch"`. A self-edge or cycle returns `409 TASK_DEPENDENCY_CYCLE`.
+
+## Agents and credentials
+
+| Method | Path                                                           | Behavior                                                                                        |
+| ------ | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `POST` | `/api/v1/projects/:projectId/agents`                           | `{ name }`; create an agent (owner or admin)                                                    |
+| `GET`  | `/api/v1/projects/:projectId/agents`                           | List agents                                                                                     |
+| `POST` | `/api/v1/projects/:projectId/agents/:agentId/revoke`           | Revoke an agent with its credentials, sessions and claims (owner or admin)                      |
+| `POST` | `/api/v1/projects/:projectId/agents/:agentId/credentials`      | Issue an agent token; `{ credential, token }`. The token is returned only here (owner or admin) |
+| `GET`  | `/api/v1/projects/:projectId/credentials`                      | List credentials, without token values                                                          |
+| `POST` | `/api/v1/projects/:projectId/credentials/:credentialId/revoke` | Revoke a credential (owner or admin)                                                            |
+
+## Presence and events
+
+| Method | Path                                   | Behavior                                                                     |
+| ------ | -------------------------------------- | ---------------------------------------------------------------------------- |
+| `GET`  | `/api/v1/projects/:projectId/presence` | Every active agent: `online` or `offline`, current task, session `branch_id` |
+| `GET`  | `/api/v1/projects/:projectId/events`   | Ordered project events; `limit`, `after`, `branch_id`, `all_branches`        |
+
+- An agent is `online` when it has an active session with a heartbeat in the last 60 seconds. Its `branch_id` is its session's branch, or `null` when offline.
+- Events are ordered by numeric event ID. Pass the previous response's `next_cursor` as `after`.
+- Each event has a `branch_id`, or `null` for project-wide events (branches, repository, agents, credentials). A branch's list includes its own events plus the project-wide ones. `all_branches=true` returns every branch; the dashboard's realtime catch-up uses it to keep one cursor.
+
+## Documents
+
+| Method  | Path                                           | Behavior                                                                      |
+| ------- | ---------------------------------------------- | ----------------------------------------------------------------------------- |
+| `GET`   | `/api/v1/projects/:projectId/documents`        | List documents; `limit`, `cursor`, `include_archived`                         |
+| `POST`  | `/api/v1/projects/:projectId/documents`        | `{ path, content }`; create a document at revision 1                          |
+| `POST`  | `/api/v1/projects/:projectId/document-folders` | `{ path }`; create a folder                                                   |
+| `GET`   | `/api/v1/documents/:id`                        | Read a document and its current revision                                      |
+| `PATCH` | `/api/v1/documents/:id`                        | `{ content, base_revision }`; create a revision                               |
+| `POST`  | `/api/v1/documents/:id/edits`                  | `{ base_revision, edits: [{ old_text, new_text }] }`; exact text replacements |
+| `PATCH` | `/api/v1/documents/:id/path`                   | `{ path, expected_revision }`; rename                                         |
+| `POST`  | `/api/v1/documents/:id/archive`                | Archive                                                                       |
+| `POST`  | `/api/v1/documents/:id/restore`                | Restore                                                                       |
+| `GET`   | `/api/v1/documents/:id/revisions`              | List immutable revisions, in revision order                                   |
+| `GET`   | `/api/v1/documents/:id/revisions/:revision`    | Read one revision                                                             |
+
+- **Paths** are relative POSIX paths of 1–1024 characters ending in `.md`, with no leading slash, backslash, NUL, empty segment, or `.`/`..` segment. Paths are unique per branch.
+- **Content** is Markdown text up to 1,000,000 characters.
+- **Writes** create one immutable revision and advance `current_revision` atomically. A stale `base_revision` returns `409 DOCUMENT_CONFLICT` and writes nothing:
+
+```json
+{
+  "error": {
+    "code": "DOCUMENT_CONFLICT",
+    "message": "Document revision is stale.",
+    "details": { "current_revision": 2, "base_revision": 1 },
+    "request_id": "req_…"
+  }
+}
+```
+
+- **Edits** apply up to 1,000 exact replacements in order. Each `old_text` must match exactly once, otherwise `409 DOCUMENT_EDIT_MISMATCH` with `edit_index` and `match_count`.
+- **Lists** are ordered by update time, then ID.
+
+Create and update responses contain the `document` and its new `revision`:
+
+```json
+{
+  "document": {
+    "id": "…",
+    "project_id": "…",
+    "path": "docs/readme.md",
+    "current_revision": 1,
+    "created_by": { "type": "human", "id": "…" },
+    "created_at": "2026-10-14T00:00:00.000Z",
+    "updated_at": "2026-10-14T00:00:00.000Z"
+  },
+  "revision": {
+    "id": "…",
+    "document_id": "…",
+    "revision_number": 1,
+    "content": "# Notes",
+    "author": { "type": "human", "id": "…" },
+    "created_at": "2026-10-14T00:00:00.000Z"
+  }
+}
+```
+
+## Attachments
+
+Attachments need [object storage](/docs/storage); without it, uploads and downloads return `503 STORAGE_UPLOAD_FAILED`.
+
+| Method   | Path                                                                   | Behavior                                                   |
+| -------- | ---------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `GET`    | `/api/v1/documents/:documentId/attachments`                            | List a document's attachments                              |
+| `POST`   | `/api/v1/documents/:documentId/attachments/uploads`                    | `{ filename, content_type?, size_bytes }`; start an upload |
+| `GET`    | `/api/v1/documents/:documentId/attachments/uploads/:uploadId`          | Inspect an upload, including completed parts               |
+| `POST`   | `/api/v1/documents/:documentId/attachments/uploads/:uploadId/refresh`  | Extend the upload and re-sign its URLs                     |
+| `POST`   | `/api/v1/documents/:documentId/attachments/uploads/:uploadId/parts`    | `{ part_numbers }` (up to 100); presigned part URLs        |
+| `POST`   | `/api/v1/documents/:documentId/attachments/uploads/:uploadId/complete` | `{ parts }`; verify and finish the upload                  |
+| `DELETE` | `/api/v1/documents/:documentId/attachments/uploads/:uploadId`          | Abort an upload                                            |
+| `POST`   | `/api/v1/documents/:documentId/attachments/:attachmentId/download`     | `{ download_url }`: a single-use URL valid for 60 seconds  |
+| `DELETE` | `/api/v1/documents/:documentId/attachments/:attachmentId`              | Delete an attachment                                       |
+
+The server never receives upload bytes. Starting an upload returns either a single presigned `upload_url` or a multipart upload with `part_size_bytes`; the client sends bytes straight to the bucket, then calls `complete`. Uploads expire after 24 hours unless refreshed. Files are limited to 2 GiB, and a project's attachments count toward its quota (`409 ATTACHMENT_QUOTA_EXCEEDED`). Downloads stream through the server from `/api/v1/attachments/download`.
+
+## Chats
+
+| Method | Path                                             | Behavior                                                                                              |
+| ------ | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
+| `GET`  | `/api/v1/projects/:projectId/message-candidates` | People and agents you can message                                                                     |
+| `GET`  | `/api/v1/projects/:projectId/chats`              | Chats on the branch                                                                                   |
+| `POST` | `/api/v1/projects/:projectId/chats`              | `{ kind, name?, participants }`; `direct` or `group` (groups need a name). `Idempotency-Key` required |
+| `GET`  | `/api/v1/projects/:projectId/inbox`              | Unread chats with unread and mention counts; `all_branches=true` covers every branch                  |
+| `GET`  | `/api/v1/chats/:id`                              | One chat                                                                                              |
+| `POST` | `/api/v1/chats/:id/members`                      | `{ action, participant }`; `add` or `remove` a participant                                            |
+| `POST` | `/api/v1/chats/:id/join`                         | Join a group chat that has no person in it yet                                                        |
+| `GET`  | `/api/v1/chats/:id/messages`                     | `after` or `before` (a sequence), `unread_only`, `limit`                                              |
+| `POST` | `/api/v1/chats/:id/messages`                     | `{ body_markdown, mentions?, document_ids? }`. `Idempotency-Key` required                             |
+| `POST` | `/api/v1/chats/:id/read`                         | `{ through_message_id }`; advance your read position                                                  |
+
+Participants are `{ type, id }` with `type` `human` or `agent`. A message holds up to 100 mentions and 20 document references; documents must be on the chat's branch.
+
+## Attention and handoffs
+
+| Method | Path                                           | Behavior                                                                   |
+| ------ | ---------------------------------------------- | -------------------------------------------------------------------------- |
+| `GET`  | `/api/v1/projects/:projectId/attention`        | Your attention summary across every branch                                 |
+| `GET`  | `/api/v1/projects/:projectId/attention/tasks`  | Per-task overlay: claim, block and unread counts                           |
+| `GET`  | `/api/v1/projects/:projectId/attention/agents` | Per agent: waiting since, pending directed items, open block, current task |
+| `POST` | `/api/v1/tasks/:id/watch`                      | `{ watching }`; `false` mutes the task                                     |
+| `POST` | `/api/v1/tasks/:id/comments/read`              | `{ through_sequence }`                                                     |
+| `POST` | `/api/v1/tasks/:id/block/resolve`              | Resolve a block                                                            |
+| `POST` | `/api/v1/projects/:projectId/handoffs`         | `{ to, body_markdown, task_id? }`. `Idempotency-Key` required              |
+
+- A handoff is a direct message to `to` with an optional task reference. Its body is up to 4,000 characters.
+- An agent can't complete or release a claim, or move its task to `review` or `done`, while comments by others posted since the claim are unacknowledged: `409 TASK_COMMENTS_UNREAD`. Sending `acknowledged_through` (a comment sequence) clears it. Imported comments never count.
+- Attention events: `task.status_changed`, `task.block_resolved`, `chat.handoff_created` (its entity is the chat, so chat access rules apply), and `run.woken`. `task.comment_created` adds `sequence` and `mentions`; `claim.released` adds `reason`.
+
+Agent routes are under [Agent attention and handoffs](#agent-attention-and-handoffs). Design notes: [`docs/agent-attention-handoffs.md`](https://github.com/armanghev/orchestrat/blob/main/docs/agent-attention-handoffs.md).
+
+## Branches
+
+Every project has branches, and exactly one is the default. Tasks (with comments, dependencies and claims), documents (with folders, revisions and attachments), chats (with participants and messages) and agent sessions belong to one branch. Organizations, projects, members, agents and credentials are project-wide. Project responses include `default_branch_id`. Design notes: [`docs/project-branches.md`](https://github.com/armanghev/orchestrat/blob/main/docs/project-branches.md).
+
+### Choosing a branch
+
+A request that names no branch uses the default branch, so clients written before branches keep working.
+
+**People.** These routes take an optional `branch_id` query parameter:
+
+- `GET` and `POST /api/v1/projects/:projectId/tasks`
+- `GET` and `POST /api/v1/projects/:projectId/documents`
+- `POST /api/v1/projects/:projectId/document-folders`
+- `GET` and `POST /api/v1/projects/:projectId/chats`
+- `GET /api/v1/projects/:projectId/inbox`
+- `GET /api/v1/projects/:projectId/events`
+- `POST /api/v1/projects/:projectId/handoffs`
+
+A `branch_id` outside the project returns `404 BRANCH_NOT_FOUND`. Archived branches stay readable; a create on one returns `409 BRANCH_ARCHIVED`. Routes for a single task, document, attachment or chat take the branch from that item. Presence, message candidates and the human attention routes are project-wide.
+
+**Agents.** Agent routes resolve the branch in this order:
+
+1. **Pinned session.** `X-Orchestrat-Session-Id: <session id>` uses that session's branch. A claim uses the session in its body. If `X-Orchestrat-Branch-Id` names a different branch, the request fails with `409 BRANCH_MISMATCH`. A session that isn't the agent's returns `404 AGENT_SESSION_NOT_FOUND`.
+2. **Header.** `X-Orchestrat-Branch-Id: <branch id>`.
+3. **The default branch.**
+
+Both headers must be UUIDs; a malformed value returns `400 VALIDATION_ERROR` with `details.header`. Agents can read tasks, documents and chats on any branch by ID. A write to an item on a different branch than the one named or pinned returns `409 BRANCH_MISMATCH`; a write with no branch signal uses the item's branch.
+
+New branch error codes go only to requests that name a branch (`?branch_id=`, `X-Orchestrat-Branch-Id` or `X-Orchestrat-Session-Id`) and to the branch, merge, decision and repository routes. Other requests get an existing code with a `details.reason`:
+
+| Failure                                         | Response                                              |
+| ----------------------------------------------- | ----------------------------------------------------- |
+| Claim a task on another branch than the session | `409 TASK_NOT_CLAIMABLE`, `reason: "branch_mismatch"` |
+| Claim a task on an archived branch              | `409 TASK_NOT_CLAIMABLE`, `reason: "branch_archived"` |
+| Write to an item on an archived branch          | `409 CONFLICT`, `reason: "branch_archived"`           |
+| Reference an item on another branch             | `400 VALIDATION_ERROR`, `reason: "cross_branch"`      |
+
+Cross-branch references are task dependencies, blocking tasks, the task in a handoff, and `document_ids` in chat messages.
+
+### Branch routes
+
+| Method | Path                                                        | Who         | Behavior                                                                                                                                  |
+| ------ | ----------------------------------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`  | `/api/v1/projects/:projectId/branches`                      | member      | Active branches, default first, then most recently updated. `include_archived=true`; `name` filters by exact name                         |
+| `POST` | `/api/v1/projects/:projectId/branches`                      | member      | `{ name }`; `201 { branch }`. `409 BRANCH_NAME_TAKEN` when an active branch has the name                                                  |
+| `GET`  | `/api/v1/projects/:projectId/branches/:branchId`            | member      | `{ branch }`                                                                                                                              |
+| `POST` | `/api/v1/projects/:projectId/branches/:branchId/default`    | owner/admin | Make it the default. `409 BRANCH_ARCHIVED` for an archived branch                                                                         |
+| `POST` | `/api/v1/projects/:projectId/branches/:branchId/archive`    | owner/admin | Archive: read-only, hidden by default, nothing deleted, agent sessions closed. `409 CONFLICT`, `reason: "default_branch"` for the default |
+| `POST` | `/api/v1/projects/:projectId/branches/:branchId/onboarding` | member      | `{ "choice": "blank" }` finishes the branch's setup. `409 CONFLICT`, `reason: "onboarding_completed"` when already done                   |
+
+A branch is `{ id, project_id, name, is_default, name_source, created_via, created_by, onboarding_state, onboarding_choice, archived_at, archived_reason, provider, open_decision_count, created_at, updated_at }`. `provider` is `null` without a connected repository, otherwise `{ provider, state, head_sha }` with `state` `tracked`, `missing` or `untracked`. `archived_reason` is `provider_deleted`, `manual` or `replaced_on_connect`.
+
+Branch names are 1–255 characters and follow a subset of `git check-ref-format`: no spaces, control characters or `~ ^ : ? * [ \`; no leading `-` or `/`; no trailing `/` or `.lock`; no `..`, `//` or `@{`; and not `@`. Names are unique among active branches only.
+
+### Imports, merges and decisions
+
+People only. Agents can't archive, merge, import, set the default or resolve decisions.
+
+| Method | Path                                                        | Who                   | Behavior                                                                                                                                                                   |
+| ------ | ----------------------------------------------------------- | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST` | `/api/v1/projects/:projectId/merges/preview`                | member or owner/admin | `{ source_branch_id, target_branch_id, kind, selection? }`; `{ preview }`                                                                                                  |
+| `POST` | `/api/v1/projects/:projectId/merges`                        | member or owner/admin | `Idempotency-Key` required. `{ source_branch_id, target_branch_id, kind, selection?, choices, preview_fingerprint, archive_source?, complete_onboarding? }`; `201 { run }` |
+| `GET`  | `/api/v1/projects/:projectId/merges`                        | member                | `branch_id` (source or target), `limit`, `cursor`; `{ runs, next_cursor }`, newest first                                                                                   |
+| `GET`  | `/api/v1/projects/:projectId/decisions`                     | member                | `branch_id` (target), `status`; `{ decisions }`, newest first                                                                                                              |
+| `POST` | `/api/v1/projects/:projectId/decisions/:decisionId/resolve` | owner/admin           | `{ choice }` with `use_source` or `use_target`; `{ decision }`                                                                                                             |
+
+- **Who.** `kind` is `import` or `merge`. Members import into any branch except the default. A merge, an import into the default branch, and `archive_source: true` need an owner or admin, for the preview as well as the apply.
+- **Selection.** An import takes `{ tasks, documents, chats }`, each `"all"` or a list of up to 2,000 lineage keys. A merge always takes everything. Selecting a task also brings the tasks it depends on that the target lacks.
+- **Preview.** Each item has an `outcome`: `copy`, `apply`, `unchanged`, `keep_target`, `conflict` or `skipped`, plus its fields and both sides' values. `counts` totals outcomes per item type, and `fingerprint` covers every version the apply depends on.
+- **Apply.** The apply re-plans under the project lock. If the fingerprint no longer matches `preview_fingerprint`, it returns `409 BRANCH_PREVIEW_STALE` with the new preview in `details.preview`. An import must choose `use_source` or `use_target` in `choices` for every conflict, otherwise `400 VALIDATION_ERROR` with `reason: "missing_choice"`.
+- **Merges never ask.** A conflict keeps the target's version and becomes a decision. A task with an active claim on the target is never changed.
+- **Limits.** A run takes at most 2,000 top-level items, 20,000 comments and messages, and 5 GiB of attachments (`400 VALIDATION_ERROR`, `reason: "too_large"`). The source and target must differ (`reason: "same_branch"`). Copied attachments count toward the project quota and need object storage.
+- **Events.** A run emits one `merge.import_applied` or `merge.merge_applied` event on the target branch, plus `decision.opened` when it created decisions.
+- **Resolving.** `use_target` keeps the target and records the source state as agreed. `use_source` applies the recorded source values if the target hasn't changed since; otherwise `409 BRANCH_DECISION_STALE` with the refreshed decision in `details.decision`. `use_source` on a claimed task returns `409 TASK_ALREADY_CLAIMED`, and a settled decision returns `409 CONFLICT` with `reason: "decision_closed"`.
+
+A run has `trigger` `dashboard` or `provider_merge`, and a fork merge is recorded with `status: "skipped"` and `skip_reason: "fork"`. A decision has `reason` `changed_on_both`, `added_on_both`, `path_collision` or `target_claimed`, and `status` `open`, `resolved_source`, `resolved_target` or `superseded`.
+
+### Branch errors
+
+| Code                    | Status | When                                                                                                                                                              |
+| ----------------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `BRANCH_NOT_FOUND`      | 404    | The branch isn't a branch of this project                                                                                                                         |
+| `BRANCH_ARCHIVED`       | 409    | A write names an archived branch: opening a session there, making it the default, importing or merging into it; or `register` names a branch the provider deleted |
+| `BRANCH_MISMATCH`       | 409    | The named branch differs from the pinned session's, or an agent writes to an item on another branch                                                               |
+| `BRANCH_NAME_TAKEN`     | 409    | An active branch already has the name                                                                                                                             |
+| `BRANCH_PREVIEW_STALE`  | 409    | The branches changed since the preview                                                                                                                            |
+| `BRANCH_DECISION_STALE` | 409    | The target changed since the decision was recorded                                                                                                                |
+
+Existing codes gain these `details.reason` values:
+
+| Code                       | Reasons                                                                                                 |
+| -------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `400 VALIDATION_ERROR`     | `cross_branch`, `same_branch`, `too_large`, `missing_choice`, `default_branch`                          |
+| `409 CONFLICT`             | `branch_archived`, `default_branch`, `onboarding_completed`, `decision_closed`, `path_taken`, `no_hook` |
+| `409 TASK_NOT_CLAIMABLE`   | `branch_mismatch`, `branch_archived`                                                                    |
+| `409 AGENT_SESSION_CLOSED` | `branch_mismatch`                                                                                       |
+
+## Repository connections
+
+A project can connect one repository. `provider` is `github`, `gitlab` or `origin` (Cursor Origin, hidden unless the server enables it). Set providers up first; see [Git providers](/docs/git-providers).
+
+| Method   | Path                                                                                         | Who                                             | Behavior                                                                                                                                                                                       |
+| -------- | -------------------------------------------------------------------------------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`    | `/api/v1/repository/providers`                                                               | signed in                                       | `{ providers }`, each with `configured` and `unavailable_reason`                                                                                                                               |
+| `GET`    | `/api/v1/repository/authorizations/pending?provider=<provider>`                              | signed in                                       | Your newest authorized attempt: `{ authorization_id, project_id, provider, expires_at }`, or `404`. GitHub's Setup URL can open in another browser, so the dashboard looks the attempt up here |
+| `GET`    | `/api/v1/projects/:projectId/repository`                                                     | member                                          | `{ repository, providers }`; `repository` is the active connection or `null`                                                                                                                   |
+| `POST`   | `/api/v1/projects/:projectId/repository/authorizations`                                      | owner/admin                                     | `{ provider, return_path? }`; `{ authorization_id, authorize_url, expires_at }`, valid 15 minutes                                                                                              |
+| `POST`   | `/api/v1/projects/:projectId/repository/authorizations/:authorizationId/github-installation` | owner/admin, same person                        | `{ installation_id }` from GitHub's Setup URL (untrusted, checked against your GitHub token)                                                                                                   |
+| `GET`    | `/api/v1/projects/:projectId/repository/authorizations/:authorizationId/repositories`        | owner/admin, same person                        | `{ repositories, install_url }`, each with `eligible` and `ineligible_reason`                                                                                                                  |
+| `POST`   | `/api/v1/projects/:projectId/repository`                                                     | owner/admin, same person                        | `{ authorization_id, provider_repository_id, default_branch_mapping, create_existing_branches }`; `201 { repository }`                                                                         |
+| `POST`   | `/api/v1/projects/:projectId/repository/import`                                              | owner/admin of the project and the organization | `{ repository_id }`; connect a repository from the organization's integrations; `201`                                                                                                          |
+| `POST`   | `/api/v1/projects/:projectId/repository/sync`                                                | owner/admin                                     | Queue a reconcile; `202 { "queued": true }`                                                                                                                                                    |
+| `POST`   | `/api/v1/projects/:projectId/repository/hook/reenable`                                       | owner/admin                                     | GitLab: wake a disabled project hook; `202`. Other providers: `409 CONFLICT`, `reason: "no_hook"`                                                                                              |
+| `GET`    | `/api/v1/projects/:projectId/repository/deliveries`                                          | owner/admin                                     | Optional `status`; the newest 100 webhook deliveries                                                                                                                                           |
+| `POST`   | `/api/v1/projects/:projectId/repository/deliveries/:deliveryId/retry`                        | owner/admin                                     | Put a failed delivery back in line; `{ delivery }`                                                                                                                                             |
+| `DELETE` | `/api/v1/projects/:projectId/repository`                                                     | owner/admin                                     | Disconnect; `204`. Branches and their work are kept. For GitLab, the hook is deleted and tokens revoked                                                                                        |
+
+`default_branch_mapping` links the project's default branch to the provider's default branch `D`:
+
+- `{ "mode": "rename_default" }` (the default) renames the default branch to `D`. Another active branch named `D` is archived with reason `replaced_on_connect`; its work stays importable.
+- `{ "mode": "use_existing", "branch_id": "…" }` makes the active branch named `D` the default; the old default stays an ordinary branch.
+
+`create_existing_branches` (default `false`) also creates branches for the provider's other branches; otherwise each one gets a branch on its first push.
+
+Sync, re-enable, retry and disconnect return `404 NOT_FOUND` when no repository is connected. A provider that doesn't answer gives `502 INTERNAL_ERROR`, and lost provider access gives `409 REPOSITORY_AUTHORIZATION_INVALID`. There is no reauthorization route: disconnect and connect again, and branches and their work are kept.
+
+| Code                               | Status | When                                                                                                                                                    |
+| ---------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `REPOSITORY_NOT_CONFIGURED`        | 400    | The provider isn't set up on this server                                                                                                                |
+| `REPOSITORY_AUTHORIZATION_INVALID` | 409    | The authorization is missing, used, expired or another person's; the installation isn't yours; access was revoked; or the repository can't be connected |
+| `REPOSITORY_CONNECTION_EXISTS`     | 409    | The project already has a repository, or the repository is connected to another project                                                                 |
+| `INTEGRATION_IN_USE`               | 409    | A GitLab organization integration still has imported projects using it                                                                                  |
+
+### Organization Git integrations
+
+Organization owners and admins can connect GitHub or GitLab once and import repositories as projects.
+
+| Method   | Path                                                                                 | Behavior                                                                                                                                                   |
+| -------- | ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`    | `/api/v1/organizations/:organizationId/integrations`                                 | List the organization's integrations                                                                                                                       |
+| `POST`   | `/api/v1/organizations/:organizationId/integrations/authorizations`                  | `{ provider, return_path? }` with `github` or `gitlab`; starts the provider's authorization                                                                |
+| `GET`    | `/api/v1/organizations/:organizationId/integrations/authorizations/:authorizationId` | GitHub installations you can use, or GitLab projects you maintain, plus `install_url` for GitHub                                                           |
+| `POST`   | `/api/v1/organizations/:organizationId/integrations`                                 | GitHub: `{ provider, authorization_id, installation_id }`. GitLab: `{ provider, authorization_id, repository_selection, selected_repository_ids? }`; `201` |
+| `PATCH`  | `/api/v1/organizations/:organizationId/integrations/:integrationId`                  | GitLab only: `{ repository_selection, selected_repository_ids }` (GitHub's selection changes on GitHub)                                                    |
+| `DELETE` | `/api/v1/organizations/:organizationId/integrations/:integrationId`                  | Remove; `204`. Refused with `409 INTEGRATION_IN_USE` while imported GitLab projects use it                                                                 |
+| `POST`   | `/api/v1/organizations/:organizationId/integrations/:integrationId/refresh`          | Re-read the integration's repositories now                                                                                                                 |
+| `GET`    | `/api/v1/organizations/:organizationId/repositories`                                 | `filter=importable` (default: not connected and not dismissed) or `all`                                                                                    |
+| `POST`   | `/api/v1/organizations/:organizationId/repositories/:repositoryId/dismiss`           | Hide a repository from the importable list                                                                                                                 |
+| `POST`   | `/api/v1/organizations/:organizationId/projects/import`                              | `{ repository_id, name, description?, task_key_prefix? }`; `201 { project, repository }`. If connecting fails, the new project is removed                  |
+
+`repository_selection` is `all` or `selected`.
+
+### Webhooks and provider callbacks
+
+| Method | Path                                    | Purpose                                                                                                                                                                                              |
+| ------ | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`  | `/api/v1/repository/callback/:provider` | Provider redirect for `github`, `gitlab` or `origin`. Always a `302` to the dashboard, with `repository_authorization=<id>` or `repository_error=invalid_state`, `expired` or `authorization_failed` |
+| `POST` | `/api/v1/webhooks/github`               | GitHub App webhooks                                                                                                                                                                                  |
+| `POST` | `/api/v1/webhooks/gitlab/:connectionId` | GitLab project hook, one per connection                                                                                                                                                              |
+| `POST` | `/api/v1/webhooks/origin`               | Cursor Origin webhooks                                                                                                                                                                               |
+
+Webhooks are verified on the raw body (up to 10 MiB) and stored for the sync worker; nothing changes until the worker applies them. They answer:
+
+- `202` when the delivery is stored, is a duplicate, or is valid but for no connected repository (stored as `ignored`)
+- `401` for a bad signature or timestamp
+- `404` when the provider isn't configured, or the GitLab connection is unknown or disconnected
+- `503` when the database is unavailable
+
+See [Architecture](/docs/architecture#repository-sync) for how the worker applies deliveries.
+
+## Realtime
+
+```text
+POST /api/v1/realtime/tickets   { "project_id": "…" }
+  -> { "ticket": "…", "expires_at": "…" }
+GET  ws://localhost:8801/api/v1/realtime/projects/<projectId>?ticket=<ticket>
+```
+
+- A ticket needs a session token and project membership. It is single-use, bound to one project, and valid for 45 seconds. Behind TLS, use `wss://`.
+- The socket sends one envelope per event: `project_id`, `branch_id` (when the event has one), `sequence`, `event_type`, `entity_type`, `entity_id`, and `actor`. Chat events can add `message_id`, `mentions` and `affected_participant`.
+- `entity_type` is one of `chat`, `project`, `task`, `claim`, `agent`, `credential`, `session`, `document`, `hook`, `run`, `branch`, `merge`, `decision` or `repository`.
+- The socket is server-to-client only; a client message closes it. After a reconnect, read `GET /api/v1/projects/:projectId/events` with `after` set to the last `sequence` you saw.
+
+## Agent API
+
+Every route in this section is under `/api/v1/agent` and needs an agent token. Paths below are relative to that prefix.
+
+### Agent sessions and events
+
+| Method | Path                             | Behavior                                                                                                |
+| ------ | -------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `GET`  | `/project`                       | The token's project, with `default_branch_id`                                                           |
+| `POST` | `/sessions`                      | `{ runtime, integration, external_session_id?, branch_id? }`; open a session                            |
+| `POST` | `/sessions/:sessionId/heartbeat` | Refresh the session and renew its active claim leases                                                   |
+| `POST` | `/sessions/:sessionId/close`     | Close the session and revoke its active claims                                                          |
+| `POST` | `/hooks/lifecycle`               | `{ event, session_id, runtime, integration, external_session_id?, error? }`. `Idempotency-Key` required |
+| `GET`  | `/presence`                      | Presence for the project (backs the MCP `list_agents` tool)                                             |
+| `GET`  | `/events`                        | Project events; `limit`, `after`                                                                        |
+
+- A session opens on `branch_id`, else the header's branch, else the default branch, and returns its `branch_id`. Opening one on an archived branch returns `409 BRANCH_ARCHIVED`.
+- A session is stale when its last heartbeat is more than 60 seconds old. Heartbeats and claims on a stale session return `409 AGENT_SESSION_STALE`; closing is still allowed.
+- Lifecycle `event` is `session.started`, `session.ended` or `run.failed`. The branch travels in `X-Orchestrat-Branch-Id`. `session.started` for a session that already exists on another branch returns `409 AGENT_SESSION_CLOSED` with `reason: "branch_mismatch"`. `session.ended` also closes the agent's other active sessions with the same `external_session_id`.
+
+### Agent tasks and claims
+
+| Method  | Path                                   | Behavior                                                                                        |
+| ------- | -------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `GET`   | `/tasks`                               | List tasks; `status`, `priority`, `limit`, `cursor`                                             |
+| `POST`  | `/tasks`                               | Create a `backlog` or `ready` task. `Idempotency-Key` required                                  |
+| `POST`  | `/tasks/bulk`                          | `{ tasks }`: create 1–50 tasks in one all-or-nothing batch. `Idempotency-Key` required          |
+| `PATCH` | `/tasks/bulk`                          | `{ tasks }`: edit or move 1–50 distinct tasks (each with `task_id`) in one all-or-nothing batch |
+| `GET`   | `/tasks/:id`                           | One task                                                                                        |
+| `PATCH` | `/tasks/:id`                           | Edit metadata or move an unclaimed task, with `expected_version`                                |
+| `GET`   | `/tasks/:id/comments`                  | Read comments from people and agents                                                            |
+| `POST`  | `/tasks/:id/comments`                  | Add a Markdown comment. `Idempotency-Key` required                                              |
+| `POST`  | `/tasks/:id/claim`                     | `{ session_id, lease_seconds? }`; claim a `ready` task                                          |
+| `POST`  | `/sessions/:sessionId/claims/release`  | `{ claim_token, acknowledged_through? }`; return the task to `ready`                            |
+| `POST`  | `/sessions/:sessionId/claims/complete` | `{ claim_token, acknowledged_through? }`; move the task to `done`                               |
+| `POST`  | `/sessions/:sessionId/claims/status`   | Set `in_progress`, `blocked` or `review` on an owned claim, using its claim token               |
+
+- **Claims** need an active session on the task's branch, a `ready` task and resolved dependencies. `lease_seconds` defaults to 300 and accepts 30–86,400. The response holds the claim and a `claim_token`; only the owning agent and session can release or complete it. Expired leases are reconciled when tasks are read or claimed. Concurrent claims produce one winner; the other gets `409 TASK_ALREADY_CLAIMED` with the active claim's lease details.
+- **Updates** take `title`, `description`, `priority`, `status`, optional `acknowledged_through` and required `expected_version`, applied as one version bump. A status change follows the human move rules and is refused with `409 TASK_NOT_CLAIMABLE` while the task has an active claim: `reason` is `own_claim` when the caller holds it (use the claim routes instead), otherwise `claimed`. Moving to `review` or `done` applies the unread-comments guard.
+- **Bulk** routes run in one transaction: any failure applies nothing and returns the single-item error with `details.index` and the item's `task_id` (update) or `title` (create). Results come back in input order, and each task emits the same events as the single route.
+
+### Agent documents and attachments
+
+| Method  | Path                                 | Behavior                                              |
+| ------- | ------------------------------------ | ----------------------------------------------------- |
+| `GET`   | `/documents`                         | List documents; `limit`, `cursor`, `include_archived` |
+| `POST`  | `/documents`                         | Create a document at revision 1                       |
+| `GET`   | `/documents/:id`                     | Read a document                                       |
+| `PATCH` | `/documents/:id`                     | Create a revision with `base_revision`                |
+| `POST`  | `/documents/:id/edits`               | Apply exact text edits                                |
+| `PATCH` | `/documents/:id/path`                | Rename                                                |
+| `POST`  | `/documents/:id/archive`             | Archive                                               |
+| `POST`  | `/documents/:id/restore`             | Restore                                               |
+| `GET`   | `/documents/:id/revisions`           | List revisions                                        |
+| `GET`   | `/documents/:id/revisions/:revision` | Read one revision                                     |
+
+Bodies and rules match the human [Documents](#documents) routes. Attachment routes mirror the human [Attachments](#attachments) routes under `/documents/:documentId/attachments`. Agents can't create folders.
+
+### Agent chats
+
+| Method | Path                  | Behavior                                   |
+| ------ | --------------------- | ------------------------------------------ |
+| `GET`  | `/message-candidates` | People and agents the agent can message    |
+| `GET`  | `/chats`              | The agent's chats on the resolved branch   |
+| `POST` | `/chats`              | Create a chat. `Idempotency-Key` required  |
+| `GET`  | `/inbox`              | Unread chats on the resolved branch        |
+| `GET`  | `/chats/:id`          | One chat                                   |
+| `POST` | `/chats/:id/members`  | Add or remove a participant                |
+| `GET`  | `/chats/:id/messages` | Read messages                              |
+| `POST` | `/chats/:id/messages` | Send a message. `Idempotency-Key` required |
+| `POST` | `/chats/:id/read`     | Advance the read position                  |
+
+Bodies match the human [Chats](#chats) routes.
+
+### Agent attention and handoffs
+
+| Method | Path                     | Behavior                                                                                                                                         |
+| ------ | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET`  | `/attention`             | Summary: `unread_chats`, watched tasks with unread comments and mentions, pending handoffs, resolved blockers, and a `cursor`                    |
+| `POST` | `/attention/acknowledge` | `{ items }` (1–50): acknowledge `task_comments`, `handoff` or `blocker` items                                                                    |
+| `GET`  | `/attention/wait`        | Long-poll: `after` cursor, `timeout_ms` (0–25,000, default 25,000; 0 polls), `directed_only`, `kinds`. Returns `pending`, `updates` or `timeout` |
+| `POST` | `/tasks/:id/watch`       | `{ watching }`; `false` mutes the task                                                                                                           |
+| `POST` | `/handoffs`              | `{ to, body_markdown, task_id? }`. `Idempotency-Key` required                                                                                    |
+| `POST` | `/wakes`                 | `{ integration, handoff_id }`; the local waker records a wake against the server's budget                                                        |
+
+### Agent branches
+
+| Method | Path                  | Behavior                                                                                                                               |
+| ------ | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`  | `/branches`           | `include_archived`, `name`; `{ branches }`                                                                                             |
+| `GET`  | `/branches/:branchId` | `{ branch }`                                                                                                                           |
+| `POST` | `/branches/register`  | `{ name, git_default_branch?, head_sha?, force_new? }`; `{ branch, created }`. Returns the active branch with that name, or creates it |
+
+`register` refuses to revive a branch the provider deleted: when only archived branches have the name and the newest was deleted on the provider, it returns `409 BRANCH_ARCHIVED` with `branch_id` and `archived_at`, and `force_new: true` creates a new branch anyway. `git_default_branch` is the checkout's `origin/HEAD` branch; it renames the default branch when that is still the fallback `main`, no repository is connected, and no active branch has the name. Creating more than 10 branches a minute per agent token returns `429 RATE_LIMITED`; registering an existing branch is never limited.
+
+## Not implemented
+
+The API has no routes for:
+
+- deleting tasks, or editing and deleting comments
+- remote MCP or MCP OAuth
+- agent capability matching or auto-assignment
+- syncing documents with a local filesystem, or collaborative cursors

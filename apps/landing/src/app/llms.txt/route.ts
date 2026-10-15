@@ -1,5 +1,6 @@
 import { contentPages } from "@/lib/content";
 import { githubUrl, licenseUrl } from "@/lib/links";
+import { docsPages } from "@/lib/source";
 import { founder, siteDescription, siteUrl } from "@/lib/seo";
 
 export const dynamic = "force-static";
@@ -22,10 +23,19 @@ Built and maintained by [${founder.name}](${founder.url}). Contact: arman@orches
 Source-available under the Elastic License 2.0 and free to self-host: ${githubUrl}. There is no hosted service; ${siteUrl} hosts only this site and the documentation.
 Orchestrat coordinates coding tools; it does not run their AI models. You run the server with Docker Compose and Postgres, open the dashboard in a browser, and connect local coding agents through the CLI on macOS or Linux. Project data stays on your server.
 
-## Product and documentation
+## Product
 
-- [Full product documentation and guides](${siteUrl}/llms-full.txt): Plain-text content of the product pages, FAQ, documentation, and guides below.
+- [Full product documentation and guides](${siteUrl}/llms-full.txt): Plain-text content of the product pages, FAQ, guides, and documentation below.
 ${links(contentPages.filter((page) => !page.slug.startsWith("guides")))}
+
+## Documentation
+
+${docsPages()
+  .map(
+    (page) =>
+      `- [${page.data.title}](${siteUrl}${page.url}): ${page.data.description ?? ""}`
+  )
+  .join("\n")}
 
 ## Guides
 

@@ -1,0 +1,67 @@
+---
+title: Upgrades and backups
+description: Upgrade by pulling a new image; migrations run on start. Back up Postgres, your storage bucket and your .env file.
+---
+
+<Draft />
+
+{/* TODO(verify): once the image and compose file ship (Releases 06–11), check: the image name `ghcr.io/armanghev/orchestrat` and its tag scheme (`latest` and version tags); migrations run on start under a Postgres advisory lock when `ORCHESTRAT_MIGRATE_ON_START` is true, and the command to run them by hand when it is false; the compose service names (`postgres`, `orchestrat`, `minio`), the database user and name (assumed `orchestrat`), and the MinIO bucket name (assumed `orchestrat`); the pg_dump and pg_restore commands against the published compose file. */}
+
+## Upgrade
+
+From the directory with your `compose.yml`:
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+The new server applies any pending database migrations before it accepts requests. Migrations only move forward, and Orchestrat has no down migrations, so take a backup first. To go back to an older version, restore the backup you took before upgrading and run the older image.
+
+If you set `ORCHESTRAT_MIGRATE_ON_START=false`, for example because several processes share one database, run the migrations yourself before starting the new version.
+
+Upgrade the CLI on each machine too. See [Connect agents](/docs/connect-agents#upgrade-or-reinstall).
+
+## What to back up
+
+| What               | Why                                                                                                           |
+| ------------------ | ------------------------------------------------------------------------------------------------------------- |
+| Postgres           | Accounts, organizations, projects, tasks, documents, chats, activity and agent identities.                    |
+| The storage bucket | Document revisions and attachments stored outside Postgres, and avatars, if you configured storage.           |
+| `.env`             | Generated secrets. Without `ORCHESTRAT_REPOSITORY_SECRET_KEY`, stored Git provider tokens can't be decrypted. |
+
+Store backups somewhere other than the machine running Orchestrat, and keep `.env` as private as a password.
+
+## Back up Postgres
+
+With the bundled Postgres, dump the database in Postgres's custom format:
+
+```bash
+docker compose exec -T postgres \
+  pg_dump -U orchestrat -d orchestrat -Fc > orchestrat-$(date +%F).dump
+```
+
+If you use your own Postgres, run `pg_dump -Fc` against `ORCHESTRAT_DATABASE_URL` instead.
+
+## Restore Postgres
+
+Stop the server so nothing writes during the restore, restore into the database, then start it again:
+
+```bash
+docker compose stop orchestrat
+docker compose exec -T postgres \
+  pg_restore -U orchestrat -d orchestrat --clean --if-exists < orchestrat-2026-11-01.dump
+docker compose start orchestrat
+```
+
+Restoring a dump from an older version is fine: the server runs the missing migrations when it starts.
+
+## Back up storage
+
+Copy the bucket with any S3-compatible tool. For example, with [rclone](https://rclone.org) configured with a remote named `orchestrat`:
+
+```bash
+rclone sync orchestrat:orchestrat ./orchestrat-bucket-backup
+```
+
+For S3 or R2, you can also turn on bucket versioning or the provider's own backups. Back up the bucket at the same time as Postgres, so the database and the files it points to match.

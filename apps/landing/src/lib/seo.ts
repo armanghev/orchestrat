@@ -9,10 +9,11 @@ export function pageMetadata(
   title: string,
   description: string,
   path: string,
-  articleDate?: string
+  articleDate?: string,
+  section = "Orchestrat"
 ): Metadata {
   const url = `${siteUrl}${path}`;
-  const fullTitle = `${title} | Orchestrat`;
+  const fullTitle = `${title} | ${section}`;
   const images = [
     {
       url: `${siteUrl}/opengraph-image`,

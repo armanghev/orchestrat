@@ -1,0 +1,118 @@
+---
+title: Configuration
+description: Every environment variable the Orchestrat server reads, with defaults, formats and what each one controls.
+---
+
+<Draft />
+
+{/* TODO(verify): v1 replaces today's ORCHESTRAT_PUBLIC_API_URL (API callbacks and webhooks) and ORCHESTRAT_DASHBOARD_URL (browser redirects, GitHub setup URL) with one ORCHESTRAT_PUBLIC_URL; see packages/config/src/repository.ts:14-15 and the "Set ORCHESTRAT_PUBLIC_API_URL and ORCHESTRAT_DASHBOARD_URL." reason at repository.ts:111-116. Confirm the final name and every URL derived from it. */}
+{/* TODO(verify): ORCHESTRAT_PUBLIC_URL default (none, or http://localhost:8801?) and whether `init` writes it. */}
+{/* TODO(verify): `docker compose run --rm orchestrat init` writes .env next to compose.yml, and which secrets it generates (repository secret key, key ID, Postgres password?). */}
+{/* TODO(verify): `docker compose up -d` recreates the orchestrat container after .env changes. */}
+{/* TODO(verify): ORCHESTRAT_MIGRATE_ON_START name, default true, advisory lock, and how to run migrations by hand when it is false. */}
+{/* TODO(verify): ORCHESTRAT_ALLOWED_ORIGINS v1 default. Today it is http://localhost:8813 (packages/config/src/index.ts:7-15); with the dashboard on the same origin, check whether ORCHESTRAT_PUBLIC_URL is allowed automatically. */}
+{/* TODO(verify): ORCHESTRAT_API_HOST / ORCHESTRAT_API_PORT and the HOST / PORT fallback (packages/config/src/index.ts:26-30) survive in the single image. */}
+{/* TODO(verify): ORCHESTRAT_SIGNUP values and default; whether first-run admin setup still works with `closed`. */}
+{/* TODO(verify): ORCHESTRAT_S3_* names, the all-or-nothing rule (today apps/api/src/document-storage-config.ts:31-33) and whether ORCHESTRAT_S3_PUBLIC_URL is required for avatars. */}
+{/* TODO(verify): ORCHESTRAT_ATTACHMENT_QUOTA_BYTES default. Today the quota is the hardcoded PROJECT_QUOTA_BYTES = 10 * 1024 * 1024 * 1024 in apps/api/src/services/attachment-service.ts:59 and apps/api/src/services/merges/engine.ts:136. */}
+
+Orchestrat reads its configuration from environment variables when the server starts. Change a value, then restart the server for it to take effect.
+
+## The `.env` file
+
+You don't write the file by hand. The `init` command creates it with generated secrets:
+
+```bash
+docker compose run --rm orchestrat init
+```
+
+It writes `.env` next to `compose.yml`, including a generated `ORCHESTRAT_REPOSITORY_SECRET_KEY`. Edit it to change settings, then apply the change:
+
+```bash
+docker compose up -d
+```
+
+`.env` holds secrets. Keep it out of version control and include it in your backups: losing `ORCHESTRAT_REPOSITORY_SECRET_KEY` makes stored Git provider tokens unreadable, and every connection then asks you to reauthorize.
+
+To generate a key yourself, for example when you add or rotate one:
+
+```bash
+openssl rand -base64 32
+```
+
+The server checks values at startup and refuses to start when one is malformed, for example a secret key that doesn't decode to 32 bytes.
+
+## Server
+
+| Variable                      | Default                 | Description                                                                                                                                                                                                                                                                                  |
+| ----------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ORCHESTRAT_PUBLIC_URL`       | None                    | The URL people and agents use to reach Orchestrat, such as `http://localhost:8801` or `https://orchestrat.example.com`. Origin only: no path, no trailing slash. It builds CLI approval links, invite links, Git provider callback and webhook URLs, and the origin allowed by storage CORS. |
+| `ORCHESTRAT_DATABASE_URL`     | None (required)         | Postgres connection string, such as `postgresql://orchestrat:password@postgres:5432/orchestrat`. `init` points it at the compose `postgres` service.                                                                                                                                         |
+| `ORCHESTRAT_MIGRATE_ON_START` | `true`                  | Apply pending database migrations when the server starts. Set to `false` to skip them.                                                                                                                                                                                                       |
+| `ORCHESTRAT_API_HOST`         | `0.0.0.0`               | Address the server listens on. When unset, `HOST` is used if present.                                                                                                                                                                                                                        |
+| `ORCHESTRAT_API_PORT`         | `8801`                  | Port the server listens on, `1` to `65535`. When unset, `PORT` is used if present.                                                                                                                                                                                                           |
+| `ORCHESTRAT_TRUST_PROXY_HOPS` | `0`                     | How many reverse proxies in front of Orchestrat to trust for the client address in `X-Forwarded-For`, `0` to `3`. Rate limits key on the client address. Keep `0` when clients connect directly; set `1` behind one proxy you control, such as Caddy. See [HTTPS](/docs/https).              |
+| `ORCHESTRAT_ALLOWED_ORIGINS`  | `http://localhost:8813` | Comma-separated browser origins allowed to call the API (CORS). You only need it when a dashboard is served from a different origin than the API, such as the dashboard dev server.                                                                                                          |
+
+## Accounts
+
+| Variable            | Default  | Description                                                                                                                                                                                                                                       |
+| ------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ORCHESTRAT_SIGNUP` | `invite` | Who can create an account. `invite`: only through project invite links. `open`: anyone who can reach the server. `closed`: nobody signs up; an admin creates accounts with `orchestrat-admin create-user`. See [Users and accounts](/docs/users). |
+
+## Storage
+
+All optional. Set all of the `ORCHESTRAT_S3_*` connection values or none of them. Without storage, documents still work, but attachments and avatar uploads are off. See [Storage](/docs/storage).
+
+| Variable                            | Default                | Description                                                                                                                                                                                                                     |
+| ----------------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ORCHESTRAT_S3_ENDPOINT`            | None                   | S3 API endpoint, such as `https://s3.us-east-1.amazonaws.com` or `https://<account id>.r2.cloudflarestorage.com`. The server calls it, and browsers and agents upload straight to it, so it must be reachable from all of them. |
+| `ORCHESTRAT_S3_REGION`              | None                   | Bucket region, such as `us-east-1`. Use `auto` for Cloudflare R2.                                                                                                                                                               |
+| `ORCHESTRAT_S3_BUCKET`              | None                   | Bucket name. Keep the bucket private.                                                                                                                                                                                           |
+| `ORCHESTRAT_S3_ACCESS_KEY_ID`       | None                   | Access key ID with read and write access to the bucket.                                                                                                                                                                         |
+| `ORCHESTRAT_S3_SECRET_ACCESS_KEY`   | None                   | Secret access key. Server-side only.                                                                                                                                                                                            |
+| `ORCHESTRAT_S3_PUBLIC_URL`          | None                   | Public base URL browsers load avatar images from.                                                                                                                                                                               |
+| `ORCHESTRAT_ATTACHMENT_QUOTA_BYTES` | `10737418240` (10 GiB) | Total attachment bytes allowed per project, counting uploads in progress.                                                                                                                                                       |
+
+## Git providers
+
+A provider is available only when the shared settings (`ORCHESTRAT_PUBLIC_URL`, `ORCHESTRAT_REPOSITORY_SECRET_KEY`, `ORCHESTRAT_REPOSITORY_SECRET_KEY_ID`) and every variable for that provider are set. Otherwise the dashboard shows its Connect button turned off, with the reason. Registration steps are in [Git providers](/docs/git-providers).
+
+### Shared settings
+
+| Variable                                           | Default                                            | Description                                                                                                                                                  |
+| -------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ORCHESTRAT_REPOSITORY_SECRET_KEY`                 | None                                               | Base64 of exactly 32 random bytes (`openssl rand -base64 32`). Encrypts stored provider tokens and webhook signing secrets with AES-256-GCM. Keep it stable. |
+| `ORCHESTRAT_REPOSITORY_SECRET_KEY_ID`              | None                                               | Short name stored with each encrypted value, matching `[a-z0-9]{1,16}`, such as `k1`. Use a new ID whenever you change the key.                              |
+| `ORCHESTRAT_REPOSITORY_PREVIOUS_SECRET_KEYS`       | None                                               | Older keys that can still decrypt, as comma-separated `id:base64` pairs, such as `k1:<old key>`. New values are always written with the current key.         |
+| `ORCHESTRAT_REPOSITORY_SYNC_ENABLED`               | `true` when a provider is configured, else `false` | Runs the in-process worker that processes webhooks and reconciles with providers. `true` or `false`.                                                         |
+| `ORCHESTRAT_REPOSITORY_RECONCILE_INTERVAL_SECONDS` | `900`                                              | How often, in seconds, each connected repository and organization integration is re-read from its provider to catch missed webhooks. Minimum `30`.           |
+
+### GitHub
+
+| Variable                                   | Default | Description                                                                      |
+| ------------------------------------------ | ------- | -------------------------------------------------------------------------------- |
+| `ORCHESTRAT_GITHUB_APP_ID`                 | None    | The app's App ID, a number.                                                      |
+| `ORCHESTRAT_GITHUB_APP_CLIENT_ID`          | None    | The app's Client ID, starting with `Iv`.                                         |
+| `ORCHESTRAT_GITHUB_APP_CLIENT_SECRET`      | None    | A client secret generated on the app's page.                                     |
+| `ORCHESTRAT_GITHUB_APP_SLUG`               | None    | The last segment of `https://github.com/apps/<slug>`. Used for the install link. |
+| `ORCHESTRAT_GITHUB_APP_PRIVATE_KEY_BASE64` | None    | The app's private key `.pem` file, base64-encoded on one line.                   |
+| `ORCHESTRAT_GITHUB_APP_WEBHOOK_SECRET`     | None    | The webhook secret set on the app. At least 32 characters.                       |
+
+### GitLab.com
+
+| Variable                                | Default | Description                       |
+| --------------------------------------- | ------- | --------------------------------- |
+| `ORCHESTRAT_GITLAB_OAUTH_CLIENT_ID`     | None    | The application's Application ID. |
+| `ORCHESTRAT_GITLAB_OAUTH_CLIENT_SECRET` | None    | The application's Secret.         |
+
+The GitLab webhook signing token is generated per connection and stored encrypted in the database, so it has no variable.
+
+## Rotate the repository secret key
+
+1. Generate a new key with `openssl rand -base64 32`.
+2. Add the current ID and key to `ORCHESTRAT_REPOSITORY_PREVIOUS_SECRET_KEYS`, such as `k1:<current key>`.
+3. Set `ORCHESTRAT_REPOSITORY_SECRET_KEY` to the new key and `ORCHESTRAT_REPOSITORY_SECRET_KEY_ID` to a new ID, such as `k2`.
+4. Restart the server.
+
+Keep the old entry listed. Values written with it are still decrypted with it.
