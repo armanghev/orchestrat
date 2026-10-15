@@ -89,7 +89,7 @@ describe("ProfileSettingsPage", () => {
       "new password 123"
     );
     expect(await screen.findByRole("status")).toHaveTextContent(
-      "Password changed. Your other sessions were signed out."
+      "Password changed. Your other sessions and CLI logins were signed out."
     );
     expect(screen.getByLabelText("Current password")).toHaveValue("");
   });

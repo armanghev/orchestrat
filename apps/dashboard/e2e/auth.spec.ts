@@ -190,7 +190,7 @@ test("@auth signs in through the password form, then signs out with revoke", asy
   await page.getByLabel("Current password").fill("correct horse battery");
   await page.getByRole("button", { name: "Change password" }).click();
   await expect(page.getByRole("status")).toHaveText(
-    "Password changed. Your other sessions were signed out."
+    "Password changed. Your other sessions and CLI logins were signed out."
   );
   expect(calls.filter((call) => call.path === "/auth/password").at(-1)).toEqual(
     {

@@ -139,7 +139,8 @@ export function PasswordCard({
           ) : null}
           {saved ? (
             <p role="status" className="text-sm text-muted-foreground">
-              Password changed. Your other sessions were signed out.
+              Password changed. Your other sessions and CLI logins were signed
+              out.
             </p>
           ) : null}
           <Button type="submit" disabled={pending}>
@@ -184,7 +185,8 @@ export function SessionsCard({
       <CardContent>
         <p className="text-sm text-muted-foreground">
           Sign out everywhere ends every session for your account, on every
-          device, including this one.
+          device, including this one. CLI logins are signed out too; run
+          orchestrat setup again to reconnect.
         </p>
         {error ? (
           <p role="alert" className="mt-3 text-sm text-destructive">
