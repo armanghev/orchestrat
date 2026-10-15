@@ -22,11 +22,16 @@ services:
       - seaweedfs:/data
     ports:
       - "${S3_PORT:-8333}:8333"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8333/healthz"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
 
   orchestrat:
     depends_on:
       seaweedfs:
-        condition: service_started
+        condition: service_healthy
     environment:
       ORCHESTRAT_S3_ENDPOINT: http://seaweedfs:8333
       ORCHESTRAT_S3_PUBLIC_ENDPOINT: ${ORCHESTRAT_S3_PUBLIC_ENDPOINT:-http://localhost:8333}

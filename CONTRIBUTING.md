@@ -35,9 +35,11 @@ pnpm db:migrate
 pnpm dev
 ```
 
-`.env.example` lists every variable the apps read. Until built-in accounts
-land, dashboard sign-in in development goes through a Supabase project,
-configured with the `ORCHESTRAT_SUPABASE_*` and `VITE_SUPABASE_*` values.
+`.env.example` lists every variable the apps read. Accounts are built in: on
+an empty database the API prints a setup link (with a one-time setup token)
+for the first, admin account, or `pnpm db:seed` creates a local admin from
+`ORCHESTRAT_SEED_USER_EMAIL`, `ORCHESTRAT_SEED_USER_NAME` and
+`ORCHESTRAT_SEED_USER_PASSWORD`.
 
 `pnpm dev` starts every app through Turborepo. Local ports are API `8801`,
 dashboard `8813` and landing `8800`. To run one app, use `pnpm dev:api`,

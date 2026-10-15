@@ -35,11 +35,12 @@ ORCHESTRAT_REPOSITORY_SECRET_KEY=${randomBytes(32).toString("base64")}
 ORCHESTRAT_REPOSITORY_SECRET_KEY_ID=k1
 
 # Object storage for attachments (docker compose -f compose.yml -f
-# compose.storage.yml up -d). Browsers upload straight to this endpoint, so it
-# must be reachable from them.
+# compose.storage.yml up -d). Browsers upload straight to the storage
+# endpoint, http://localhost:8333 unless you set it here (only with the
+# storage overlay, or the server sees half a storage configuration):
+# ORCHESTRAT_S3_PUBLIC_ENDPOINT=https://s3.example.com
 S3_ACCESS_KEY=orchestrat
 S3_SECRET_KEY=${secret(24)}
-ORCHESTRAT_S3_PUBLIC_ENDPOINT=http://localhost:8333
 `);
 console.error(
   "Wrote a new .env. Next: docker compose up -d, then open the setup link from `docker compose logs orchestrat`."
