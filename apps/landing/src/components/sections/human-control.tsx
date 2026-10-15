@@ -20,7 +20,7 @@ const controls = [
   {
     icon: KeyRound,
     title: "One identity per tool",
-    text: "Setup gives each coding tool its own agent identity, with credentials stored in macOS Keychain."
+    text: "Setup gives each coding tool its own agent identity, with credentials kept in your OS credential store: macOS Keychain or Linux libsecret."
   }
 ];
 

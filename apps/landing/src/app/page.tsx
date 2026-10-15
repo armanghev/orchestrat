@@ -12,7 +12,7 @@ import { StructuredData } from "@/components/structured-data";
 import { homeStructuredData, pageMetadata, siteDescription } from "@/lib/seo";
 
 export const metadata = pageMetadata(
-  "Coordinate your AI coding agents",
+  "Self-hosted coordination for AI coding agents",
   siteDescription,
   ""
 );

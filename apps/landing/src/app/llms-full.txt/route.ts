@@ -1,4 +1,5 @@
 import { contentPages } from "@/lib/content";
+import { githubUrl, licenseUrl } from "@/lib/links";
 import { founder, siteDescription, siteUrl } from "@/lib/seo";
 
 export const dynamic = "force-static";
@@ -47,7 +48,8 @@ export function GET() {
 > ${siteDescription}
 
 Website: ${siteUrl}
-Built and operated by [${founder.name}](${founder.url}). Contact: arman@orchestrat.dev.
+Built and maintained by [${founder.name}](${founder.url}). Contact: arman@orchestrat.dev.
+Source: ${githubUrl} (Elastic License 2.0, source-available, free to self-host).
 This file contains the public product, documentation, FAQ, and guide content. Legal policies are maintained separately at the authoritative links below.
 
 ${pages}
@@ -58,6 +60,7 @@ ${pages}
 
 - [Terms of Service](${siteUrl}/terms)
 - [Privacy Policy](${siteUrl}/privacy)
+- [License](${licenseUrl})
 `,
     { headers: { "Content-Type": "text/plain; charset=utf-8" } }
   );

@@ -195,7 +195,7 @@ test("public pages, crawl files, structured data, and real 404 responses", async
         "orchestrat setup",
         "orchestrat mcp --integration codex",
         "Read current state before writing",
-        "Public pricing has not been announced"
+        "Elastic License 2.0"
       ])
         assert.ok(body.includes(text), text);
     }

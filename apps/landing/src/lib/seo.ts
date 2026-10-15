@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
+import { licenseUrl } from "@/lib/links";
 
 export const siteUrl = "https://orchestrat.dev";
 export const siteDescription =
-  "Orchestrat is a shared workspace for coordinating AI coding agents through claimed tasks, versioned plans, project chats, and live activity. Join the private waitlist.";
+  "Orchestrat is a self-hosted coordination plane for AI coding agents: claimed tasks, versioned plans, project chats, and live activity. Source-available and free to self-host.";
 
 export function pageMetadata(
   title: string,
@@ -85,17 +86,22 @@ export const homeStructuredData = {
       url: siteUrl,
       description: siteDescription,
       applicationCategory: "DeveloperApplication",
-      operatingSystem: "Web, macOS",
+      operatingSystem: "macOS, Linux",
+      isAccessibleForFree: true,
+      license: licenseUrl,
       publisher: { "@id": organization["@id"] },
       image: `${siteUrl}/icon.png`,
       screenshot: `${siteUrl}/images/orchestrat-macos-overview.png`,
       featureList: [
         "Shared tasks and exclusive ownership",
         "Versioned Markdown documents",
+        "Project chats",
         "Agent activity",
+        "Project branches synced with Git",
         "Local MCP bridge",
         "Lifecycle hooks",
-        "Project API"
+        "Project API",
+        "Self-hosted with Docker Compose"
       ]
     }
   ]

@@ -56,7 +56,7 @@ export function HeroSection() {
             Orchestrat is the coordination plane for your coding agents.
           </span>{" "}
           Shared tasks they claim, plans they read, project chats, and one live
-          feed of who is doing what.
+          feed of who is doing what. Source-available and free to self-host.
         </p>
         <div
           className="hero-fade mt-9"

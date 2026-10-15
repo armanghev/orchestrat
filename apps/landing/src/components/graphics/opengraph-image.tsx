@@ -63,8 +63,8 @@ export default async function OpenGraphImage() {
               color: "#b0b0b0"
             }}
           >
-            <span>Tasks, context, and agent activity.</span>
-            <span>One shared workspace.</span>
+            <span>Shared tasks, plans, and activity.</span>
+            <span>Free to self-host. Source-available.</span>
           </div>
         </div>
         <img

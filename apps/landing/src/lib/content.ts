@@ -20,37 +20,37 @@ export const faqs: ContentSection[] = [
   {
     heading: "What is Orchestrat?",
     paragraphs: [
-      "Orchestrat is a shared workspace for coordinating AI coding agents, in your browser or the macOS app. It brings shared tasks, task ownership, versioned Markdown documents, and live agent activity into one place, while you keep using your existing coding tools."
+      "Orchestrat is a coordination plane for AI coding agents. It gives one developer and several agents shared tasks with exclusive claims, versioned Markdown documents, project chats, and a live activity feed. You run it yourself and keep using your existing coding tools."
     ]
   },
   {
     heading: "Does Orchestrat run AI models or replace my coding tools?",
     paragraphs: [
-      "No. Your coding tools run their own models and execute the work. Orchestrat gives connected agents shared project state through a local MCP bridge, lifecycle hooks, and an API. You remain responsible for reviewing changes and approving actions in your tools."
+      "No. Your coding tools run their own models and do the work. Orchestrat gives connected agents shared project state through a local MCP bridge, lifecycle hooks, and an API. You remain responsible for reviewing changes and approving actions in your tools."
     ]
   },
   {
     heading: "Which coding agents can I connect?",
     paragraphs: [
-      "The private-alpha setup supports Codex, Claude Code, Cursor, and Antigravity. Each receives MCP and lifecycle-hook configuration. Pi can be detected, but cannot currently be selected for setup. Integration behavior depends on the installed tool version."
+      "Claude Code, Codex, Cursor, and Antigravity. Setup gives each one MCP and lifecycle-hook configuration. Pi can be detected, but cannot currently be selected for setup. Integration behavior depends on the installed tool version."
     ]
   },
   {
-    heading: "Is Orchestrat available, and how much does it cost?",
+    heading: "Is it open source?",
     paragraphs: [
-      "Orchestrat is in private early access. Join the waitlist to request an invitation. Public pricing has not been announced. Joining the waitlist does not create a paid subscription or guarantee access or a release date. Any future paid offering will show its price and terms before you agree to pay."
+      "It’s source-available under the Elastic License 2.0: free to use, modify and self-host, and to build into your own products. The one thing you can’t do is offer Orchestrat to others as a hosted service."
     ]
   },
   {
-    heading: "Where can I use Orchestrat?",
+    heading: "What do I need to run it?",
     paragraphs: [
-      "The Orchestrat workspace runs in your browser, and there is also a native macOS app. Connecting local coding agents through the CLI currently requires macOS. Remote cloud agents and CI agents are not supported by the current setup."
+      "Docker with Docker Compose for the server. Postgres is bundled in the compose file, so there is nothing else to install, though you can point Orchestrat at your own Postgres instead. The CLI that connects your coding agents needs Node.js and runs on macOS and Linux. S3-compatible storage for attachments is optional."
     ]
   },
   {
-    heading: "Is my project data stored only on my computer?",
+    heading: "Where is my project data stored?",
     paragraphs: [
-      "No. Orchestrat uses a hosted service for shared project data and a local bridge for your coding tools. Integration credentials are stored in macOS Keychain. Tasks, comments, documents, attachments, and reported activity are handled by the hosted service. The Privacy Policy describes these data flows."
+      "On your own server. Tasks, comments, documents, chats, and activity live in your Postgres database, and attachments in your own storage bucket if you configure one. Agent credentials stay in your OS credential store: macOS Keychain or Linux libsecret. A self-hosted instance sends nothing to Orchestrat. Connected coding tools may still send project context to their own model providers."
     ]
   },
   {
@@ -62,7 +62,7 @@ export const faqs: ContentSection[] = [
   {
     heading: "Who builds Orchestrat, and how can I get in touch?",
     paragraphs: [
-      "Orchestrat is built and maintained by @armanghev. For early access, product questions, support, or privacy requests, email arman@orchestrat.dev."
+      "Orchestrat is built and maintained by @armanghev. Report bugs and suggest changes on GitHub. For anything else, email arman@orchestrat.dev."
     ]
   }
 ];
@@ -72,9 +72,9 @@ export const contentPages: ContentPage[] = [
     slug: "about",
     title: "About Orchestrat",
     description:
-      "Meet Orchestrat, the shared workspace for AI coding agents, built and maintained by @armanghev. Learn what it does and how to get in touch.",
+      "Meet Orchestrat, the self-hosted coordination plane for AI coding agents, built and maintained by @armanghev. Learn what it does and how to get in touch.",
     intro:
-      "Orchestrat is a shared workspace for the work happening across your AI coding tools. Built and maintained by @armanghev, it connects tasks, project context, and agent activity in one workspace you can open in your browser or the macOS app.",
+      "Orchestrat is a coordination plane for the work happening across your AI coding tools. Built and maintained by @armanghev, it connects tasks, project context, and agent activity in one place that you run yourself.",
     sections: [
       {
         heading: "A shared place for the work",
@@ -87,25 +87,29 @@ export const contentPages: ContentPage[] = [
         heading: "Your tools, connected",
         paragraphs: [
           "Orchestrat works alongside coding tools through MCP, lifecycle hooks, and an API. The coding tools continue to run their models and execute changes. You choose which integrations to connect, review their work, and control their permissions.",
-          "The private alpha focuses on one developer coordinating multiple local coding agents. It does not promise automatic assignment, built-in inference, or a complete record of every tool call."
+          "It focuses on one developer coordinating several local coding agents. It does not assign work automatically, run inference, or record every tool call."
+        ]
+      },
+      {
+        heading: "Self-hosted and source-available",
+        paragraphs: [
+          "You run Orchestrat on your own machine or server with Docker Compose, and your project data stays in your own Postgres database. There is no hosted version and no paid tier; orchestrat.dev hosts only this site and the documentation.",
+          "The source is on GitHub under the Elastic License 2.0. You are free to use, modify, and self-host it, and to build it into your own products. The one thing the license rules out is offering Orchestrat to others as a hosted service."
+        ],
+        links: [
+          { label: "Self-host it", href: "/docs/quickstart" },
+          {
+            label: "Source on GitHub",
+            href: "https://github.com/armanghev/orchestrat"
+          }
         ]
       },
       {
         heading: "Creator and contact",
         paragraphs: [
-          "@armanghev builds and maintains Orchestrat. For questions about the product, an early-access invitation, support, or privacy, contact arman@orchestrat.dev."
+          "@armanghev builds and maintains Orchestrat. Report bugs and suggest changes on GitHub. For questions, support, or privacy, contact arman@orchestrat.dev."
         ],
         links: [{ label: "Email support", href: "mailto:arman@orchestrat.dev" }]
-      },
-      {
-        heading: "Current availability",
-        paragraphs: [
-          "Orchestrat is in private early access with a public waitlist. Features may change during the alpha. Public pricing and a general release date have not been announced."
-        ],
-        links: [
-          { label: "Self-host it", href: "/docs/quickstart" },
-          { label: "Privacy Policy", href: "/privacy" }
-        ]
       }
     ],
     related: ["docs", "faq"]
@@ -183,9 +187,9 @@ export const contentPages: ContentPage[] = [
     slug: "faq",
     title: "Orchestrat frequently asked questions",
     description:
-      "Answers about Orchestrat, supported coding agents, where it runs, early access, pricing, project data, and task ownership.",
+      "Answers about Orchestrat: supported coding agents, the license, what you need to self-host it, where your data lives, and task ownership.",
     intro:
-      "Straight answers about what Orchestrat does, how agents connect, and what to expect during private early access.",
+      "Straight answers about what Orchestrat does, how agents connect, and what it takes to run it yourself.",
     sections: faqs,
     related: ["docs", "about"]
   },
@@ -287,7 +291,7 @@ export const contentPages: ContentPage[] = [
       {
         heading: "The local bridge connects an agent to a project",
         paragraphs: [
-          "The Orchestrat CLI configures the coding tool to launch a local stdio MCP bridge. A configured integration has its own agent identity and credential, with credentials stored in macOS Keychain. Project-scoped setup binds the connection to the selected project.",
+          "The Orchestrat CLI configures the coding tool to launch a local stdio MCP bridge. A configured integration has its own agent identity and credential, stored in your OS credential store: macOS Keychain or Linux libsecret. Project-scoped setup binds the connection to the selected project.",
           "For Codex and Claude Code, the managed bridge commands look like the examples below. Run orchestrat setup to create the supported configuration. These commands explain what the coding tool launches; they are not a substitute for account authorization and project selection."
         ],
         code: "orchestrat mcp --integration codex\norchestrat mcp --integration claude-code"
