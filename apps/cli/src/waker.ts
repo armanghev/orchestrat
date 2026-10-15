@@ -967,35 +967,72 @@ type ParsedArgs = {
   wakeOn?: WakeKind[];
 };
 
-function parseArgs(args: string[]): ParsedArgs | undefined {
+const ACTION_FLAGS: Record<string, readonly string[]> = {
+  enable: ["--integration", "--wake-on"],
+  disable: [],
+  status: [],
+  run: ["--once", "--dry-run"]
+};
+
+// Accepts `--flag value` and `--flag=value`. --integration may repeat;
+// --wake-on takes a comma-separated list and repeats add to it.
+function parseArgs(args: string[]): ParsedArgs | { error?: string } {
   const [action, ...rest] = args;
-  if (!action || !["enable", "disable", "status", "run"].includes(action))
-    return undefined;
+  if (!action || !Object.hasOwn(ACTION_FLAGS, action)) return {};
   const parsed: ParsedArgs = {
     action,
     once: false,
     dryRun: false,
     integrations: []
   };
+  const integrations = new Set<Integration>();
+  const wakeOn = new Set<WakeKind>();
   for (let index = 0; index < rest.length; index += 1) {
-    const flag = rest[index];
-    if (action === "run" && flag === "--once") parsed.once = true;
-    else if (action === "run" && flag === "--dry-run") parsed.dryRun = true;
-    else if (action === "enable" && flag === "--integration") {
-      const value = rest[++index];
+    const arg = rest[index];
+    const equals = arg.startsWith("--") ? arg.indexOf("=") : -1;
+    const flag = equals === -1 ? arg : arg.slice(0, equals);
+    if (!ACTION_FLAGS[action].includes(flag))
+      return {
+        error: flag.startsWith("-")
+          ? `orchestrat waker ${action} does not accept ${flag}.`
+          : `orchestrat waker ${action} does not take "${arg}".`
+      };
+    const takesValue = flag === "--integration" || flag === "--wake-on";
+    if (!takesValue) {
+      if (equals !== -1) return { error: `${flag} does not take a value.` };
+      if (flag === "--once") parsed.once = true;
+      else parsed.dryRun = true;
+      continue;
+    }
+    const value = equals === -1 ? rest[++index] : arg.slice(equals + 1);
+    if (flag === "--integration") {
       if (!(INTEGRATIONS as readonly unknown[]).includes(value))
-        return undefined;
-      parsed.integrations.push(value as Integration);
-    } else if (action === "enable" && flag === "--wake-on") {
-      const kinds = (rest[++index] ?? "").split(",").filter(Boolean);
-      if (
-        !kinds.length ||
-        kinds.some((kind) => !(WAKE_KINDS as readonly string[]).includes(kind))
-      )
-        return undefined;
-      parsed.wakeOn = [...new Set(kinds as WakeKind[])];
-    } else return undefined;
+        return {
+          error:
+            value === undefined || value === ""
+              ? `--integration needs a value: ${INTEGRATIONS.join(", ")}.`
+              : `Unknown integration "${value}" for --integration; use ${INTEGRATIONS.join(", ")}.`
+        };
+      integrations.add(value as Integration);
+    } else {
+      const kinds = (value ?? "")
+        .split(",")
+        .map((kind) => kind.trim())
+        .filter(Boolean);
+      const unknown = kinds.find(
+        (kind) => !(WAKE_KINDS as readonly string[]).includes(kind)
+      );
+      if (!kinds.length || unknown !== undefined)
+        return {
+          error: kinds.length
+            ? `Unknown wake kind "${unknown}" for --wake-on; use one or more of ${WAKE_KINDS.join(", ")}, comma-separated.`
+            : `--wake-on needs one or more of ${WAKE_KINDS.join(", ")}, comma-separated.`
+        };
+      for (const kind of kinds) wakeOn.add(kind as WakeKind);
+    }
   }
+  parsed.integrations = [...integrations];
+  if (wakeOn.size) parsed.wakeOn = [...wakeOn];
   return parsed;
 }
 
@@ -1230,8 +1267,8 @@ export async function runWakerCommand(
 ): Promise<number> {
   const deps = defaultDeps(overrides);
   const parsed = parseArgs(args);
-  if (!parsed) {
-    deps.stderr(USAGE);
+  if (!("action" in parsed)) {
+    deps.stderr(parsed.error ? `${parsed.error}\n${USAGE}` : USAGE);
     return 1;
   }
   try {

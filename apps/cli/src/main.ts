@@ -126,6 +126,7 @@ export function parseInvocationArgs(argv: string[]): {
       rewake: { type: "boolean", default: false },
       once: { type: "boolean", default: false },
       "dry-run": { type: "boolean", default: false },
+      "wake-on": { type: "string" },
       follow: { type: "boolean", default: false },
       server: { type: "string" }
     },
@@ -172,7 +173,19 @@ export function parseInvocationArgs(argv: string[]): {
   if (values.rewake && !values["auto-continue"]) usage();
   if (values.server !== undefined && positionals[0] !== "setup") usage();
   if ((values.once || values["dry-run"]) && positionals[0] !== "waker") usage();
+  if (values["wake-on"] !== undefined && positionals[0] !== "waker") usage();
   if (values.follow && !branchCommand) usage();
+  if (positionals[0] === "waker") {
+    // waker.ts parses the raw argv itself: --integration may repeat, and a
+    // bad --integration or --wake-on value gets an error naming it.
+    if (!["enable", "disable", "status", "run"].includes(positionals[1] ?? ""))
+      usage();
+    const index = argv.indexOf("waker");
+    return {
+      command: "waker",
+      wakerArgs: argv.filter((_, position) => position !== index)
+    };
+  }
   if (
     typeof integration !== "undefined" &&
     !isConfigurableIntegration(integration)
@@ -302,15 +315,6 @@ export function parseInvocationArgs(argv: string[]): {
       ...(values["auto-continue"] ? { autoContinue: true } : {}),
       ...(values.rewake ? { rewake: true } : {})
     };
-  if (positionals[0] === "waker") {
-    if (!["enable", "disable", "status", "run"].includes(positionals[1] ?? ""))
-      usage();
-    const index = argv.indexOf("waker");
-    return {
-      command: "waker",
-      wakerArgs: argv.filter((_, position) => position !== index)
-    };
-  }
   if (positionals[0] === "hook") {
     const hookIntegration = positionals[1];
     if (
@@ -373,7 +377,7 @@ export function parseInvocationArgs(argv: string[]): {
 
 function usage(): never {
   throw new Error(
-    "Usage: orchestrat setup [--server <url>] [--auto-continue [--rewake]] | status | doctor | hook <integration> [--event <event>] | hook <claude-code|codex> --event Stop [--watch] | disconnect <integration|all> | mcp --integration <integration> [--cwd <project>] [--global] [--wait-budget-seconds <n>] | waker <enable|disable|status|run> [--once] [--dry-run] | document(s) <list|read|create|write|patch|history|upload|download> --integration <integration> | branch [current|list [--include-archived]|create <name>|select <name>|select --follow] --integration <integration>"
+    "Usage: orchestrat setup [--server <url>] [--auto-continue [--rewake]] | status | doctor | hook <integration> [--event <event>] | hook <claude-code|codex> --event Stop [--watch] | disconnect <integration|all> | mcp --integration <integration> [--cwd <project>] [--global] [--wait-budget-seconds <n>] | waker enable [--integration <integration>]... [--wake-on <handoff,direct_message,mention>] | waker <disable|status> | waker run [--once] [--dry-run] | document(s) <list|read|create|write|patch|history|upload|download> --integration <integration> | branch [current|list [--include-archived]|create <name>|select <name>|select --follow] --integration <integration>"
   );
 }
 
