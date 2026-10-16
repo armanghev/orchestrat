@@ -20,37 +20,37 @@ export const faqs: ContentSection[] = [
   {
     heading: "What is Orchestrat?",
     paragraphs: [
-      "Orchestrat is a shared workspace for coordinating AI coding agents, in your browser or the macOS app. It brings shared tasks, task ownership, versioned Markdown documents, and live agent activity into one place, while you keep using your existing coding tools."
+      "Orchestrat is a coordination plane for AI coding agents. It gives one developer and several agents shared tasks with exclusive claims, versioned Markdown documents, project chats, and a live activity feed. You run it yourself and keep using your existing coding tools."
     ]
   },
   {
     heading: "Does Orchestrat run AI models or replace my coding tools?",
     paragraphs: [
-      "No. Your coding tools run their own models and execute the work. Orchestrat gives connected agents shared project state through a local MCP bridge, lifecycle hooks, and an API. You remain responsible for reviewing changes and approving actions in your tools."
+      "No. Your coding tools run their own models and do the work. Orchestrat gives connected agents shared project state through a local MCP bridge, lifecycle hooks, and an API. You remain responsible for reviewing changes and approving actions in your tools."
     ]
   },
   {
     heading: "Which coding agents can I connect?",
     paragraphs: [
-      "The private-alpha setup supports Codex, Claude Code, Cursor, and Antigravity. Each receives MCP and lifecycle-hook configuration. Pi can be detected, but cannot currently be selected for setup. Integration behavior depends on the installed tool version."
+      "Claude Code, Codex, Cursor, and Antigravity. Setup gives each one MCP and lifecycle-hook configuration. Pi can be detected, but cannot currently be selected for setup. Integration behavior depends on the installed tool version."
     ]
   },
   {
-    heading: "Is Orchestrat available, and how much does it cost?",
+    heading: "Is it open source?",
     paragraphs: [
-      "Orchestrat is in private early access. Join the waitlist to request an invitation. Public pricing has not been announced. Joining the waitlist does not create a paid subscription or guarantee access or a release date. Any future paid offering will show its price and terms before you agree to pay."
+      "It’s source-available under the Elastic License 2.0: free to use, modify and self-host, and to build into your own products. The one thing you can’t do is offer Orchestrat to others as a hosted service."
     ]
   },
   {
-    heading: "Where can I use Orchestrat?",
+    heading: "What do I need to run it?",
     paragraphs: [
-      "The Orchestrat workspace runs in your browser, and there is also a native macOS app. Connecting local coding agents through the CLI currently requires macOS. Remote cloud agents and CI agents are not supported by the current setup."
+      "Docker with Docker Compose for the server. Postgres is bundled in the compose file, so there is nothing else to install, though you can point Orchestrat at your own Postgres instead. The CLI that connects your coding agents needs Node.js and runs on macOS and Linux. S3-compatible storage for attachments is optional."
     ]
   },
   {
-    heading: "Is my project data stored only on my computer?",
+    heading: "Where is my project data stored?",
     paragraphs: [
-      "No. Orchestrat uses a hosted service for shared project data and a local bridge for your coding tools. Integration credentials are stored in macOS Keychain. Tasks, comments, documents, attachments, and reported activity are handled by the hosted service. The Privacy Policy describes these data flows."
+      "On your own server. Tasks, comments, documents, chats, and activity live in your Postgres database, and attachments in your own storage bucket if you configure one. Agent credentials stay in your OS credential store: macOS Keychain or Linux libsecret. A self-hosted instance sends nothing to Orchestrat. Connected coding tools may still send project context to their own model providers."
     ]
   },
   {
@@ -62,7 +62,7 @@ export const faqs: ContentSection[] = [
   {
     heading: "Who builds Orchestrat, and how can I get in touch?",
     paragraphs: [
-      "Orchestrat is built and maintained by @armanghev. For early access, product questions, support, or privacy requests, email arman@orchestrat.dev."
+      "Orchestrat is built and maintained by @armanghev. Report bugs and suggest changes on GitHub. For anything else, email arman@orchestrat.dev."
     ]
   }
 ];
@@ -72,9 +72,9 @@ export const contentPages: ContentPage[] = [
     slug: "about",
     title: "About Orchestrat",
     description:
-      "Meet Orchestrat, the shared workspace for AI coding agents, built and maintained by @armanghev. Learn what it does and how to get in touch.",
+      "Meet Orchestrat, the self-hosted coordination plane for AI coding agents, built and maintained by @armanghev. Learn what it does and how to get in touch.",
     intro:
-      "Orchestrat is a shared workspace for the work happening across your AI coding tools. Built and maintained by @armanghev, it connects tasks, project context, and agent activity in one workspace you can open in your browser or the macOS app.",
+      "Orchestrat is a coordination plane for the work happening across your AI coding tools. Built and maintained by @armanghev, it connects tasks, project context, and agent activity in one place that you run yourself.",
     sections: [
       {
         heading: "A shared place for the work",
@@ -87,142 +87,42 @@ export const contentPages: ContentPage[] = [
         heading: "Your tools, connected",
         paragraphs: [
           "Orchestrat works alongside coding tools through MCP, lifecycle hooks, and an API. The coding tools continue to run their models and execute changes. You choose which integrations to connect, review their work, and control their permissions.",
-          "The private alpha focuses on one developer coordinating multiple local coding agents. It does not promise automatic assignment, built-in inference, or a complete record of every tool call."
+          "It focuses on one developer coordinating several local coding agents. It does not assign work automatically, run inference, or record every tool call."
+        ]
+      },
+      {
+        heading: "Self-hosted and source-available",
+        paragraphs: [
+          "You run Orchestrat on your own machine or server with Docker Compose, and your project data stays in your own Postgres database. There is no hosted version and no paid tier; orchestrat.dev hosts only this site and the documentation.",
+          "The source is on GitHub under the Elastic License 2.0. You are free to use, modify, and self-host it, and to build it into your own products. The one thing the license rules out is offering Orchestrat to others as a hosted service."
+        ],
+        links: [
+          { label: "Self-host it", href: "/docs/quickstart" },
+          {
+            label: "Source on GitHub",
+            href: "https://github.com/armanghev/orchestrat"
+          }
         ]
       },
       {
         heading: "Creator and contact",
         paragraphs: [
-          "@armanghev builds and maintains Orchestrat. For questions about the product, an early-access invitation, support, or privacy, contact arman@orchestrat.dev."
+          "@armanghev builds and maintains Orchestrat. Report bugs and suggest changes on GitHub. For questions, support, or privacy, contact arman@orchestrat.dev."
         ],
         links: [{ label: "Email support", href: "mailto:arman@orchestrat.dev" }]
-      },
-      {
-        heading: "Current availability",
-        paragraphs: [
-          "Orchestrat is in private early access with a public waitlist. Features may change during the alpha. Public pricing and a general release date have not been announced."
-        ],
-        links: [
-          { label: "Join the waitlist", href: "/#waitlist" },
-          { label: "Privacy Policy", href: "/privacy" }
-        ]
       }
     ],
-    related: ["docs", "pricing", "faq"]
-  },
-  {
-    slug: "docs",
-    title: "Orchestrat documentation: connect your coding agents",
-    description:
-      "Set up Orchestrat, connect Codex and Claude Code through MCP, and understand shared tasks, documents, lifecycle hooks, and troubleshooting.",
-    intro:
-      "Orchestrat connects your local coding agents to a shared project through its CLI and MCP bridge. This guide covers the private-alpha setup for invited users.",
-    sections: [
-      {
-        heading: "Before you begin",
-        paragraphs: [
-          "You need an Orchestrat account with access to a project, macOS, Node.js 20.19+ or a supported newer Node.js release, and at least one supported coding tool. Follow the installation details supplied with your invitation if they specify a particular alpha version.",
-          "An npm package installation alone does not grant access to a project. If you have not been invited, join the waitlist first."
-        ],
-        links: [{ label: "Request early access", href: "/#waitlist" }]
-      },
-      {
-        heading: "Install and connect",
-        paragraphs: [
-          "Install the alpha CLI, then run setup from the local project directory you want to connect. Setup detects installed coding tools, lets you choose integrations, and previews the configuration entries it will manage. Complete browser authorization and select the intended Orchestrat project when prompted.",
-          "Setup creates a separate agent identity for each selected integration. Credentials go into macOS Keychain; the managed configuration connects the coding tool to the local bridge. Restart the tool’s MCP connection after setup so it loads the configuration."
-        ],
-        code: "npm install -g @orchestrat/cli@alpha\n# From your local project directory:\norchestrat setup\norchestrat status"
-      },
-      {
-        heading: "How the MCP connection works",
-        paragraphs: [
-          "Setup manages the MCP launch command for your coding tool. The examples below show the bridge entry points for Codex and Claude Code; you normally let the coding tool launch them rather than run them as a separate daily workflow.",
-          "A project-scoped connection is bound to its configured project. A global connection requires the agent to list and explicitly select an authorized project before doing project work."
-        ],
-        code: "orchestrat mcp --integration codex\norchestrat mcp --integration claude-code"
-      },
-      {
-        heading: "Supported integrations",
-        paragraphs: [
-          "Codex, Claude Code, Cursor, and Antigravity support managed MCP and lifecycle-hook configuration. Pi is detected but is not currently selectable for setup.",
-          "MCP exposes intentional project actions such as reading tasks, claiming work, posting comments, and updating documents. Hooks report session start, session end, and failure. A session ending does not automatically complete a task."
-        ]
-      },
-      {
-        heading: "A first shared workflow",
-        paragraphs: [
-          "Create a small task with a clear outcome and put its constraints in a shared document. Ask one connected agent to read the project context, claim the task, do the work, and leave a comment explaining the result and checks performed.",
-          "Use the Orchestrat workspace, in your browser or the macOS app, to review task ownership, document revisions, and activity. Before handing the task to another agent, record what changed and what remains. Claims coordinate task ownership; use your coding tools and Git workflow to manage file edits and review code."
-        ],
-        bullets: [
-          "Give each task one owner and a concrete completion condition.",
-          "Keep enduring decisions in a shared document rather than only in a chat.",
-          "Distinguish implemented changes, checks that passed, and work still awaiting review."
-        ]
-      },
-      {
-        heading: "Check or disconnect a connection",
-        paragraphs: [
-          "Run status to inspect configured connections and doctor to diagnose launcher, configuration, credential, and backend connectivity issues. Check that you are in the intended project directory. After a CLI update, restart the coding tool’s MCP connection.",
-          "To remove an integration, use disconnect and inspect its preview. It revokes that integration’s agent credential and removes its managed entries. Do not paste access tokens into a document, agent prompt, or support message."
-        ],
-        code: "orchestrat status\norchestrat doctor\norchestrat disconnect codex",
-        links: [
-          { label: "Ask for setup help", href: "mailto:arman@orchestrat.dev" }
-        ]
-      }
-    ],
-    related: [
-      "guides/mcp-agent-coordination",
-      "guides/coordinate-multiple-coding-agents",
-      "faq"
-    ]
-  },
-  {
-    slug: "pricing",
-    title: "Orchestrat pricing and early access",
-    description:
-      "Orchestrat is in private early access. Public pricing is not yet announced. Learn what joining the waitlist means and how to request an invitation.",
-    intro:
-      "Orchestrat is in private early access. Public pricing has not been announced. Join the waitlist to request an invitation and hear about availability.",
-    sections: [
-      {
-        heading: "What the waitlist means",
-        paragraphs: [
-          "Joining the waitlist registers your interest in Orchestrat. It does not create a paid subscription, reserve a price, or guarantee an invitation or release date. We use your email for early-access communications."
-        ],
-        links: [{ label: "Join the waitlist", href: "/#waitlist" }]
-      },
-      {
-        heading: "What is available during the alpha?",
-        paragraphs: [
-          "The private alpha focuses on shared tasks, ownership, versioned documents, and agent activity for a developer using local coding agents. Setup connects supported tools through the CLI and MCP bridge. Features and availability may change as the product develops.",
-          "Orchestrat does not provide the AI models used by connected coding tools. Your arrangements with those providers remain separate."
-        ]
-      },
-      {
-        heading: "Future plans and billing",
-        paragraphs: [
-          "Any future paid offering will disclose its pricing and payment terms before you agree to pay. We have not published subscription tiers, usage allowances, or a general-availability date. For product or access questions, contact arman@orchestrat.dev."
-        ],
-        links: [
-          { label: "Contact support", href: "mailto:arman@orchestrat.dev" },
-          { label: "Terms of Service", href: "/terms" }
-        ]
-      }
-    ],
-    related: ["about", "docs", "faq"]
+    related: ["docs/quickstart", "faq"]
   },
   {
     slug: "faq",
     title: "Orchestrat frequently asked questions",
     description:
-      "Answers about Orchestrat, supported coding agents, where it runs, early access, pricing, project data, and task ownership.",
+      "Answers about Orchestrat: supported coding agents, the license, what you need to self-host it, where your data lives, and task ownership.",
     intro:
-      "Straight answers about what Orchestrat does, how agents connect, and what to expect during private early access.",
+      "Straight answers about what Orchestrat does, how agents connect, and what it takes to run it yourself.",
     sections: faqs,
-    related: ["docs", "pricing", "about"]
+    related: ["docs/quickstart", "about"]
   },
   {
     slug: "guides",
@@ -288,13 +188,15 @@ export const contentPages: ContentPage[] = [
           "When tasks meet again, inspect the actual code and run checks at the integration boundary. Two tasks passing their own checks does not prove the complete user flow works. Review the merged behavior, not only the status labels.",
           "Orchestrat provides shared tasks, documents, comments, and activity for this workflow. Your coding tools still execute the changes, and you decide whether the result is ready. Start with two agents and one bounded project so the coordination remains easy to understand."
         ],
-        links: [{ label: "Connect your first agents", href: "/docs" }]
+        links: [
+          { label: "Connect your first agents", href: "/docs/connect-agents" }
+        ]
       }
     ],
     related: [
       "guides/shared-context-for-coding-agents",
       "guides/mcp-agent-coordination",
-      "docs"
+      "docs/connect-agents"
     ]
   },
   {
@@ -322,7 +224,7 @@ export const contentPages: ContentPage[] = [
       {
         heading: "The local bridge connects an agent to a project",
         paragraphs: [
-          "The Orchestrat CLI configures the coding tool to launch a local stdio MCP bridge. A configured integration has its own agent identity and credential, with credentials stored in macOS Keychain. Project-scoped setup binds the connection to the selected project.",
+          "The Orchestrat CLI configures the coding tool to launch a local stdio MCP bridge. A configured integration has its own agent identity and credential, stored in your OS credential store: macOS Keychain or Linux libsecret. Project-scoped setup binds the connection to the selected project.",
           "For Codex and Claude Code, the managed bridge commands look like the examples below. Run orchestrat setup to create the supported configuration. These commands explain what the coding tool launches; they are not a substitute for account authorization and project selection."
         ],
         code: "orchestrat mcp --integration codex\norchestrat mcp --integration claude-code"
@@ -348,10 +250,19 @@ export const contentPages: ContentPage[] = [
           "Once the connection works, review the task itself: ownership, prerequisites, shared documents, and the last meaningful update. A healthy connection does not tell you whether the work is ready. A completed task does not prove that a later session has the correct project selected."
         ],
         code: "orchestrat status\norchestrat doctor",
-        links: [{ label: "Read the setup documentation", href: "/docs" }]
+        links: [
+          {
+            label: "Read the setup documentation",
+            href: "/docs/connect-agents"
+          }
+        ]
       }
     ],
-    related: ["docs", "guides/coordinate-multiple-coding-agents", "faq"]
+    related: [
+      "docs/connect-agents",
+      "guides/coordinate-multiple-coding-agents",
+      "faq"
+    ]
   },
   {
     slug: "guides/shared-context-for-coding-agents",

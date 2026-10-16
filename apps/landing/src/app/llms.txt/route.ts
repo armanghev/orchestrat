@@ -1,4 +1,6 @@
 import { contentPages } from "@/lib/content";
+import { githubUrl, licenseUrl } from "@/lib/links";
+import { docsPages } from "@/lib/source";
 import { founder, siteDescription, siteUrl } from "@/lib/seo";
 
 export const dynamic = "force-static";
@@ -17,14 +19,23 @@ export function GET() {
 
 > ${siteDescription}
 
-Built and operated by [${founder.name}](${founder.url}). Contact: arman@orchestrat.dev.
-Private early access; public pricing and a general release date have not been announced.
-Orchestrat coordinates coding tools; it does not run their AI models. The workspace runs in the browser and as a macOS app. Local coding agents connect through the CLI, and a hosted service stores shared project data.
+Built and maintained by [${founder.name}](${founder.url}). Contact: arman@orchestrat.dev.
+Source-available under the Elastic License 2.0 and free to self-host: ${githubUrl}. There is no hosted service; ${siteUrl} hosts only this site and the documentation.
+Orchestrat coordinates coding tools; it does not run their AI models. You run the server with Docker Compose and Postgres, open the dashboard in a browser, and connect local coding agents through the CLI on macOS or Linux. Project data stays on your server.
 
-## Product and documentation
+## Product
 
-- [Full product documentation and guides](${siteUrl}/llms-full.txt): Plain-text content of the product pages, FAQ, documentation, and guides below.
+- [Full product documentation and guides](${siteUrl}/llms-full.txt): Plain-text content of the product pages, FAQ, guides, and documentation below.
 ${links(contentPages.filter((page) => !page.slug.startsWith("guides")))}
+
+## Documentation
+
+${docsPages()
+  .map(
+    (page) =>
+      `- [${page.data.title}](${siteUrl}${page.url}): ${page.data.description ?? ""}`
+  )
+  .join("\n")}
 
 ## Guides
 
@@ -32,8 +43,9 @@ ${links(contentPages.filter((page) => page.published))}
 
 ## Optional
 
-- [Terms of Service](${siteUrl}/terms): Authoritative terms for the website, waitlist, and service.
-- [Privacy Policy](${siteUrl}/privacy): Authoritative information about data handling and privacy requests.
+- [Terms of Service](${siteUrl}/terms): Terms for using the website. The software is governed by its license.
+- [License](${licenseUrl}): Elastic License 2.0.
+- [Privacy Policy](${siteUrl}/privacy): How the website handles data, and how to make privacy requests.
 - [Sitemap](${siteUrl}/sitemap.xml): Index of public pages.
 `,
     { headers: { "Content-Type": "text/plain; charset=utf-8" } }

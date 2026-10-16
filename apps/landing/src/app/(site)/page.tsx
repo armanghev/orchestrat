@@ -7,12 +7,12 @@ import { HumanControlSection } from "@/components/sections/human-control";
 import { CliPreviewSection } from "@/components/sections/cli-preview";
 import { FounderNoteSection } from "@/components/sections/founder-note";
 import { FaqSection } from "@/components/sections/faq";
-import { WaitlistCtaSection } from "@/components/sections/waitlist-cta";
+import { ClosingCtaSection } from "@/components/sections/closing-cta";
 import { StructuredData } from "@/components/structured-data";
 import { homeStructuredData, pageMetadata, siteDescription } from "@/lib/seo";
 
 export const metadata = pageMetadata(
-  "Coordinate your AI coding agents",
+  "Self-hosted coordination for AI coding agents",
   siteDescription,
   ""
 );
@@ -30,7 +30,7 @@ export default function Home() {
       <CliPreviewSection />
       <FounderNoteSection />
       <FaqSection />
-      <WaitlistCtaSection />
+      <ClosingCtaSection />
     </>
   );
 }

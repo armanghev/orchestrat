@@ -129,10 +129,6 @@ rate limits and presence are kept in memory. Don't scale it horizontally.
 
 ## Self-host in 5 minutes
 
-> **Before launch:** the `ghcr.io/armanghev/orchestrat` image is published
-> with the first release. Until then, run `docker compose build` in `deploy/`
-> first to build it from source.
-
 You need Docker with Docker Compose 2.24 or later. PostgreSQL is included.
 
 ```bash
@@ -142,6 +138,9 @@ docker compose run --rm --no-deps -T orchestrat init > .env
 docker compose up -d
 docker compose logs orchestrat
 ```
+
+This pulls the `ghcr.io/armanghev/orchestrat` image. To build it from source
+instead, run `docker compose build` before `init`.
 
 1. `init` prints a `.env` with fresh secrets: the database password, the
    setup token and the key that encrypts Git provider tokens. Keep it, and

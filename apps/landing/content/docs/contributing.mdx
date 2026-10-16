@@ -1,0 +1,99 @@
+---
+title: Contributing
+description: Set up the monorepo, run the tests, and send a pull request. Contributions need a signed CLA.
+---
+
+Orchestrat is source-available under the Elastic License 2.0, and contributions are welcome. Read [CONTRIBUTING.md](https://github.com/armanghev/orchestrat/blob/main/CONTRIBUTING.md) before you open a pull request: it has the conventions and the review process.
+
+## Contributor License Agreement
+
+Every contributor signs a Contributor License Agreement before a pull request can be merged. The CLA bot comments on your first pull request with a link; signing takes a minute and covers all your future contributions. Without a CLA, contributed code would arrive under the Elastic License 2.0 only, and the project could not relicense or host it.
+
+## Repository layout
+
+| Path                | What it is                                                                 |
+| ------------------- | -------------------------------------------------------------------------- |
+| `apps/api`          | Fastify API server.                                                        |
+| `apps/dashboard`    | Vite and React dashboard.                                                  |
+| `apps/cli`          | The `orchestrat` CLI: setup, the stdio MCP server and lifecycle hooks.     |
+| `apps/landing`      | Next.js site for orchestrat.dev, including these docs.                     |
+| `packages/protocol` | Shared Zod schemas, types and errors.                                      |
+| `packages/db`       | Drizzle schema, migrations and seed.                                       |
+| `packages/mcp`      | MCP tool definitions.                                                      |
+| `packages/*`        | Other shared packages: `sdk`, `auth`, `config`, `logger`, `testing`, `ui`. |
+
+## Development setup
+
+You need:
+
+- Node.js 22.22.2 or later on the 22.x line, 24.15 or later, or 26 and later.
+- pnpm 10. The repo pins the exact version in `packageManager`, so `corepack enable` picks it up.
+- A PostgreSQL database you can create tables in.
+
+```bash
+git clone https://github.com/armanghev/orchestrat.git
+cd orchestrat
+pnpm install
+cp .env.example .env
+# Set ORCHESTRAT_DATABASE_URL in .env, then:
+pnpm db:migrate
+pnpm dev
+```
+
+`pnpm dev` starts every app with Turborepo. To run one:
+
+```bash
+pnpm dev:api        # http://localhost:8801
+pnpm dev:dashboard  # http://localhost:8813
+pnpm dev:landing    # http://localhost:8800
+```
+
+### Sign in during development
+
+The dashboard uses the API's built-in accounts, so you need no external auth service. Create the first account in one of two ways:
+
+- **Seed.** Set `ORCHESTRAT_SEED_USER_EMAIL`, `ORCHESTRAT_SEED_USER_NAME` and `ORCHESTRAT_SEED_USER_PASSWORD` in `.env`, then run `pnpm db:seed`. It creates that account as an instance admin, with a "Local organization" and a "Demo project", and you sign in at `http://localhost:8813` with that password. The password must be 10 to 256 characters and differ from the `.env.example` value. Running the seed again resets the password.
+- **Setup link.** While the database has no accounts, `pnpm dev:api` prints a setup link to the dashboard dev server, `http://localhost:8813/?setup_token=…`. Open it and create the first account. The token changes on every start unless you set `ORCHESTRAT_SETUP_TOKEN`.
+
+To try your CLI changes against your local API and dashboard, build and install it in place of the managed runtime, then run setup with both URLs:
+
+```bash
+pnpm cli:install
+ORCHESTRAT_API_URL=http://localhost:8801 ORCHESTRAT_WEB_URL=http://localhost:8813 orchestrat setup
+```
+
+## Checks
+
+Run these before you push. CI runs the same ones.
+
+```bash
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm format:check
+```
+
+Tests that need a real Postgres are skipped unless you point them at one. Use a role that can create and drop databases:
+
+```bash
+ORCHESTRAT_TEST_POSTGRES_URL=postgresql://postgres:postgres@127.0.0.1:5432/postgres pnpm test
+```
+
+The dashboard also has Playwright tests, run in WebKit:
+
+```bash
+pnpm --filter @orchestrat/dashboard test:e2e
+```
+
+To run the whole GitHub Actions workflow locally in Docker, use [act](https://github.com/nektos/act): `pnpm ci:local`.
+
+## Database changes
+
+Edit the Drizzle schema in `packages/db`, then generate a migration with `pnpm db:generate` and review the SQL it writes. Migrations only move forward, and self-hosted servers apply them automatically on start, so keep them safe to run against existing data.
+
+## Pull requests
+
+- Keep each pull request to one change, with tests for new behavior.
+- Use [Conventional Commits](https://www.conventionalcommits.org) for commit messages, for example `fix(api): reject expired invite links`.
+- Report security issues privately through GitHub's private vulnerability reporting, not in a public issue.

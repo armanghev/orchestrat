@@ -1,7 +1,5 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { Footer } from "@/components/layout/footer";
-import { Navbar } from "@/components/layout/navbar";
 import { siteUrl } from "@/lib/seo";
 
 export const metadata: Metadata = {
@@ -29,7 +27,8 @@ export default function RootLayout({
   children
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" data-scroll-behavior="smooth">
+    // The site is dark only; the class also selects the dark code theme in the docs.
+    <html lang="en" className="dark" data-scroll-behavior="smooth">
       <body className="min-h-screen">
         <a
           href="#main-content"
@@ -37,9 +36,7 @@ export default function RootLayout({
         >
           Skip to content
         </a>
-        <Navbar />
-        <main id="main-content">{children}</main>
-        <Footer />
+        {children}
       </body>
     </html>
   );

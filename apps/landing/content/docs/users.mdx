@@ -1,0 +1,100 @@
+---
+title: Users and accounts
+description: The first admin, signup modes, invite links, sessions, and the orchestrat-admin command. No email server needed.
+---
+
+Orchestrat has its own accounts: people sign in to the dashboard with an email address and a password. Agents never use these accounts; each connected tool gets its own agent credential (see [Connect agents](/docs/connect-agents)).
+
+## The first account is the admin
+
+While the server has no accounts, the dashboard shows **Set up this Orchestrat server**, and the server prints a setup link in its log:
+
+```bash
+docker compose logs orchestrat
+```
+
+Open the link, which ends in `?setup_token=…`, to get the setup screen with the token filled in. Creating the first account needs that token, `ORCHESTRAT_SETUP_TOKEN` in `.env`, whatever `ORCHESTRAT_SIGNUP` says. The first account becomes the **instance admin**.
+
+You can also create the first account from the command line, without the setup screen:
+
+```bash
+docker compose exec orchestrat orchestrat-admin create-user --email you@example.com --name "Your Name" --admin
+```
+
+Instance admin is separate from organization and project roles. Inside an organization, people are owners, admins or members, and owners and admins manage projects and their members. The dashboard shows the instance admin badge on the profile page; it gives no extra permissions there. Account administration happens through [`orchestrat-admin`](#orchestrat-admin), so anyone with shell access to the server can manage accounts. Protect that access accordingly.
+
+## Signup modes
+
+`ORCHESTRAT_SIGNUP` controls who can create an account after the first one:
+
+| Value              | Who can sign up                                                                                               |
+| ------------------ | ------------------------------------------------------------------------------------------------------------- |
+| `invite` (default) | Only people who open a valid project invite link. Signing up uses the invite up and adds them to the project. |
+| `open`             | Anyone who can reach the dashboard.                                                                           |
+| `closed`           | Nobody. An admin creates accounts with `orchestrat-admin create-user`.                                        |
+
+Use `open` only on a private network. If the server is reachable from the internet, keep `invite` or `closed`. With `closed`, invite links still add people who already have an account.
+
+## Invite links
+
+Project owners and admins create invite links in the project's settings, under **Project members → Invitation links**. Each link:
+
+- adds the person who accepts it to the project, and to its organization, as a member;
+- works once, and expires after 7 days;
+- can be revoked from the same screen until it is accepted.
+
+The link points at the address you opened the dashboard at. Send it however you like: Orchestrat never emails it, so you don't need an email server. With `ORCHESTRAT_SIGNUP=invite`, opening the link is also how a new person creates their account.
+
+## Passwords and sessions
+
+Passwords are 10 to 256 characters. Email addresses are not case-sensitive.
+
+- Signing in starts a session. Its access token lasts 1 hour, and the dashboard renews it with a refresh token. Refresh tokens rotate on every use and last 30 days. A session ends 90 days after sign-in, however often it is renewed.
+- **Change password**, on your profile page, signs out your other sessions and your CLI logins. The session you changed it from stays signed in.
+- **Sign out everywhere**, on the same page, ends every session, including the current one, and your CLI logins.
+
+A CLI login is the credential `orchestrat setup` gets when you approve it in the browser. After it is signed out, `orchestrat setup`, `doctor` and `disconnect` ask you to approve the CLI again. Connected agents keep working: they have their own credentials. Revoke those with `orchestrat disconnect` (see [Connect agents](/docs/connect-agents)).
+
+Sign-in, sign-up and password changes are rate-limited:
+
+| Action           | Limit                                                                              |
+| ---------------- | ---------------------------------------------------------------------------------- |
+| Sign-in          | 20 a minute per IP address, and 10 failed attempts per email address in 15 minutes |
+| Sign-up          | 10 a minute per IP address                                                         |
+| Session refresh  | 60 a minute per IP address                                                         |
+| Password changes | 5 per account in 15 minutes                                                        |
+
+Behind a reverse proxy, set `ORCHESTRAT_TRUST_PROXY_HOPS=1` so the limits see each client's address instead of the proxy's. See [HTTPS](/docs/https).
+
+## orchestrat-admin
+
+The server image includes an `orchestrat-admin` command for account tasks that would otherwise need email. It works on the database directly. Run it inside the running container:
+
+```bash
+docker compose exec orchestrat orchestrat-admin <command> [options]
+```
+
+| Command                                                                  | What it does                                                                                                             |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| `create-user --email <email> --name <name> [--admin] [--password-stdin]` | Creates an account, as an instance admin with `--admin`. Use it when signup is `closed`.                                 |
+| `reset-password --email <email> [--password-stdin]`                      | Sets a new password and signs the account out everywhere, CLI logins included. This is how password resets work.         |
+| `promote --email <email>`                                                | Makes an account an instance admin.                                                                                      |
+| `demote --email <email>`                                                 | Removes instance admin from an account.                                                                                  |
+| `revoke-sessions --email <email>`                                        | Signs an account out everywhere, CLI logins included, for example after a lost laptop.                                   |
+| `list-users`                                                             | Lists every account, one per line: email, name, `admin` or `member`, whether it has a password, and when it was created. |
+
+`create-user` and `reset-password` generate a random password and print it once. To choose the password instead, pipe it in with `--password-stdin`. Use `exec -T` so the pipe reaches the command:
+
+```bash
+printf %s "$NEW_PASSWORD" | docker compose exec -T orchestrat orchestrat-admin reset-password --email you@example.com --password-stdin
+```
+
+`orchestrat-admin help` prints the usage. A failed command prints the reason and exits with status 1.
+
+## Accounts from the hosted alpha
+
+If you run Orchestrat on a database from the hosted alpha, its accounts signed in through the alpha's identity provider and have no Orchestrat password, so they can't sign in yet. `list-users` shows them as `no password (supabase)`. Run `reset-password` for each one. It sets a password and turns the account into a regular Orchestrat account; its organizations, projects and data are unchanged.
+
+## No email server needed
+
+Orchestrat sends no email. Invites are links you share, password resets go through `orchestrat-admin`, and agent connections are approved in the browser by a signed-in person.

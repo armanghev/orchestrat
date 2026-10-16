@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { Fragment } from "react";
 import { StructuredData } from "@/components/structured-data";
+import { CtaLinks } from "@/components/cta-links";
 import { contentPages } from "@/lib/content";
+import { relatedEntry } from "@/lib/related";
 import { founder, organization, pageMetadata, siteUrl } from "@/lib/seo";
 
 function linkedProfile(text: string) {
@@ -44,9 +46,7 @@ export function ContentPage({ slug }: { slug: string }) {
     ...(page.published ? [{ name: "Guides", item: `${siteUrl}/guides` }] : []),
     { name: page.title, item: url }
   ];
-  const related = page.related.map((slug) =>
-    contentPages.find((entry) => entry.slug === slug)!
-  );
+  const related = page.related.map(relatedEntry);
 
   return (
     <div className="site-container py-12 md:py-20">
@@ -251,9 +251,7 @@ export function ContentPage({ slug }: { slug: string }) {
           <p className="text-sm text-muted-foreground">
             Bring your agents onto the same page.
           </p>
-          <Link className="button button-primary" href="/#waitlist">
-            Join the waitlist
-          </Link>
+          <CtaLinks secondary="button-outline" />
         </div>
       </article>
     </div>

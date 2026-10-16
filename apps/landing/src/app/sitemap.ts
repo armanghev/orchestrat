@@ -1,6 +1,7 @@
 import type { MetadataRoute } from "next";
 import { contentPages } from "@/lib/content";
 import { siteUrl } from "@/lib/seo";
+import { docsPages } from "@/lib/source";
 
 export default function sitemap(): MetadataRoute.Sitemap {
   return [
@@ -9,7 +10,8 @@ export default function sitemap(): MetadataRoute.Sitemap {
       url: `${siteUrl}/${page.slug}`,
       ...(page.published ? { lastModified: page.published } : {})
     })),
-    { url: `${siteUrl}/terms`, lastModified: "2026-09-20" },
-    { url: `${siteUrl}/privacy`, lastModified: "2026-09-20" }
+    ...docsPages().map((page) => ({ url: `${siteUrl}${page.url}` })),
+    { url: `${siteUrl}/terms`, lastModified: "2026-10-14" },
+    { url: `${siteUrl}/privacy`, lastModified: "2026-10-14" }
   ];
 }
