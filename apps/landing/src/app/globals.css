@@ -77,6 +77,9 @@
   html {
     scroll-behavior: smooth;
     scroll-padding-top: 100px;
+    /* Keep the scrollbar's space on short pages too, so the layout doesn't
+       shift between pages when scrollbars are always shown. */
+    scrollbar-gutter: stable;
   }
   body {
     @apply m-0 bg-background font-sans text-foreground antialiased;

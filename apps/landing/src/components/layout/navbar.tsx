@@ -29,15 +29,18 @@ export function Navbar() {
           }
         }}
       >
-        <div className="flex h-20 items-center justify-between gap-4">
+        {/* Three columns keep the links centered on every page, whatever the
+            side groups contain (the docs navbar uses the same grid). */}
+        <div className="grid h-20 grid-cols-[1fr_auto_1fr] items-center gap-4">
           <Link
             href="/"
             aria-label="Orchestrat home"
+            className="col-start-1 justify-self-start"
             onClick={() => setOpen(false)}
           >
             <OrchestratLogo />
           </Link>
-          <div className="hidden items-center gap-8 lg:flex">
+          <div className="col-start-2 hidden items-center gap-8 lg:flex">
             {siteLinks.map((link) => (
               <Link
                 key={link.href}
@@ -48,38 +51,40 @@ export function Navbar() {
               </Link>
             ))}
           </div>
-          <div className="ml-auto hidden items-center gap-2 md:flex lg:ml-0">
-            <a href={githubUrl} className="button button-ghost min-h-9 px-3">
-              <GitHubMark />
-              GitHub
-            </a>
-            <Link
-              href={quickstartHref}
-              className="button button-primary min-h-9 px-4"
+          <div className="col-start-3 flex items-center justify-self-end gap-2">
+            <div className="hidden items-center gap-2 md:flex">
+              <a href={githubUrl} className="button button-ghost min-h-9 px-3">
+                <GitHubMark />
+                GitHub
+              </a>
+              <Link
+                href={quickstartHref}
+                className="button button-primary min-h-9 px-4"
+              >
+                Self-host it
+              </Link>
+            </div>
+            <button
+              id="menu-toggle"
+              type="button"
+              aria-label={open ? "Close menu" : "Open menu"}
+              aria-expanded={open}
+              aria-controls="mobile-navigation"
+              className="group relative flex size-11 items-center justify-center rounded-md hover:bg-secondary lg:hidden"
+              onClick={() => setOpen((current) => !current)}
             >
-              Self-host it
-            </Link>
+              <Menu
+                size={20}
+                aria-hidden="true"
+                className="absolute transition-[transform,opacity] duration-200 ease-out group-aria-expanded:rotate-90 group-aria-expanded:opacity-0"
+              />
+              <X
+                size={20}
+                aria-hidden="true"
+                className="absolute -rotate-90 opacity-0 transition-[transform,opacity] duration-200 ease-out group-aria-expanded:rotate-0 group-aria-expanded:opacity-100"
+              />
+            </button>
           </div>
-          <button
-            id="menu-toggle"
-            type="button"
-            aria-label={open ? "Close menu" : "Open menu"}
-            aria-expanded={open}
-            aria-controls="mobile-navigation"
-            className="group relative flex size-11 items-center justify-center rounded-md hover:bg-secondary lg:hidden"
-            onClick={() => setOpen((current) => !current)}
-          >
-            <Menu
-              size={20}
-              aria-hidden="true"
-              className="absolute transition-[transform,opacity] duration-200 ease-out group-aria-expanded:rotate-90 group-aria-expanded:opacity-0"
-            />
-            <X
-              size={20}
-              aria-hidden="true"
-              className="absolute -rotate-90 opacity-0 transition-[transform,opacity] duration-200 ease-out group-aria-expanded:rotate-0 group-aria-expanded:opacity-100"
-            />
-          </button>
         </div>
         <div
           id="mobile-navigation"
