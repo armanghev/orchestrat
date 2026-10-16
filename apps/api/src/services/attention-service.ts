@@ -59,7 +59,7 @@ import { resolveBranch } from "./branch-context.js";
 import type { ChatService } from "./chat-service.js";
 import { PermissionService } from "./permission-service.js";
 
-// Summary list caps (spec §15). Notices trim further on the MCP side.
+// Summary list caps. Notices trim further on the MCP side.
 const listLimit = 50;
 const unreadPerTask = 5;
 // Unread excerpts come from the newest comments; the window bounds the rows
@@ -99,10 +99,10 @@ const watchJson = (watch: WatchRow): TaskWatch => ({
 const time = (value: Date | string | null) =>
   value === null ? 0 : new Date(value).getTime();
 
-// Directed items (spec §4) in an agent summary: unread direct messages, chat
-// and task mentions, unread comments above the claim baseline on claimed
-// tasks, and unseen resolved blockers. A handoff is a direct message, so it
-// is already counted through its chat.
+// Directed items in an agent summary: unread direct messages, chat and task
+// mentions, unread comments above the claim baseline on claimed tasks, and
+// unseen resolved blockers. A handoff is a direct message, so it is already
+// counted through its chat.
 const directedCount = (summary: AttentionSummary, directChats: Set<string>) =>
   summary.unread_chats.reduce(
     (total, chat) =>
@@ -229,9 +229,9 @@ export class AttentionService {
     this.permissions = new PermissionService(db);
   }
 
-  // Branch scoping seam (spec §13). Agents see the branch they work on: the
-  // one they name, else their pinned session's, else the default branch
-  // (docs/project-branches.md §6.1). Humans pass null to span all branches.
+  // Branch scoping seam. Agents see the branch they work on: the one they name,
+  // else their pinned session's, else the default branch. Humans pass null to
+  // span all branches.
   attentionBranchScope(branchId?: string | null): string | null {
     return branchId ?? null;
   }
@@ -929,7 +929,7 @@ export class AttentionService {
   }
 
   // True when an agent summary holds directed items, which makes a wait
-  // without a cursor return `pending` at once (spec §10).
+  // without a cursor return `pending` at once.
   async hasDirectedPending(summary: AttentionSummary): Promise<boolean> {
     if (summary.handoffs.length > 0 || summary.blockers_resolved.length > 0)
       return true;

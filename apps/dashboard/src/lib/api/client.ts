@@ -475,7 +475,7 @@ export class ApiClient {
     ).then(({ branch }) => branch);
   }
 
-  /** What an import or merge would do (docs/project-branches.md §9.5). */
+  /** What an import or merge would do. */
   previewMerge(
     projectId: string,
     input: z.input<typeof mergePreviewRequestSchema>
@@ -551,7 +551,7 @@ export class ApiClient {
   }
 
   /** Starts connecting a provider; the browser then visits `authorize_url`
-   * and returns to `return_path` (docs/project-branches.md §8.1). */
+   * and returns to `return_path`. */
   authorizeRepository(
     projectId: string,
     input: { provider: RepositoryProvider; return_path?: string }
@@ -563,7 +563,7 @@ export class ApiClient {
     );
   }
 
-  /** The GitHub Setup URL's installation, which the API checks (§8.3). */
+  /** The GitHub Setup URL's installation, which the API checks. */
   submitGithubInstallation(
     projectId: string,
     authorizationId: string,

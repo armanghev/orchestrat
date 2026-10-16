@@ -50,9 +50,9 @@ type PingDialogProps = {
 };
 
 /**
- * Ping (spec §14): a human handoff, i.e. a direct message plus a handoff row
- * that wakes a waiting agent. The trigger owns focus return, and a retry of
- * the same draft reuses its idempotency key.
+ * Ping: a human handoff, i.e. a direct message plus a handoff row that wakes a
+ * waiting agent. The trigger owns focus return, and a retry of the same draft
+ * reuses its idempotency key.
  */
 export function PingDialog({
   api,

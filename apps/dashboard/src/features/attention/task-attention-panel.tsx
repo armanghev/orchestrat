@@ -27,7 +27,7 @@ const refKey = (participant: ParticipantRef) =>
 const leaseMinutes = (leaseExpiresAt: string, now: number) =>
   Math.max(0, Math.ceil((Date.parse(leaseExpiresAt) - now) / 60_000));
 
-/** "Claimed by claude-code · in progress · lease 4 min" (spec §14). */
+/** "Claimed by claude-code · in progress · lease 4 min" */
 export function TaskClaimLine({
   claim,
   status

@@ -4,9 +4,9 @@ import { and, eq, isNull } from "drizzle-orm";
 import { insertProjectEvent, type Transaction } from "./agent-service.js";
 import type { Actor } from "./attention-hooks.js";
 
-// Transaction-scoped block hooks (spec §9, §13). Callers hold the project row
-// lock, so block resolution and the claim or move that triggers it commit
-// together and are serialized with every other task write in the project.
+// Transaction-scoped block hooks. Callers hold the project row lock, so block
+// resolution and the claim or move that triggers it commit together and are
+// serialized with every other task write in the project.
 export type TaskStatus = (typeof tasks.$inferSelect)["status"];
 export type TaskBlockRow = typeof taskBlocks.$inferSelect;
 

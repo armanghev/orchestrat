@@ -15,8 +15,8 @@ import { Label } from "@/components/ui/label";
 import { DashboardApiError, type ApiClient } from "@/lib/api/client";
 import { branchKeys } from "./query-options";
 
-// New branch (docs/project-branches.md §11.6). Names follow Git's rules so an
-// agent on the same Git branch joins it.
+// New branch. Names follow Git's rules so an agent on the same Git branch
+// joins it.
 export function CreateBranchDialog({
   api,
   projectId,

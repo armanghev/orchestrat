@@ -28,9 +28,9 @@ import type { CredentialReader } from "./keychain.js";
 import { resolveInvocation } from "./resolve.js";
 import { atomicWrite, readOptional } from "./safe-files.js";
 
-// Local waker (spec §11.4). Opt-in and foreground only: it long-polls the
-// attention wait endpoint for each configured agent and, when work is handed
-// to an agent with no online session, starts that agent's harness headlessly.
+// Local waker. Opt-in and foreground only: it long-polls the attention wait
+// endpoint for each configured agent and, when work is handed to an agent with
+// no online session, starts that agent's harness headlessly.
 
 export const WAKE_KINDS = ["handoff", "direct_message", "mention"] as const;
 export type WakeKind = (typeof WAKE_KINDS)[number];
@@ -41,7 +41,7 @@ export type WakerLimits = {
   per_day: number;
   max_run_minutes: number;
 };
-// The spec's local budgets are ceilings: config may only make them stricter.
+// These local budgets are ceilings: config may only make them stricter.
 export const DEFAULT_WAKER_LIMITS: WakerLimits = {
   min_interval_minutes: 5,
   per_hour: 6,
@@ -64,15 +64,15 @@ export type WakerConfig = {
 };
 
 // The prompt is a fixed template. Message and handoff bodies reach the agent
-// only through tools it calls (get_attention), never through argv (§15).
+// only through tools it calls (get_attention), never through argv.
 export const WAKE_PROMPT =
   "You were woken by Orchestrat because work was handed to you. Call get_attention and handle items addressed to you, then end your turn.";
 
-// TODO-verify-against---help: spellings follow spec §11.4 and the vendor docs
-// cited in §17 (cc-cli, ox-exec, C2, A3, O4). ATT-11 re-checks each against
-// the installed CLI's `--help` before the waker leaves alpha. Tests never run
-// these binaries. Runs use the harness's normal permission settings: nothing
-// here may add --dangerously-* or any other permission-bypass flag.
+// TODO-verify-against---help: spellings follow each vendor's CLI docs. ATT-11
+// re-checks each against the installed CLI's `--help` before the waker leaves
+// alpha. Tests never run these binaries. Runs use the harness's normal
+// permission settings: nothing here may add --dangerously-* or any other
+// permission-bypass flag.
 export const HARNESS_COMMANDS: Record<
   Integration,
   {

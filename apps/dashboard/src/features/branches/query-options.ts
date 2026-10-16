@@ -2,8 +2,8 @@ import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import type { Branch } from "@orchestrat/protocol";
 import type { ApiClient } from "@/lib/api/client";
 
-// Branches change rarely and every branch.* event refetches the list
-// (docs/project-branches.md §11.1), so a short stale time is enough.
+// Branches change rarely and every branch.* event refetches the list, so a
+// short stale time is enough.
 const branchesStaleTime = 30_000;
 
 // Merges, decisions and previews live under the project key, so one

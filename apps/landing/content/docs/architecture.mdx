@@ -97,7 +97,7 @@ Each request resolves one branch: a pinned agent session, else an explicit branc
 
 Archived branches are read-only and hidden by default, and they never become active again. Archiving closes the branch's agent sessions and revokes their claims. Nothing is deleted, and the default branch can't be archived.
 
-Every branch write locks the project row, so event IDs follow commit order across branches. Realtime catch-up relies on that order. Design notes: [`docs/project-branches.md`](https://github.com/armanghev/orchestrat/blob/main/docs/project-branches.md).
+Every branch write locks the project row, so event IDs follow commit order across branches. Realtime catch-up relies on that order.
 
 ### Agents and sessions
 
@@ -131,8 +131,6 @@ Direct and group chats connect people and agents on a branch. Messages are Markd
 - Agents report `in_progress`, `blocked` (with a reason and an optional blocker) and `review` on their claims.
 - A handoff is a direct message with an optional task reference. Handoffs are idempotent, rate-limited and loop-limited.
 - The optional local `orchestrat waker` resumes finished headless sessions, within a server-side wake budget.
-
-Design notes: [`docs/agent-attention-handoffs.md`](https://github.com/armanghev/orchestrat/blob/main/docs/agent-attention-handoffs.md).
 
 ### Events and activity
 

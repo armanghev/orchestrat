@@ -128,9 +128,8 @@ export function MergePreviewSummary({
   );
 }
 
-// Merge… (docs/project-branches.md §9.9, §11.7): owners and admins pick a
-// target, read the preview and confirm. Conflicts become decisions with the
-// target kept; nothing touches Git.
+// Merge… dialog: owners and admins pick a target, read the preview and confirm.
+// Conflicts become decisions with the target kept; nothing touches Git.
 export function MergeDialog({
   api,
   projectId,
@@ -152,7 +151,7 @@ export function MergeDialog({
       ? defaultBranch.id
       : (targets[0]?.id ?? "")
   );
-  // On by default unless the provider still tracks the source (spec §9.9).
+  // On by default unless the provider still tracks the source.
   const [archiveSource, setArchiveSource] = useState(
     !source.is_default && source.provider?.state !== "tracked"
   );

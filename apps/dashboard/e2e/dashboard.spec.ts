@@ -1935,7 +1935,7 @@ test("compact shell collapses and restores sidebar without horizontal overflow",
       })
     );
   // Organization, project and branch menus, the appearance menu, plus the
-  // trigger, separator and breadcrumb (docs/project-branches.md §11.2).
+  // trigger, separator and breadcrumb.
   expect(centers).toHaveLength(7);
   expect(Math.max(...centers) - Math.min(...centers)).toBeLessThanOrEqual(1);
 });

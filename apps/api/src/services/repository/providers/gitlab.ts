@@ -24,9 +24,9 @@ import {
 } from "../types.js";
 import { json, ProviderHttpError, send, type HttpOptions } from "./http.js";
 
-// The GitLab.com adapter (docs/project-branches.md §8.4). The connection acts
-// with the connecting Maintainer's OAuth tokens; refresh tokens rotate, so
-// refreshes are serialized on the connection row and persisted before use.
+// The GitLab.com adapter. The connection acts with the connecting Maintainer's
+// OAuth tokens; refresh tokens rotate, so refreshes are serialized on the
+// connection row and persisted before use.
 
 export type GitlabConfig = { clientId: string; clientSecret: string };
 type Tokens = {

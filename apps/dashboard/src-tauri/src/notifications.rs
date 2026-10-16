@@ -36,7 +36,7 @@ impl Drop for NotificationWaitPermit {
 }
 
 // `branchId` opens the branch the event happened on; without it the dashboard
-// shows the default branch (docs/project-branches.md §11.1).
+// shows the default branch.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum NotificationDestination {

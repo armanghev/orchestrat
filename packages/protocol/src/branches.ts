@@ -1,23 +1,23 @@
 import { z } from "zod";
 
-// Project branch contracts (docs/project-branches.md §4, §6). Like attention.ts,
-// this module imports only zod: index.ts re-exports it with `export *`, so a
-// back-reference to index.ts primitives would hit a TDZ error. The primitives
-// below mirror index.ts deliberately.
+// Project branch contracts. Like attention.ts, this module imports only zod:
+// index.ts re-exports it with `export *`, so a back-reference to index.ts
+// primitives would hit a TDZ error. The primitives below mirror index.ts
+// deliberately.
 const idSchema = z.string().uuid();
 const dateSchema = z.string().datetime();
 const booleanQuerySchema = z
   .enum(["true", "false"])
   .transform((value) => value === "true");
 
-/** Request header an agent uses to name a branch (spec §6.1). */
+/** Request header an agent uses to name a branch. */
 export const BRANCH_ID_HEADER = "x-orchestrat-branch-id";
-/** Request header that pins an agent request to its open session (spec §6.1). */
+/** Request header that pins an agent request to its open session. */
 export const SESSION_ID_HEADER = "x-orchestrat-session-id";
 
 // New codes are only returned to requests that carried an explicit branch
 // signal or that hit branch-only routes, so old clients with a closed error
-// enum never see them (spec §6.4).
+// enum never see them.
 export const branchErrorCodeSchema = z.enum([
   "BRANCH_NOT_FOUND",
   "BRANCH_ARCHIVED",
@@ -32,8 +32,8 @@ export const branchErrorCodeSchema = z.enum([
 ]);
 export type BranchErrorCode = z.infer<typeof branchErrorCodeSchema>;
 
-// A subset of `git check-ref-format` (spec §4.6). Every ref a provider sends
-// passes it; slugSchema can't be reused because it forbids "/".
+// A subset of `git check-ref-format`. Every ref a provider sends passes it;
+// slugSchema can't be reused because it forbids "/".
 const forbiddenBranchCharacters = /[ ~^:?*[\\]/;
 const hasControlCharacter = (name: string) =>
   [...name].some((character) => {
@@ -184,7 +184,7 @@ export const branchSelectorQuerySchema = z.object({
 });
 export type BranchSelectorQuery = z.infer<typeof branchSelectorQuerySchema>;
 
-/** Events and inbox: `?all_branches=true` returns every branch (spec §6.3). */
+/** Events and inbox: `?all_branches=true` returns every branch. */
 export const allBranchesQuerySchema = z.object({
   all_branches: booleanQuerySchema.default(false)
 });

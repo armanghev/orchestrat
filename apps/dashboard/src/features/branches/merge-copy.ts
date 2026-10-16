@@ -5,8 +5,7 @@ import type {
   MergeItemType
 } from "@orchestrat/protocol";
 
-// Plain-language copy for previews, runs and the branches table
-// (docs/project-branches.md §9, §11.7).
+// Plain-language copy for previews, runs and the branches table.
 
 const nouns: Record<MergeItemType, [string, string]> = {
   task: ["task", "tasks"],

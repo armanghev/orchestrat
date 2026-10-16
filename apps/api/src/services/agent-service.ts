@@ -51,7 +51,7 @@ export type AgentPrincipal = {
   agentId: string;
   projectId: string;
   credentialId: string;
-  /** Branch headers of the current request (docs/project-branches.md §6.1). */
+  /** Branch headers of the current request. */
   branch?: BranchSelector;
 };
 
@@ -498,7 +498,7 @@ export class AgentService {
       await this.activeProject(tx, principal.projectId);
       await this.agentFor(tx, principal);
       // A new session pins the body's branch, else the header's, else the
-      // default (spec §6.2). It never inherits another session's pin.
+      // default. It never inherits another session's pin.
       const branch = await resolveBranch(
         tx,
         principal.projectId,
@@ -829,7 +829,7 @@ export class AgentService {
 
   /**
    * Closes every active session on a branch that is being archived; their
-   * claims are revoked like any session close (spec §6.2).
+   * claims are revoked like any session close.
    */
   async closeBranchSessions(
     tx: Transaction,
@@ -859,7 +859,7 @@ export class AgentService {
     return sessions.length;
   }
 
-  /** `reason` lands on revoked claims and the events (spec §6.2). */
+  /** `reason` lands on revoked claims and the events. */
   private async closeSessionInTransaction(
     tx: Transaction,
     principal: AgentPrincipal,
@@ -985,7 +985,7 @@ export class AgentService {
   ): Promise<ProjectEventsResponse> {
     await this.permissions.projectAccess(userId, projectId);
     // A branch's feed includes project-wide events; realtime catch-up reads
-    // every branch so it keeps one monotonic cursor (spec §6.3).
+    // every branch so it keeps one monotonic cursor.
     const branchId = allBranches
       ? null
       : (await resolveBranch(this.db, projectId, selector)).id;

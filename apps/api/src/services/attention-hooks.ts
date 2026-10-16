@@ -12,8 +12,8 @@ import { and, count, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { ApiError } from "./api-error.js";
 import type { Transaction } from "./agent-service.js";
 
-// Transaction-scoped attention hooks (spec §7, §13). Existing services call
-// these inside their own write transactions, after the project row lock.
+// Transaction-scoped attention hooks. Existing services call these inside their
+// own write transactions, after the project row lock.
 export type Actor = { type: "human" | "agent"; id: string };
 export type CommentMention = {
   type: "human" | "agent";
@@ -235,7 +235,7 @@ export async function onTaskCommentCreated(
     mentions: { type: "human" | "agent"; id: string }[];
   }
 ) {
-  // Posting never advances the author's read position (spec §4).
+  // Posting never advances the author's read position.
   await ensureWatch(tx, {
     projectId: input.projectId,
     taskId: input.taskId,

@@ -21,10 +21,9 @@ import {
 } from "../types.js";
 import { json, ProviderHttpError, send, type HttpOptions } from "./http.js";
 
-// The Cursor Origin adapter (docs/project-branches.md §8.5). Origin signs
-// receipts and webhooks with its own Ed25519 keys (JWKS); the app signs its
-// JWTs with ours. Installation tokens are minted per repository and kept in
-// memory only until they expire.
+// The Cursor Origin adapter. Origin signs receipts and webhooks with its own
+// Ed25519 keys (JWKS); the app signs its JWTs with ours. Installation tokens
+// are minted per repository and kept in memory only until they expire.
 
 export type OriginConfig = {
   appId: string;
@@ -96,7 +95,7 @@ export class OriginAdapter implements ProviderAdapter {
     return this.http.now?.() ?? new Date();
   }
 
-  /** EdDSA app JWT; `kid` is the app id (the docs disagree, see §8.10). */
+  /** EdDSA app JWT; `kid` is the app id, though Origin's docs disagree. */
   appJwt() {
     const seconds = Math.floor(this.now().getTime() / 1000);
     const head = b64url(

@@ -94,7 +94,7 @@ import {
 } from "./routes/attention.js";
 
 type AppOptions = {
-  /** Repository connections (docs/project-branches.md §8). Off by default. */
+  /** Repository connections. Off by default. */
   repository?: {
     config?: Partial<
       Pick<

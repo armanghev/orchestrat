@@ -48,7 +48,7 @@ export function watchAuthSessionBoundaries(
 }
 
 // `branch` is the destination's branch; without one the page shows the
-// default branch (docs/project-branches.md §11.1).
+// default branch.
 type NotificationNavigation =
   | {
       to: "/projects/$projectId/tasks";

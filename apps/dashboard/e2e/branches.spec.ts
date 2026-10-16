@@ -1,8 +1,8 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
-// Project branches end to end against a mocked API (docs/project-branches.md
-// §11, §13.4). Tests tagged @phone also run on the phone project.
+// Project branches end to end against a mocked API. Tests tagged @phone also
+// run on the phone project.
 
 // Each flow scans with axe in both themes, which takes a while on CI's
 // Linux WebKit.

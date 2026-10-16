@@ -11,8 +11,8 @@ const toneDot: Record<AgentAttentionTone, string> = {
 };
 
 /**
- * The Agents page status line (spec §14). `attention` is undefined while the
- * shared query loads and null when it failed or has no row for this agent.
+ * The Agents page status line. `attention` is undefined while the shared query
+ * loads and null when it failed or has no row for this agent.
  */
 export function AgentAttentionLine({
   attention,

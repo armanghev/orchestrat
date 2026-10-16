@@ -16,8 +16,8 @@ import {
 } from "./types.js";
 
 // Applies stored webhook deliveries in received order and reconciles every
-// active connection (docs/project-branches.md §8.1, §8.8). One replica runs
-// it in-process: a single-flight tick, an optimistic claim, and backoff.
+// active connection. One replica runs it in-process: a single-flight tick, an
+// optimistic claim, and backoff.
 
 type DeliveryRow = typeof repositoryWebhookDeliveries.$inferSelect;
 

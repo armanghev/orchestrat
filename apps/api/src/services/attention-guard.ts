@@ -33,9 +33,9 @@ export const notAuthoredByAgent = (agentId: string) =>
     ne(taskComments.authorAgentId, agentId)
   )!;
 
-// Safe completion (spec §8). Runs inside the claim-ending transaction, after
-// the project and task row locks, so a concurrent comment either committed
-// before this read (and blocks) or commits after the claim ends.
+// Safe completion. Runs inside the claim-ending transaction, after the project
+// and task row locks, so a concurrent comment either committed before this read
+// (and blocks) or commits after the claim ends.
 export async function assertCommentsAcknowledged(
   tx: Transaction,
   input: {

@@ -26,7 +26,7 @@ export type LocalIntegrationStatus = {
 };
 
 // branchId opens the branch the event happened on; absent means the default
-// branch (docs/project-branches.md §11.1).
+// branch.
 export const nativeNotificationDestinationSchema = z.discriminatedUnion(
   "kind",
   [

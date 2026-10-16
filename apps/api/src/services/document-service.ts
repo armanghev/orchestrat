@@ -456,8 +456,8 @@ export class DocumentService {
   }
 
   /**
-   * Entity writes take the branch from the document (spec §6.1); an agent
-   * that names or is pinned to another branch gets BRANCH_MISMATCH.
+   * Entity writes take the branch from the document; an agent that names or is
+   * pinned to another branch gets BRANCH_MISMATCH.
    */
   private branchGuard(
     tx: Executor,

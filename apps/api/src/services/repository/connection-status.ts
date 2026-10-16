@@ -5,8 +5,8 @@ import type { ConnectionRow } from "./types.js";
 
 /**
  * Updates a connection and, when its status actually changes, tells the
- * project with one `repository.status_changed` event (docs/project-branches.md
- * §10), so open dashboards show the new state.
+ * project with one `repository.status_changed` event, so open dashboards show
+ * the new state.
  */
 export async function updateConnection(
   db: Database,

@@ -78,9 +78,9 @@ import {
   type TaskSide
 } from "./task-items.js";
 
-// One engine for imports, manual merges and provider merges
-// (docs/project-branches.md §9). plan() reads without locks; apply() re-plans
-// under the project lock and writes everything in one transaction.
+// One engine for imports, manual merges and provider merges. plan() reads
+// without locks; apply() re-plans under the project lock and writes everything
+// in one transaction.
 
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 type RunRow = typeof branchMergeRuns.$inferSelect;
@@ -127,7 +127,7 @@ export type AttachmentObjects = {
   remove(key: AttachmentKey): Promise<void>;
 };
 
-// Per-run bounds (spec §9.5); beyond them the UI suggests a smaller selection.
+// Per-run bounds; beyond them the UI suggests a smaller selection.
 export const MERGE_LIMITS = {
   topLevelItems: 2000,
   childItems: 20000,
@@ -410,7 +410,7 @@ export class MergeEngine {
       bump(counts, "chat_message.copy", item.messages.length);
     }
     // Covers every version the apply depends on, so any change in between
-    // makes the preview stale (spec §9.7).
+    // makes the preview stale.
     const taskBaselines = await baselines("task");
     const fingerprint = digest({
       kind: request.kind,
@@ -726,7 +726,7 @@ export class MergeEngine {
       .returning();
     const context = { tx, plan, runId: run!.id, choices, now };
     // Dependency order: folders and documents first, so chat messages can
-    // point at the target's copies (spec §9.7).
+    // point at the target's copies.
     const documents = await this.applyDocuments(context, allocation, copied);
     const tasks = await this.applyTasks(context);
     const chats = await this.applyChats(context, documents.landed);
@@ -764,7 +764,7 @@ export class MergeEngine {
           : "import_all",
         actor
       );
-    // One summary event per run, never one per item (spec §9.7).
+    // One summary event per run, never one per item.
     await insertProjectEvent(tx, {
       projectId,
       branchId: plan.target.id,
@@ -807,7 +807,7 @@ export class MergeEngine {
   }
 
   // Dashboard applies replay a lost response by Idempotency-Key, scoped to
-  // the target branch (spec §6.5).
+  // the target branch.
   private async reserve(
     tx: Transaction,
     request: ApplyRequest,

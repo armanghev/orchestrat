@@ -17,10 +17,10 @@ import {
 } from "../types.js";
 import { json, nextLink, send, type HttpOptions } from "./http.js";
 
-// The GitHub App adapter (docs/project-branches.md §8.3). Installation tokens
-// are minted per call for one repository with the narrowest permission and
-// kept in memory only; the app never reads file contents or writes. Branch
-// reads need Contents: GitHub refuses them with Metadata alone.
+// The GitHub App adapter. Installation tokens are minted per call for one
+// repository with the narrowest permission and kept in memory only; the app
+// never reads file contents or writes. Branch reads need Contents: GitHub
+// refuses them with Metadata alone.
 
 export type GithubConfig = {
   appId: string;

@@ -15,8 +15,8 @@ import {
 } from "@/components/ui/dialog";
 import { CheckIcon } from "lucide-react";
 
-// Every branch, archived ones in their own group (docs/project-branches.md
-// §11.2). The branch menu itself lists active branches only.
+// Every branch, archived ones in their own group. The branch menu itself lists
+// active branches only.
 export function AllBranchesDialog({
   open,
   onOpenChange,

@@ -22,9 +22,9 @@ import {
   users
 } from "./schema.js";
 
-// Merge engine and repository sync tables (docs/project-branches.md §4.3,
-// §4.4; migration 0016). One-way import from schema.ts keeps the module graph
-// acyclic; packages/db/src/index.ts re-exports both.
+// Merge engine and repository sync tables (migration 0016). One-way import
+// from schema.ts keeps the module graph acyclic; packages/db/src/index.ts
+// re-exports both.
 
 export type MergeCounts = Record<string, number>;
 export type Fingerprint = Record<string, string>;
@@ -102,7 +102,7 @@ export const branchItemBaselines = pgTable(
     branchLowId: uuid("branch_low_id").notNull(),
     branchHighId: uuid("branch_high_id").notNull(),
     itemType: text("item_type").$type<"task" | "document" | "chat">().notNull(),
-    // Lineage key of the item on the low branch's side (spec §4.3).
+    // Lineage key of the item on the low branch's side.
     lineageKey: uuid("lineage_key").notNull(),
     fingerprint: jsonb("fingerprint")
       .$type<Fingerprint>()
@@ -364,7 +364,7 @@ export const repositoryRefs = pgTable(
     headSha: text("head_sha"),
     firstSeenSha: text("first_seen_sha"),
     branchId: uuid("branch_id"),
-    // One row per generation of a provider branch name (spec §4.4, §8.2).
+    // One row per generation of a provider branch name.
     state: text("state")
       .$type<"active" | "deleted">()
       .default("active")

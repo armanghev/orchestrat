@@ -7,8 +7,8 @@ import {
 } from "node:crypto";
 
 // The Cursor Origin endpoints the adapter uses, in memory, behind an injected
-// fetch (docs/project-branches.md §13.3). Origin's own Ed25519 key signs
-// receipts and webhooks and is served as a JWKS.
+// fetch. Origin's own Ed25519 key signs receipts and webhooks and is served as
+// a JWKS.
 
 type Repository = {
   id: string;

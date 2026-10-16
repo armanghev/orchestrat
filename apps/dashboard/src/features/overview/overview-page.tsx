@@ -93,7 +93,7 @@ export function OverviewPage({ context }: { context: ProjectContext }) {
   const agentById = new Map(
     agents.data!.agents.map((agent) => [agent.id, agent])
   );
-  // Only agents working on this branch (docs/project-branches.md §11.3).
+  // Only agents working on this branch.
   const online = presence.data!.agents.filter(
     (item) =>
       derivePresence(item.status, item.last_heartbeat_at) === "online" &&

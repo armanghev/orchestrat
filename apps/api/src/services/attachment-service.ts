@@ -42,9 +42,9 @@ import { DEFAULT_ATTACHMENT_QUOTA_BYTES } from "../storage-config.js";
 
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 /**
- * Who writes to a document's attachments. The document's branch decides
- * (spec §6.1): archived branches are read-only and an agent working on
- * another branch gets BRANCH_MISMATCH.
+ * Who writes to a document's attachments. The document's branch decides:
+ * archived branches are read-only and an agent working on another branch gets
+ * BRANCH_MISMATCH.
  */
 type Writer = {
   actor: "human" | "agent";
@@ -130,8 +130,8 @@ export class AttachmentService {
     return `document-attachments/v1/${projectId}/${documentId}/${attachmentId}`;
   }
   /**
-   * Server-side object copies for branch imports and merges
-   * (docs/project-branches.md §9.7); undefined without storage.
+   * Server-side object copies for branch imports and merges; undefined without
+   * storage.
    */
   mergeObjects(): AttachmentObjects | undefined {
     if (!this.storage || !this.config) return undefined;

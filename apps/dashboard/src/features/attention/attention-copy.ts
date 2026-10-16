@@ -4,7 +4,7 @@ import { DashboardApiError } from "@/lib/api/client";
 const plural = (count: number, noun: string) =>
   `${count} ${noun}${count === 1 ? "" : "s"}`;
 
-/** Board and list line for a blocked task (spec §14). */
+/** Board and list line for a blocked task. */
 export function blockedTaskLine(
   block: Pick<TaskBlock, "blocking_task" | "blocked_on" | "reason">
 ) {

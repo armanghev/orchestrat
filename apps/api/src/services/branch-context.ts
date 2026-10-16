@@ -7,13 +7,13 @@ type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 type Executor = Database | Transaction;
 export type BranchRow = typeof projectBranches.$inferSelect;
 
-/** Name of a default branch before Git names it (docs/project-branches.md §8.7). */
+/** Name of a default branch before Git names it. */
 export const FALLBACK_DEFAULT_BRANCH_NAME = "main";
 
 /**
- * What a request said about its branch (spec §6.1). Humans set `branchId`
- * from `?branch_id=`; agents set it from `X-Orchestrat-Branch-Id` and may pin
- * a session with `X-Orchestrat-Session-Id`. Absent everywhere = default branch.
+ * What a request said about its branch. Humans set `branchId` from
+ * `?branch_id=`; agents set it from `X-Orchestrat-Branch-Id` and may pin a
+ * session with `X-Orchestrat-Session-Id`. Absent everywhere = default branch.
  */
 export type BranchSelector = {
   branchId?: string | null;
@@ -94,10 +94,10 @@ export async function findProjectBranch(
 }
 
 /**
- * Resolves the branch a collection or create request acts on (spec §6.1):
- * a pinned session wins, and an explicit branch that disagrees with it is a
- * 409; otherwise the explicit branch; otherwise the default branch. Writes to
- * an archived branch are refused.
+ * Resolves the branch a collection or create request acts on: a pinned session
+ * wins, and an explicit branch that disagrees with it is a 409; otherwise the
+ * explicit branch; otherwise the default branch. Writes to an archived branch
+ * are refused.
  */
 export async function resolveBranch(
   tx: Executor,
@@ -146,7 +146,7 @@ export async function resolveBranch(
   return branch;
 }
 
-/** Archived branches are read-only (spec §3, §6.1). */
+/** Archived branches are read-only. */
 export function assertBranchWritable(
   branch: Pick<BranchRow, "id" | "archivedAt">,
   selector?: BranchSelector
@@ -163,10 +163,10 @@ export function assertBranchWritable(
 }
 
 /**
- * Entity routes take the branch from the row (spec §6.1). A human who names a
- * different branch gets a 404, like a wrong project today. Agents may read
- * entities on any branch of their project, but a write must match the
- * branch they named or the one their session is pinned to.
+ * Entity routes take the branch from the row. A human who names a different
+ * branch gets a 404, like a wrong project today. Agents may read entities on
+ * any branch of their project, but a write must match the branch they named or
+ * the one their session is pinned to.
  */
 export async function assertEntityBranch(
   tx: Executor,

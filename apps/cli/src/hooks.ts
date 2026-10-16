@@ -74,7 +74,7 @@ export async function runHook(input: {
               input.event ?? input.eventName,
               input.payload
             );
-  // SessionEnd ends any Claude rewake watcher for the session (spec §11.3).
+  // SessionEnd ends any Claude rewake watcher for the session.
   if (
     input.integration === "claude-code" &&
     normalized.event === "session.ended"

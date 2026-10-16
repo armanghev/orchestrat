@@ -4,7 +4,7 @@ import { cn } from "@/lib/cn";
 import { useBranch } from "./branch-context";
 
 /** A deep link to an item on another branch of this project offers to switch
- * there instead of a dead end (docs/project-branches.md §11.1). */
+ * there instead of a dead end. */
 export function OtherBranchNotice({
   item,
   branchId,

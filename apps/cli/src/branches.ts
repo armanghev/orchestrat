@@ -14,9 +14,9 @@ import {
 } from "./git.js";
 import { readPrivateState, writePrivateState } from "./safe-files.js";
 
-// Which Orchestrat branch a checkout works on (docs/project-branches.md §7.3):
-// the per-checkout override from `orchestrat branch select`, else the branch
-// Git has checked out, else the project's default branch.
+// Which Orchestrat branch a checkout works on: the per-checkout override from
+// `orchestrat branch select`, else the branch Git has checked out, else the
+// project's default branch.
 
 export const branchOverridesPath = (home: string) =>
   join(home, ".orchestrat", "branch-overrides.json");

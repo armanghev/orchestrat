@@ -43,10 +43,10 @@ const knownRealtimeEventTypes = new Set([
   "run.woken"
 ]);
 
-// Tasks, documents and events belong to a branch (docs/project-branches.md
-// §11.3). The branch is the last key part, so a key without it is a prefix
-// that matches every branch of the project. Presence stays project-wide: it
-// lists every agent with the branch each one is on.
+// Tasks, documents and events belong to a branch. The branch is the last key
+// part, so a key without it is a prefix that matches every branch of the
+// project. Presence stays project-wide: it lists every agent with the branch
+// each one is on.
 const scoped = (branchId?: string) => (branchId ? [branchId] : []);
 
 /** The events key part for Activity's "All branches" view. */
@@ -260,7 +260,7 @@ export function invalidateRealtimeEvent(
   event: RealtimeEventEnvelope
 ) {
   // null marks a project-wide event and older servers send no branch_id; in
-  // both cases the prefix keys refresh every branch (spec §11.4).
+  // both cases the prefix keys refresh every branch.
   const branchId = event.branch_id ?? undefined;
   const invalidate = (keys: QueryKey[]) =>
     Promise.all(

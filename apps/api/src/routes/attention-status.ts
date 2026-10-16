@@ -6,7 +6,7 @@ import {
 import type { FastifyInstance } from "fastify";
 import type { AttentionRouteOptions } from "./attention.js";
 
-// Agent status changes use the claim token (spec §9); humans resolve blocks.
+// Agent status changes use the claim token; humans resolve blocks.
 export async function agentStatusRoutes(
   app: FastifyInstance,
   options: AttentionRouteOptions

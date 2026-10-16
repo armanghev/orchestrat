@@ -3,9 +3,9 @@ import { setTaskStatusRequestSchema } from "@orchestrat/protocol";
 import { z } from "zod";
 import type { AttentionToolHost } from "./attention-tools.js";
 
-// set_task_status (spec §9, §12). Uses the process-local claim token, like
-// release_task and complete_task; review ends the claim, so its token is
-// dropped only after the server accepts it.
+// set_task_status. Uses the process-local claim token, like release_task and
+// complete_task; review ends the claim, so its token is dropped only after the
+// server accepts it.
 export function registerStatusTool(host: AttentionToolHost): void {
   host.server.registerTool(
     "set_task_status",

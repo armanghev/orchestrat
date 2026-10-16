@@ -194,8 +194,8 @@ test("humans and offline agents exchange immutable project-scoped messages", asy
   assert.deepEqual(agentInbox.json().unread_chats, [
     { chat_id: group.id, unread_count: 1, mention_count: 1 }
   ]);
-  // Direct chats accept mentions (spec §4); they are still validated against
-  // the chat's participants.
+  // Direct chats accept mentions; they are still validated against the chat's
+  // participants.
   const directMention = await app.inject({
     method: "POST",
     url: `/api/v1/chats/${direct.id}/messages`,

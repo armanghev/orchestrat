@@ -98,8 +98,8 @@ export class TaskClaimService {
             and(eq(tasks.id, taskId), eq(tasks.projectId, principal.projectId))
           )
           .for("update");
-        // Claims belong to the session's branch (spec §6.2). Existing codes
-        // with a reason keep old clients parsing the error.
+        // Claims belong to the session's branch. Existing codes with a reason
+        // keep old clients parsing the error.
         if (task.branchId !== session.branchId)
           throw new ApiError(
             409,

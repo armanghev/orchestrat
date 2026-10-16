@@ -9,9 +9,9 @@ export type NormalizedHook = {
   error?: string;
 };
 
-// With a branch, the branch is part of the id (docs/project-branches.md §7.4):
-// one conversation gets one session per branch, and hook idempotency keys
-// stay unique per branch. Without one, the id is the pre-branches formula.
+// With a branch, the branch is part of the id: one conversation gets one
+// session per branch, and hook idempotency keys stay unique per branch. Without
+// one, the id is the pre-branches formula.
 export const deterministicSessionId = (
   integration: string,
   external: string,

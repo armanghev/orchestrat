@@ -54,8 +54,8 @@ function MergeSource({ run }: { run: MergeRun }) {
   );
 }
 
-// Decisions (docs/project-branches.md §11.7): the conflicts merges left for
-// a person, filtered to the branch on screen as their target.
+// Decisions: the conflicts merges left for a person, filtered to the branch on
+// screen as their target.
 export function DecisionsPage({
   api,
   projectId

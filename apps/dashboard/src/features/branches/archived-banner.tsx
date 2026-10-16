@@ -13,7 +13,7 @@ const dayFormat = new Intl.DateTimeFormat(undefined, {
   day: "numeric"
 });
 
-/** Why a branch is archived, in plain words (docs/project-branches.md §11.5). */
+/** Why a branch is archived, in plain words. */
 export function archivedReason(branch: Branch) {
   const on = branch.archived_at
     ? ` on ${dayFormat.format(new Date(branch.archived_at))}`
@@ -34,7 +34,7 @@ export function ArchivedBranchBanner() {
   if (!context?.branchArchived) return null;
   const { branch, branches, canManage, projectArchived, defaultBranch } =
     context;
-  // Its work can still move to an active branch (spec §11.5).
+  // Its work can still move to an active branch.
   const targets = branches.filter(
     (item) => !item.archived_at && (canManage || !item.is_default)
   );

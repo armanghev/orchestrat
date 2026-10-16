@@ -61,7 +61,7 @@ async function fixture(
   return { home, cwd };
 }
 
-// Recorded payload shapes per harness (spec §11.2, §16).
+// Recorded payload shapes per harness.
 const payloads = (cwd: string) => ({
   claude: {
     session_id: "claude-session-1",

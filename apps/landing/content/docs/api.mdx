@@ -412,11 +412,11 @@ Participants are `{ type, id }` with `type` `human` or `agent`. A message holds 
 - An agent can't complete or release a claim, or move its task to `review` or `done`, while comments by others posted since the claim are unacknowledged: `409 TASK_COMMENTS_UNREAD`. Sending `acknowledged_through` (a comment sequence) clears it. Imported comments never count.
 - Attention events: `task.status_changed`, `task.block_resolved`, `chat.handoff_created` (its entity is the chat, so chat access rules apply), and `run.woken`. `task.comment_created` adds `sequence` and `mentions`; `claim.released` adds `reason`.
 
-Agent routes are under [Agent attention and handoffs](#agent-attention-and-handoffs). Design notes: [`docs/agent-attention-handoffs.md`](https://github.com/armanghev/orchestrat/blob/main/docs/agent-attention-handoffs.md).
+Agent routes are under [Agent attention and handoffs](#agent-attention-and-handoffs). How attention works: [Architecture](/docs/architecture#attention-and-handoffs).
 
 ## Branches
 
-Every project has branches, and exactly one is the default. Tasks (with comments, dependencies and claims), documents (with folders, revisions and attachments), chats (with participants and messages) and agent sessions belong to one branch. Organizations, projects, members, agents and credentials are project-wide. Project responses include `default_branch_id`. Design notes: [`docs/project-branches.md`](https://github.com/armanghev/orchestrat/blob/main/docs/project-branches.md).
+Every project has branches, and exactly one is the default. Tasks (with comments, dependencies and claims), documents (with folders, revisions and attachments), chats (with participants and messages) and agent sessions belong to one branch. Organizations, projects, members, agents and credentials are project-wide. Project responses include `default_branch_id`. How branches work: [Architecture](/docs/architecture#branches).
 
 ### Choosing a branch
 

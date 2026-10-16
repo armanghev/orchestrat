@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Local end-to-end simulation of agent attention and handoffs (spec §16).
+// Local end-to-end simulation of agent attention and handoffs.
 //
 //   source <test-env.sh>   # sets ORCHESTRAT_TEST_POSTGRES_URL (admin DB)
 //   node scripts/acceptance/attention-simulation.mjs

@@ -69,8 +69,8 @@ type BlockedCalloutProps = {
 };
 
 /**
- * The task sheet's blocked region (spec §14): reason, what it waits on, since
- * when, and Resolve blocker behind a confirmation.
+ * The task sheet's blocked region: reason, what it waits on, since when, and
+ * Resolve blocker behind a confirmation.
  */
 export function BlockedCallout({
   api,

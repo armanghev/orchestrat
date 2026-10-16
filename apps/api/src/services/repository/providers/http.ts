@@ -1,6 +1,6 @@
-// Provider HTTP (docs/project-branches.md §8.1): an injected fetch, a 10 s
-// timeout, bounded retries on 429 and 5xx that honor Retry-After, and errors
-// that never carry bodies, headers or tokens.
+// Provider HTTP: an injected fetch, a 10 s timeout, bounded retries on 429 and
+// 5xx that honor Retry-After, and errors that never carry bodies, headers or
+// tokens.
 
 export type Fetch = typeof globalThis.fetch;
 

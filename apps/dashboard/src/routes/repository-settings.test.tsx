@@ -17,8 +17,7 @@ import {
 } from "@/test/branch-routes";
 import { REPOSITORY_ATTEMPT_KEY } from "@/features/repository/repository-copy";
 
-// Settings › Repository and the GitHub Setup URL (docs/project-branches.md
-// §11.8).
+// Settings › Repository and the GitHub Setup URL.
 
 const goTo = vi.hoisted(() => vi.fn());
 vi.mock("@/features/repository/redirect", () => ({ goTo }));

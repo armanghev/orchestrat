@@ -15,8 +15,7 @@ import {
   render
 } from "@/test/branch-routes";
 
-// Onboarding, the import dialog and Decisions (docs/project-branches.md
-// §11.6, §11.7).
+// Onboarding, the import dialog and Decisions.
 
 const key = (n: number) =>
   `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;

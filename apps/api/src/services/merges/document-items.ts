@@ -16,9 +16,8 @@ import {
 } from "./fingerprint.js";
 import { lineageOf } from "./task-items.js";
 
-// Documents, their revisions and attachments, and folders in the merge engine
-// (docs/project-branches.md §9.1–§9.4). A document matches by lineage, else by
-// path; deletions never propagate.
+// Documents, their revisions and attachments, and folders in the merge engine.
+// A document matches by lineage, else by path; deletions never propagate.
 
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 export type DocumentRow = typeof documents.$inferSelect;
@@ -104,7 +103,7 @@ export const rewriteRefs = (body: string, map: Map<string, string>) =>
 
 /**
  * Compared fields. The body is hashed with attachment references normalized
- * to lineage keys, because copying gives attachments new ids (spec §9.3).
+ * to lineage keys, because copying gives attachments new ids.
  */
 export const documentValues = (side: DocumentSide, document: DocumentRow) => ({
   path: document.path,
@@ -255,7 +254,7 @@ export type AttachmentCopy = {
 };
 
 /** Ids for every document and attachment the plan copies, made up front so
- * attachment objects can be copied before the transaction (spec §9.7). */
+ * attachment objects can be copied before the transaction. */
 export function allocate(items: DocumentPlanItem[]) {
   const documentIds = new Map<string, string>();
   const attachments: AttachmentCopy[] = [];

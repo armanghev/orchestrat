@@ -519,8 +519,7 @@ test("remote document storage migration keeps metadata and upload invariants", a
 
 test("migration journal applies in order: each when exceeds the previous", async () => {
   // drizzle-kit migrate skips any migration whose `when` is not greater than
-  // the newest applied one, so an out-of-order entry is silently lost
-  // (docs/project-branches.md §15.2).
+  // the newest applied one, so an out-of-order entry is silently lost.
   const journal = JSON.parse(
     await readFile(
       new URL("../drizzle/meta/_journal.json", import.meta.url),

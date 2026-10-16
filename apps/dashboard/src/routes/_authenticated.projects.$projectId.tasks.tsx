@@ -139,7 +139,7 @@ function TasksRoute() {
     ...taskQueryOptions(api, taskId),
     enabled: Boolean(selectedTaskId)
   });
-  // A task deep link can name another branch's task (spec §11.1).
+  // A task deep link can name another branch's task.
   const selectedBranchId = selected.data?.branch_id;
   const selectedInProject =
     selected.data?.project_id === projectId &&

@@ -521,7 +521,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       api
     });
     // Cursor `stop` and Antigravity `Stop` keep their lifecycle ingest and
-    // add the opt-in continuation output in the same process (spec §11.2).
+    // add the opt-in continuation output in the same process.
     const eventName =
       hookPayload && typeof hookPayload === "object"
         ? (hookPayload as Record<string, unknown>).hook_event_name
@@ -796,7 +796,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       client,
       integration: publicResult.integration as ConfigurableIntegration,
       ...(waitBudgetSeconds === undefined ? {} : { waitBudgetSeconds }),
-      // The session follows the checkout's branch (spec §7.2).
+      // The session follows the checkout's branch.
       resolveCheckoutBranch: checkoutResolver(invocationCwd, home)
     });
     const shutdown = async () => {

@@ -120,8 +120,8 @@ function FailedDeliveries({
 
 type Confirmation = "disconnect" | "reconnect";
 
-// Settings › Repository (docs/project-branches.md §11.8). Owners and admins
-// connect, sync and disconnect; members see the status.
+// Settings › Repository. Owners and admins connect, sync and disconnect;
+// members see the status.
 export function RepositorySettingsSection({
   api,
   projectId,
@@ -166,7 +166,7 @@ export function RepositorySettingsSection({
       }),
     onSuccess: async (authorization, provider) => {
       // The GitHub Setup URL comes back without our state; this attempt
-      // is how the setup route finds its way (spec §11.8).
+      // is how the setup route finds its way.
       window.sessionStorage.setItem(
         REPOSITORY_ATTEMPT_KEY,
         JSON.stringify({

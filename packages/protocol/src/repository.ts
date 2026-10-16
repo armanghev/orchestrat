@@ -1,7 +1,6 @@
 import { z } from "zod";
 
-// Repository connection contracts (docs/project-branches.md §8). Imports only
-// zod; see branches.ts for why.
+// Repository connection contracts. Imports only zod; see branches.ts for why.
 const idSchema = z.string().uuid();
 const dateSchema = z.string().datetime();
 
@@ -89,7 +88,7 @@ export const repositoryAuthorizationParamsSchema = z.object({
   authorizationId: z.string().regex(/^ra_[A-Za-z0-9_-]{20,}$/)
 });
 
-/** The GitHub Setup URL's installation_id is untrusted (spec §8.3). */
+/** The GitHub Setup URL's installation_id is untrusted. */
 export const githubInstallationRequestSchema = z.object({
   installation_id: z.string().regex(/^[1-9][0-9]{0,19}$/)
 });
@@ -127,7 +126,7 @@ export type RepositoryCandidatesResponse = z.infer<
 /**
  * The signed-in person's newest authorized attempt for a provider. GitHub's
  * Setup URL lands in whichever browser installed the app, so the dashboard
- * finds the attempt on the server rather than in one tab's storage (§11.8).
+ * finds the attempt on the server rather than in one tab's storage.
  */
 export const pendingRepositoryAuthorizationQuerySchema = z.object({
   provider: repositoryProviderSchema

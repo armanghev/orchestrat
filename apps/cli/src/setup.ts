@@ -449,8 +449,8 @@ export type SetupRunOptions = SetupTransport & {
   mcpScope?: McpScope;
   globalProjects?: ProjectChoice[];
   pathEnv?: string;
-  // Opt-in stop continuation for the selected integrations (spec §11.3);
-  // `rewake` adds Claude Code's async idle wake. Both only ever add.
+  // Opt-in stop continuation for the selected integrations; `rewake` adds
+  // Claude Code's async idle wake. Both only ever add.
   autoContinue?: boolean;
   rewake?: boolean;
   reportPreview?: (previews: SetupPreview[]) => Promise<void> | void;

@@ -2,9 +2,8 @@ import { createContext, useContext, type ReactNode } from "react";
 import type { Branch } from "@orchestrat/protocol";
 import type { ImportRequest } from "./import-dialog";
 
-// The branch a project page shows (docs/project-branches.md §11.1). The
-// project layout resolves it once from `?branch=` and every page, the toolbar
-// and the shell read it from here.
+// The branch a project page shows. The project layout resolves it once from
+// `?branch=` and every page, the toolbar and the shell read it from here.
 export type BranchContextValue = {
   projectId: string;
   /** Every branch, archived ones included: active first, default first. */
@@ -14,9 +13,9 @@ export type BranchContextValue = {
   defaultBranch: Branch | null;
   projectArchived: boolean;
   branchArchived: boolean;
-  /** An archived project or branch: write controls are hidden (§11.5). */
+  /** An archived project or branch: write controls are hidden. */
   readOnly: boolean;
-  /** Owners and admins set the default, archive and merge (§6.6). */
+  /** Owners and admins set the default, archive and merge. */
   canManage: boolean;
   branchName: (branchId: string | null | undefined) => string | undefined;
   /** Shows another branch of this project, keeping the current page. */
@@ -25,7 +24,7 @@ export type BranchContextValue = {
   branchParam: (branchId: string) => string | undefined;
   openCreateBranch: () => void;
   openAllBranches: () => void;
-  /** Opens the import dialog (docs/project-branches.md §11.6). */
+  /** Opens the import dialog. */
   openImport: (request: ImportRequest) => void;
 };
 

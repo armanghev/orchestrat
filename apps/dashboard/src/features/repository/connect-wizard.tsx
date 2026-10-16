@@ -31,8 +31,8 @@ import {
   repositoryKeys
 } from "./query-options";
 
-// After the provider redirect (docs/project-branches.md §11.8): pick a
-// repository, see how the default branch will be linked, and connect.
+// After the provider redirect: pick a repository, see how the default branch
+// will be linked, and connect.
 export function ConnectWizard({
   api,
   projectId,
@@ -56,7 +56,7 @@ export function ConnectWizard({
     repositoryCandidatesQueryOptions(api, projectId, authorizationId)
   );
   const repositories = candidates.data?.repositories ?? [];
-  // GitHub lists only repositories where the app is installed (§8.3).
+  // GitHub lists only repositories where the app is installed.
   const installUrl = candidates.data?.install_url ?? null;
   const install = (url: string) =>
     platform.kind === "desktop"
@@ -70,7 +70,7 @@ export function ConnectWizard({
     : undefined;
   const existing = plan?.kind === "choose" ? plan.existing : undefined;
   // Keeping the default's work is recommended when the other branch is
-  // empty; otherwise the person chooses (spec §8.7).
+  // empty; otherwise the person chooses.
   const existingTasks = useQuery({
     ...tasksQueryOptions(api, projectId, existing?.id),
     enabled: Boolean(existing)

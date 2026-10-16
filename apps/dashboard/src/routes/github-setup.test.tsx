@@ -10,9 +10,9 @@ import {
   render
 } from "@/test/branch-routes";
 
-// Installing the GitHub App mid-connection (docs/project-branches.md §8.3,
-// §11.8): the picker offers the install, and the Setup URL finds the
-// attempt on the server when it opens in another browser.
+// Installing the GitHub App mid-connection: the picker offers the install, and
+// the Setup URL finds the attempt on the server when it opens in another
+// browser.
 
 const goTo = vi.hoisted(() => vi.fn());
 vi.mock("@/features/repository/redirect", () => ({ goTo }));

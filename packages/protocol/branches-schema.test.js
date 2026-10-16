@@ -27,7 +27,7 @@ const id = "00000000-0000-4000-8000-000000000001";
 const other = "00000000-0000-4000-8000-000000000002";
 const timestamp = "2026-09-30T00:00:00.000Z";
 
-test("branch names follow the git ref subset from spec §4.6", () => {
+test("branch names follow the git check-ref-format subset", () => {
   for (const name of [
     "main",
     "feat/login",

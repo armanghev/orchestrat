@@ -20,8 +20,8 @@ type WaitResponse = Awaited<ReturnType<AttentionApi["wait"]>>;
 type AttentionSummary = WaitResponse["attention"];
 type WaitEvent = WaitResponse["events"][number];
 
-// Stop-hook continuation (spec §11.3). Every path fails open: an error,
-// timeout, missing credential or missing opt-in allows the stop.
+// Stop-hook continuation. Every path fails open: an error, timeout, missing
+// credential or missing opt-in allows the stop.
 export const STOP_BUDGET_MS = 2000;
 export const MAX_BLOCKS = 3;
 export const BLOCK_WINDOW_MS = 30 * 60 * 1000;
@@ -468,7 +468,7 @@ export async function decideStop(input: StopHookInput): Promise<StopDecision> {
 
 export type StopOutput = { exitCode: 0 | 2; stdout?: string; stderr?: string };
 
-// Each harness's own continuation mechanism (spec §11.3 table).
+// Each harness's own continuation mechanism.
 export function renderStopDecision(
   integration: ConfigurableIntegration,
   decision: StopDecision

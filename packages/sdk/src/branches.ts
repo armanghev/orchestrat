@@ -18,9 +18,9 @@ export type {
 type BranchListInput = { include_archived?: boolean; name?: string };
 
 /**
- * The agent's view of its project's branches (docs/project-branches.md §6.7).
- * Agents list, look up and register branches; archiving, merging and the
- * default branch belong to owners and admins in the dashboard.
+ * The agent's view of its project's branches. Agents list, look up and register
+ * branches; archiving, merging and the default branch belong to owners and
+ * admins in the dashboard.
  */
 export class BranchesApi {
   constructor(private readonly request: RequestFn) {}
