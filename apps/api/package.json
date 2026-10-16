@@ -11,7 +11,7 @@
     "typecheck": "tsc --noEmit",
     "test": "node --test dist/routes/*.test.js dist/operations/*.test.js dist/services/*.test.js",
     "test:storage": "node --test dist/operations/*.test.js dist/services/*.test.js",
-    "test:postgres": "node --test dist/operations/postgres-acceptance.integration.test.js dist/operations/branches-postgres.integration.test.js dist/operations/auth-postgres.integration.test.js",
+    "test:postgres": "node --test dist/operations/postgres-acceptance.integration.test.js dist/operations/branches-postgres.integration.test.js dist/operations/auth-postgres.integration.test.js dist/operations/delete-cascade-postgres.integration.test.js",
     "storage:backfill": "node dist/operations/backfill-document-storage.js",
     "storage:gc": "node dist/operations/gc-document-storage.js",
     "start": "node dist/server.js",

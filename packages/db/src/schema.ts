@@ -303,7 +303,7 @@ export const projectBranches = pgTable(
       columns: [table.projectId, table.createdByAgentId],
       foreignColumns: [agents.projectId, agents.id],
       name: "project_branches_created_by_agent_project_fk"
-    }),
+    }).onDelete("cascade"),
     check("project_branches_name_not_blank", sql`btrim(${table.name}) <> ''`),
     check(
       "project_branches_default_active",
@@ -378,7 +378,7 @@ export const tasks = pgTable(
       columns: [table.projectId, table.createdByAgentId],
       foreignColumns: [agents.projectId, agents.id],
       name: "tasks_created_by_agent_project_fk"
-    }),
+    }).onDelete("cascade"),
     check(
       "tasks_author_consistent",
       sql`(${table.createdByType} = 'human' and ${table.createdByUserId} is not null and ${table.createdByAgentId} is null) or (${table.createdByType} = 'agent' and ${table.createdByUserId} is null and ${table.createdByAgentId} is not null)`
@@ -445,7 +445,7 @@ export const taskComments = pgTable(
       columns: [table.projectId, table.authorAgentId],
       foreignColumns: [agents.projectId, agents.id],
       name: "task_comments_author_agent_project_fk"
-    }),
+    }).onDelete("cascade"),
     foreignKey({
       columns: [table.projectId, table.taskId],
       foreignColumns: [tasks.projectId, tasks.id],
@@ -718,7 +718,7 @@ export const projectEvents = pgTable(
       columns: [table.projectId, table.actorAgentId],
       foreignColumns: [agents.projectId, agents.id],
       name: "project_events_actor_agent_project_fk"
-    }),
+    }).onDelete("cascade"),
     index("project_events_project_id_id_idx").on(table.projectId, table.id),
     index("project_events_project_branch_id_idx").on(
       table.projectId,
@@ -940,7 +940,7 @@ export const documents = pgTable(
       columns: [table.projectId, table.createdByAgentId],
       foreignColumns: [agents.projectId, agents.id],
       name: "documents_created_by_agent_project_fk"
-    }),
+    }).onDelete("cascade"),
     check("documents_path_not_blank", sql`btrim(${table.path}) <> ''`),
     check(
       "documents_current_revision_positive",
@@ -1028,7 +1028,7 @@ export const documentRevisions = pgTable(
       columns: [table.projectId, table.authorAgentId],
       foreignColumns: [agents.projectId, agents.id],
       name: "document_revisions_author_agent_project_fk"
-    }),
+    }).onDelete("cascade"),
     index("document_revisions_document_created_idx").on(
       table.documentId,
       table.createdAt,
@@ -1095,7 +1095,7 @@ export const documentAttachments = pgTable(
       columns: [table.projectId, table.addedByAgentId],
       foreignColumns: [agents.projectId, agents.id],
       name: "document_attachments_added_by_agent_project_fk"
-    }),
+    }).onDelete("cascade"),
     index("document_attachments_document_created_idx").on(
       table.documentId,
       table.createdAt,
@@ -1159,7 +1159,7 @@ export const documentAttachmentUploads = pgTable(
       columns: [table.projectId, table.actorAgentId],
       foreignColumns: [agents.projectId, agents.id],
       name: "document_attachment_uploads_actor_agent_project_fk"
-    }),
+    }).onDelete("cascade"),
     index("document_attachment_uploads_project_status_idx").on(
       table.projectId,
       table.status,
@@ -1276,7 +1276,7 @@ export const chats = pgTable(
       columns: [table.projectId, table.creatorAgentId],
       foreignColumns: [agents.projectId, agents.id],
       name: "chats_creator_agent_project_fk"
-    }),
+    }).onDelete("cascade"),
     check(
       "chats_kind_consistent",
       sql`(${table.kind} = 'direct' and ${table.directKey} is not null and ${table.name} is null) or (${table.kind} = 'group' and ${table.directKey} is null and ${table.name} is not null and btrim(${table.name}) <> '')`
@@ -1407,7 +1407,7 @@ export const chatMessages = pgTable(
       columns: [table.projectId, table.authorAgentId],
       foreignColumns: [agents.projectId, agents.id],
       name: "chat_messages_author_agent_project_fk"
-    }),
+    }).onDelete("cascade"),
     check(
       "chat_messages_author_consistent",
       sql`(${table.authorType} = 'human' and ${table.authorUserId} is not null and ${table.authorAgentId} is null) or (${table.authorType} = 'agent' and ${table.authorAgentId} is not null and ${table.authorUserId} is null)`
@@ -1530,17 +1530,17 @@ export const taskBlocks = pgTable(
       columns: [table.projectId, table.createdByAgentId],
       foreignColumns: [agents.projectId, agents.id],
       name: "task_blocks_created_by_agent_project_fk"
-    }),
+    }).onDelete("cascade"),
     foreignKey({
       columns: [table.projectId, table.blockedOnAgentId],
       foreignColumns: [agents.projectId, agents.id],
       name: "task_blocks_blocked_on_agent_project_fk"
-    }),
+    }).onDelete("cascade"),
     foreignKey({
       columns: [table.projectId, table.resolvedByAgentId],
       foreignColumns: [agents.projectId, agents.id],
       name: "task_blocks_resolved_by_agent_project_fk"
-    }),
+    }).onDelete("cascade"),
     check(
       "task_blocks_creator_consistent",
       sql`(${table.createdByType} = 'human' and ${table.createdByUserId} is not null and ${table.createdByAgentId} is null) or (${table.createdByType} = 'agent' and ${table.createdByAgentId} is not null and ${table.createdByUserId} is null)`
@@ -1622,12 +1622,12 @@ export const handoffs = pgTable(
       columns: [table.projectId, table.fromAgentId],
       foreignColumns: [agents.projectId, agents.id],
       name: "handoffs_from_agent_project_fk"
-    }),
+    }).onDelete("cascade"),
     foreignKey({
       columns: [table.projectId, table.toAgentId],
       foreignColumns: [agents.projectId, agents.id],
       name: "handoffs_to_agent_project_fk"
-    }),
+    }).onDelete("cascade"),
     check(
       "handoffs_from_single",
       sql`(${table.fromUserId} is null) <> (${table.fromAgentId} is null)`

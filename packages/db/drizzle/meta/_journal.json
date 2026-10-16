@@ -127,6 +127,13 @@
       "when": 1792500000000,
       "tag": "0018_builtin_auth",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1793400000000,
+      "tag": "0019_agent_history_cascade",
+      "breakpoints": true
     }
   ]
 }
