@@ -105,7 +105,7 @@ type ChatNotice = {
   id: string;
   projectId: string;
   chatId: string;
-  /** The chat's branch, when it isn't the one on screen (spec §11.4). */
+  /** The chat's branch, when it isn't the one on screen. */
   branchId?: string;
   /** The chat branch's name when it isn't the one on screen, so even a
    * short mention notice says where. */
@@ -167,7 +167,7 @@ export function notificationForRealtimeEvent(
     currentUserId,
     statusChange
   );
-  // A click opens the branch the event happened on (spec §11.1).
+  // A click opens the branch the event happened on.
   return notification && event.branch_id
     ? {
         ...notification,
@@ -183,8 +183,8 @@ function baseNotificationForRealtimeEvent(
   currentUserId?: string,
   statusChange?: TaskStatusChangeNotice
 ): NativeNotification | null {
-  // Agents set blocked and review themselves (spec §14); other transitions,
-  // including system block resolutions, stay quiet.
+  // Agents set blocked and review themselves; other transitions, including
+  // system block resolutions, stay quiet.
   if (event.event_type === "task.status_changed") {
     if (
       !statusChange ||
@@ -402,7 +402,7 @@ export class ProjectRealtimeController {
       let nextSequence = this.lastSequence;
       let events;
       do {
-        // One monotonic cursor over every branch (spec §11.4).
+        // One monotonic cursor over every branch.
         events = await this.api.listProjectEvents(
           this.projectId,
           { after },
@@ -913,7 +913,7 @@ export function ProjectRealtimeProvider({
             participant.type === "human" && participant.id === userId
         )
       );
-      // Notices for another branch say which one (spec §11.4).
+      // Notices for another branch say which one.
       const where = inBranch(otherBranch);
       const title = isHandoff
         ? `Handoff from ${actor?.name ?? "an agent"}${where}`

@@ -33,8 +33,8 @@ import type { TaskClaimService } from "./task-claim-service.js";
 type TaskRow = typeof tasks.$inferSelect;
 type ClaimRow = typeof taskClaims.$inferSelect;
 
-// Statuses a claimant can move from (spec §9). A task with an active claim is
-// never in review, done or cancelled.
+// Statuses a claimant can move from. A task with an active claim is never in
+// review, done or cancelled.
 const claimantStatuses = new Set<TaskStatus>([
   "claimed",
   "in_progress",
@@ -118,7 +118,7 @@ export class TaskStatusService {
             .returning();
         } else {
           if (to === "review") {
-            // Review ends the claim, so the completion guard applies (§8).
+            // Review ends the claim, so the completion guard applies.
             await assertCommentsAcknowledged(tx, {
               projectId: principal.projectId,
               taskId: task.id,
@@ -229,9 +229,9 @@ export class TaskStatusService {
     });
   }
 
-  // Blocking-task and blocked_on checks (spec §9): same project, not the task
-  // itself, no direct two-task cycle, and a message candidate other than the
-  // agent. Longer cycles are allowed; resolving any blocker breaks them.
+  // Blocking-task and blocked_on checks: same project, not the task itself, no
+  // direct two-task cycle, and a message candidate other than the agent. Longer
+  // cycles are allowed; resolving any blocker breaks them.
   private async validateBlock(
     tx: Transaction,
     principal: AgentPrincipal,

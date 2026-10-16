@@ -33,11 +33,11 @@ export function readGithubAttempt(): Attempt | null {
   }
 }
 
-// GitHub's Setup URL lands here after an app install (docs/project-branches.md
-// §8.3, §11.8). Its installation_id is untrusted: the API accepts it only
-// when the authorizing user's token lists that installation. The attempt
-// comes from this tab, or from the server when the install opened in
-// another browser (the desktop app sends people to their own browser).
+// GitHub's Setup URL lands here after an app install. Its installation_id is
+// untrusted: the API accepts it only when the authorizing user's token lists
+// that installation. The attempt comes from this tab, or from the server when
+// the install opened in another browser (the desktop app sends people to their
+// own browser).
 export function GithubSetup({
   api,
   installationId

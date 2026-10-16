@@ -57,10 +57,9 @@ export async function provider<T>(work: () => Promise<T>): Promise<T> {
   }
 }
 
-// Connecting a project to one repository (docs/project-branches.md §6.7,
-// §8.7, §12): single-use authorization attempts, a repository picker, the
-// default-branch mapping, and disconnect. Provider specifics live in the
-// adapters.
+// Connecting a project to one repository: single-use authorization attempts, a
+// repository picker, the default-branch mapping, and disconnect. Provider
+// specifics live in the adapters.
 
 const ATTEMPT_TTL_MS = 15 * 60_000;
 const sha256 = (value: string) =>
@@ -433,7 +432,7 @@ export class RepositoryService {
         adapter.listCandidates({ attempt, userToken })
       ),
       // GitHub only lists installed repositories; the attempt id is a
-      // harmless state for the Setup URL (§8.3).
+      // harmless state for the Setup URL.
       install_url: adapter.installUrl?.(attempt.id) ?? null
     };
   }
@@ -574,7 +573,7 @@ export class RepositoryService {
   /**
    * Writes a connection: snapshot the provider's branches, then in one
    * transaction check nothing else holds the project or repository, insert,
-   * map the default branch and record the refs (§8.7).
+   * map the default branch and record the refs.
    */
   async finishConnection(input: {
     userId: string;
@@ -677,10 +676,10 @@ export class RepositoryService {
   }
 
   /**
-   * Links the default branch to the provider default `D` (§8.7): the
-   * default is already `D`; or it's renamed to `D`; or another active `D`
-   * branch is archived as replaced; or (use_existing) that `D` branch
-   * becomes the default and the old default stays an ordinary branch.
+   * Links the default branch to the provider default `D`: the default is
+   * already `D`; or it's renamed to `D`; or another active `D` branch is
+   * archived as replaced; or (use_existing) that `D` branch becomes the default
+   * and the old default stays an ordinary branch.
    */
   private async mapDefault(
     tx: Parameters<Parameters<Database["transaction"]>[0]>[0],

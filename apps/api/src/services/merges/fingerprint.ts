@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
-// Fingerprints compare one logical item across branches field by field
-// (docs/project-branches.md §9.3): `{ field: sha256(canonical value) }`.
+// Fingerprints compare one logical item across branches field by field:
+// `{ field: sha256(canonical value) }`.
 
 export type Fingerprint = Record<string, string>;
 

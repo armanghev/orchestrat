@@ -18,7 +18,7 @@ export type HarnessRecord = {
   configurable: boolean;
   supportsMcp: boolean;
   supportsHooks: boolean;
-  // How opt-in stop continuation is delivered (spec §11.3).
+  // How opt-in stop continuation is delivered.
   continuation?: "stop-hook";
   // Shown when a detected harness is not offered by setup.
   unsupportedReason?: string;

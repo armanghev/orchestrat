@@ -106,7 +106,7 @@ export type TopToolbarProps = {
   onOpenCommands: () => void;
   routeActions?: ReactNode;
   commandTriggerRef?: RefObject<HTMLButtonElement | null>;
-  /** Organization › Project › Branch › Page (docs/project-branches.md §11.2). */
+  /** Organization › Project › Branch › Page. */
   branchMenu?: ReactNode;
 };
 

@@ -47,7 +47,7 @@ function ActivityRoute() {
   const { projectId } = Route.useParams();
   const { api, project } = Route.useRouteContext();
   const { branchId, branchName } = useBranch();
-  // This branch plus project-wide events, or every branch (spec §11.3).
+  // This branch plus project-wide events, or every branch.
   const [allBranches, setAllBranches] = useState(false);
   const tasks = useQuery(tasksQueryOptions(api, projectId, branchId));
   const agents = useQuery(agentsQueryOptions(api, projectId));

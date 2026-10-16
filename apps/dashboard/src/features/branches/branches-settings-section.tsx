@@ -178,9 +178,8 @@ function MergeHistory({
   );
 }
 
-// Settings › Branches (docs/project-branches.md §11.8). Everyone sees the
-// table and history; owners and admins also set the default, merge and
-// archive.
+// Settings › Branches. Everyone sees the table and history; owners and admins
+// also set the default, merge and archive.
 export function BranchesSettingsSection({
   api,
   projectId

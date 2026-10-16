@@ -24,7 +24,7 @@ import { and, asc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import type { AgentPrincipal } from "./agent-service.js";
 import { excerpt } from "./attention-guard.js";
 
-// Spec §10: one classification pass scans at most this many project events.
+// One classification pass scans at most this many project events.
 export const waitScanLimit = 500;
 
 // Event types that can classify for some agent. The hub skips waking waiters
@@ -98,11 +98,11 @@ const unique = (values: (string | undefined)[]) => [
   ...new Set(values.filter((value): value is string => value !== undefined))
 ];
 
-// Classifies project events after `after` for one agent (spec §10). Its own
-// actions are skipped, chat events need a current participant row (the same
-// privacy rule as AgentService.listEvents), and the returned cursor is the
-// last id scanned, so events are never rescanned. `more` reports that the
-// scan stopped early (event limit or scan limit) and newer events remain.
+// Classifies project events after `after` for one agent. Its own actions are
+// skipped, chat events need a current participant row (the same privacy rule as
+// AgentService.listEvents), and the returned cursor is the last id scanned, so
+// events are never rescanned. `more` reports that the scan stopped early (event
+// limit or scan limit) and newer events remain.
 export async function classifyEventsSince(
   db: Database,
   principal: AgentPrincipal,

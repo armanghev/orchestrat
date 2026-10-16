@@ -50,7 +50,7 @@ function AgentsRoute() {
   const [search, setSearch] = useState("");
   const { api } = Route.useRouteContext();
   const { branchId, branchName, readOnly } = useBranch();
-  // Every project agent is listed whichever branch it works on (spec §11.3).
+  // Every project agent is listed whichever branch it works on.
   const agents = useQuery(agentsQueryOptions(api, projectId));
   const attention = useQuery(agentAttentionQueryOptions(api, projectId));
   const presence = useQuery(agentPresenceQueryOptions(api, projectId));

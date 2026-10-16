@@ -650,8 +650,7 @@ export class ProjectService {
         userId,
         role: "owner"
       });
-      // Every project starts with its default branch (docs/project-branches.md
-      // §5.3); Git names it later (§8.7).
+      // Every project starts with its default branch; Git names it later.
       const [branch] = await tx
         .insert(projectBranches)
         .values({

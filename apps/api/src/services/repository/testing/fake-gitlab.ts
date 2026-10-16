@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 
 // The GitLab.com endpoints the adapter uses, in memory, behind an injected
-// fetch (docs/project-branches.md §13.3). Access tokens expire on the shared
-// clock and refresh tokens rotate, like GitLab's.
+// fetch. Access tokens expire on the shared clock and refresh tokens rotate,
+// like GitLab's.
 
 type Project = {
   id: number;

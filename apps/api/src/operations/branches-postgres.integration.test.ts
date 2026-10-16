@@ -26,8 +26,8 @@ import { MergeEngine, type AttachmentKey } from "../services/merges/engine.js";
 import { checkProjectSummaries } from "../test/project-summaries.js";
 import { workspaceOn } from "../test/workspace.js";
 
-// Branch concurrency needs real row locks (docs/project-branches.md §13.2).
-// Opt in like postgres-acceptance: every run creates and drops its database.
+// Branch concurrency needs real row locks. Opt in like postgres-acceptance:
+// every run creates and drops its database.
 const postgresUrl = process.env.ORCHESTRAT_TEST_POSTGRES_URL;
 
 test(

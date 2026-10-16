@@ -256,7 +256,7 @@ export function AppShell({
     ({ project }) => project.id === activeProjectId
   );
   const branchContext = useOptionalBranch();
-  // The sidebar's Messages badge counts the branch on screen (spec §11.3).
+  // The sidebar's Messages badge counts the branch on screen.
   const inboxQueries = useQueries({
     queries: catalog.projects.map(({ project }) =>
       inboxQueryOptions(

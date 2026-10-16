@@ -32,8 +32,8 @@ const valueText = (value: unknown) =>
 const claimedNotice =
   "An agent is working on this task. You can choose once the claim ends.";
 
-// One decision, source and target side by side (docs/project-branches.md
-// §11.7). Owners and admins choose; members read.
+// One decision, source and target side by side. Owners and admins choose;
+// members read.
 export function DecisionSheet({
   api,
   projectId,

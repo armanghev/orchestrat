@@ -10,8 +10,8 @@ import {
 import type { FastifyInstance } from "fastify";
 import type { MergeService } from "../services/merge-service.js";
 
-// Imports, merges and decisions (docs/project-branches.md §6.7). People only:
-// agents never import, merge or settle decisions.
+// Imports, merges and decisions. People only: agents never import, merge or
+// settle decisions.
 export async function humanMergeRoutes(
   app: FastifyInstance,
   options: { merges: MergeService }

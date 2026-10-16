@@ -11,9 +11,9 @@ import type {
   ProviderName
 } from "./types.js";
 
-// Webhook receipt (docs/project-branches.md §8.1): verify on the raw body,
-// store once per provider delivery id, answer fast. The sync worker applies
-// stored deliveries in order; nothing here touches branches.
+// Webhook receipt: verify on the raw body, store once per provider delivery id,
+// answer fast. The sync worker applies stored deliveries in order; nothing here
+// touches branches.
 
 export type IngressResult = 202 | 401 | 404 | 503;
 

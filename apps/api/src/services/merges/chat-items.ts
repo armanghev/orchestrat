@@ -14,9 +14,9 @@ import {
 } from "./fingerprint.js";
 import { lineageOf } from "./task-items.js";
 
-// Chats and messages in the merge engine (docs/project-branches.md §9.6).
-// Copies never widen who can read a conversation, and imported messages are
-// history, not news: no events, notices or unread counts.
+// Chats and messages in the merge engine. Copies never widen who can read a
+// conversation, and imported messages are history, not news: no events, notices
+// or unread counts.
 
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 export type ChatRow = typeof chats.$inferSelect;

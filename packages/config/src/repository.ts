@@ -1,8 +1,7 @@
 import { z } from "zod";
 
-// Repository connection settings (docs/project-branches-provider-setup.md
-// §0.4). A provider counts as configured only when the shared repository
-// settings and all of its own required variables are set.
+// Repository connection settings. A provider counts as configured only when the
+// shared repository settings and all of its own required variables are set.
 
 const optional = z
   .string()

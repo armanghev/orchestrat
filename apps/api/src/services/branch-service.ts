@@ -174,13 +174,13 @@ export class BranchService {
   }
 
   /**
-   * Registers the checkout's Git branch for the CLI (spec §6.8): returns the
-   * active branch with that name or creates it. A name whose newest
-   * generation was deleted on the provider is refused unless force_new.
+   * Registers the checkout's Git branch for the CLI: returns the active branch
+   * with that name or creates it. A name whose newest generation was deleted on
+   * the provider is refused unless force_new.
    */
   /**
    * `beforeCreate` runs only when registration would create a branch; it
-   * throws to refuse (the per-credential rate limit, spec §12).
+   * throws to refuse (the per-credential rate limit).
    */
   async registerForAgent(
     principal: AgentPrincipal,
@@ -505,7 +505,7 @@ export class BranchService {
   /**
    * The CLI reports the checkout's default branch (refs/remotes/origin/HEAD).
    * Without a connected repository, a default still named by the "main"
-   * fallback takes that name (spec §8.7).
+   * fallback takes that name.
    */
   private async applyLocalDefaultName(
     tx: Transaction,

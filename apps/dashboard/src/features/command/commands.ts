@@ -56,7 +56,7 @@ export type BuildCommandsOptions = {
   openPreferences: () => void | Promise<void>;
   signOut: () => void | Promise<void>;
   /** The active project's branches; the breadcrumb menu is hidden on phones,
-   * so ⌘K switches branches there (docs/project-branches.md §11.2). */
+   * so ⌘K switches branches there. */
   branches?: {
     branches: Branch[];
     currentBranchId: string;

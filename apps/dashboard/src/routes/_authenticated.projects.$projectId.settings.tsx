@@ -62,7 +62,7 @@ function SettingsRoute() {
 export const Route = createFileRoute(
   "/_authenticated/projects/$projectId/settings"
 )({
-  // Provider callbacks return here (docs/project-branches.md §6.7).
+  // Provider callbacks return here.
   validateSearch: z.object({
     repository_authorization: z.string().optional(),
     repository_error: z.string().optional()

@@ -16,9 +16,9 @@ import {
   type RemoteRepository
 } from "../types.js";
 
-// A generic in-memory provider for scenario tests (docs/project-branches.md
-// §13.3). Repositories are mutable maps; webhooks are HMAC-signed JSON; the
-// connect flow is a plain code exchange.
+// A generic in-memory provider for scenario tests. Repositories are mutable
+// maps; webhooks are HMAC-signed JSON; the connect flow is a plain code
+// exchange.
 
 export type FakeRepository = {
   id: string;

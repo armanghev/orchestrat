@@ -13,7 +13,7 @@ import {
 } from "./attention-events.js";
 import type { AttentionService } from "./attention-service.js";
 
-// Spec §10 and §15. Limits are server constants (§19.5).
+// Long-poll limits and timing. Limits are server constants.
 export const waitLimitPerAgent = 3;
 export const waitLimitPerProject = 50;
 const waitEventLimit = 50;
@@ -35,10 +35,10 @@ type Outcome = {
   cursor: string;
 };
 
-// In-memory long-poll waiters (spec §10). The realtime publisher calls
-// notify() after commit; a woken waiter re-classifies after a 250 ms
-// debounce, with a 5 s fallback re-check for writes this process never
-// published. No DB connection is held while a waiter sleeps.
+// In-memory long-poll waiters. The realtime publisher calls notify() after
+// commit; a woken waiter re-classifies after a 250 ms debounce, with a 5 s
+// fallback re-check for writes this process never published. No DB connection
+// is held while a waiter sleeps.
 export class AttentionWaitHub {
   private readonly waiters = new Map<string, Set<Waiter>>();
   private closing = false;

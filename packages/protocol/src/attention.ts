@@ -1,7 +1,7 @@
 import { z } from "zod";
 
-// Agent attention contracts (spec §6). This module imports only zod and never
-// imports index.ts: `export *` from index.ts evaluates this file first, so any
+// Agent attention contracts. This module imports only zod and never imports
+// index.ts: `export *` from index.ts evaluates this file first, so any
 // back-reference to index.ts primitives would hit a TDZ error. The primitives
 // below mirror index.ts deliberately.
 const idSchema = z.string().uuid();

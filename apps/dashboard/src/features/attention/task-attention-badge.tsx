@@ -1,7 +1,7 @@
 import { cn } from "@/lib/cn";
 import { unreadCommentsLabel } from "./query-options";
 
-/** Unread-comment dot for tasks the human watches (spec §14). */
+/** Unread-comment dot for tasks the human watches. */
 export function TaskAttentionBadge({
   unread,
   mentions,

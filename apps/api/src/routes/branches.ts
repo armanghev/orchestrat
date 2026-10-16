@@ -12,9 +12,9 @@ import { ApiError } from "../services/api-error.js";
 import type { BranchService } from "../services/branch-service.js";
 import { FixedWindowRateLimit } from "../services/rate-limit.js";
 
-// Branch routes (docs/project-branches.md §6.7). Humans manage branches in a
-// project; agents list, look up and register them for their credential's
-// project. Only owners and admins set the default or archive.
+// Branch routes. Humans manage branches in a project; agents list, look up and
+// register them for their credential's project. Only owners and admins set the
+// default or archive.
 export async function humanBranchRoutes(
   app: FastifyInstance,
   options: { branches: BranchService }
@@ -91,9 +91,8 @@ export async function agentBranchRoutes(
   app: FastifyInstance,
   options: { branches: BranchService; registrationsPerMinute?: number }
 ) {
-  // At most 10 new branches per minute per agent credential (spec §12).
-  // Registering a branch that already exists is free: the CLI does it on
-  // every session start.
+  // At most 10 new branches per minute per agent credential. Registering a
+  // branch that already exists is free: the CLI does it on every session start.
   const creations = new FixedWindowRateLimit(
     options.registrationsPerMinute ?? 10,
     60_000

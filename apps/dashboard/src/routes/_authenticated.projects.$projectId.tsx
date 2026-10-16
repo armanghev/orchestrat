@@ -49,7 +49,7 @@ import { DashboardApiError } from "@/lib/api/client";
 export const Route = createFileRoute("/_authenticated/projects/$projectId")({
   // The branch is a search param holding its id, since names are reused and
   // the default can be renamed. Without it a page shows the default branch,
-  // so every older link stays valid (docs/project-branches.md §11.1).
+  // so every older link stays valid.
   validateSearch: z.object({ branch: z.string().optional() }),
   search: { middlewares: [retainSearchParams(["branch"])] },
   beforeLoad: async ({ context, params }) => {
@@ -378,7 +378,7 @@ function ProjectLayout() {
   // Without ?branch= a page shows the default branch. When the default moves
   // (another admin, a repository connect), the page keeps the branch it
   // showed and names it in the URL, instead of switching under the person
-  // and past the editor's unsaved-draft check (spec §11.1, §11.9).
+  // and past the editor's unsaved-draft check.
   const shownDefault = useRef<{ projectId: string; branchId: string }>(null);
   const keptBranchId =
     !requestedBranchId &&

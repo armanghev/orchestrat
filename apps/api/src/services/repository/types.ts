@@ -7,8 +7,8 @@ import type {
 import type { RepositoryCandidate } from "@orchestrat/protocol";
 
 // The provider-agnostic contract between the repository core and each
-// provider adapter (docs/project-branches.md §8.1). Adapters do the HTTP and
-// the signature checks; the core owns state, ordering and the database.
+// provider adapter. Adapters do the HTTP and the signature checks; the core
+// owns state, ordering and the database.
 
 export type ProviderName = "github" | "gitlab" | "origin";
 export type ConnectionRow = typeof repositoryConnections.$inferSelect;
@@ -56,7 +56,7 @@ export type MergedChange = {
 };
 
 /** Normalized provider events. They are hints: anything order-sensitive is
- * confirmed through the provider API before it changes state (§8.2). */
+ * confirmed through the provider API before it changes state. */
 export type ProviderEvent =
   | { type: "ref_pushed"; name: string; sha: string | null }
   | { type: "ref_deleted"; name: string; beforeSha: string | null }

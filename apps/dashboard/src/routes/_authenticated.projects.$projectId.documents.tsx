@@ -479,7 +479,7 @@ function DocumentsRoute() {
   const [creatingFolder, setCreatingFolder] = useState(false);
   const documents = useQuery(documentsQueryOptions(api, projectId, branchId));
   // A deep link to a document this branch doesn't have may name another
-  // branch's document; its own record says which (spec §11.1).
+  // branch's document; its own record says which.
   const linkedElsewhere = useQuery({
     ...documentQueryOptions(api, documentId ?? ""),
     enabled: Boolean(
@@ -1043,7 +1043,7 @@ function DocumentEditor({
     saveNow
   ]);
   // Switching branches saves a pending draft first. If it can't be saved
-  // (a conflict, a merge or an error), the person decides (spec §11.9).
+  // (a conflict, a merge or an error), the person decides.
   const flushDraft = async () => {
     // An autosave already on its way settles first, for up to about 5 s.
     for (let waited = 0; savingRef.current && waited < 5_000; waited += 50)

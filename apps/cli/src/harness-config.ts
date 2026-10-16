@@ -11,8 +11,8 @@ import {
   removeHarnessMcp
 } from "./safe-files.js";
 
-// Opt-in attention wiring for one integration (spec §11.3). The default is
-// off, which reproduces the pre-attention configuration exactly.
+// Opt-in attention wiring for one integration. The default is off, which
+// reproduces the pre-attention configuration exactly.
 export type AttentionPlanOptions = { autoContinue?: boolean; rewake?: boolean };
 
 export function attentionPlanOptions(

@@ -9,9 +9,9 @@ import type { MergeEngine } from "../merges/engine.js";
 import type { BranchSync } from "./branch-sync.js";
 import type { ConnectionRow, MergedChange } from "./types.js";
 
-// A merged pull or merge request merges the branches in Orchestrat too
-// (docs/project-branches.md §8.6). Conflicts become decisions and the target
-// is kept; provider automation never resolves them.
+// A merged pull or merge request merges the branches in Orchestrat too.
+// Conflicts become decisions and the target is kept; provider automation never
+// resolves them.
 
 const DELETED_SOURCE_WINDOW_MS = 7 * 24 * 3_600_000;
 

@@ -6,8 +6,7 @@ import { branch, project, taskCard } from "@/test/factories";
 import { handlers } from "@/test/handlers";
 import { renderDashboardRoute } from "@/test/render";
 
-// Shared fixtures for the dashboard's branch route tests
-// (docs/project-branches.md §11).
+// Shared fixtures for the dashboard's branch route tests.
 
 export const apiUrl = "http://localhost:8801/api/v1";
 export const expectedProject = project();

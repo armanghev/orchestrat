@@ -152,7 +152,7 @@ export function CreateProjectPage({
         return;
       }
       // The GitHub Setup URL comes back without our state; this attempt is
-      // how the setup route finds its way (docs/project-branches.md §11.8).
+      // how the setup route finds its way.
       window.sessionStorage.setItem(
         REPOSITORY_ATTEMPT_KEY,
         JSON.stringify({

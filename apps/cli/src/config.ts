@@ -31,7 +31,7 @@ export type ProjectMapping = {
   mcpScopes?: Partial<Record<Integration, McpScope>>;
   integrations: Partial<Record<Integration, IntegrationMapping>>;
 };
-// Opt-in intrusive wake-ups (spec §11.3, §19.1). Absent means off.
+// Opt-in intrusive wake-ups. Absent means off.
 export type AttentionConfig = {
   continue_on_stop?: ConfigurableIntegration[];
   rewake?: boolean;

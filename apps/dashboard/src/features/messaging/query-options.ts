@@ -1,9 +1,8 @@
 import { queryOptions } from "@tanstack/react-query";
 import type { ApiClient } from "@/lib/api/client";
 
-// Chats and the inbox belong to a branch (docs/project-branches.md §11.3). The
-// branch is the last key part, so a key without it is a prefix that matches
-// every branch of the project.
+// Chats and the inbox belong to a branch. The branch is the last key part, so a
+// key without it is a prefix that matches every branch of the project.
 const scoped = (branchId?: string) => (branchId ? [branchId] : []);
 
 export const messagingKeys = {

@@ -361,7 +361,6 @@ pnpm ci:local                                     # the GitHub Actions workflow,
 | `packages/sdk`, `packages/mcp`               | The agent API client and the MCP tool definitions                    |
 | `packages/config`, `logger`, `ui`, `testing` | Shared configuration, logging, UI primitives and test helpers        |
 | `deploy/`                                    | Dockerfile, compose files, the smoke test                            |
-| `docs/`                                      | Design specs and plans                                               |
 
 The design system for the dashboard is in [DESIGN.md](DESIGN.md).
 

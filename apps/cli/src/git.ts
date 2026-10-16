@@ -1,10 +1,10 @@
 import { readFile, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
-// Reads a Git checkout from files alone (docs/project-branches.md §7.3):
-// spawning `git` in a hook is slow, and on macOS /usr/bin/git can open the
-// Xcode installer prompt. Local Git only ever *names* a branch here; it never
-// merges, archives or deletes anything in Orchestrat.
+// Reads a Git checkout from files alone: spawning `git` in a hook is slow, and
+// on macOS /usr/bin/git can open the Xcode installer prompt. Local Git only
+// ever *names* a branch here; it never merges, archives or deletes anything in
+// Orchestrat.
 
 export type GitReader = {
   /** The file's text, or undefined when it is missing or unreadable. */

@@ -5,8 +5,8 @@ import {
 import { z } from "zod";
 import type { AttentionToolHost } from "./attention-tools.js";
 
-// handoff (ORC-15, spec §11.1): a direct message plus a handoffs row, so the
-// recipient sees it as a pending, directed attention item.
+// handoff (ORC-15): a direct message plus a handoffs row, so the recipient sees
+// it as a pending, directed attention item.
 export function registerHandoffTool(host: AttentionToolHost): void {
   host.server.registerTool(
     "handoff",

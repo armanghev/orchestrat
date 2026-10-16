@@ -1,7 +1,6 @@
 import type { Branch, RepositoryProvider } from "@orchestrat/protocol";
 
-// Plain-language copy for the repository settings (docs/project-branches.md
-// §8.7, §11.8).
+// Plain-language copy for the repository settings.
 
 export const providerLabels: Record<RepositoryProvider, string> = {
   github: "GitHub",
@@ -9,7 +8,7 @@ export const providerLabels: Record<RepositoryProvider, string> = {
   origin: "Cursor Origin"
 };
 
-/** The pending GitHub attempt, for the Setup URL route (§11.8). */
+/** The pending GitHub attempt, for the Setup URL route. */
 export const REPOSITORY_ATTEMPT_KEY = "orchestrat.repository.attempt";
 export const authorizationPattern = /^ra_[A-Za-z0-9_-]{20,}$/;
 
@@ -29,7 +28,7 @@ export function callbackErrorMessage(code: string) {
 
 /**
  * How connecting links the Orchestrat default branch to the provider's
- * default `D` (spec §8.7):
+ * default `D`:
  * - link: the default is already named D;
  * - rename: no active branch is named D, so the default is renamed to D;
  * - choose: another active branch is named D; keep the default's work as D

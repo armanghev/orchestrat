@@ -5,7 +5,7 @@ import { GithubAdapter } from "./github.js";
 import { GitlabAdapter } from "./gitlab.js";
 import { OriginAdapter } from "./origin.js";
 
-/** The adapters for every fully configured provider (setup guide §0.4). */
+/** The adapters for every fully configured provider. */
 export function providerAdapters(
   config: RepositoryConfig,
   secrets: SecretBox | null

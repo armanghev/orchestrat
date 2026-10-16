@@ -67,7 +67,7 @@ import {
 import { countLines, itemReasons } from "./merge-copy";
 import { branchKeys } from "./query-options";
 
-/** Where an import goes and what is fixed (docs/project-branches.md §11.6). */
+/** Where an import goes and what is fixed. */
 export type ImportRequest = {
   targetId: string;
   sourceId?: string;
@@ -129,7 +129,7 @@ function ResponsiveDialog({
   onClose: () => void;
   children: ReactNode;
 }) {
-  // A sheet on phones, a large dialog elsewhere (spec §11.6).
+  // A sheet on phones, a large dialog elsewhere.
   const isMobile = useIsMobile();
   const onOpenChange = (open: boolean) => {
     if (!open && !pending) onClose();
@@ -268,7 +268,7 @@ export function ImportDialog({
         ? defaultBranch.id
         : (sources[0]?.id ?? ""))
   );
-  // Members can't import into the default branch (spec §6.6).
+  // Members can't import into the default branch.
   const targets = branches.filter(
     (branch) =>
       !branch.archived_at &&
@@ -363,8 +363,8 @@ export function ImportDialog({
   // selection replaces it and a stale import returns a fresh one. Whenever
   // its fingerprint changes, choices carry over from the plan the person last
   // saw: unchanged conflicts keep theirs, changed ones are cleared and
-  // highlighted, new ones have none yet (spec §11.6). A layout effect, so
-  // Import never paints enabled with a choice made against old values.
+  // highlighted, new ones have none yet. A layout effect, so Import never
+  // paints enabled with a choice made against old values.
   useLayoutEffect(() => {
     if (!current) return;
     const before = seen.current;

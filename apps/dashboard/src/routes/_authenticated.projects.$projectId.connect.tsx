@@ -21,7 +21,7 @@ function ConnectRoute() {
 export const Route = createFileRoute(
   "/_authenticated/projects/$projectId/connect"
 )({
-  // Provider callbacks for the creation flow land here (plan §Pages → Connect).
+  // Provider callbacks for the creation flow land here.
   validateSearch: z.object({
     repository_authorization: z.string().optional(),
     repository_error: z.string().optional()

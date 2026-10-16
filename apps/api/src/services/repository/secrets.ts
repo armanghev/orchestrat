@@ -1,9 +1,9 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import type { SecretKey } from "@orchestrat/config";
 
-// Stored provider secrets (docs/project-branches.md §8.1, §12): AES-256-GCM,
-// `v1.<key_id>.<iv>.<ciphertext+tag>`, bound to a row and purpose through
-// additional authenticated data, so a ciphertext copied elsewhere fails.
+// Stored provider secrets: AES-256-GCM, `v1.<key_id>.<iv>.<ciphertext+tag>`,
+// bound to a row and purpose through additional authenticated data, so a
+// ciphertext copied elsewhere fails.
 
 export const aad = (table: string, rowId: string, purpose: string) =>
   `${table}:${rowId}:${purpose}`;

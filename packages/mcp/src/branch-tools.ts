@@ -8,10 +8,10 @@ import { z } from "zod";
 import type { ToolResult } from "./attention-tools.js";
 import type { ClaimTokenStore } from "./index.js";
 
-// Branches for the MCP bridge (docs/project-branches.md §7.2). The session is
-// pinned to one branch; switching closes it and opens a new one. A failed
-// close keeps the session, the claim tokens and the heartbeat, so nothing
-// local is lost and the switch can simply be retried.
+// Branches for the MCP bridge. The session is pinned to one branch; switching
+// closes it and opens a new one. A failed close keeps the session, the claim
+// tokens and the heartbeat, so nothing local is lost and the switch can simply
+// be retried.
 
 /** What the CLI reads from the Git checkout, override first. */
 export type CheckoutBranch = {

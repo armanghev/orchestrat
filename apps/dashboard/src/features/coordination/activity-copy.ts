@@ -7,7 +7,7 @@ const statusLabel = (value: unknown) =>
   typeof value === "string" ? value.replaceAll("_", " ") : "a new status";
 
 // Why a blocker closed. Resolutions run inside the causing actor's change, so
-// the actor line stays truthful and this only names the cause (spec §15).
+// the actor line stays truthful and this only names the cause.
 const blockResolutionCopy: Record<string, string> = {
   blocking_task_done: " after its blocking task was done",
   blocking_task_cancelled: " after its blocking task was cancelled",

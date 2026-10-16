@@ -15,9 +15,9 @@ import {
   type Fingerprint
 } from "./fingerprint.js";
 
-// Tasks, their comments and dependencies in the merge engine
-// (docs/project-branches.md §9.1–§9.5). Claims, sessions, watches, blocks and
-// handoffs are per-agent runtime state and never cross branches.
+// Tasks, their comments and dependencies in the merge engine. Claims, sessions,
+// watches, blocks and handoffs are per-agent runtime state and never cross
+// branches.
 
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 export type TaskRow = typeof tasks.$inferSelect;
@@ -135,7 +135,7 @@ export function planTasks(input: {
     ]);
 
   // Selected lineages, each with the selected tasks that require it. A task
-  // brings along every blocker the target lacks, transitively (spec §9.5).
+  // brings along every blocker the target lacks, transitively.
   const selected = new Map<string, Set<string>>();
   const roots =
     input.selection === "all"
@@ -249,7 +249,7 @@ export function planTasks(input: {
 }
 
 // Dependencies are additive: a source edge lands when both ends exist in the
-// target afterwards and it closes no cycle there (spec §9.1).
+// target afterwards and it closes no cycle there.
 function planEdges(
   input: { source: TaskSide; target: TaskSide },
   items: TaskPlanItem[]

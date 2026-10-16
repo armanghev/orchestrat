@@ -1,8 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 // The GitHub REST endpoints the adapter uses, in memory, behind an injected
-// fetch (docs/project-branches.md §13.3). Pages hold two items so pagination
-// is exercised.
+// fetch. Pages hold two items so pagination is exercised.
 
 type Repository = {
   id: number;

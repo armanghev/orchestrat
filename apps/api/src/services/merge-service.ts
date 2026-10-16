@@ -35,8 +35,7 @@ import { activeClaim } from "./task-block-hooks.js";
 import { applyTaskValues, lineageOf, taskValues } from "./merges/task-items.js";
 import { PermissionService } from "./permission-service.js";
 
-// Imports, merges and the "Needs your decision" list for people
-// (docs/project-branches.md §6.6, §6.7, §9.8, §9.9).
+// Imports, merges and the "Needs your decision" list for people.
 
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 type DecisionRow = typeof branchMergeDecisions.$inferSelect;
@@ -190,7 +189,7 @@ export class MergeService {
 
   async preview(userId: string, projectId: string, input: MergePreviewRequest) {
     // The same rules as apply: merges and imports into the default need an
-    // owner or admin, and nothing can land on an archived branch (§6.7).
+    // owner or admin, and nothing can land on an archived branch.
     const target = await findProjectBranch(
       this.db,
       projectId,
@@ -308,9 +307,9 @@ export class MergeService {
   }
 
   /**
-   * Owners and admins settle a decision (spec §9.8). use_target keeps the
-   * target and records the source state as agreed; use_source applies the
-   * recorded source values when the target hasn't changed since.
+   * Owners and admins settle a decision. use_target keeps the target and
+   * records the source state as agreed; use_source applies the recorded source
+   * values when the target hasn't changed since.
    */
   async resolve(
     userId: string,

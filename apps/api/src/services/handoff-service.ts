@@ -52,7 +52,7 @@ import {
 import type { ChatService } from "./chat-service.js";
 import { resolveBlocksOnParticipantResponse } from "./task-block-hooks.js";
 
-// Server constants (spec §11.1, §11.4, §19.5). Tuning is a one-line change.
+// Server constants. Tuning is a one-line change.
 export const handoffLimits = {
   maxHop: 4,
   perSenderPerHour: 20,
@@ -143,7 +143,7 @@ async function projectTask(
 }
 
 // A human who messaged the agent directly, or mentioned it in a chat or a
-// task comment, after `since` has stepped into the loop (spec §11.1).
+// task comment, after `since` has stepped into the loop.
 async function humanContactSince(
   executor: Executor,
   projectId: string,
@@ -216,7 +216,7 @@ async function chainFor(executor: Executor, projectId: string, sender: Actor) {
   return { chainId: incoming.chainId, hop: incoming.hop + 1 };
 }
 
-// Counts come from handoffs rows, so limits survive restarts (spec §11.1).
+// Counts come from handoffs rows, so limits survive restarts.
 async function assertWithinLimits(
   executor: Executor,
   projectId: string,
@@ -327,9 +327,9 @@ export class HandoffService {
     });
   }
 
-  // Spec §11.1: the direct chat and message go through ChatService (its
-  // canonicalization, idempotency, unread state and events), then a second
-  // transaction records the handoff row.
+  // The direct chat and message go through ChatService (its canonicalization,
+  // idempotency, unread state and events), then a second transaction records
+  // the handoff row.
   private async createAs(
     sender: Actor,
     projectId: string,
@@ -544,8 +544,8 @@ export class HandoffService {
     };
   }
 
-  // Spec §11.4 server budget: 12 wakes per agent per hour, 30 per day, and
-  // one per (chain, recipient). The woken agent's own credential records it.
+  // Server wake budget: 12 wakes per agent per hour, 30 per day, and one per
+  // (chain, recipient). The woken agent's own credential records it.
   async recordWake(
     principal: AgentPrincipal,
     input: RecordWakeRequest

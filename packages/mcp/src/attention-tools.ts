@@ -34,8 +34,8 @@ export type AttentionToolHost = {
 
 const NOTICE_LIMIT = 5;
 
-// Compact per-call notice (spec §12). Returns undefined when nothing needs
-// the agent's attention so quiet calls stay one content block long.
+// Compact per-call notice. Returns undefined when nothing needs the agent's
+// attention so quiet calls stay one content block long.
 export function attentionNotice(summary: AttentionSummary) {
   const { tasks, handoffs, blockers_resolved } = summary;
   if (!tasks.length && !handoffs.length && !blockers_resolved.length)

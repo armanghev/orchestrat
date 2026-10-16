@@ -336,14 +336,14 @@ function MessagesWorkspace({
   const candidatesQuery = useQuery(
     messageCandidatesQueryOptions(api, projectId)
   );
-  // Only this branch's documents can be attached (spec §11.3).
+  // Only this branch's documents can be attached.
   const documentsQuery = useQuery(
     documentsQueryOptions(api, projectId, branchId)
   );
   const chats = chatsQuery.data?.chats ?? [];
   const selectedChat = chats.find(({ id }) => id === selectedChatId);
   // A deep link to a chat this branch doesn't list may name another
-  // branch's chat; its record says which (spec §11.1).
+  // branch's chat; its record says which.
   const linkedChat = useQuery({
     queryKey: messagingKeys.chat(selectedChatId ?? ""),
     queryFn: () => api.getChat(selectedChatId as string),

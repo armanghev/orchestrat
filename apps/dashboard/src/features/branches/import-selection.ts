@@ -5,8 +5,8 @@ import type {
   MergePreviewItem
 } from "@orchestrat/protocol";
 
-// Import selection rules (docs/project-branches.md §9.5, §11.6). The person
-// picks items by lineage key; tasks bring the tasks they depend on.
+// Import selection rules. The person picks items by lineage key; tasks bring
+// the tasks they depend on.
 
 export type ImportSelection = Record<MergeItemType, ReadonlySet<string>>;
 
@@ -105,11 +105,11 @@ const conflictSignature = (item: MergePreviewItem) =>
   ]);
 
 /**
- * Carries choices from the preview the person last saw to a newer one
- * (spec §11.6). A conflict that is still the same keeps its choice. One whose
- * values changed loses it and is reported in `changed`, to be highlighted.
- * One that wasn't a conflict before, say because an item was added to the
- * selection, is reported in `added`: it simply has no choice yet.
+ * Carries choices from the preview the person last saw to a newer one. A
+ * conflict that is still the same keeps its choice. One whose values changed
+ * loses it and is reported in `changed`, to be highlighted. One that wasn't a
+ * conflict before, say because an item was added to the selection, is reported
+ * in `added`: it simply has no choice yet.
  */
 export function carryChoices(
   before: MergePreview | undefined,

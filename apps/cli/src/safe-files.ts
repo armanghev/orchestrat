@@ -80,8 +80,8 @@ export async function writePrivateState(path: string, content: string) {
   return atomicWrite(path, content, false);
 }
 
-// Stop continuation (spec §11.3) and Codex/Antigravity MCP budgets are opt-in
-// per integration; these constants are the managed values setup writes.
+// Stop continuation and Codex/Antigravity MCP budgets are opt-in per
+// integration; these constants are the managed values setup writes.
 export const WAIT_BUDGET_SECONDS = 600;
 export const MCP_TOOL_TIMEOUT_SECONDS = 660;
 export const REWAKE_TIMEOUT_SECONDS = 3600;

@@ -2,9 +2,8 @@ import { branchItemBaselines, type Database } from "@orchestrat/db";
 import { and, eq, or } from "drizzle-orm";
 import { sameFingerprint, type Fingerprint } from "./fingerprint.js";
 
-// Baselines are the last state two branches agreed on for one item (spec
-// §4.3, §9.3). They are stored under the sorted branch pair, so one row
-// serves both merge directions.
+// Baselines are the last state two branches agreed on for one item. They are
+// stored under the sorted branch pair, so one row serves both merge directions.
 
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 export type Executor = Database | Transaction;
@@ -81,10 +80,10 @@ export async function upsertBaseline(
 }
 
 /**
- * Stacked branches (spec §9.3): when an item copied from `source` to
- * `target` still matches what `source` agreed with a third branch, the copy
- * agrees with that branch too. So main → feat1 → feat2 can later merge
- * feat2 → main without spurious conflicts.
+ * Stacked branches: when an item copied from `source` to `target` still matches
+ * what `source` agreed with a third branch, the copy agrees with that branch
+ * too. So main → feat1 → feat2 can later merge feat2 → main without spurious
+ * conflicts.
  */
 export async function inheritBaselines(
   tx: Transaction,

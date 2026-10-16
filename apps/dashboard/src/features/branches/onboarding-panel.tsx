@@ -27,9 +27,9 @@ type Choice = "blank" | "everything" | "pick";
 const plural = (count: number, noun: string) =>
   `${count} ${noun}${count === 1 ? "" : "s"}`;
 
-// First visit to a new branch (docs/project-branches.md §11.6): start blank
-// or bring work over from another branch. It sits above every page until
-// the branch is set up; it is not a modal.
+// First visit to a new branch: start blank or bring work over from another
+// branch. It sits above every page until the branch is set up; it is not a
+// modal.
 export function BranchOnboardingPanel({ api }: { api: ApiClient }) {
   const context = useOptionalBranch();
   const branch = context?.branch;
@@ -62,7 +62,7 @@ function OnboardingPanel({ api }: { api: ApiClient }) {
   );
   const tasks = useQuery(tasksQueryOptions(api, projectId, branchId));
   const documents = useQuery(documentsQueryOptions(api, projectId, branchId));
-  // Members can't import into the default branch (spec §6.6).
+  // Members can't import into the default branch.
   const canImport = sources.length > 0 && (canManage || !branch.is_default);
   const blank = useMutation({
     mutationFn: () => api.startBranchBlank(projectId, branchId),

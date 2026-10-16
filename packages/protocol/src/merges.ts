@@ -1,7 +1,7 @@
 import { z } from "zod";
 
-// Import, merge and decision contracts (docs/project-branches.md §9). Imports
-// only zod; see branches.ts for why.
+// Import, merge and decision contracts. Imports only zod; see branches.ts for
+// why.
 const idSchema = z.string().uuid();
 const dateSchema = z.string().datetime();
 const cursorSchema = z.string().trim().min(1).max(2048);
@@ -58,7 +58,7 @@ const selectionListSchema = z.union([
   z.literal("all"),
   z.array(idSchema).max(2000)
 ]);
-/** Lineage keys to import, per item type (spec §9.5). */
+/** Lineage keys to import, per item type. */
 export const mergeSelectionSchema = z.object({
   tasks: selectionListSchema.default([]),
   documents: selectionListSchema.default([]),

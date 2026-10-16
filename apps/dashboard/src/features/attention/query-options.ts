@@ -5,9 +5,9 @@ import type {
 } from "@orchestrat/protocol";
 import type { ApiClient } from "@/lib/api/client";
 
-// Watches and read positions are private to the viewer (spec §14), so every
-// attention query is keyed by project and refetched rather than patched from
-// realtime payloads.
+// Watches and read positions are private to the viewer, so every attention
+// query is keyed by project and refetched rather than patched from realtime
+// payloads.
 export const attentionKeys = {
   all: ["attention"] as const,
   project: (projectId: string) => [...attentionKeys.all, projectId] as const,
@@ -36,7 +36,7 @@ export const taskAttentionQueryOptions = (api: ApiClient, projectId: string) =>
     staleTime: 5_000
   });
 
-/** Agent status lines on the Agents page, refreshed every 30 s (spec §14). */
+/** Agent status lines on the Agents page, refreshed every 30 s. */
 export const agentAttentionQueryOptions = (api: ApiClient, projectId: string) =>
   queryOptions({
     queryKey: attentionKeys.agents(projectId),

@@ -204,7 +204,7 @@ export class IntegrationService {
     let row: IntegrationRow;
     if (input.provider === "github") {
       // The Setup URL's installation id is untrusted: it counts only when the
-      // person's own token lists it (§8.3).
+      // person's own token lists it.
       const confirmed = await provider(() =>
         adapter.confirmInstallation!({
           attempt,

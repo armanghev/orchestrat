@@ -20,7 +20,7 @@ import { useBranch } from "./branch-context";
 /** How many active branches the menu lists before "All branches…". */
 export const BRANCH_MENU_LIMIT = 12;
 
-/** Branches with unread messages, from the all-branches inbox (§11.2). */
+/** Branches with unread messages, from the all-branches inbox. */
 export function useUnreadBranchIds(api: ApiClient, projectId: string) {
   const inbox = useQuery(inboxAllBranchesQueryOptions(api, projectId));
   return new Set(
@@ -42,7 +42,7 @@ export function menuBranches(branches: Branch[], current: Branch) {
 }
 
 // The third breadcrumb: Organization › Project › Branch › Page. It copies the
-// project selector's menu (docs/project-branches.md §11.2).
+// project selector's menu.
 export function BranchSelector({ api }: { api: ApiClient }) {
   const navigate = useNavigate();
   const {

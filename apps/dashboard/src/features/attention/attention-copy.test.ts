@@ -53,7 +53,7 @@ describe("relativeTime", () => {
 });
 
 describe("agentAttentionLine", () => {
-  it("matches the spec examples", () => {
+  it("renders each status line", () => {
     expect(
       agentAttentionLine(
         agentAttention({

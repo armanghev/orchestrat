@@ -18,8 +18,7 @@ import {
   selfId
 } from "@/test/branch-routes";
 
-// The branch selector, `?branch=` and per-page scoping
-// (docs/project-branches.md §11.1–§11.5, §11.9).
+// The branch selector, `?branch=` and per-page scoping.
 
 vi.mock("@/features/documents/markdown-editor", () => ({
   MarkdownEditor: forwardRef<

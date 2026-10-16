@@ -13,8 +13,8 @@ import type { FastifyInstance, preHandlerHookHandler } from "fastify";
 import type { RepositoryService } from "../services/repository/connection-service.js";
 import type { WebhookIngress } from "../services/repository/webhook-ingress.js";
 
-// Repository connection routes (docs/project-branches.md §6.7). Owners and
-// admins connect, sync and disconnect; members see the status.
+// Repository connection routes. Owners and admins connect, sync and disconnect;
+// members see the status.
 export async function humanRepositoryRoutes(
   app: FastifyInstance,
   options: { repositories: RepositoryService }

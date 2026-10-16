@@ -664,9 +664,9 @@ export class ChatService {
   }
 
   /**
-   * create_chat keys are scoped to the branch (spec §6.5). Before branches
-   * they were scoped to the project, so a retry that spans the deploy still
-   * replays on the default branch.
+   * create_chat keys are scoped to the branch. Before branches they were scoped
+   * to the project, so a retry that spans the deploy still replays on the
+   * default branch.
    */
   private async legacyIdempotency(
     tx: Transaction,
@@ -1744,9 +1744,8 @@ export class ChatService {
   }
 
   /**
-   * Entity writes take the branch from the chat (spec §6.1): archived
-   * branches are read-only, and an agent working on another branch gets
-   * BRANCH_MISMATCH.
+   * Entity writes take the branch from the chat: archived branches are
+   * read-only, and an agent working on another branch gets BRANCH_MISMATCH.
    */
   private chatBranchGuard(
     tx: Transaction,

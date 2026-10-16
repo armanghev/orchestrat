@@ -19,10 +19,9 @@ import type {
   RemoteBranch
 } from "./types.js";
 
-// Provider branch state → Orchestrat branches (docs/project-branches.md
-// §8.2, §8.7, §8.8). Events are hints: deletes are confirmed through the
-// provider API, refs keep one row per generation of a name, and the default
-// branch is never archived by anything a provider says.
+// Provider branch state → Orchestrat branches. Events are hints: deletes are
+// confirmed through the provider API, refs keep one row per generation of a
+// name, and the default branch is never archived by anything a provider says.
 
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 type RefRow = typeof repositoryRefs.$inferSelect;
@@ -35,7 +34,7 @@ export type MergeHandler = (
 ) => Promise<void>;
 
 export class BranchSync {
-  /** Set by the merge wiring (§8.6); merges are skipped until it is. */
+  /** Set by the merge wiring; merges are skipped until it is. */
   onMerged?: MergeHandler;
 
   constructor(
@@ -67,7 +66,7 @@ export class BranchSync {
           deliveryId
         );
       else if (event.type === "ref_deleted") {
-        // Confirm before archiving anything (§8.2).
+        // Confirm before archiving anything.
         const remote = await this.adapter(connection).getBranch(
           connection,
           event.name
@@ -320,7 +319,7 @@ export class BranchSync {
 
   /**
    * Re-reads the provider: the repository, every branch and merged changes
-   * since the watermark (§8.8). Lost or out-of-order events converge here.
+   * since the watermark. Lost or out-of-order events converge here.
    */
   async reconcile(connection: ConnectionRow) {
     if (
@@ -390,10 +389,10 @@ export class BranchSync {
   }
 
   /**
-   * The provider's default moved (§8.2). When the Orchestrat default still
-   * tracks the old one it follows: a rename (old name gone, same head)
-   * renames it in place; otherwise the new default's branch becomes the
-   * default. A default that tracked something else gets a notice instead.
+   * The provider's default moved. When the Orchestrat default still tracks the
+   * old one it follows: a rename (old name gone, same head) renames it in
+   * place; otherwise the new default's branch becomes the default. A default
+   * that tracked something else gets a notice instead.
    */
   private async defaultChanged(
     connection: ConnectionRow,
@@ -493,7 +492,7 @@ export class BranchSync {
     });
   }
 
-  /** The newest deleted ref of a name whose head matches (§8.6). */
+  /** The newest deleted ref of a name whose head matches. */
   async deletedRef(connectionId: string, name: string, sha: string | null) {
     if (!sha) return null;
     const rows = await this.db

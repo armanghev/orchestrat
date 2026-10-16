@@ -3,8 +3,8 @@ import type { WaitResponse } from "@orchestrat/protocol";
 import { z } from "zod";
 import type { AttentionToolHost } from "./attention-tools.js";
 
-// One server long-poll is at most 25 s (spec §10); the tool loops rounds
-// until something happens or its budget is spent.
+// One server long-poll is at most 25 s; the tool loops rounds until something
+// happens or its budget is spent.
 const roundMs = 25_000;
 const requestLimitSeconds = 1800;
 // A setup-written client timeout (--wait-budget-seconds) is capped here.
@@ -12,9 +12,9 @@ const configuredCapSeconds = 600;
 
 export type WaitBudget = { defaultSeconds: number; maxSeconds: number };
 
-// Per-integration budgets (spec §10). Without a setup-written client
-// timeout, codex and antigravity stay at their default, which is what their
-// clients are known to allow; progress does not extend those timeouts.
+// Per-integration budgets. Without a setup-written client timeout, codex and
+// antigravity stay at their default, which is what their clients are known to
+// allow; progress does not extend those timeouts.
 export function waitBudget(
   integration: string,
   waitBudgetSeconds?: number
@@ -117,7 +117,7 @@ async function waitForUpdate(
   }
 }
 
-// wait_for_update (ORC-11, spec §10). `now` is injectable for tests.
+// wait_for_update (ORC-11). `now` is injectable for tests.
 export function registerWaitTool(
   host: AttentionToolHost,
   options: { now?: () => number } = {}
