@@ -1,6 +1,7 @@
 {
   "name": "@orchestrat/cli",
   "version": "0.1.0",
+  "mcpName": "io.github.armanghev/orchestrat",
   "license": "Elastic-2.0",
   "author": "Arman Ghevondyan",
   "homepage": "https://orchestrat.dev/docs",
