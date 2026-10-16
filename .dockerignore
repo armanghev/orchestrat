@@ -1,16 +1,19 @@
 .git
 .worktrees
 local
-node_modules
-dist
-.next
-coverage
-.env
-.env.*
-*.env
-*.env.*
-*.tsbuildinfo
-.DS_Store
+# A bare name only matches at the context root; **/ reaches into apps/* and
+# packages/* too (local installs, stale builds, env files vite would load).
+**/node_modules
+**/dist
+**/.next
+**/.turbo
+**/coverage
+**/.env
+**/.env.*
+**/*.env
+**/*.env.*
+**/*.tsbuildinfo
+**/.DS_Store
 apps/landing/*
 !apps/landing/package.json
 apps/dashboard/src-tauri/target

@@ -36,6 +36,11 @@ const login = (app: App, email: string, secret = password) =>
     payload: { email, password: secret }
   });
 
+// Changes the last character to a different one (a fixed replacement would
+// match the original 1 time in 64).
+const tampered = (token: string) =>
+  `${token.slice(0, -1)}${token.endsWith("A") ? "B" : "A"}`;
+
 const profile = (app: App, token: string) =>
   app.inject({ method: "GET", url: "/api/v1/profile", headers: bearer(token) });
 
@@ -340,7 +345,7 @@ test("only access tokens work on signed-in routes", async () => {
   assert.equal((await profile(app, session.refresh_token)).statusCode, 401);
   assert.equal((await profile(app, "alice")).statusCode, 401);
   assert.equal(
-    (await profile(app, `${session.access_token.slice(0, -1)}A`)).statusCode,
+    (await profile(app, tampered(session.access_token))).statusCode,
     401
   );
   const agentToken = await profile(app, `orch_agent_${"a".repeat(43)}`);
