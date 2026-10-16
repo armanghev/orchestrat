@@ -615,12 +615,28 @@ async function seed(
   }, authentication);
 }
 // Sheets and dialogs fade in; contrast checks must wait for the final colors.
+// Waits until no animation or transition is running. An element that just
+// mounted can start its enter animation a frame or two later, so every check
+// waits two frames first.
 async function settle(page: Page) {
-  await page.waitForFunction(() =>
-    document
-      .getAnimations()
-      .every((animation) => animation.playState !== "running")
-  );
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          new Promise<boolean>((resolve) =>
+            requestAnimationFrame(() =>
+              requestAnimationFrame(() =>
+                resolve(
+                  document
+                    .getAnimations()
+                    .some((animation) => animation.playState === "running")
+                )
+              )
+            )
+          )
+      )
+    )
+    .toBe(false);
 }
 async function expectNoAxe(page: Page) {
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);

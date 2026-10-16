@@ -163,12 +163,28 @@ async function seed(page: Page) {
 }
 
 // Sheets and dialogs fade in; contrast checks wait for the final colors.
+// Waits until no animation or transition is running. An element that just
+// mounted can start its enter animation a frame or two later, so every check
+// waits two frames first.
 async function settle(page: Page) {
-  await page.waitForFunction(() =>
-    document
-      .getAnimations()
-      .every((animation) => animation.playState !== "running")
-  );
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          new Promise<boolean>((resolve) =>
+            requestAnimationFrame(() =>
+              requestAnimationFrame(() =>
+                resolve(
+                  document
+                    .getAnimations()
+                    .some((animation) => animation.playState === "running")
+                )
+              )
+            )
+          )
+      )
+    )
+    .toBe(false);
 }
 
 /**
@@ -183,12 +199,6 @@ async function expectNoAxe(page: Page, include?: string) {
     if (colorScheme === "dark")
       await expect(page.locator("html")).toHaveClass(/\bdark\b/);
     else await expect(page.locator("html")).not.toHaveClass(/\bdark\b/);
-    await page.evaluate(
-      () =>
-        new Promise((resolve) =>
-          requestAnimationFrame(() => requestAnimationFrame(resolve))
-        )
-    );
     await settle(page);
     const builder = new AxeBuilder({ page });
     if (include) builder.include(include);

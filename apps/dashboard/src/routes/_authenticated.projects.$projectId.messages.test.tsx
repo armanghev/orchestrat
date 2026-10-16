@@ -205,8 +205,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// Each test drives several dialogs and requests; 5s is tight on slow CI runners.
-describe("project messages route", { timeout: 15_000 }, () => {
+describe("project messages route", () => {
   it("creates a group with more than one selected project participant", async () => {
     const chats: Chat[] = [];
     const created = chat({
