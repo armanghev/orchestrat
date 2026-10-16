@@ -1356,6 +1356,9 @@ test("@phone task attention shows unread badges, a New divider, and a watch togg
 test("@phone blocked tasks show the card line and callout, and Resolve blocker confirms in both themes", async ({
   page
 }) => {
+  // Six axe scans across two themes and three dialogs: a slow CI runner
+  // spends the whole default 30s on them.
+  test.slow();
   await page.emulateMedia({ colorScheme: "light" });
   const blockingTaskId = "00000000-0000-4000-8000-000000000012";
   const baseTask = {
