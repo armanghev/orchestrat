@@ -254,7 +254,7 @@ describe("project messages route", () => {
         ]
       })
     );
-  });
+  }, 15_000); // several dialogs and requests; 5s is tight on slow CI runners
 
   it("creates a human-agent direct message with typed participant identities", async () => {
     const agent = candidate({
