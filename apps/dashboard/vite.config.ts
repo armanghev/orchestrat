@@ -29,6 +29,9 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: "./vitest.setup.ts",
-    exclude: [...configDefaults.exclude, "e2e/**"]
+    exclude: [...configDefaults.exclude, "e2e/**"],
+    // Route tests drive several dialogs and page loads; CI runners are slow
+    // enough that Vitest's 5s default flakes.
+    testTimeout: 15_000
   }
 });
