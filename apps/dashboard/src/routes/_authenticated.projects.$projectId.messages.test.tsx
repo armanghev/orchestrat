@@ -205,7 +205,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("project messages route", () => {
+// Each test drives several dialogs and requests; 5s is tight on slow CI runners.
+describe("project messages route", { timeout: 15_000 }, () => {
   it("creates a group with more than one selected project participant", async () => {
     const chats: Chat[] = [];
     const created = chat({
@@ -254,7 +255,7 @@ describe("project messages route", () => {
         ]
       })
     );
-  }, 15_000); // several dialogs and requests; 5s is tight on slow CI runners
+  });
 
   it("creates a human-agent direct message with typed participant identities", async () => {
     const agent = candidate({
