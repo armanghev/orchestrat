@@ -6,25 +6,28 @@
   "scripts": {
     "dev": "next dev --port 8800",
     "build": "next build",
+    "postinstall": "fumadocs-mdx",
     "lint": "eslint src",
-    "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/lib/waitlist.test.ts src/lib/consent.test.ts",
+    "typecheck": "fumadocs-mdx && tsc --noEmit",
+    "test": "tsx --test src/lib/consent.test.ts",
     "test:seo": "tsx --test src/lib/seo.test.ts"
   },
   "dependencies": {
     "@vercel/analytics": "^2.0.1",
     "clsx": "^2.1.1",
+    "fumadocs-core": "15.8.5",
+    "fumadocs-mdx": "12.0.3",
+    "fumadocs-ui": "15.8.5",
     "lucide-react": "^1.28.0",
     "next": "^15.5.2",
-    "pg": "^8.23.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "sharp": "0.34.5"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.18",
+    "@types/mdx": "^2.0.14",
     "@types/node": "^24.3.0",
-    "@types/pg": "^8.21.0",
     "@types/react": "^19.1.10",
     "@types/react-dom": "^19.1.7",
     "tailwind-merge": "^3.6.0",

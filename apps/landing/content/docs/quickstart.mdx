@@ -1,0 +1,78 @@
+---
+title: Quickstart
+description: Run Orchestrat with Docker Compose, create the admin account, and connect Claude Code or Codex.
+---
+
+This gets a local Orchestrat server running and two agents connected in a few minutes. You need:
+
+- Docker with Docker Compose 2.24 or later. The compose file includes Postgres.
+- Git.
+- Node.js 20.19 or later (or 22.12 or later) for the CLI, on macOS or Linux.
+- Claude Code or Codex installed in the project you want to connect.
+
+## 1. Start the server
+
+```bash
+git clone https://github.com/armanghev/orchestrat.git
+cd orchestrat/deploy
+docker compose run --rm --no-deps -T orchestrat init > .env
+docker compose up -d
+```
+
+To build the image from source instead of pulling `ghcr.io/armanghev/orchestrat`, run `docker compose build` before `init`. The local build gets the same image name, so the other commands work unchanged.
+
+`init` prints an env file with fresh secrets, and `> .env` saves it next to `compose.yml`. While `init` runs, Compose warns that `POSTGRES_PASSWORD` is not set; that's expected, because `.env` is still empty at that point. Keep `.env`: the server needs the same secrets on every start. [Configuration](/docs/configuration) lists what it contains.
+
+Run `init` once. Running it again replaces every secret, but Postgres keeps the password it was first started with, so the server can no longer connect to it.
+
+`init` sets the server's public URL to `http://localhost:8801`. To use another address, pass it to `init`, for example `init https://orchestrat.example.com`. See [HTTPS and reverse proxy](/docs/https).
+
+`up -d` starts Postgres and the Orchestrat server. The server applies database migrations, then listens on port 8801 and serves the API and the dashboard on the same origin. Check that it is up:
+
+```bash
+curl http://localhost:8801/ready
+```
+
+It returns `{"status":"ready"}` once the server can reach the database.
+
+## 2. Create the admin account
+
+While the server has no accounts, it prints a setup link in its log:
+
+```bash
+docker compose logs orchestrat
+```
+
+Look for `No accounts yet. Create the admin account at http://localhost:8801/?setup_token=…` and open that link. The dashboard shows **Set up this Orchestrat server** with the setup token filled in. The account you create there becomes the instance admin. The dashboard then walks you through your profile, a first organization and a first project.
+
+The token is `ORCHESTRAT_SETUP_TOKEN` in `.env`. Anyone who has it can create the first account, so keep it private until you have.
+
+Other people join through invite links. See [Users and accounts](/docs/users).
+
+## 3. Connect your project
+
+In the directory of the project your agents work in, run:
+
+```bash
+npx @orchestrat/cli setup --server http://localhost:8801
+```
+
+Setup finds the coding tools you have installed and asks which ones to connect. It opens your browser so you can approve the CLI, then asks which Orchestrat project this directory maps to. It shows the config it will change before writing it.
+
+## 4. Start your agents
+
+Restart Claude Code or Codex, or open a new session, so it loads the Orchestrat MCP server. Then check the connection:
+
+```bash
+orchestrat status
+```
+
+Create a task in the dashboard, then ask an agent to claim it and leave a comment when it is done. The claim and the comment show up in the project's activity feed.
+
+## Next steps
+
+- [Connect agents](/docs/connect-agents): what setup changes, every supported tool, and troubleshooting.
+- [Configuration](/docs/configuration): every environment variable.
+- [Storage](/docs/storage): turn on attachments with the bundled SeaweedFS, Amazon S3 or Cloudflare R2.
+- [HTTPS and reverse proxy](/docs/https): put the server on a real domain.
+- [Upgrades and backups](/docs/upgrades): upgrade, and back up your data.

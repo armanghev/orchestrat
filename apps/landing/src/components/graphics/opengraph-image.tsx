@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ImageResponse } from "next/og";
 import sharp from "sharp";
+import { githubMarkPath } from "@/components/graphics/github-mark";
 
 const size = { width: 1200, height: 630 };
 
@@ -62,8 +63,8 @@ export default async function OpenGraphImage() {
               color: "#b0b0b0"
             }}
           >
-            <span>Tasks, context, and agent activity.</span>
-            <span>One shared workspace.</span>
+            <span>Shared tasks, plans, and activity.</span>
+            <span>Free to self-host. Source-available.</span>
           </div>
         </div>
         <img
@@ -80,19 +81,39 @@ export default async function OpenGraphImage() {
           alignItems: "center"
         }}
       >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            padding: "17px 24px",
-            borderRadius: 6,
-            background: "#eeeeee",
-            color: "#1e1e1e",
-            fontSize: 24,
-            fontWeight: 700
-          }}
-        >
-          <span>Join the waitlist</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              padding: "17px 24px",
+              borderRadius: 6,
+              background: "#eeeeee",
+              color: "#1e1e1e",
+              fontSize: 24,
+              fontWeight: 700
+            }}
+          >
+            <span>Self-host it</span>
+          </div>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              padding: "16px 23px",
+              borderRadius: 6,
+              border: "1px solid #5a5a5a",
+              color: "#eeeeee",
+              fontSize: 24,
+              fontWeight: 700
+            }}
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="#eeeeee">
+              <path d={githubMarkPath} />
+            </svg>
+            <span>GitHub</span>
+          </div>
         </div>
         <span style={{ fontSize: 23, color: "#b0b0b0" }}>orchestrat.dev</span>
       </div>

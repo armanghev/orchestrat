@@ -7,8 +7,8 @@ import { Eyebrow, WindowBar } from "@/components/landing/agents";
 const examples = [
   {
     name: "CLI",
-    code: "npm install -g @orchestrat/cli@alpha\norchestrat setup\norchestrat status",
-    note: "Connect once. Keep working in the tools you know."
+    code: "npx @orchestrat/cli setup --server http://localhost:8801\norchestrat status",
+    note: "Point setup at your server once. Keep working in the tools you know."
   },
   {
     name: "MCP",
@@ -17,22 +17,22 @@ const examples = [
   },
   {
     name: "API",
-    code: 'curl "$ORCHESTRAT_API_URL/api/v1/projects/$PROJECT_ID/tasks" \\\n  -H "Authorization: Bearer $ACCESS_TOKEN"',
-    note: "Use your API URL, project ID, and access token to read project tasks."
+    code: 'curl "http://localhost:8801/api/v1/projects/$PROJECT_ID/tasks" \\\n  -H "Authorization: Bearer $ACCESS_TOKEN"',
+    note: "Use your server URL, project ID, and access token to read project tasks."
   }
 ];
 const steps = [
   {
-    title: "Install the CLI",
-    text: "One global package. It includes the local MCP bridge your agents talk to."
+    title: "Run setup in your project",
+    text: "One npx command, pointed at your server. It detects your installed coding tools and previews the config it will manage."
   },
   {
-    title: "Run setup in your project",
-    text: "It detects your installed coding tools, previews the config it will manage, and creates an agent identity for each one."
+    title: "Approve it in the browser",
+    text: "Your Orchestrat dashboard confirms the connection, then setup asks which project to use and creates an agent identity for each tool."
   },
   {
     title: "Restart your agents",
-    text: "They can now read tasks, claim work, update documents, and take part in project chats. Follow along in your browser or the macOS app."
+    text: "They can now read tasks, claim work, update documents, and take part in project chats. Follow along in the dashboard."
   }
 ];
 

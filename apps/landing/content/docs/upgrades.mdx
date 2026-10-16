@@ -1,0 +1,108 @@
+---
+title: Upgrades and backups
+description: Upgrade by pulling a new image; migrations run on start. Back up Postgres, your storage and your .env file.
+---
+
+Run these commands from the `deploy/` directory with your `.env`. If you use the bundled storage, add `-f compose.yml -f compose.storage.yml` to each `docker compose` command, or set `COMPOSE_FILE` as described in [Storage](/docs/storage#the-bundled-seaweedfs).
+
+## Upgrade
+
+Take a [backup](#back-up-postgres) first, then:
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+The new server applies pending database migrations before it accepts requests, under a Postgres lock so two servers starting at once don't both run them. Migrations only move forward, and Orchestrat has no down migrations. To go back to an older version, restore the backup you took before upgrading and run the older image.
+
+If you build the image from source, update the checkout and rebuild instead:
+
+```bash
+git pull
+docker compose up -d --build
+```
+
+If you set `ORCHESTRAT_MIGRATE_ON_START=false`, run the migrations yourself before starting the new version: from a source checkout of the same version, run `pnpm db:migrate` with `ORCHESTRAT_DATABASE_URL` pointing at the database.
+
+Upgrade the CLI on each machine too. See [Connect agents](/docs/connect-agents#upgrade-or-reinstall).
+
+### Pin a version
+
+By default compose runs the `latest` tag, the newest stable release. To stay on one release, set its version in `.env`, then run `docker compose pull` and `docker compose up -d`:
+
+```bash
+ORCHESTRAT_VERSION=<version>
+```
+
+Releases are tagged with the full version, such as `1.4.2`, and with the minor version, such as `1.4`, which follows its patch releases.
+
+## What to back up
+
+| What     | Why                                                                                                                                                                                     |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Postgres | Accounts, organizations, projects, tasks, documents, chats, activity and agent identities.                                                                                              |
+| Storage  | Document revisions, attachments and avatars, if you turned on storage.                                                                                                                  |
+| `.env`   | Generated secrets. Without `ORCHESTRAT_REPOSITORY_SECRET_KEY`, stored Git provider tokens can't be decrypted; without `POSTGRES_PASSWORD`, the server can't reach the bundled database. |
+
+Store backups somewhere other than the machine running Orchestrat, and keep `.env` as private as a password. Back up storage at the same time as Postgres, so the database and the files it points to match.
+
+## Back up Postgres
+
+With the bundled Postgres, dump the database to a SQL file:
+
+```bash
+docker compose exec -T postgres pg_dump -U orchestrat orchestrat > backup.sql
+```
+
+`-T` keeps Docker from adding terminal control characters to the output. If you use your own Postgres, run `pg_dump` against `ORCHESTRAT_DATABASE_URL` instead.
+
+## Restore Postgres
+
+Stop the server so nothing writes during the restore, replace the database with an empty one, load the dump, then start the server again:
+
+```bash
+docker compose stop orchestrat
+docker compose exec -T postgres dropdb -U orchestrat orchestrat
+docker compose exec -T postgres createdb -U orchestrat orchestrat
+docker compose exec -T postgres psql -U orchestrat -d orchestrat < backup.sql
+docker compose start orchestrat
+```
+
+On a new machine, put your `.env` back first and start only Postgres, which creates an empty `orchestrat` database. Load the dump, then start everything:
+
+```bash
+docker compose up -d --wait postgres
+docker compose exec -T postgres psql -U orchestrat -d orchestrat < backup.sql
+docker compose up -d
+```
+
+Restoring a dump from an older version is fine: the server runs the missing migrations when it starts.
+
+## Back up SeaweedFS
+
+The bundled SeaweedFS keeps everything in its `seaweedfs` volume. Stop it, copy the data out, and start it again:
+
+```bash
+docker compose -f compose.yml -f compose.storage.yml stop seaweedfs
+docker compose -f compose.yml -f compose.storage.yml cp seaweedfs:/data ./seaweedfs-backup
+docker compose -f compose.yml -f compose.storage.yml start seaweedfs
+```
+
+To restore, for example on a new machine, create the container without starting it, copy the data in, then start the stack:
+
+```bash
+docker compose -f compose.yml -f compose.storage.yml create seaweedfs
+docker compose -f compose.yml -f compose.storage.yml cp ./seaweedfs-backup/. seaweedfs:/data
+docker compose -f compose.yml -f compose.storage.yml up -d
+```
+
+## Back up S3 or R2
+
+Copy the bucket with any S3-compatible tool. For example, with [rclone](https://rclone.org) configured with a remote named `orchestrat`:
+
+```bash
+rclone sync orchestrat:orchestrat ./orchestrat-bucket-backup
+```
+
+You can also turn on bucket versioning or the provider's own backups.

@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "fumadocs-ui/css/preset.css";
 
 /* The dashboard's dark palette is the landing page's source of truth. */
 :root {
@@ -49,6 +50,24 @@
   --radius-sm: calc(var(--radius) - 2px);
   --radius-md: var(--radius);
   --radius-lg: calc(var(--radius) + 4px);
+
+  /* Docs (Fumadocs) use the landing palette; orange stays an accent. */
+  --color-fd-background: var(--background);
+  --color-fd-foreground: var(--foreground);
+  --color-fd-muted: var(--muted);
+  --color-fd-muted-foreground: var(--muted-foreground);
+  --color-fd-popover: var(--card);
+  --color-fd-popover-foreground: var(--foreground);
+  --color-fd-card: var(--rail);
+  --color-fd-card-foreground: var(--foreground);
+  --color-fd-border: var(--border);
+  --color-fd-primary: var(--primary-text);
+  --color-fd-primary-foreground: var(--primary-foreground);
+  --color-fd-secondary: var(--secondary);
+  --color-fd-secondary-foreground: var(--foreground);
+  --color-fd-accent: var(--secondary);
+  --color-fd-accent-foreground: var(--foreground);
+  --color-fd-ring: var(--ring);
 }
 
 @layer base {
@@ -58,6 +77,9 @@
   html {
     scroll-behavior: smooth;
     scroll-padding-top: 100px;
+    /* Keep the scrollbar's space on short pages too, so the layout doesn't
+       shift between pages when scrollbars are always shown. */
+    scrollbar-gutter: stable;
   }
   body {
     @apply m-0 bg-background font-sans text-foreground antialiased;

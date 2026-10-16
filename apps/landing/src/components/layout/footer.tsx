@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { OrchestratLogo } from "@/components/graphics/orchestrat-logo";
+import { licenseUrl } from "@/lib/links";
 import { founder } from "@/lib/seo";
 import { CookiePreferences } from "@/components/cookie-preferences";
 
@@ -18,7 +19,6 @@ export function Footer() {
             { href: "/about", label: "About" },
             { href: "/docs", label: "Docs" },
             { href: "/guides", label: "Guides" },
-            { href: "/pricing", label: "Pricing" },
             { href: "/faq", label: "FAQ" }
           ].map((link) => (
             <Link
@@ -31,34 +31,51 @@ export function Footer() {
           ))}
         </nav>
       </div>
-      <p className="pb-7 text-xs leading-6 text-muted-foreground">
-        Built by{" "}
-        <a href={founder.url} className="hover:text-primary-text">
-          {founder.name}
-        </a>{" "}
-        ·{" "}
-        <a
-          href="mailto:arman@orchestrat.dev"
-          className="hover:text-primary-text"
-        >
-          arman@orchestrat.dev
+      <FooterCredits className="pb-7" />
+      <FooterLegal className="border-t py-7" />
+    </footer>
+  );
+}
+
+export function FooterCredits({ className = "" }: { className?: string }) {
+  return (
+    <p className={`text-xs leading-6 text-muted-foreground ${className}`}>
+      Built by{" "}
+      <a href={founder.url} className="hover:text-primary-text">
+        {founder.name}
+      </a>{" "}
+      ·{" "}
+      <a href="mailto:arman@orchestrat.dev" className="hover:text-primary-text">
+        arman@orchestrat.dev
+      </a>
+    </p>
+  );
+}
+
+/** License line, legal links and the analytics consent control. */
+export function FooterLegal({ className = "" }: { className?: string }) {
+  return (
+    <div
+      className={`flex flex-col justify-between gap-3 text-xs text-muted-foreground sm:flex-row ${className}`}
+    >
+      <p>
+        {`© ${new Date().getFullYear()} Arman Ghevondyan · `}
+        <a href={licenseUrl} className="hover:text-primary-text">
+          Elastic License 2.0
         </a>
       </p>
-      <div className="flex flex-col justify-between gap-3 border-t py-7 text-xs text-muted-foreground sm:flex-row">
-        <p>© {new Date().getFullYear()} Orchestrat. All rights reserved.</p>
-        <nav aria-label="Legal" className="flex flex-wrap gap-x-5 gap-y-3">
-          <Link href="/terms" className="hover:text-primary-text">
-            Terms of Service
-          </Link>
-          <Link href="/privacy" className="hover:text-primary-text">
-            Privacy Policy
-          </Link>
-          <Link href="/privacy#cookies" className="hover:text-primary-text">
-            Cookie information
-          </Link>
-          <CookiePreferences />
-        </nav>
-      </div>
-    </footer>
+      <nav aria-label="Legal" className="flex flex-wrap gap-x-5 gap-y-3">
+        <Link href="/terms" className="hover:text-primary-text">
+          Terms of Service
+        </Link>
+        <Link href="/privacy" className="hover:text-primary-text">
+          Privacy Policy
+        </Link>
+        <Link href="/privacy#cookies" className="hover:text-primary-text">
+          Cookie information
+        </Link>
+        <CookiePreferences />
+      </nav>
+    </div>
   );
 }
