@@ -14,6 +14,7 @@ import { fixture } from "../test/fixture.js";
 import type { AgentPrincipal } from "./agent-service.js";
 import { ApiError } from "./api-error.js";
 import { AttachmentService } from "./attachment-service.js";
+import type { DocumentStorageConfig } from "./document-service.js";
 import { expireUploads } from "../operations/storage-operations.js";
 
 const AUTH_SUBJECT = "550e8400-e29b-41d4-a716-446655440000";
@@ -106,15 +107,22 @@ class FakeS3 {
       this.objects.delete(key);
       return {};
     }
+    if (name === "CopyObjectCommand") {
+      const source = String(input.CopySource).replace(/^[^/]+\//, "");
+      const size = this.objects.get(source);
+      if (size === undefined) throw new Error("NoSuchKey");
+      this.objects.set(key, size);
+      return {};
+    }
     throw new Error(`Unsupported command: ${name}`);
   }
 }
 
-function storageClient(fake: FakeS3) {
+function storageClient(fake: FakeS3, endpoint = config.endpoint) {
   const client = new S3Client({
     forcePathStyle: true,
     region: config.region,
-    endpoint: config.endpoint,
+    endpoint,
     credentials: {
       accessKeyId: config.accessKeyId,
       secretAccessKey: config.secretAccessKey
@@ -125,7 +133,10 @@ function storageClient(fake: FakeS3) {
   return client;
 }
 
-async function setup() {
+async function setup(
+  storage: Partial<DocumentStorageConfig> = {},
+  quotaBytes?: number
+) {
   const { app, db } = await fixture();
   const organization = (
     await app.inject({
@@ -156,10 +167,13 @@ async function setup() {
     .from(users)
     .where(eq(users.authSubject, AUTH_SUBJECT));
   const fake = new FakeS3();
-  const service = new AttachmentService(db, {
-    ...config,
-    client: storageClient(fake)
-  });
+  const settings = { ...config, ...storage };
+  const service = new AttachmentService(
+    db,
+    { ...settings, client: storageClient(fake, settings.endpoint) },
+    undefined,
+    quotaBytes
+  );
   return {
     app,
     db,
@@ -216,6 +230,142 @@ test("server selects direct at 100 MiB and multipart above it", async () => {
     PART_SIZE
   );
   assert.ok((multipart.upload as Record<string, unknown>).upload_id);
+});
+
+test("upload URLs are signed for the public endpoint; server calls stay internal", async () => {
+  const { document, project, service, fake, userId } = await setup({
+    endpoint: "http://minio:9000",
+    publicEndpoint: "http://localhost:9000"
+  });
+  const host = (url: unknown) => new URL(String(url)).host;
+  const direct = await service.create(userId, document.id, input(10));
+  const directUrl = (direct.upload as Record<string, unknown>).upload_url;
+  assert.equal(host(directUrl), "localhost:9000");
+  // An empty-body checksum in the URL would make real uploads fail.
+  assert.equal(
+    new URL(String(directUrl)).searchParams.has("x-amz-checksum-crc32"),
+    false
+  );
+  assert.match(
+    new URL(String(directUrl)).pathname,
+    new RegExp(`^/documents/document-attachments/v1/${project.id}/`)
+  );
+  assert.equal(
+    host(
+      (
+        (await service.refresh(userId, direct.upload.id, document.id))
+          .upload as Record<string, unknown>
+      ).upload_url
+    ),
+    "localhost:9000"
+  );
+
+  const multipart = await service.create(
+    userId,
+    document.id,
+    input(MULTIPART_SIZE)
+  );
+  const signed = await service.signPartsForUser(
+    userId,
+    multipart.upload.id,
+    [1, 2],
+    document.id
+  );
+  assert.deepEqual(
+    signed.parts.map((part) => host(part.upload_url)),
+    ["localhost:9000", "localhost:9000"]
+  );
+  // Every provider call went through the internal client; none was signed.
+  assert.deepEqual(fake.commands, ["CreateMultipartUploadCommand"]);
+
+  const key = `document-attachments/v1/${project.id}/${document.id}/${direct.upload.id}`;
+  fake.objects.set(key, 10);
+  const completed = await service.complete(
+    userId,
+    direct.upload.id,
+    undefined,
+    document.id
+  );
+  assert.equal(completed.attachment.size_bytes, 10);
+  await service.mergeObjects()!.copy(
+    {
+      projectId: project.id,
+      documentId: document.id,
+      attachmentId: direct.upload.id
+    },
+    { projectId: project.id, documentId: document.id, attachmentId: "copy" }
+  );
+  assert.deepEqual(fake.commands.slice(1), [
+    "HeadObjectCommand",
+    "CopyObjectCommand"
+  ]);
+
+  // Without a public endpoint, URLs use the server endpoint as before.
+  const plain = await setup();
+  const plainUpload = await plain.service.create(
+    plain.userId,
+    plain.document.id,
+    input(10)
+  );
+  assert.equal(
+    host((plainUpload.upload as Record<string, unknown>).upload_url),
+    "storage.example.test"
+  );
+});
+
+test("a configured attachment quota replaces the 10 GiB default", async () => {
+  const { document, service, userId } = await setup({}, 1000);
+  await service.create(userId, document.id, input(600));
+  await assert.rejects(
+    service.create(userId, document.id, input(401)),
+    apiError("ATTACHMENT_QUOTA_EXCEEDED")
+  );
+  await service.create(userId, document.id, input(400));
+});
+
+test("buildApp passes the quota to attachment uploads", async (t) => {
+  const fake = new FakeS3();
+  const { app } = await fixture({
+    documentStorage: { ...config, client: storageClient(fake) },
+    attachmentQuotaBytes: 100
+  });
+  t.after(() => app.close());
+  const alice = { authorization: "Bearer alice" };
+  const organization = (
+    await app.inject({
+      method: "POST",
+      url: "/api/v1/organizations",
+      headers: alice,
+      payload: { name: `Quota ${randomUUID()}` }
+    })
+  ).json();
+  const project = (
+    await app.inject({
+      method: "POST",
+      url: `/api/v1/organizations/${organization.id}/projects`,
+      headers: alice,
+      payload: { name: "Primary" }
+    })
+  ).json();
+  const document = (
+    await app.inject({
+      method: "POST",
+      url: `/api/v1/projects/${project.id}/documents`,
+      headers: alice,
+      payload: { path: "docs/quota.md", content: "content" }
+    })
+  ).json().document;
+  const upload = (size_bytes: number) =>
+    app.inject({
+      method: "POST",
+      url: `/api/v1/documents/${document.id}/attachments/uploads`,
+      headers: alice,
+      payload: input(size_bytes)
+    });
+  assert.equal((await upload(100)).statusCode, 201);
+  const over = await upload(1);
+  assert.equal(over.statusCode, 409);
+  assert.equal(over.json().error.code, "ATTACHMENT_QUOTA_EXCEEDED");
 });
 
 test("rejects attachments above 2 GiB before reserving quota", async () => {

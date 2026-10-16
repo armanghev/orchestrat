@@ -10,8 +10,6 @@ import { useEffect, useRef, useState } from "react";
 import { usePlatform } from "@/platform/provider";
 import type { LocalIntegrationStatus } from "@/platform/contract";
 
-const defaultApiUrl = "https://api.orchestrat.dev";
-const defaultWebUrl = "https://app.orchestrat.dev";
 const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 const httpOrigin = (value: string | undefined) => {
   if (!value) return undefined;
@@ -22,27 +20,32 @@ const httpOrigin = (value: string | undefined) => {
     return undefined;
   }
 };
-export function buildCliEnvironment(
+// The CLI has no default server. Setup commands name this dashboard's own
+// API origin with --server, and only set ORCHESTRAT_WEB_URL when the
+// dashboard is not served from that origin (the CLI's default).
+export function buildCliCommands(
   kind: "desktop" | "web",
-  input: { apiUrl?: string; webCallbackUrl?: string } = {
-    apiUrl: import.meta.env.VITE_API_URL,
-    webCallbackUrl: import.meta.env.VITE_WEB_AUTH_CALLBACK_URL
+  input: { apiUrl?: string; webUrl?: string } = {
+    apiUrl: import.meta.env.VITE_API_URL
   },
   currentOrigin = typeof window !== "undefined"
     ? window.location.origin
     : undefined
 ) {
-  const values: string[] = [];
-  const apiUrl = input.apiUrl;
-  if (apiUrl && apiUrl !== defaultApiUrl)
-    values.push(`ORCHESTRAT_API_URL=${shellQuote(apiUrl)}`);
-  const configuredWebUrl = httpOrigin(input.webCallbackUrl);
-  const webUrl =
-    configuredWebUrl ??
-    (kind === "web" ? httpOrigin(currentOrigin) : undefined);
-  if (webUrl && webUrl !== defaultWebUrl)
-    values.push(`ORCHESTRAT_WEB_URL=${shellQuote(webUrl)}`);
-  return values.length ? `${values.join(" ")} ` : "";
+  const pageOrigin = kind === "web" ? httpOrigin(currentOrigin) : undefined;
+  const apiUrl = httpOrigin(input.apiUrl) ?? pageOrigin;
+  const webUrl = httpOrigin(input.webUrl) ?? pageOrigin;
+  const environment =
+    webUrl && webUrl !== apiUrl
+      ? `ORCHESTRAT_WEB_URL=${shellQuote(webUrl)} `
+      : "";
+  const server = apiUrl ? ` --server ${shellQuote(apiUrl)}` : "";
+  return {
+    setup: `${environment}npx @orchestrat/cli@latest setup${server}`,
+    installedSetup: `${environment}orchestrat setup${server}`,
+    status: "orchestrat status",
+    doctor: "orchestrat doctor"
+  };
 }
 
 const fallbackStatus = (message: string, supported = false) => ({
@@ -116,11 +119,12 @@ export function LocalIntegrationStatusSection({
   }
 
   const hasStatus = status?.supported && !status.error;
-  const commandPrefix = buildCliEnvironment(platform.kind);
-  const setupCommand = `${commandPrefix}npx @orchestrat/cli@latest setup`;
-  const installedSetupCommand = `${commandPrefix}orchestrat setup`;
-  const statusCommand = `${commandPrefix}orchestrat status`;
-  const doctorCommand = `${commandPrefix}orchestrat doctor`;
+  const {
+    setup: setupCommand,
+    installedSetup: installedSetupCommand,
+    status: statusCommand,
+    doctor: doctorCommand
+  } = buildCliCommands(platform.kind);
   const setupHelp = (
     <div className="mt-5 space-y-4 rounded-md border bg-muted/30 p-4">
       <div>
@@ -197,13 +201,14 @@ export function LocalIntegrationStatusSection({
         </summary>
         <div className="mt-2 space-y-2 text-muted-foreground">
           <p>
-            Setup requires macOS, Node.js 20+, an Orchestrat account, and a
-            local project checkout.
+            Setup requires macOS or Linux, Node.js 20+, an account on this
+            Orchestrat server, and a local project checkout.
           </p>
           <p>
             Setup previews managed changes before writing them, stores
-            credentials in macOS Keychain, and is safe to repeat. It does not
-            run from this dashboard.
+            credentials in the macOS Keychain or, on Linux, the Secret Service
+            or a private file, and is safe to repeat. It does not run from this
+            dashboard.
           </p>
           <p>
             Claude Code, Codex, Cursor, and Antigravity receive MCP and hooks.

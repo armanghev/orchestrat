@@ -1,13 +1,19 @@
+import { randomBytes } from "node:crypto";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { config as loadEnv } from "dotenv";
-import { createSupabaseAuth } from "@orchestrat/auth";
 import { loadApiConfig, loadRepositoryConfig } from "@orchestrat/config";
-import { createDatabase } from "@orchestrat/db";
+import { createDatabase, migrateDatabase, users } from "@orchestrat/db";
 import { logger } from "@orchestrat/logger";
 import { buildApp } from "./app.js";
-import { readDocumentStorageConfig } from "./document-storage-config.js";
 import { providerAdapters } from "./services/repository/providers/index.js";
 import { SecretBox } from "./services/repository/secrets.js";
 import { createShutdownHandler } from "./services/shutdown.js";
+import {
+  ensureBucket,
+  readStorageConfig,
+  warnIfStorageMissing
+} from "./storage-config.js";
 
 loadEnv({ path: "../../.env" });
 
@@ -23,38 +29,34 @@ const { db, pool } = createDatabase({
   connectionString: config.ORCHESTRAT_DATABASE_URL,
   connectionTimeoutMillis: 2_000
 });
-const auth = createSupabaseAuth({
-  algorithm: config.ORCHESTRAT_SUPABASE_JWT_ALGORITHM,
-  audience: config.ORCHESTRAT_SUPABASE_JWT_AUDIENCE,
-  supabaseUrl: config.ORCHESTRAT_SUPABASE_URL
-});
-const avatarBucket = process.env.SUPABASE_AVATAR_BUCKET;
-const documentStorage = readDocumentStorageConfig();
-const s3Endpoint = process.env.SUPABASE_S3_ENDPOINT;
-const s3Region = process.env.SUPABASE_S3_REGION;
-const s3AccessKeyId = process.env.SUPABASE_S3_ACCESS_KEY_ID;
-const s3SecretAccessKey = process.env.SUPABASE_S3_SECRET_ACCESS_KEY;
+const dashboardDir = config.ORCHESTRAT_DASHBOARD_DIR;
+if (dashboardDir && !existsSync(join(dashboardDir, "index.html"))) {
+  logger.error(
+    { dashboard_dir: dashboardDir },
+    "ORCHESTRAT_DASHBOARD_DIR has no index.html; build the dashboard first."
+  );
+  process.exit(1);
+}
+const setupToken =
+  config.ORCHESTRAT_SETUP_TOKEN ?? randomBytes(24).toString("base64url");
+// Throws on a partial or invalid storage configuration.
+const storage = readStorageConfig();
 const app = buildApp({
   allowedOrigins: config.ORCHESTRAT_ALLOWED_ORIGINS,
-  auth,
+  signupMode: config.ORCHESTRAT_SIGNUP,
+  dashboardDir,
+  setupToken,
   checkDatabase: async () => {
     const query = { text: "select 1", query_timeout: 2_000 };
     await pool.query(query);
   },
   closeDatabase: () => pool.end(),
   db,
-  avatarStorage:
-    avatarBucket && s3Endpoint && s3Region && s3AccessKeyId && s3SecretAccessKey
-      ? {
-          bucket: avatarBucket,
-          endpoint: s3Endpoint,
-          region: s3Region,
-          accessKeyId: s3AccessKeyId,
-          secretAccessKey: s3SecretAccessKey,
-          publicUrlBase: `${s3Endpoint.replace(/\/storage\/v1\/s3\/?$/, "")}/storage/v1/object/public/${avatarBucket}`
-        }
-      : undefined,
-  documentStorage,
+  avatarStorage: storage.avatarStorage,
+  documentStorage: storage.documentStorage,
+  attachmentQuotaBytes: storage.attachmentQuotaBytes,
+  publicApiUrl:
+    config.ORCHESTRAT_PUBLIC_URL ?? repositoryConfig.publicApiUrl ?? undefined,
   repository: {
     config: repositoryConfig,
     adapters: providerAdapters(repositoryConfig, repositorySecrets),
@@ -67,11 +69,36 @@ process.once("SIGINT", shutdown);
 process.once("SIGTERM", shutdown);
 
 try {
+  if (config.ORCHESTRAT_MIGRATE_ON_START) {
+    await migrateDatabase(db, pool);
+    logger.info({}, "Database migrations are up to date");
+  }
+  if (storage.documentStorage && storage.createBucket)
+    await ensureBucket(storage.documentStorage);
+  await warnIfStorageMissing(db, storage.documentStorage);
   await app.listen({
     host: config.ORCHESTRAT_API_HOST,
     port: config.ORCHESTRAT_API_PORT
   });
   logger.info({ port: config.ORCHESTRAT_API_PORT }, "API listening");
+  const [anyUser] = await db.select({ id: users.id }).from(users).limit(1);
+  if (!anyUser) {
+    const local = `http://localhost:${config.ORCHESTRAT_API_PORT}`;
+    const dashboard =
+      config.ORCHESTRAT_PUBLIC_URL ??
+      (dashboardDir
+        ? local
+        : (repositoryConfig.dashboardUrl ??
+          config.ORCHESTRAT_ALLOWED_ORIGINS[0] ??
+          local));
+    // The link carries the token: whoever can read the server log (or the
+    // .env it came from) is already trusted to set the server up.
+    const setupUrl = `${dashboard}/?setup_token=${encodeURIComponent(setupToken)}`;
+    logger.info(
+      { setup_url: setupUrl },
+      `No accounts yet. Create the admin account at ${setupUrl}`
+    );
+  }
 } catch (error) {
   logger.error(
     { error: error instanceof Error ? error.message : String(error) },

@@ -2,6 +2,7 @@
   "name": "@orchestrat/api",
   "version": "0.1.0",
   "private": true,
+  "license": "Elastic-2.0",
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/server.ts",
@@ -10,16 +11,18 @@
     "typecheck": "tsc --noEmit",
     "test": "node --test dist/routes/*.test.js dist/operations/*.test.js dist/services/*.test.js",
     "test:storage": "node --test dist/operations/*.test.js dist/services/*.test.js",
-    "test:postgres": "node --test dist/operations/postgres-acceptance.integration.test.js dist/operations/branches-postgres.integration.test.js",
+    "test:postgres": "node --test dist/operations/postgres-acceptance.integration.test.js dist/operations/branches-postgres.integration.test.js dist/operations/auth-postgres.integration.test.js",
     "storage:backfill": "node dist/operations/backfill-document-storage.js",
     "storage:gc": "node dist/operations/gc-document-storage.js",
-    "start": "node dist/server.js"
+    "start": "node dist/server.js",
+    "admin": "node dist/admin.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1112.0",
     "@aws-sdk/s3-request-presigner": "^3.1116.0",
     "@fastify/cors": "^11.3.0",
     "@fastify/multipart": "^10.1.1",
+    "@fastify/static": "^8.3.0",
     "@fastify/websocket": "^11.3.0",
     "@orchestrat/auth": "workspace:*",
     "@orchestrat/config": "workspace:*",
@@ -35,5 +38,8 @@
     "jose": "^6.2.8",
     "pg-mem": "^3.0.14",
     "tsx": "^4.20.5"
+  },
+  "bin": {
+    "orchestrat-admin": "dist/admin.js"
   }
 }

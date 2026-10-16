@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
 import cors from "@fastify/cors";
 import type { HumanAuth } from "@orchestrat/auth";
+import type { SignupMode } from "@orchestrat/protocol";
 import type { Database } from "@orchestrat/db";
 import { logger } from "@orchestrat/logger";
 import type { ApiErrorResponse, ErrorCode } from "@orchestrat/protocol";
 import multipart from "@fastify/multipart";
+import fastifyStatic from "@fastify/static";
 import websocket from "@fastify/websocket";
 import Fastify from "fastify";
 import { healthRoutes } from "./routes/health.js";
@@ -39,6 +41,11 @@ import { MergeService } from "./services/merge-service.js";
 import { MergeEngine } from "./services/merges/engine.js";
 import { TaskClaimService } from "./services/task-claim-service.js";
 import { IdentityService } from "./services/identity-service.js";
+import {
+  AuthService,
+  type AuthServiceOptions
+} from "./services/auth-service.js";
+import { authHumanRoutes, authPublicRoutes } from "./routes/auth.js";
 import { PermissionService } from "./services/permission-service.js";
 import { ProjectService } from "./services/project-service.js";
 import {
@@ -56,6 +63,7 @@ import {
   realtimeTicketRoutes
 } from "./routes/realtime.js";
 import { attachmentDownloadRoutes } from "./routes/attachment-download.js";
+import { avatarRoutes } from "./routes/avatars.js";
 import {
   RealtimeRegistry,
   AttachmentDownloadTicketStore,
@@ -69,7 +77,11 @@ import {
   cliAuthorizationHumanRoutes,
   cliAuthorizationPublicRoutes
 } from "./routes/cli-authorization.js";
-import { FixedWindowRateLimit, rateLimitHook } from "./services/rate-limit.js";
+import {
+  FixedWindowRateLimit,
+  clientKey,
+  rateLimitHook
+} from "./services/rate-limit.js";
 import { ChatService } from "./services/chat-service.js";
 import { ProjectMembershipService } from "./services/project-membership-service.js";
 import { AttentionService } from "./services/attention-service.js";
@@ -100,17 +112,36 @@ type AppOptions = {
     now?: () => Date;
   };
   allowedOrigins: string[];
-  auth: HumanAuth;
+  /** Overrides the built-in session auth; tests inject a fake here. */
+  auth?: HumanAuth;
+  signupMode?: SignupMode;
+  sessionAuth?: Omit<
+    AuthServiceOptions,
+    "signupMode" | "setupToken" | "memberships"
+  >;
+  /** Needed to create the first account on an empty instance. */
+  setupToken?: string;
+  /** A built dashboard to serve on this origin (single-container self-host). */
+  dashboardDir?: string;
   closeDatabase?: () => Promise<void>;
   db: Database;
   avatarStorage?: AvatarStorageConfig;
   documentStorage?: DocumentStorageConfig;
+  /** Per-project attachment bytes; 10 GiB by default. */
+  attachmentQuotaBytes?: number;
+  /** Absolute API URL (ORCHESTRAT_PUBLIC_URL) for stored avatar URLs. */
+  publicApiUrl?: string;
   checkDatabase?: () => Promise<void>;
   trustProxyHops?: number;
   rateLimits?: Partial<{
     publicCliCreate: number;
     publicCliPoll: number;
     expensive: number;
+    authLogin: number;
+    authLoginPerEmail: number;
+    authSignup: number;
+    authRefresh: number;
+    authPassword: number;
   }>;
 };
 
@@ -161,7 +192,9 @@ export function buildApp(options: AppOptions) {
   });
   const chats = new ChatService(db);
   const identities = new IdentityService(db);
-  const profiles = new ProfileService(db, options.avatarStorage);
+  const profiles = new ProfileService(db, options.avatarStorage, {
+    publicApiUrl: options.publicApiUrl
+  });
   const tasks = new TaskService(db);
   const agents = new AgentService(db);
   const branches = new BranchService(db, agents);
@@ -180,10 +213,18 @@ export function buildApp(options: AppOptions) {
     db,
     chats.assertHumanMayLeaveProject.bind(chats)
   );
+  const sessions = new AuthService(db, {
+    ...options.sessionAuth,
+    signupMode: options.signupMode ?? "invite",
+    setupToken: options.setupToken,
+    memberships
+  });
+  const humanAuth = options.auth ?? sessions;
   const attachments = new AttachmentService(
     db,
     options.documentStorage,
-    attachmentDownloadTickets
+    attachmentDownloadTickets,
+    options.attachmentQuotaBytes
   );
   const repositoryOptions = options.repository ?? {};
   const repositoryConfig = {
@@ -209,7 +250,12 @@ export function buildApp(options: AppOptions) {
     providerAdapters,
     repositoryOptions.now
   );
-  const mergeEngine = new MergeEngine(db, branches, attachments.mergeObjects());
+  const mergeEngine = new MergeEngine(
+    db,
+    branches,
+    attachments.mergeObjects(),
+    options.attachmentQuotaBytes
+  );
   const providerMerges = new ProviderMerges(
     db,
     mergeEngine,
@@ -262,15 +308,20 @@ export function buildApp(options: AppOptions) {
     publicCliCreate: 10,
     publicCliPoll: 120,
     expensive: 120,
+    authLogin: 20,
+    authLoginPerEmail: 10,
+    authSignup: 10,
+    authRefresh: 60,
+    authPassword: 5,
     ...options.rateLimits
   };
   const publicCliCreateRateLimit = rateLimitHook(
     new FixedWindowRateLimit(rateLimits.publicCliCreate, 60_000),
-    (request) => request.ip
+    (request) => clientKey(request.ip)
   );
   const publicCliPollRateLimit = rateLimitHook(
     new FixedWindowRateLimit(rateLimits.publicCliPoll, 60_000),
-    (request) => request.ip
+    (request) => clientKey(request.ip)
   );
   const expensiveRateLimit = rateLimitHook(
     new FixedWindowRateLimit(rateLimits.expensive, 60_000),
@@ -282,8 +333,29 @@ export function buildApp(options: AppOptions) {
 
   app.register(cors, {
     origin: options.allowedOrigins,
-    methods: ["GET", "HEAD", "POST", "PATCH", "DELETE"]
+    methods: ["GET", "HEAD", "POST", "PATCH", "DELETE"],
+    exposedHeaders: ["retry-after", "x-request-id"]
   });
+  if (options.dashboardDir) {
+    // Only files that exist get routes (wildcard: false); every other
+    // non-API GET falls back to index.html below, for client-side routes.
+    app.register(fastifyStatic, {
+      root: options.dashboardDir,
+      wildcard: false,
+      index: false,
+      // setHeaders decides caching: hashed assets forever, the rest revalidate.
+      cacheControl: false,
+      setHeaders(response, path) {
+        response.setHeader("x-content-type-options", "nosniff");
+        response.setHeader(
+          "cache-control",
+          /[\\/]assets[\\/]/.test(path)
+            ? "public, max-age=31536000, immutable"
+            : "no-cache"
+        );
+      }
+    });
+  }
   app.register(multipart, {
     limits: { fileSize: 2 * 1024 * 1024, files: 1 }
   });
@@ -354,11 +426,27 @@ export function buildApp(options: AppOptions) {
       .send(errorResponse(request.id, "INTERNAL_ERROR", "The request failed."));
   });
 
-  app.setNotFoundHandler((request, reply) =>
-    reply
+  const isApiPath = (url: string) => /^\/(api|health|ready)(\/|\?|$)/.test(url);
+  // A missing file (e.g. a stale /assets/*.js) must 404, not get index.html.
+  const looksLikeFile = (url: string) =>
+    /\.[A-Za-z0-9]+$/.test(url.split(/[?#]/, 1)[0]!);
+  app.setNotFoundHandler((request, reply) => {
+    if (
+      options.dashboardDir &&
+      (request.method === "GET" || request.method === "HEAD") &&
+      !isApiPath(request.url) &&
+      !looksLikeFile(request.url)
+    )
+      return reply
+        .header("cache-control", "no-cache")
+        .header("x-content-type-options", "nosniff")
+        .header("x-frame-options", "DENY")
+        .header("referrer-policy", "same-origin")
+        .sendFile("index.html");
+    return reply
       .code(404)
-      .send(errorResponse(request.id, "NOT_FOUND", "Route not found."))
-  );
+      .send(errorResponse(request.id, "NOT_FOUND", "Route not found."));
+  });
 
   app.register(healthRoutes, { checkDatabase: options.checkDatabase });
   app.register(healthRoutes, {
@@ -369,6 +457,14 @@ export function buildApp(options: AppOptions) {
     prefix: "/api/v1",
     attachments
   });
+  app.register(avatarRoutes, {
+    prefix: "/api/v1",
+    profiles,
+    rateLimit: rateLimitHook(
+      new FixedWindowRateLimit(1200, 60_000),
+      (request) => clientKey(request.ip)
+    )
+  });
   app.register(cliAuthorizationPublicRoutes, {
     prefix: "/api/v1",
     authorization: cliAuthorization,
@@ -376,13 +472,32 @@ export function buildApp(options: AppOptions) {
     pollRateLimit: publicCliPollRateLimit
   });
   app.register(cliSetupRoutes, { prefix: "/api/v1", setup: cliSetup });
+  app.register(authPublicRoutes, {
+    prefix: "/api/v1",
+    auth: sessions,
+    signupRateLimit: rateLimitHook(
+      new FixedWindowRateLimit(rateLimits.authSignup, 60_000),
+      (request) => clientKey(request.ip)
+    ),
+    loginRateLimit: rateLimitHook(
+      new FixedWindowRateLimit(rateLimits.authLogin, 60_000),
+      (request) => clientKey(request.ip)
+    ),
+    loginFailures: new FixedWindowRateLimit(
+      rateLimits.authLoginPerEmail,
+      15 * 60_000
+    ),
+    refreshRateLimit: rateLimitHook(
+      new FixedWindowRateLimit(rateLimits.authRefresh, 60_000),
+      (request) => clientKey(request.ip)
+    )
+  });
   app.register(publicRepositoryRoutes, {
     prefix: "/api/v1",
     repositories,
     ingress: webhookIngress,
-    rateLimit: rateLimitHook(
-      new FixedWindowRateLimit(600, 60_000),
-      (request) => request.ip
+    rateLimit: rateLimitHook(new FixedWindowRateLimit(600, 60_000), (request) =>
+      clientKey(request.ip)
     )
   });
   app.decorateRequest("agentPrincipal", null);
@@ -404,7 +519,7 @@ export function buildApp(options: AppOptions) {
             "Agent credentials are only valid on agent routes."
           );
         }
-        const principal = await options.auth.authenticate({
+        const principal = await humanAuth.authenticate({
           headers: rawHeaderEntries(request.raw.rawHeaders),
           method: request.method,
           url: `http://${request.headers.host ?? "localhost"}${request.url}`
@@ -417,7 +532,8 @@ export function buildApp(options: AppOptions) {
           );
         }
         request.suggestedUsername = principal.username;
-        request.userId = await identities.resolveUserId(principal);
+        request.userId =
+          principal.userId ?? (await identities.resolveUserId(principal));
       });
       api.register(v1Routes, {
         projects,
@@ -450,6 +566,13 @@ export function buildApp(options: AppOptions) {
       });
       api.register(cliAuthorizationHumanRoutes, {
         authorization: cliAuthorization
+      });
+      api.register(authHumanRoutes, {
+        auth: sessions,
+        passwordRateLimit: rateLimitHook(
+          new FixedWindowRateLimit(rateLimits.authPassword, 15 * 60_000),
+          (request) => `user:${request.userId}`
+        )
       });
     },
     { prefix: "/api/v1" }

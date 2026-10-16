@@ -1,11 +1,21 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { PublicConfig } from "@/app/config";
-import type { Platform } from "@/platform/contract";
-import { desktopAuthBridge } from "./desktop-bridge";
-import { DesktopAuthClient } from "./desktop-auth-client";
 import { loadingAuthClient, type AuthClient } from "./auth-client";
 import { AuthContext } from "./auth-context";
 import { WebAuthProvider } from "./web-auth-provider";
+
+// The e2e build stubs auth unless a spec opts into the real password client
+// (against mocked /api/v1/auth routes) with this stored mode.
+export const E2E_AUTH_MODE_KEY = "orchestrat.e2e.auth";
+export const E2E_PASSWORD_MODE = "password";
+
+function e2eUsesPasswordClient(): boolean {
+  try {
+    return window.localStorage.getItem(E2E_AUTH_MODE_KEY) === E2E_PASSWORD_MODE;
+  } catch {
+    return false;
+  }
+}
 
 function disposeClient(client: AuthClient): void {
   const disposable = client as AuthClient & { dispose?: unknown };
@@ -52,20 +62,6 @@ function ClientProvider({
   );
 }
 
-function DesktopProvider({
-  platform,
-  children
-}: {
-  platform: Platform;
-  children: ReactNode;
-}) {
-  const client = useMemo(
-    () => new DesktopAuthClient(platform, desktopAuthBridge),
-    [platform]
-  );
-  return <ClientProvider client={client}>{children}</ClientProvider>;
-}
-
 function E2eProvider({ children }: { children: ReactNode }) {
   const [client, setClient] = useState<AuthClient | null>(null);
   useEffect(() => {
@@ -90,12 +86,10 @@ function E2eProvider({ children }: { children: ReactNode }) {
 
 export function AuthProvider({
   children,
-  config,
-  platform
+  config
 }: {
   children: ReactNode;
   config: PublicConfig;
-  platform: Platform;
 }) {
   if (config.e2eAuth) {
     if (import.meta.env.MODE !== "e2e") {
@@ -103,24 +97,9 @@ export function AuthProvider({
         <p role="alert">E2E authentication is only available in e2e mode.</p>
       );
     }
-    return <E2eProvider>{children}</E2eProvider>;
+    if (!e2eUsesPasswordClient()) return <E2eProvider>{children}</E2eProvider>;
   }
-  if (platform.kind === "desktop")
-    return <DesktopProvider platform={platform}>{children}</DesktopProvider>;
-  if (
-    !config.supabaseUrl ||
-    !config.supabasePublishableKey ||
-    !config.webAuthCallbackUrl
-  ) {
-    return <p role="alert">Dashboard configuration is invalid.</p>;
-  }
-  return (
-    <WebAuthProvider
-      supabaseUrl={config.supabaseUrl}
-      supabasePublishableKey={config.supabasePublishableKey}
-      callbackUrl={config.webAuthCallbackUrl}
-    >
-      {children}
-    </WebAuthProvider>
-  );
+  // The desktop app is a webview on the same API, so it signs in with the
+  // same password client. Its native browser sign-in returns in v1.1.
+  return <WebAuthProvider apiUrl={config.apiUrl}>{children}</WebAuthProvider>;
 }

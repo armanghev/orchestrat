@@ -1,6 +1,5 @@
 import {
   apiOrigin,
-  DEFAULT_API_URL,
   findMapping,
   findProject,
   type Integration,
@@ -38,7 +37,12 @@ export async function resolveInvocation(input: Invocation) {
       `No ${input.integration} project mapping found for ${input.cwd}`
     );
   if (!input.credentials) throw new Error("Credential reader is unavailable");
-  const api = apiOrigin(input.api ?? mapping.apiUrl ?? DEFAULT_API_URL);
+  const server = input.api ?? mapping.apiUrl;
+  if (!server)
+    throw new Error(
+      `No Orchestrat server URL for ${mapping.cwd}; run orchestrat setup --server <url> there or set ORCHESTRAT_API_URL`
+    );
+  const api = apiOrigin(server);
   const credential = await input.credentials.read(
     agentAccount(mapping.projectId, input.integration, api)
   );
@@ -65,28 +69,41 @@ export async function resolveGlobalInvocation(input: {
     throw new Error(`No global ${input.integration} projects are configured`);
   const resolved = await Promise.all(
     configured.map(async ([projectId, project]) => {
-      const apiUrl = apiOrigin(project.apiUrl ?? input.api ?? DEFAULT_API_URL);
-      const credential = await input.credentials.read(
-        agentAccount(projectId, input.integration, apiUrl)
-      );
+      const server = project.apiUrl ?? input.api;
+      const apiUrl = server === undefined ? undefined : apiOrigin(server);
+      const credential =
+        apiUrl === undefined
+          ? undefined
+          : await input.credentials.read(
+              agentAccount(projectId, input.integration, apiUrl)
+            );
       return { projectId, ...project, apiUrl, credential };
     })
   );
-  // One stale project (credential removed or never issued) must not take the
-  // whole global connection down; skip it and say so on stderr.
-  const projects = resolved.flatMap(({ credential, ...project }) =>
-    credential ? [{ ...project, credential }] : []
+  // One stale project (credential removed or never issued, or no known
+  // server) must not take the whole global connection down; skip it and say
+  // so on stderr.
+  const projects = resolved.flatMap(({ credential, apiUrl, ...project }) =>
+    credential && apiUrl ? [{ ...project, apiUrl, credential }] : []
   );
-  const missing = resolved.filter((project) => !project.credential);
+  const missing = resolved.filter(
+    (project) => !project.credential || !project.apiUrl
+  );
+  const reason = (project: (typeof missing)[number]) =>
+    project.apiUrl
+      ? `no ${input.integration} credential on this API`
+      : "no server URL";
   if (!projects.length) {
     const [first] = missing;
     throw new Error(
-      `No ${input.integration} credential found for ${first!.organizationName} / ${first!.name} on this API; run orchestrat setup`
+      first!.apiUrl
+        ? `No ${input.integration} credential found for ${first!.organizationName} / ${first!.name} on this API; run orchestrat setup`
+        : `No Orchestrat server URL for ${first!.organizationName} / ${first!.name}; run orchestrat setup --server <url> or set ORCHESTRAT_API_URL`
     );
   }
   for (const project of missing)
     input.warn?.(
-      `orchestrat: skipping ${project.organizationName} / ${project.name}: no ${input.integration} credential on this API; run orchestrat setup to reconnect it\n`
+      `orchestrat: skipping ${project.organizationName} / ${project.name}: ${reason(project)}; run orchestrat setup to reconnect it\n`
     );
   return projects;
 }

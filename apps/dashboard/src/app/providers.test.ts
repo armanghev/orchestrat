@@ -49,13 +49,13 @@ describe("watchAuthSessionBoundaries", () => {
     stop();
   });
 
-  it("clears cache and navigates root on sign-out even after an intermediate error", () => {
+  it("clears cache and navigates root on sign-out even after an intermediate loading state", () => {
     const f = authFixture({ status: "signedIn", identityKey: "account-a" });
     const queryClient = createDashboardQueryClient();
     queryClient.setQueryData(["private"], "account-a-data");
     const navigate = vi.fn();
     const stop = watchAuthSessionBoundaries(f.auth, queryClient, { navigate });
-    f.emit({ status: "error", code: "offline", message: "Try again." });
+    f.emit({ status: "loading" });
     f.emit({ status: "signedOut" });
     expect(queryClient.getQueryData(["private"])).toBeUndefined();
     expect(navigate).toHaveBeenCalledWith({ to: "/" });

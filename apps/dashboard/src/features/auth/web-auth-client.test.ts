@@ -1,28 +1,74 @@
-import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
-import { describe, expect, it, vi } from "vitest";
-import { ProviderTokenStrippingStorage } from "./web-auth-storage";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { AuthRequestError } from "./auth-client";
 import {
+  REFRESH_MARGIN_MS,
   WebAuthClient,
-  createBrowserWebAuthClient,
-  type WebAuthApi
+  type RefreshLocks
 } from "./web-auth-client";
+import {
+  AUTH_SESSION_STORAGE_KEY,
+  AuthSessionStorage,
+  type StoredSession
+} from "./web-auth-storage";
 
-const callbackUrl = "https://dashboard.example.com/auth/callback";
+const apiUrl = "https://api.test";
+const userId = "00000000-0000-4000-8000-000000000001";
+const otherUserId = "00000000-0000-4000-8000-000000000002";
+const start = 1_000_000;
+const hour = 3_600_000;
 
-function session(token = "supabase-access", userId = "user-1"): Session {
+type Call = {
+  key: string;
+  headers: Headers;
+  body: Record<string, unknown> | undefined;
+};
+type Handler = (call: Call) => Response | Promise<Response>;
+
+function json(status: number, body?: unknown, headers?: HeadersInit) {
+  return new Response(body === undefined ? null : JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json", ...headers }
+  });
+}
+
+function apiError(status: number, code: string, details = {}) {
+  return json(status, {
+    error: { code, message: code, details, request_id: "req_1" }
+  });
+}
+
+function sessionBody(n: number, user = userId) {
   return {
-    access_token: token,
-    token_type: "bearer",
+    access_token: `orch_sess_${n}`,
+    refresh_token: `orch_refresh_${n}`,
+    token_type: "Bearer",
     expires_in: 3600,
-    expires_at: 4_000_000_000,
-    refresh_token: "supabase-refresh",
+    refresh_expires_in: 2_592_000,
     user: {
-      id: userId,
-      app_metadata: {},
-      user_metadata: {},
-      aud: "authenticated",
-      created_at: "2026-01-01T00:00:00.000Z"
+      user_id: user,
+      email: "ada@example.com",
+      full_name: "Ada",
+      is_instance_admin: false
     }
+  };
+}
+
+function stored(
+  n: number,
+  {
+    accessExpiresAt = start + hour,
+    refreshExpiresAt = start + 30 * 24 * hour,
+    user = userId
+  } = {}
+): StoredSession {
+  const body = sessionBody(n, user);
+  return {
+    version: 1,
+    access_token: body.access_token,
+    refresh_token: body.refresh_token,
+    access_expires_at: accessExpiresAt,
+    refresh_expires_at: refreshExpiresAt,
+    user: body.user
   };
 }
 
@@ -34,645 +80,580 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-function fixture(restored: Session | null = null) {
-  let authChange:
-    ((event: AuthChangeEvent, session: Session | null) => void) | undefined;
-  const unsubscribe = vi.fn();
-  const auth = {
-    onAuthStateChange: vi.fn(
-      (listener: (event: AuthChangeEvent, session: Session | null) => void) => {
-        authChange = listener;
-        return { data: { subscription: { unsubscribe } } };
-      }
-    ),
-    getSession: vi.fn(async () => ({
-      data: { session: restored },
-      error: null
-    })),
-    signInWithOAuth: vi.fn(async () => ({
-      data: { provider: "github", url: "https://github.example" },
-      error: null
-    })),
-    signInWithOtp: vi.fn(async () => ({
-      data: { user: null, session: null, messageId: "accepted" },
-      error: null
-    })),
-    exchangeCodeForSession: vi.fn(async () => ({
-      data: { session: session(), user: session().user },
-      error: null
-    })),
-    refreshSession: vi.fn(async () => ({
-      data: { session: session("refreshed-access"), user: session().user },
-      error: null
-    })),
-    signOut: vi.fn(async () => ({ error: null })),
-    dispose: vi.fn(async () => undefined)
+function setup({
+  session,
+  locks = null
+}: { session?: StoredSession; locks?: RefreshLocks | null } = {}) {
+  const values = new Map<string, string>();
+  if (session) values.set(AUTH_SESSION_STORAGE_KEY, JSON.stringify(session));
+  const backing = {
+    getItem: vi.fn((key: string) => values.get(key) ?? null),
+    setItem: vi.fn((key: string, value: string) => {
+      values.set(key, value);
+    }),
+    removeItem: vi.fn((key: string) => {
+      values.delete(key);
+    })
   };
-  const client = new WebAuthClient(auth as WebAuthApi, callbackUrl);
+  const routes: Record<string, Handler> = {};
+  const calls: Call[] = [];
+  const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input));
+    const call: Call = {
+      key: `${init?.method ?? "GET"} ${url.pathname}`,
+      headers: new Headers(init?.headers),
+      body: init?.body ? JSON.parse(String(init.body)) : undefined
+    };
+    calls.push(call);
+    const handler = routes[call.key];
+    return handler ? handler(call) : json(404, { unexpected: call.key });
+  });
+  const clock = { now: start };
+  const client = new WebAuthClient({
+    apiUrl,
+    storage: new AuthSessionStorage(backing),
+    fetch: fetch as unknown as typeof globalThis.fetch,
+    now: () => clock.now,
+    locks
+  });
+  const shared = () => {
+    const raw = values.get(AUTH_SESSION_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as StoredSession) : null;
+  };
+  // Another tab changing the shared session, then the browser telling us.
+  const otherTabWrites = (value: StoredSession | null) => {
+    if (value) values.set(AUTH_SESSION_STORAGE_KEY, JSON.stringify(value));
+    else values.delete(AUTH_SESSION_STORAGE_KEY);
+    window.dispatchEvent(
+      new StorageEvent("storage", { key: AUTH_SESSION_STORAGE_KEY })
+    );
+  };
+  // Another tab changing it before this tab has heard about it.
+  const otherTabWritesQuietly = (value: StoredSession) =>
+    values.set(AUTH_SESSION_STORAGE_KEY, JSON.stringify(value));
   return {
-    auth,
     client,
-    unsubscribe,
-    emit: (event: AuthChangeEvent, value: Session | null) =>
-      authChange?.(event, value)
+    routes,
+    calls,
+    clock,
+    backing,
+    shared,
+    otherTabWrites,
+    otherTabWritesQuietly
   };
 }
 
-describe("WebAuthClient", () => {
-  it.each([
-    [null, "signedOut"],
-    [session(), "signedIn"]
-  ] as const)(
-    "initializes a restored %s session as %s",
-    async (restored, status) => {
-      const f = fixture(restored);
-      const first = f.client.initialize();
-      const second = f.client.initialize();
-      expect(first).toBe(second);
-      await first;
-      expect(f.auth.onAuthStateChange).toHaveBeenCalledOnce();
-      expect(f.auth.getSession).toHaveBeenCalledOnce();
-      expect(f.client.getSnapshot().status).toBe(status);
-    }
-  );
+const clients: WebAuthClient[] = [];
+async function ready(env: ReturnType<typeof setup>) {
+  clients.push(env.client);
+  await env.client.initialize();
+  return env;
+}
 
-  it("does not overwrite a synchronous auth event with an older restored session", async () => {
-    const f = fixture(null);
-    f.auth.onAuthStateChange.mockImplementationOnce((listener) => {
-      listener("SIGNED_IN", session("event-access"));
-      return { data: { subscription: { unsubscribe: vi.fn() } } };
-    });
-    await f.client.initialize();
-    expect(f.client.getSnapshot()).toMatchObject({ status: "signedIn" });
-    expect(await f.client.getAccessToken()).toBe("event-access");
+afterEach(() => {
+  clients.splice(0).forEach((client) => client.dispose());
+});
+
+const signedIn = { status: "signedIn", identityKey: userId };
+
+describe("WebAuthClient session restore", () => {
+  it("starts signed out without a stored session", async () => {
+    const { client, calls } = await ready(setup());
+    expect(client.getSnapshot()).toEqual({ status: "signedOut" });
+    await expect(client.getAccessToken()).resolves.toBeNull();
+    expect(calls).toHaveLength(0);
   });
 
-  it("maps auth events, keeps equal snapshots stable, and unsubscribes on dispose", async () => {
-    const f = fixture();
-    const listener = vi.fn();
-    const stop = f.client.subscribe(listener);
-    await f.client.initialize();
-    const signedOut = f.client.getSnapshot();
-    f.emit("SIGNED_OUT", null);
-    expect(f.client.getSnapshot()).toBe(signedOut);
-    f.emit("SIGNED_IN", session());
-    expect(f.client.getSnapshot()).toMatchObject({ status: "signedIn" });
-    f.emit("TOKEN_REFRESHED", session("new-access"));
-    expect(await f.client.getAccessToken()).toBe("new-access");
-    stop();
-    f.client.dispose();
-    f.emit("SIGNED_OUT", null);
-    expect(f.unsubscribe).toHaveBeenCalledOnce();
-    expect(listener).toHaveBeenCalledTimes(2);
+  it("restores a stored session locally, keyed by user id", async () => {
+    const { client, calls } = await ready(setup({ session: stored(1) }));
+    expect(client.getSnapshot()).toEqual(signedIn);
+    await expect(client.getAccessToken()).resolves.toBe("orch_sess_1");
+    expect(calls).toHaveLength(0);
   });
 
-  it("disposes the owned auth port once after wrapper unsubscribe and is idempotent", async () => {
-    const f = fixture();
-    const cleanupOrder: string[] = [];
-    f.unsubscribe.mockImplementation(() => {
-      cleanupOrder.push("wrapper-unsubscribe");
-    });
-    f.auth.dispose.mockImplementation(async () => {
-      cleanupOrder.push("auth-dispose");
-    });
-    await f.client.initialize();
-    f.client.dispose();
-    f.client.dispose();
-    await Promise.resolve();
-    expect(cleanupOrder).toEqual(["wrapper-unsubscribe", "auth-dispose"]);
-    expect(f.unsubscribe).toHaveBeenCalledOnce();
-    expect(f.auth.dispose).toHaveBeenCalledOnce();
-  });
-
-  it("handles auth-port disposal rejection without logging or an unhandled rejection", async () => {
-    const f = fixture();
-    const consoleError = vi
-      .spyOn(console, "error")
-      .mockImplementation(() => undefined);
-    const consoleLog = vi
-      .spyOn(console, "log")
-      .mockImplementation(() => undefined);
-    f.auth.dispose.mockRejectedValueOnce(
-      new Error("secret provider disposal detail")
+  it("drops a stored session whose refresh token already expired", async () => {
+    const env = await ready(
+      setup({ session: stored(1, { refreshExpiresAt: start - 1 }) })
     );
-    f.client.dispose();
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(f.auth.dispose).toHaveBeenCalledOnce();
-    expect(consoleError).not.toHaveBeenCalled();
-    expect(consoleLog).not.toHaveBeenCalled();
-    consoleError.mockRestore();
-    consoleLog.mockRestore();
-  });
-
-  it("notifies on signed-in principal changes but not same-user token refresh", async () => {
-    const f = fixture();
-    await f.client.initialize();
-    const listener = vi.fn();
-    f.client.subscribe(listener);
-    f.emit("SIGNED_IN", session("account-a-token", "account-a"));
-    expect(f.client.getSnapshot()).toEqual({
-      status: "signedIn",
-      identityKey: "account-a"
-    });
-    f.emit("TOKEN_REFRESHED", session("account-a-refreshed", "account-a"));
-    expect(listener).toHaveBeenCalledOnce();
-    f.emit("SIGNED_IN", session("account-b-token", "account-b"));
-    expect(f.client.getSnapshot()).toEqual({
-      status: "signedIn",
-      identityKey: "account-b"
-    });
-    expect(listener).toHaveBeenCalledTimes(2);
-  });
-
-  it("starts GitHub OAuth once with the exact configured callback", async () => {
-    const f = fixture();
-    await f.client.initialize();
-    const pending = deferred<{
-      data: { provider: "github"; url: string };
-      error: null;
-    }>();
-    f.auth.signInWithOAuth.mockReturnValueOnce(pending.promise);
-    const first = f.client.signInWithGitHub();
-    const second = f.client.signInWithGitHub();
-    expect(first).toBe(second);
-    expect(f.client.getSnapshot()).toEqual({ status: "signingIn" });
-    expect(f.auth.signInWithOAuth).toHaveBeenCalledWith({
-      provider: "github",
-      options: { redirectTo: callbackUrl }
-    });
-    pending.resolve({
-      data: { provider: "github", url: "https://github.example" },
-      error: null
-    });
-    await first;
-    expect(f.auth.signInWithOAuth).toHaveBeenCalledOnce();
-  });
-
-  it("keeps a SIGNED_IN event authoritative over an older GitHub failure", async () => {
-    const f = fixture();
-    await f.client.initialize();
-    const pending = deferred<{
-      data: { provider: "github"; url: null };
-      error: unknown;
-    }>();
-    f.auth.signInWithOAuth.mockReturnValueOnce(pending.promise as never);
-    const request = f.client.signInWithGitHub();
-    f.emit("SIGNED_IN", session("github-event-token"));
-    pending.resolve({
-      data: { provider: "github", url: null },
-      error: new Error("stale OAuth failure")
-    });
-    await request;
-    expect(f.client.getSnapshot()).toMatchObject({ status: "signedIn" });
-    expect(await f.client.getAccessToken()).toBe("github-event-token");
-  });
-
-  it("normalizes and sends a magic link once, then reports request acceptance", async () => {
-    const f = fixture();
-    await f.client.initialize();
-    const pending = deferred<{
-      data: { user: null; session: null; messageId: string };
-      error: null;
-    }>();
-    f.auth.signInWithOtp.mockReturnValueOnce(pending.promise);
-    const first = f.client.sendMagicLink("  Person@Example.COM  ");
-    const second = f.client.sendMagicLink("person@example.com");
-    expect(first).toBe(second);
-    expect(f.client.getSnapshot()).toEqual({
-      status: "sendingMagicLink",
-      email: "person@example.com"
-    });
-    expect(f.auth.signInWithOtp).toHaveBeenCalledWith({
-      email: "person@example.com",
-      options: { emailRedirectTo: callbackUrl, shouldCreateUser: true }
-    });
-    pending.resolve({
-      data: { user: null, session: null, messageId: "accepted" },
-      error: null
-    });
-    await first;
-    expect(f.client.getSnapshot()).toEqual({
-      status: "magicLinkSent",
-      email: "person@example.com"
-    });
-    expect(f.auth.signInWithOtp).toHaveBeenCalledOnce();
-  });
-
-  it("keeps a SIGNED_IN event authoritative when an older OTP request resolves", async () => {
-    const f = fixture();
-    await f.client.initialize();
-    const pending = deferred<{
-      data: { user: null; session: null; messageId: string };
-      error: null;
-    }>();
-    f.auth.signInWithOtp.mockReturnValueOnce(pending.promise);
-    const request = f.client.sendMagicLink("person@example.com");
-    f.emit("SIGNED_IN", session("event-signed-in"));
-    pending.resolve({
-      data: { user: null, session: null, messageId: "accepted" },
-      error: null
-    });
-    await request;
-    expect(f.client.getSnapshot()).toMatchObject({ status: "signedIn" });
-    expect(await f.client.getAccessToken()).toBe("event-signed-in");
-  });
-
-  it.each(["success", "failure"] as const)(
-    "keeps a SIGNED_OUT event authoritative when an older OTP request ends with %s",
-    async (outcome) => {
-      const f = fixture();
-      await f.client.initialize();
-      const pending = deferred<{
-        data: { user: null; session: null; messageId?: string };
-        error: unknown;
-      }>();
-      f.auth.signInWithOtp.mockReturnValueOnce(pending.promise as never);
-      const request = f.client.sendMagicLink("person@example.com");
-      f.emit("SIGNED_OUT", null);
-      pending.resolve(
-        outcome === "success"
-          ? {
-              data: { user: null, session: null, messageId: "accepted" },
-              error: null
-            }
-          : {
-              data: { user: null, session: null },
-              error: new Error("old OTP failure")
-            }
-      );
-      await request;
-      expect(f.client.getSnapshot()).toEqual({ status: "signedOut" });
-    }
-  );
-
-  it("does not let an older OTP failure overwrite a newer GitHub flow", async () => {
-    const f = fixture();
-    const pending = deferred<{
-      data: { user: null; session: null };
-      error: unknown;
-    }>();
-    f.auth.signInWithOtp.mockReturnValueOnce(pending.promise as never);
-    const otp = f.client.sendMagicLink("person@example.com");
-    await f.client.signInWithGitHub();
-    pending.resolve({
-      data: { user: null, session: null },
-      error: new Error("old OTP failure")
-    });
-    await otp;
-    expect(f.client.getSnapshot()).toEqual({ status: "signingIn" });
-  });
-
-  it.each([
-    "",
-    "not-an-email",
-    "a@b",
-    `${"a".repeat(245)}@example.com`,
-    "first@example.com,second@example.com"
-  ])("rejects invalid email without making a request: %s", async (email) => {
-    const f = fixture();
-    await f.client.sendMagicLink(email);
-    expect(f.auth.signInWithOtp).not.toHaveBeenCalled();
-    expect(f.client.getSnapshot()).toEqual({
-      status: "error",
-      code: "invalid_email",
-      message: "Enter a valid email address."
-    });
-  });
-
-  it("exchanges an exact callback code once across concurrent completion", async () => {
-    const f = fixture();
-    const pending = deferred<{
-      data: { session: Session; user: Session["user"] };
-      error: null;
-    }>();
-    f.auth.exchangeCodeForSession.mockReturnValueOnce(pending.promise);
-    const first = f.client.completeSignIn(`${callbackUrl}?code=one-time-code`);
-    const second = f.client.completeSignIn(`${callbackUrl}?code=one-time-code`);
-    expect(first).toBe(second);
-    expect(f.client.getSnapshot()).toEqual({ status: "signingIn" });
-    expect(f.auth.exchangeCodeForSession).toHaveBeenCalledOnce();
-    expect(f.auth.exchangeCodeForSession).toHaveBeenCalledWith("one-time-code");
-    pending.resolve({
-      data: { session: session(), user: session().user },
-      error: null
-    });
-    expect(await first).toEqual({ status: "success", identityKey: "user-1" });
-    await f.client.completeSignIn(`${callbackUrl}?code=ignored-after-success`);
-    expect(f.auth.exchangeCodeForSession).toHaveBeenCalledOnce();
-    expect(f.client.getSnapshot()).toMatchObject({ status: "signedIn" });
-  });
-
-  it("makes a failed accepted callback terminal until a genuinely new auth flow starts", async () => {
-    const f = fixture();
-    f.auth.exchangeCodeForSession.mockResolvedValueOnce({
-      data: { session: null, user: null },
-      error: new Error("old exchange failure")
-    } as never);
-    await f.client.completeSignIn(`${callbackUrl}?code=failed-once`);
-    const failedSnapshot = f.client.getSnapshot();
-    await f.client.completeSignIn(`${callbackUrl}?code=must-not-retry`);
-    expect(f.auth.exchangeCodeForSession).toHaveBeenCalledOnce();
-    expect(f.client.getSnapshot()).toBe(failedSnapshot);
-
-    await f.client.signInWithGitHub();
-    await f.client.completeSignIn(`${callbackUrl}?code=new-flow-code`);
-    expect(f.auth.exchangeCodeForSession).toHaveBeenCalledTimes(2);
-    expect(f.client.getSnapshot()).toMatchObject({ status: "signedIn" });
-  });
-
-  it.each(["signOut", "expireSession"] as const)(
-    "keeps a failed accepted callback terminal after %s",
-    async (clearMethod) => {
-      const f = fixture();
-      f.auth.exchangeCodeForSession.mockResolvedValueOnce({
-        data: { session: null, user: null },
-        error: new Error("first exchange failure")
-      } as never);
-      const acceptedCallback = `${callbackUrl}?code=failed-before-clear`;
-      await f.client.completeSignIn(acceptedCallback);
-      await f.client[clearMethod]();
-      await f.client.completeSignIn(acceptedCallback);
-      expect(f.auth.exchangeCodeForSession).toHaveBeenCalledOnce();
-    }
-  );
-
-  it.each(["github", "magic"] as const)(
-    "does not reset callback terminality when a new %s flow fails to start",
-    async (flow) => {
-      const f = fixture();
-      f.auth.exchangeCodeForSession.mockResolvedValueOnce({
-        data: { session: null, user: null },
-        error: new Error("first exchange failure")
-      } as never);
-      await f.client.completeSignIn(
-        `${callbackUrl}?code=failed-before-new-flow`
-      );
-      if (flow === "github") {
-        f.auth.signInWithOAuth.mockResolvedValueOnce({
-          data: { provider: "github", url: null },
-          error: new Error("OAuth start failed")
-        } as never);
-        await f.client.signInWithGitHub();
-      } else {
-        f.auth.signInWithOtp.mockResolvedValueOnce({
-          data: { user: null, session: null },
-          error: new Error("OTP start failed")
-        } as never);
-        await f.client.sendMagicLink("person@example.com");
-      }
-      await f.client.completeSignIn(`${callbackUrl}?code=must-remain-terminal`);
-      expect(f.auth.exchangeCodeForSession).toHaveBeenCalledOnce();
-    }
-  );
-
-  it("keeps an auth event authoritative over a callback exchange failure", async () => {
-    const f = fixture();
-    await f.client.initialize();
-    const pending = deferred<{
-      data: { session: null; user: null };
-      error: unknown;
-    }>();
-    f.auth.exchangeCodeForSession.mockReturnValueOnce(pending.promise as never);
-    const exchange = f.client.completeSignIn(`${callbackUrl}?code=event-owned`);
-    f.emit("SIGNED_IN", session("callback-event-token"));
-    pending.resolve({
-      data: { session: null, user: null },
-      error: new Error("stale callback failure")
-    });
-    await exchange;
-    expect(f.client.getSnapshot()).toMatchObject({ status: "signedIn" });
-    expect(await f.client.getAccessToken()).toBe("callback-event-token");
-  });
-
-  it("keeps the SIGNED_IN event emitted by callback exchange authoritative over its result", async () => {
-    const f = fixture();
-    await f.client.initialize();
-    f.auth.exchangeCodeForSession.mockImplementationOnce(async () => {
-      f.emit("SIGNED_IN", session("exchange-event-token"));
-      return {
-        data: {
-          session: session("stale-exchange-token"),
-          user: session().user
-        },
-        error: null
-      };
-    });
-    await f.client.completeSignIn(`${callbackUrl}?code=emits-event`);
-    expect(f.client.getSnapshot()).toMatchObject({ status: "signedIn" });
-    expect(await f.client.getAccessToken()).toBe("exchange-event-token");
-  });
-
-  it("also resets callback attempt terminality when a new magic-link flow starts", async () => {
-    const f = fixture();
-    f.auth.exchangeCodeForSession.mockResolvedValueOnce({
-      data: { session: null, user: null },
-      error: new Error("first exchange failure")
-    } as never);
-    await f.client.completeSignIn(
-      `${callbackUrl}?code=failed-magic-predecessor`
-    );
-    await f.client.sendMagicLink("person@example.com");
-    await f.client.completeSignIn(`${callbackUrl}?code=new-magic-flow`);
-    expect(f.auth.exchangeCodeForSession).toHaveBeenCalledTimes(2);
-    expect(f.client.getSnapshot()).toMatchObject({ status: "signedIn" });
-  });
-
-  it("replaces signed-in account A with callback account B and returns attributable success", async () => {
-    const f = fixture(session("account-a-token", "account-a"));
-    await f.client.initialize();
-    const pending = deferred<{
-      data: { session: Session; user: Session["user"] };
-      error: null;
-    }>();
-    f.auth.exchangeCodeForSession.mockReturnValueOnce(pending.promise);
-    const completion = f.client.completeSignIn(`${callbackUrl}?code=account-b`);
-    expect(f.client.getSnapshot()).toEqual({ status: "signingIn" });
-    pending.resolve({
-      data: {
-        session: session("account-b-token", "account-b"),
-        user: session("unused", "account-b").user
-      },
-      error: null
-    });
-    expect(await completion).toEqual({
-      status: "success",
-      identityKey: "account-b"
-    });
-    expect(f.client.getSnapshot()).toEqual({
-      status: "signedIn",
-      identityKey: "account-b"
-    });
-  });
-
-  it("returns callback failure instead of accepting a preexisting signed-in account", async () => {
-    const f = fixture(session("account-a-token", "account-a"));
-    await f.client.initialize();
-    expect(
-      await f.client.completeSignIn(`${callbackUrl}?error=access_denied`)
-    ).toEqual({ status: "error" });
-    expect(f.auth.exchangeCodeForSession).not.toHaveBeenCalled();
-    expect(f.client.getSnapshot()).toMatchObject({
-      status: "error",
-      code: "provider_error"
-    });
-  });
-
-  it.each([
-    "https://foreign.example.com/auth/callback?code=x",
-    "https://dashboard.example.com:444/auth/callback?code=x",
-    "https://dashboard.example.com/auth/callback?code=x#fragment",
-    "https://user@dashboard.example.com/auth/callback?code=x",
-    "https://dashboard.example.com/auth/callback?code=a&code=b",
-    "https://dashboard.example.com/auth/callback?code=x&state=unknown",
-    "https://dashboard.example.com/auth/callback?error=denied&code=x",
-    "https://dashboard.example.com/auth/callback?error_code=denied"
-  ])("rejects unsafe callback shapes without exchanging: %s", async (url) => {
-    const f = fixture();
-    await f.client.completeSignIn(url);
-    expect(f.auth.exchangeCodeForSession).not.toHaveBeenCalled();
-    expect(f.client.getSnapshot()).toEqual({
-      status: "error",
-      code: "invalid_callback",
-      message: "We couldn't complete your sign-in. Try again."
-    });
-  });
-
-  it("turns sanitized provider callback errors into a stable generic error", async () => {
-    const f = fixture();
-    await f.client.completeSignIn(
-      `${callbackUrl}?error=access_denied&error_code=oauth_denied&error_description=private%20provider%20details`
-    );
-    expect(f.auth.exchangeCodeForSession).not.toHaveBeenCalled();
-    expect(f.client.getSnapshot()).toEqual({
-      status: "error",
-      code: "provider_error",
-      message: "We couldn't complete your sign-in. Try again."
-    });
-    expect(JSON.stringify(f.client.getSnapshot())).not.toContain(
-      "private provider details"
-    );
-  });
-
-  it("returns the cached token and coalesces a forced Supabase refresh", async () => {
-    const f = fixture(session());
-    await f.client.initialize();
-    expect(await f.client.getAccessToken()).toBe("supabase-access");
-    const pending = deferred<{
-      data: { session: Session; user: Session["user"] };
-      error: null;
-    }>();
-    f.auth.refreshSession.mockReturnValueOnce(pending.promise);
-    const first = f.client.getAccessToken({ forceRefresh: true });
-    const second = f.client.getAccessToken({ forceRefresh: true });
-    expect(first).toBe(second);
-    pending.resolve({
-      data: { session: session("refreshed-access"), user: session().user },
-      error: null
-    });
-    expect(await first).toBe("refreshed-access");
-    expect(f.auth.refreshSession).toHaveBeenCalledOnce();
-  });
-
-  it("keeps a SIGNED_OUT event authoritative over an older refresh success", async () => {
-    const f = fixture(session());
-    await f.client.initialize();
-    const pending = deferred<{
-      data: { session: Session; user: Session["user"] };
-      error: null;
-    }>();
-    f.auth.refreshSession.mockReturnValueOnce(pending.promise);
-    const refresh = f.client.getAccessToken({ forceRefresh: true });
-    f.emit("SIGNED_OUT", null);
-    pending.resolve({
-      data: { session: session("stale-refresh"), user: session().user },
-      error: null
-    });
-    expect(await refresh).toBeNull();
-    expect(f.client.getSnapshot()).toEqual({ status: "signedOut" });
-  });
-
-  it("keeps a TOKEN_REFRESHED event authoritative over an older refresh failure", async () => {
-    const f = fixture(session());
-    await f.client.initialize();
-    const pending = deferred<{
-      data: { session: null; user: null };
-      error: unknown;
-    }>();
-    f.auth.refreshSession.mockReturnValueOnce(pending.promise as never);
-    const refresh = f.client.getAccessToken({ forceRefresh: true });
-    f.emit("TOKEN_REFRESHED", session("event-refreshed"));
-    pending.resolve({
-      data: { session: null, user: null },
-      error: new Error("stale refresh failure")
-    });
-    expect(await refresh).toBe("event-refreshed");
-    expect(f.auth.signOut).not.toHaveBeenCalled();
-    expect(f.client.getSnapshot()).toMatchObject({ status: "signedIn" });
-  });
-
-  it("expires the local session after refresh failure", async () => {
-    const f = fixture(session());
-    await f.client.initialize();
-    f.auth.refreshSession.mockResolvedValueOnce({
-      data: { session: null, user: null },
-      error: new Error("private failure")
-    } as never);
-    expect(await f.client.getAccessToken({ forceRefresh: true })).toBeNull();
-    expect(f.client.getSnapshot()).toEqual({ status: "signedOut" });
-    expect(f.auth.signOut).toHaveBeenCalledWith({ scope: "local" });
-  });
-
-  it("coalesces sign-out and expiry and affects only the local Supabase session", async () => {
-    const f = fixture(session());
-    await f.client.initialize();
-    const pending = deferred<{ error: null }>();
-    f.auth.signOut.mockReturnValueOnce(pending.promise);
-    const first = f.client.signOut();
-    const second = f.client.expireSession();
-    expect(first).toBe(second);
-    expect(f.client.getSnapshot()).toEqual({ status: "signedOut" });
-    expect(await f.client.getAccessToken()).toBeNull();
-    expect(f.auth.signOut).toHaveBeenCalledWith({ scope: "local" });
-    pending.resolve({ error: null });
-    await first;
-    expect(f.auth.signOut).toHaveBeenCalledOnce();
-    f.emit("SIGNED_IN", session("next-session"));
-    expect(f.client.getSnapshot()).toMatchObject({ status: "signedIn" });
-    expect(await f.client.getAccessToken()).toBe("next-session");
+    expect(env.client.getSnapshot()).toEqual({ status: "signedOut" });
+    expect(env.shared()).toBeNull();
   });
 });
 
-describe("createBrowserWebAuthClient", () => {
-  it("creates Supabase once with PKCE persistence and provider-token-safe storage", () => {
-    const auth = fixture().auth;
-    const createClient = vi.fn(() => ({ auth }));
-    const backing = window.localStorage;
-    const client = createBrowserWebAuthClient(
-      "https://project.supabase.co",
-      "sb_publishable_test",
-      callbackUrl,
-      backing,
-      createClient as unknown as Parameters<
-        typeof createBrowserWebAuthClient
-      >[4]
+describe("WebAuthClient sign-in", () => {
+  it("signs in with email and password and stores both tokens", async () => {
+    const env = await ready(setup());
+    env.routes["POST /api/v1/auth/login"] = () => json(200, sessionBody(1));
+    const listener = vi.fn();
+    env.client.subscribe(listener);
+
+    await env.client.signIn("  ada@example.com ", "correct horse battery");
+
+    expect(env.calls[0]).toMatchObject({
+      key: "POST /api/v1/auth/login",
+      body: { email: "ada@example.com", password: "correct horse battery" }
+    });
+    expect(env.calls[0]!.headers.get("authorization")).toBeNull();
+    expect(env.client.getSnapshot()).toEqual(signedIn);
+    expect(listener).toHaveBeenCalled();
+    expect(env.shared()).toEqual({
+      ...stored(1),
+      access_expires_at: start + hour,
+      refresh_expires_at: start + 2_592_000_000
+    });
+    await expect(env.client.getAccessToken()).resolves.toBe("orch_sess_1");
+  });
+
+  it("rejects a wrong password with its code and stays signed out", async () => {
+    const env = await ready(setup());
+    env.routes["POST /api/v1/auth/login"] = () =>
+      apiError(401, "INVALID_CREDENTIALS");
+    const failure = env.client.signIn("ada@example.com", "wrong-password");
+    await expect(failure).rejects.toBeInstanceOf(AuthRequestError);
+    await expect(failure).rejects.toMatchObject({
+      code: "INVALID_CREDENTIALS",
+      status: 401
+    });
+    expect(env.client.getSnapshot()).toEqual({ status: "signedOut" });
+    expect(env.shared()).toBeNull();
+  });
+
+  it("reports how long a rate-limited sign-in must wait", async () => {
+    const env = await ready(setup());
+    env.routes["POST /api/v1/auth/login"] = () =>
+      apiError(429, "RATE_LIMITED", { retry_after_seconds: 42 });
+    await expect(
+      env.client.signIn("ada@example.com", "secret-password")
+    ).rejects.toMatchObject({ code: "RATE_LIMITED", retryAfterSeconds: 42 });
+
+    env.routes["POST /api/v1/auth/login"] = () =>
+      json(429, undefined, { "retry-after": "7" });
+    await expect(
+      env.client.signIn("ada@example.com", "secret-password")
+    ).rejects.toMatchObject({ code: "RATE_LIMITED", retryAfterSeconds: 7 });
+  });
+
+  it("reports an unreachable server as a network error", async () => {
+    const env = await ready(setup());
+    env.routes["POST /api/v1/auth/login"] = () => {
+      throw new TypeError("Failed to fetch");
+    };
+    await expect(
+      env.client.signIn("ada@example.com", "secret-password")
+    ).rejects.toMatchObject({ code: "NETWORK_ERROR", status: null });
+  });
+
+  it("rejects a malformed session response", async () => {
+    const env = await ready(setup());
+    env.routes["POST /api/v1/auth/login"] = () =>
+      json(200, { access_token: "x" });
+    await expect(
+      env.client.signIn("ada@example.com", "secret-password")
+    ).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+    expect(env.client.getSnapshot()).toEqual({ status: "signedOut" });
+  });
+});
+
+describe("WebAuthClient instance and sign-up", () => {
+  it("caches instance info until asked to refresh", async () => {
+    const env = await ready(setup());
+    let needsSetup = true;
+    env.routes["GET /api/v1/auth/instance"] = () =>
+      json(200, { needs_setup: needsSetup, signup_mode: "invite" });
+    await expect(env.client.getInstance()).resolves.toEqual({
+      needs_setup: true,
+      signup_mode: "invite"
+    });
+    needsSetup = false;
+    await expect(env.client.getInstance()).resolves.toMatchObject({
+      needs_setup: true
+    });
+    await expect(
+      env.client.getInstance({ refresh: true })
+    ).resolves.toMatchObject({ needs_setup: false });
+    expect(env.calls).toHaveLength(2);
+  });
+
+  it("creates the first admin with the setup token and forgets the setup state", async () => {
+    const env = await ready(setup());
+    let needsSetup = true;
+    env.routes["GET /api/v1/auth/instance"] = () =>
+      json(200, { needs_setup: needsSetup, signup_mode: "invite" });
+    env.routes["POST /api/v1/auth/signup"] = () => {
+      needsSetup = false;
+      return json(201, sessionBody(1));
+    };
+    await env.client.getInstance();
+
+    await expect(
+      env.client.signUp({
+        email: "ada@example.com",
+        password: "correct horse battery",
+        fullName: "  Ada Lovelace ",
+        setupToken: " setup-123 "
+      })
+    ).resolves.toEqual({ invitedProjectId: null });
+
+    expect(env.calls[1]!.body).toEqual({
+      email: "ada@example.com",
+      password: "correct horse battery",
+      full_name: "Ada Lovelace",
+      setup_token: "setup-123"
+    });
+    expect(env.client.getSnapshot()).toEqual(signedIn);
+    await expect(env.client.getInstance()).resolves.toMatchObject({
+      needs_setup: false
+    });
+  });
+
+  it("signs up with an invite and returns the joined project", async () => {
+    const env = await ready(setup());
+    const projectId = "00000000-0000-4000-8000-000000000099";
+    env.routes["POST /api/v1/auth/signup"] = () =>
+      json(201, { ...sessionBody(1), invited_project_id: projectId });
+    await expect(
+      env.client.signUp({
+        email: "ada@example.com",
+        password: "correct horse battery",
+        fullName: "Ada",
+        inviteToken: "a".repeat(43)
+      })
+    ).resolves.toEqual({ invitedProjectId: projectId });
+    expect(env.calls[0]!.body).toMatchObject({ invite_token: "a".repeat(43) });
+    expect(env.calls[0]!.body).not.toHaveProperty("setup_token");
+  });
+
+  it.each([
+    [403, "SETUP_TOKEN_REQUIRED"],
+    [403, "INVITE_REQUIRED"],
+    [403, "SIGNUP_CLOSED"],
+    [409, "EMAIL_TAKEN"]
+  ])("surfaces a %s %s sign-up error", async (status, code) => {
+    const env = await ready(setup());
+    env.routes["POST /api/v1/auth/signup"] = () => apiError(status, code);
+    await expect(
+      env.client.signUp({
+        email: "ada@example.com",
+        password: "correct horse battery",
+        fullName: "Ada"
+      })
+    ).rejects.toMatchObject({ code, status });
+    expect(env.client.getSnapshot()).toEqual({ status: "signedOut" });
+  });
+});
+
+describe("WebAuthClient token refresh", () => {
+  it("refreshes about a minute before expiry and rotates both tokens", async () => {
+    const env = await ready(setup({ session: stored(1) }));
+    env.routes["POST /api/v1/auth/refresh"] = () => json(200, sessionBody(2));
+
+    env.clock.now = start + hour - REFRESH_MARGIN_MS - 1;
+    await expect(env.client.getAccessToken()).resolves.toBe("orch_sess_1");
+    expect(env.calls).toHaveLength(0);
+
+    env.clock.now = start + hour - REFRESH_MARGIN_MS + 1;
+    await expect(env.client.getAccessToken()).resolves.toBe("orch_sess_2");
+    expect(env.calls[0]).toMatchObject({
+      key: "POST /api/v1/auth/refresh",
+      body: { refresh_token: "orch_refresh_1" }
+    });
+    expect(env.shared()).toMatchObject({
+      access_token: "orch_sess_2",
+      refresh_token: "orch_refresh_2",
+      access_expires_at: env.clock.now + hour
+    });
+    expect(env.client.getSnapshot()).toEqual(signedIn);
+  });
+
+  it("shares one refresh between concurrent callers", async () => {
+    const env = await ready(setup({ session: stored(1) }));
+    const response = deferred<Response>();
+    env.routes["POST /api/v1/auth/refresh"] = () => response.promise;
+
+    const first = env.client.getAccessToken({ forceRefresh: true });
+    const second = env.client.getAccessToken({ forceRefresh: true });
+    response.resolve(json(200, sessionBody(2)));
+
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      "orch_sess_2",
+      "orch_sess_2"
+    ]);
+    expect(env.calls).toHaveLength(1);
+  });
+
+  it("refreshes inside the cross-tab lock when Web Locks are available", async () => {
+    const request = vi.fn(
+      <T>(_name: string, callback: () => Promise<T>): Promise<T> => callback()
     );
-    expect(client).toBeInstanceOf(WebAuthClient);
-    client.dispose();
-    expect(auth.dispose).toHaveBeenCalledOnce();
-    expect(createClient).toHaveBeenCalledOnce();
-    expect(createClient).toHaveBeenCalledWith(
-      "https://project.supabase.co",
-      "sb_publishable_test",
-      {
-        auth: expect.objectContaining({
-          flowType: "pkce",
-          persistSession: true,
-          autoRefreshToken: true,
-          detectSessionInUrl: false,
-          storage: expect.any(ProviderTokenStrippingStorage)
-        })
+    const env = await ready(
+      setup({
+        session: stored(1),
+        locks: { request: request as RefreshLocks["request"] }
+      })
+    );
+    env.routes["POST /api/v1/auth/refresh"] = () => json(200, sessionBody(2));
+    await expect(
+      env.client.getAccessToken({ forceRefresh: true })
+    ).resolves.toBe("orch_sess_2");
+    expect(request).toHaveBeenCalledWith(
+      "orchestrat.auth.refresh",
+      expect.any(Function)
+    );
+  });
+
+  it("uses tokens another tab already rotated instead of refreshing again", async () => {
+    const env = await ready(setup({ session: stored(1) }));
+    env.otherTabWritesQuietly(stored(2));
+    await expect(
+      env.client.getAccessToken({ forceRefresh: true })
+    ).resolves.toBe("orch_sess_2");
+    expect(env.calls).toHaveLength(0);
+  });
+
+  it("keeps the session when a refresh 401 follows another tab's rotation", async () => {
+    const env = await ready(setup({ session: stored(1) }));
+    env.routes["POST /api/v1/auth/refresh"] = () => {
+      // The other tab won the race and saved its tokens first.
+      env.otherTabWritesQuietly(stored(2));
+      return apiError(401, "REFRESH_TOKEN_INVALID");
+    };
+    await expect(
+      env.client.getAccessToken({ forceRefresh: true })
+    ).resolves.toBe("orch_sess_2");
+    expect(env.client.getSnapshot()).toEqual(signedIn);
+    expect(env.shared()).toMatchObject({ refresh_token: "orch_refresh_2" });
+  });
+
+  it("signs out on a definitive refresh 401", async () => {
+    const env = await ready(setup({ session: stored(1) }));
+    env.routes["POST /api/v1/auth/refresh"] = () =>
+      apiError(401, "REFRESH_TOKEN_INVALID");
+    await expect(
+      env.client.getAccessToken({ forceRefresh: true })
+    ).resolves.toBeNull();
+    expect(env.client.getSnapshot()).toEqual({ status: "signedOut" });
+    expect(env.shared()).toBeNull();
+  });
+
+  it("signs out without a request once the refresh token has expired", async () => {
+    const env = await ready(setup({ session: stored(1) }));
+    env.clock.now = start + 30 * 24 * hour;
+    await expect(env.client.getAccessToken()).resolves.toBeNull();
+    expect(env.calls).toHaveLength(0);
+    expect(env.client.getSnapshot()).toEqual({ status: "signedOut" });
+    expect(env.shared()).toBeNull();
+  });
+
+  it("keeps the session through a transient failure but never replays a rejected token", async () => {
+    const env = await ready(setup({ session: stored(1) }));
+    env.routes["POST /api/v1/auth/refresh"] = () =>
+      apiError(503, "INTERNAL_ERROR");
+
+    await expect(
+      env.client.getAccessToken({ forceRefresh: true })
+    ).resolves.toBeNull();
+    expect(env.client.getSnapshot()).toEqual(signedIn);
+
+    // A proactive refresh may keep using a token that is still valid.
+    env.clock.now = start + hour - 30_000;
+    await expect(env.client.getAccessToken()).resolves.toBe("orch_sess_1");
+
+    env.routes["POST /api/v1/auth/refresh"] = () => {
+      throw new TypeError("offline");
+    };
+    env.clock.now = start + hour + 1;
+    await expect(env.client.getAccessToken()).resolves.toBeNull();
+    expect(env.shared()).toMatchObject({ refresh_token: "orch_refresh_1" });
+
+    env.routes["POST /api/v1/auth/refresh"] = () => json(200, sessionBody(2));
+    await expect(env.client.getAccessToken()).resolves.toBe("orch_sess_2");
+  });
+
+  it("drops a refresh that finishes after the session ended", async () => {
+    const env = await ready(setup({ session: stored(1) }));
+    const response = deferred<Response>();
+    env.routes["POST /api/v1/auth/refresh"] = () => response.promise;
+    const token = env.client.getAccessToken({ forceRefresh: true });
+    await env.client.expireSession();
+    response.resolve(json(200, sessionBody(2)));
+    await expect(token).resolves.toBeNull();
+    expect(env.client.getSnapshot()).toEqual({ status: "signedOut" });
+    expect(env.shared()).toBeNull();
+  });
+});
+
+describe("WebAuthClient across tabs", () => {
+  it("follows another tab's rotation, sign-out and sign-in", async () => {
+    const env = await ready(setup({ session: stored(1) }));
+    const listener = vi.fn();
+    env.client.subscribe(listener);
+
+    env.otherTabWrites(stored(2));
+    await expect(env.client.getAccessToken()).resolves.toBe("orch_sess_2");
+    expect(listener).not.toHaveBeenCalled();
+
+    env.otherTabWrites(null);
+    expect(env.client.getSnapshot()).toEqual({ status: "signedOut" });
+
+    env.otherTabWrites(stored(3, { user: otherUserId }));
+    expect(env.client.getSnapshot()).toEqual({
+      status: "signedIn",
+      identityKey: otherUserId
+    });
+  });
+
+  it("stops listening after dispose", async () => {
+    const env = await ready(setup({ session: stored(1) }));
+    env.client.dispose();
+    env.otherTabWrites(null);
+    expect(env.client.getSnapshot()).toEqual(signedIn);
+  });
+
+  it("keeps working in memory when storage refuses writes", async () => {
+    const env = await ready(setup());
+    env.backing.setItem.mockImplementation(() => {
+      throw new Error("QuotaExceededError");
+    });
+    env.routes["POST /api/v1/auth/login"] = () => json(200, sessionBody(1));
+    await env.client.signIn("ada@example.com", "secret-password");
+    env.routes["POST /api/v1/auth/refresh"] = () => json(200, sessionBody(2));
+    await expect(
+      env.client.getAccessToken({ forceRefresh: true })
+    ).resolves.toBe("orch_sess_2");
+    expect(env.client.getSnapshot()).toEqual(signedIn);
+  });
+});
+
+describe("WebAuthClient sign-out and account actions", () => {
+  it("revokes by refresh token on sign-out, then clears the session", async () => {
+    const env = await ready(
+      setup({ session: stored(1, { accessExpiresAt: start - 1 }) })
+    );
+    let sharedDuringRevoke: StoredSession | null = null;
+    env.routes["POST /api/v1/auth/revoke"] = () => {
+      sharedDuringRevoke = env.shared();
+      return new Response(null, { status: 204 });
+    };
+    await env.client.signOut();
+    expect(env.calls).toHaveLength(1);
+    expect(env.calls[0]).toMatchObject({
+      key: "POST /api/v1/auth/revoke",
+      body: { refresh_token: "orch_refresh_1" }
+    });
+    expect(env.calls[0]!.headers.get("authorization")).toBeNull();
+    expect(sharedDuringRevoke).not.toBeNull();
+    expect(env.client.getSnapshot()).toEqual({ status: "signedOut" });
+    expect(env.shared()).toBeNull();
+  });
+
+  it("signs out locally even when revoke can't reach the server", async () => {
+    const env = await ready(setup({ session: stored(1) }));
+    env.routes["POST /api/v1/auth/revoke"] = () => {
+      throw new TypeError("offline");
+    };
+    await env.client.signOut();
+    expect(env.client.getSnapshot()).toEqual({ status: "signedOut" });
+    expect(env.shared()).toBeNull();
+  });
+
+  it("signs out everywhere with the bearer token", async () => {
+    const env = await ready(setup({ session: stored(1) }));
+    env.routes["POST /api/v1/auth/logout-all"] = () =>
+      new Response(null, { status: 204 });
+    await env.client.signOutEverywhere();
+    expect(env.calls[0]!.headers.get("authorization")).toBe(
+      "Bearer orch_sess_1"
+    );
+    // An empty JSON body would be rejected by the API.
+    expect(env.calls[0]!.headers.get("content-type")).toBeNull();
+    expect(env.client.getSnapshot()).toEqual({ status: "signedOut" });
+    expect(env.shared()).toBeNull();
+  });
+
+  it("stays signed in when sign out everywhere fails", async () => {
+    const env = await ready(setup({ session: stored(1) }));
+    env.routes["POST /api/v1/auth/logout-all"] = () =>
+      apiError(500, "INTERNAL_ERROR");
+    await expect(env.client.signOutEverywhere()).rejects.toMatchObject({
+      code: "INTERNAL_ERROR"
+    });
+    expect(env.client.getSnapshot()).toEqual(signedIn);
+  });
+
+  it("changes the password and keeps this session", async () => {
+    const env = await ready(setup({ session: stored(1) }));
+    env.routes["POST /api/v1/auth/password"] = () =>
+      new Response(null, { status: 204 });
+    await env.client.changePassword("old-password", "new password 123");
+    expect(env.calls[0]).toMatchObject({
+      key: "POST /api/v1/auth/password",
+      body: {
+        current_password: "old-password",
+        new_password: "new password 123"
       }
+    });
+    expect(env.calls[0]!.headers.get("authorization")).toBe(
+      "Bearer orch_sess_1"
     );
+    expect(env.client.getSnapshot()).toEqual(signedIn);
+    expect(env.shared()).toMatchObject({ access_token: "orch_sess_1" });
+  });
+
+  it.each([
+    [
+      "an incorrect current password",
+      () => apiError(403, "PASSWORD_INCORRECT"),
+      { code: "PASSWORD_INCORRECT", status: 403 }
+    ],
+    [
+      "the rate limit",
+      () =>
+        json(
+          429,
+          {
+            error: {
+              code: "RATE_LIMITED",
+              message: "Too many requests.",
+              details: { retry_after_seconds: 900 },
+              request_id: "req"
+            }
+          },
+          { "retry-after": "900" }
+        ),
+      { code: "RATE_LIMITED", retryAfterSeconds: 900 }
+    ]
+  ])("reports %s on password change", async (_label, response, expected) => {
+    const env = await ready(setup({ session: stored(1) }));
+    env.routes["POST /api/v1/auth/password"] = response;
+    await expect(
+      env.client.changePassword("old-password", "new password 123")
+    ).rejects.toMatchObject(expected);
+    expect(env.client.getSnapshot()).toEqual(signedIn);
+  });
+
+  it("refreshes once when an account action meets an expired access token", async () => {
+    const env = await ready(setup({ session: stored(1) }));
+    env.routes["POST /api/v1/auth/password"] = ({ headers }) =>
+      headers.get("authorization") === "Bearer orch_sess_2"
+        ? new Response(null, { status: 204 })
+        : apiError(401, "UNAUTHENTICATED");
+    env.routes["POST /api/v1/auth/refresh"] = () => json(200, sessionBody(2));
+    await env.client.changePassword("old-password", "new password 123");
+    expect(env.calls.map((call) => call.key)).toEqual([
+      "POST /api/v1/auth/password",
+      "POST /api/v1/auth/refresh",
+      "POST /api/v1/auth/password"
+    ]);
+  });
+
+  it("expires the session when an account action is rejected twice", async () => {
+    const env = await ready(setup({ session: stored(1) }));
+    env.routes["POST /api/v1/auth/logout-all"] = () =>
+      apiError(401, "UNAUTHENTICATED");
+    env.routes["POST /api/v1/auth/refresh"] = () => json(200, sessionBody(2));
+    await expect(env.client.signOutEverywhere()).rejects.toMatchObject({
+      code: "UNAUTHENTICATED"
+    });
+    expect(env.client.getSnapshot()).toEqual({ status: "signedOut" });
   });
 });

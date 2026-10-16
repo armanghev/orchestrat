@@ -2,6 +2,7 @@
   "name": "@orchestrat/auth",
   "version": "0.1.0",
   "private": true,
+  "license": "Elastic-2.0",
   "type": "module",
   "exports": {
     ".": "./dist/index.js"
@@ -14,8 +15,5 @@
   },
   "devDependencies": {
     "tsx": "^4.20.5"
-  },
-  "dependencies": {
-    "jose": "^6.2.8"
   }
 }

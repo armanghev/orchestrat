@@ -12,7 +12,9 @@ export const INTEGRATIONS = CONFIGURABLE_INTEGRATIONS;
 // Integrations removed from the product. Old configs may still name them;
 // their entries are dropped on read (and so on the next write).
 const RETIRED_INTEGRATIONS: ReadonlySet<string> = new Set(["opencode"]);
-export const DEFAULT_API_URL = "https://api.orchestrat.dev";
+// Only ever shown as a suggestion; there is no default server.
+export const SUGGESTED_SERVER_URL = "http://localhost:8801";
+export const MISSING_SERVER_MESSAGE = `No Orchestrat server URL. Run orchestrat setup --server <url> (for example --server ${SUGGESTED_SERVER_URL}) or set ORCHESTRAT_API_URL.`;
 export type Integration = ConfigurableIntegration;
 
 export type IntegrationMapping = { agentId: string };
@@ -73,6 +75,31 @@ export function apiOrigin(value: string): string {
   const origin = validateApiUrl(value);
   if (!origin) throw new Error("API URL is required");
   return origin;
+}
+
+// The server is never implied: --server, then ORCHESTRAT_API_URL, then the
+// project's saved apiUrl. Undefined means the caller must ask or fail.
+export function resolveServerUrl(input: {
+  flag?: string;
+  env?: string;
+  projectApiUrl?: string;
+}): string | undefined {
+  if (input.flag !== undefined) {
+    try {
+      const origin = validateApiUrl(input.flag);
+      if (origin) return origin;
+    } catch {
+      // Reported below with the flag's name.
+    }
+    throw new Error("Invalid --server URL; use an http(s) URL");
+  }
+  let env: string | undefined;
+  try {
+    env = validateApiUrl(input.env);
+  } catch {
+    throw new Error("Invalid ORCHESTRAT_API_URL; use an http(s) URL");
+  }
+  return env ?? validateApiUrl(input.projectApiUrl);
 }
 
 export function parseConfig(value: unknown): OrchestratConfig {

@@ -2,6 +2,7 @@
   "name": "@orchestrat/dashboard",
   "version": "0.1.0",
   "private": true,
+  "license": "Elastic-2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -28,7 +29,6 @@
     "@lezer/highlight": "1.2.3",
     "@mdxeditor/editor": "4.2.3",
     "@orchestrat/protocol": "workspace:*",
-    "@supabase/supabase-js": "^2.112.3",
     "@tanstack/react-query": "^5.101.4",
     "@tanstack/react-router": "^1.170.27",
     "@tauri-apps/api": "^2.11.1",

@@ -1,10 +1,22 @@
 {
   "name": "@orchestrat/cli",
-  "version": "0.1.0-alpha.5",
+  "version": "0.2.0",
+  "license": "Elastic-2.0",
+  "author": "Arman Ghevondyan",
+  "homepage": "https://orchestrat.dev/docs",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/armanghev/orchestrat.git",
+    "directory": "apps/cli"
+  },
+  "bugs": "https://github.com/armanghev/orchestrat/issues",
   "type": "module",
   "files": [
     "dist/main.js",
-    "package.json"
+    "package.json",
+    "LICENSE",
+    "NOTICE",
+    "THIRD_PARTY_LICENSES"
   ],
   "engines": {
     "node": "^20.19.0 || >=22.12.0"
@@ -16,7 +28,7 @@
     "orchestrat": "dist/main.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json && esbuild src/main.ts --bundle --platform=node --format=esm --outfile=dist/main.js",
+    "build": "tsc -p tsconfig.json && esbuild src/main.ts --bundle --platform=node --format=esm --outfile=dist/main.js --metafile=dist/metafile.json && node scripts/third-party-licenses.mjs",
     "prepack": "pnpm build",
     "lint": "eslint src",
     "typecheck": "tsc --noEmit",

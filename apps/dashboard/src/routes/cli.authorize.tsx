@@ -4,10 +4,13 @@ import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { SignInScreen } from "@/features/auth/sign-in-screen";
 import { useAuthSnapshot } from "@/features/auth/auth-context";
+import {
+  CLI_ATTEMPT_KEY,
+  cliAttemptPattern as attemptPattern
+} from "@/features/auth/post-auth";
 
-export const CLI_ATTEMPT_KEY = "orchestrat.cli.authorization.attempt";
+export { CLI_ATTEMPT_KEY };
 export const CLI_TERMINAL_KEY = "orchestrat.cli.authorization.terminal";
-export const attemptPattern = /^ca_[A-Za-z0-9_-]{20,}$/;
 type TerminalState = { status: "approved" | "denied"; attempt?: string };
 
 function clearAttemptQuery() {

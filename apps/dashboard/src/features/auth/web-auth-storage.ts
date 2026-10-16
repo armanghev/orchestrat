@@ -1,101 +1,116 @@
-import type { SupportedStorage } from "@supabase/supabase-js";
+import { z } from "zod";
 
-const providerTokenKeys = new Set(["provider_token", "provider_refresh_token"]);
-const maxSerializedLength = 1_000_000;
-const maxNodes = 10_000;
-const maxDepth = 64;
+// One session per browser profile, shared by every tab. Bump the version in
+// the key when the shape changes; older values are then simply ignored.
+export const AUTH_SESSION_STORAGE_KEY = "orchestrat.auth.session.v1";
 
-function sanitizedJson(value: string): string | null {
+const maxSerializedLength = 16_384;
+
+const storedSessionSchema = z.object({
+  version: z.literal(1),
+  access_token: z.string().min(1).max(512),
+  refresh_token: z.string().min(1).max(512),
+  // Epoch milliseconds, computed from this device's clock when the tokens
+  // arrived, so server clock skew doesn't matter.
+  access_expires_at: z.number().int().nonnegative(),
+  refresh_expires_at: z.number().int().nonnegative(),
+  user: z.object({
+    user_id: z.string().min(1).max(128),
+    email: z.string().max(320),
+    full_name: z.string().max(256),
+    is_instance_admin: z.boolean()
+  })
+});
+export type StoredSession = z.infer<typeof storedSessionSchema>;
+
+type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+
+export function parseStoredSession(value: string): StoredSession | null {
   if (value.length === 0 || value.length > maxSerializedLength) return null;
   try {
-    const parsed: unknown = JSON.parse(value);
-    const stack: Array<{ value: unknown; depth: number }> = [
-      { value: parsed, depth: 0 }
-    ];
-    let nodes = 0;
-    while (stack.length > 0) {
-      const current = stack.pop();
-      if (!current || ++nodes > maxNodes || current.depth > maxDepth)
-        return null;
-      if (current.value === null || typeof current.value !== "object") continue;
-      if (Array.isArray(current.value)) {
-        for (const child of current.value)
-          stack.push({ value: child, depth: current.depth + 1 });
-        continue;
-      }
-      for (const key of Object.keys(current.value)) {
-        if (providerTokenKeys.has(key)) {
-          delete (current.value as Record<string, unknown>)[key];
-        } else {
-          stack.push({
-            value: (current.value as Record<string, unknown>)[key],
-            depth: current.depth + 1
-          });
-        }
-      }
-    }
-    const serialized = JSON.stringify(parsed);
-    return typeof serialized === "string" &&
-      serialized.length <= maxSerializedLength
-      ? serialized
-      : null;
+    const parsed = storedSessionSchema.safeParse(JSON.parse(value));
+    return parsed.success ? parsed.data : null;
   } catch {
     return null;
   }
 }
 
-export class ProviderTokenStrippingStorage implements SupportedStorage {
+export class AuthSessionStorage {
   constructor(
-    private readonly storage: Pick<
-      Storage,
-      "getItem" | "setItem" | "removeItem"
-    >
+    private readonly storage: StorageLike | null,
+    private readonly key = AUTH_SESSION_STORAGE_KEY
   ) {}
 
-  getItem(key: string): string | null {
+  get available(): boolean {
+    return this.storage !== null;
+  }
+
+  /**
+   * The shared session, `null` when there is none, or `undefined` when the
+   * storage can't be read at all. An unreadable or malformed value is removed.
+   */
+  read(): StoredSession | null | undefined {
+    if (!this.storage) return undefined;
     let value: string | null;
     try {
-      value = this.storage.getItem(key);
+      value = this.storage.getItem(this.key);
     } catch {
-      return null;
+      return undefined;
     }
     if (value === null) return null;
-    const safeValue = sanitizedJson(value);
-    if (safeValue === null) {
-      this.quarantine(key);
-      return null;
-    }
+    const session = parseStoredSession(value);
+    if (!session) this.clear();
+    return session;
+  }
+
+  /** Returns false when the session could only be kept in memory. */
+  write(session: StoredSession): boolean {
+    if (!this.storage) return false;
     try {
-      this.storage.setItem(key, safeValue);
-      return safeValue;
+      this.storage.setItem(this.key, JSON.stringify(session));
+      return true;
     } catch {
-      this.quarantine(key);
-      return null;
+      this.clear();
+      return false;
     }
   }
 
-  setItem(key: string, value: string): void {
-    const safeValue = sanitizedJson(value);
-    if (safeValue === null) {
-      this.quarantine(key);
-      return;
-    }
+  clear(): void {
     try {
-      this.storage.setItem(key, safeValue);
+      this.storage?.removeItem(this.key);
     } catch {
-      this.quarantine(key);
+      /* Storage cleanup is best-effort. */
     }
   }
 
-  removeItem(key: string): void {
-    this.quarantine(key);
+  /** Calls the listener when another tab changes the shared session. */
+  subscribe(listener: () => void): () => void {
+    if (typeof window === "undefined") return () => undefined;
+    const handler = (event: StorageEvent) => {
+      // A null key means the other tab cleared all of storage.
+      if (event.key === null || event.key === this.key) listener();
+    };
+    window.addEventListener("storage", handler);
+    return () => window.removeEventListener("storage", handler);
   }
+}
 
-  private quarantine(key: string): void {
-    try {
-      this.storage.removeItem(key);
-    } catch {
-      /* Storage cleanup is best-effort and contains no auth value. */
+// The hosted alpha kept Supabase sessions under `sb-<project>-auth-token`.
+// They are useless now, so drop them instead of leaving tokens behind.
+const legacySupabaseKey = /^sb-[A-Za-z0-9-]+-auth-token(?:-code-verifier)?$/u;
+
+export function removeLegacySupabaseSessions(
+  storage: Pick<Storage, "key" | "length" | "removeItem"> | null
+): void {
+  if (!storage) return;
+  try {
+    const keys: string[] = [];
+    for (let index = 0; index < storage.length; index += 1) {
+      const key = storage.key(index);
+      if (key && legacySupabaseKey.test(key)) keys.push(key);
     }
+    for (const key of keys) storage.removeItem(key);
+  } catch {
+    /* Best-effort cleanup. */
   }
 }

@@ -126,10 +126,6 @@ describe("ProjectMembersSection", () => {
   });
 
   it("creates a copyable public invitation link and revokes active links", async () => {
-    vi.stubEnv(
-      "VITE_WEB_AUTH_CALLBACK_URL",
-      "https://app.orchestrat.dev/auth/callback"
-    );
     const user = userEvent.setup();
     const api = apiFixture({
       listProjectInvitations: vi.fn().mockResolvedValue({
@@ -150,7 +146,7 @@ describe("ProjectMembersSection", () => {
     );
     const link = await screen.findByLabelText("Invitation link");
     expect(link).toHaveValue(
-      "https://app.orchestrat.dev/project-invitations/join#token=" +
+      `${window.location.origin}/project-invitations/join#token=` +
         "a".repeat(43)
     );
 

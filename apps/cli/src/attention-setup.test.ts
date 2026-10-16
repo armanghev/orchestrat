@@ -305,6 +305,56 @@ test("CLI parses attention flags, hook events and waker commands", () => {
   assert.throws(() => parseInvocationArgs(["status", "--once"]));
 });
 
+// ORC-76: the top-level parser rejected these before waker.ts saw them.
+test("CLI passes waker enable --integration and --wake-on through to the waker", () => {
+  for (const wakerArgs of [
+    ["enable", "--integration", "codex"],
+    ["enable", "--wake-on", "handoff,direct_message,mention"],
+    ["enable", "--integration", "claude-code", "--wake-on", "mention"],
+    ["enable", "--integration=cursor", "--wake-on=direct_message"],
+    [
+      "enable",
+      "--integration",
+      "codex",
+      "--integration",
+      "antigravity",
+      "--wake-on",
+      "handoff",
+      "--wake-on",
+      "mention"
+    ],
+    // Values are validated by waker.ts, which names the bad one.
+    ["enable", "--integration", "opencode"],
+    ["enable", "--wake-on", "everything"]
+  ])
+    assert.deepEqual(parseInvocationArgs(["waker", ...wakerArgs]), {
+      command: "waker",
+      wakerArgs
+    });
+  assert.throws(() => parseInvocationArgs(["status", "--wake-on", "handoff"]));
+  assert.throws(() =>
+    parseInvocationArgs([
+      "mcp",
+      "--integration",
+      "codex",
+      "--wake-on",
+      "handoff"
+    ])
+  );
+  assert.throws(
+    () => parseInvocationArgs(["waker", "enable", "--wake-on"]),
+    /--wake-on <value>' argument missing/
+  );
+  assert.throws(
+    () => parseInvocationArgs(["waker", "enable", "--integration"]),
+    /--integration <value>' argument missing/
+  );
+  assert.throws(
+    () => parseInvocationArgs(["status", "--integration", "codex"]),
+    /Usage: .*waker enable \[--integration <integration>\]\.\.\. \[--wake-on/
+  );
+});
+
 class Store implements CredentialStore {
   values = new Map<string, string>();
   async read(account: string) {

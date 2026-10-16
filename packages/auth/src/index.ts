@@ -1,10 +1,10 @@
 import {
-  createRemoteJWKSet,
-  errors,
-  jwtVerify,
-  type JWTVerifyGetKey,
-  type JWTPayload
-} from "jose";
+  createHash,
+  randomBytes,
+  scrypt as scryptCallback,
+  timingSafeEqual,
+  type ScryptOptions
+} from "node:crypto";
 
 export type AuthHeaders =
   | Headers
@@ -22,75 +22,22 @@ export type HumanPrincipal = {
   avatarUrl: string | null;
   email: string;
   name: string | null;
-  provider: "supabase";
+  provider: string;
   username: string | null;
+  // Set when the session already resolved the account, so the API can skip
+  // the provider/subject lookup.
+  userId?: string;
 };
 
 export type HumanAuth = {
   authenticate(request: AuthRequest): Promise<HumanPrincipal | null>;
 };
 
-export type SupabaseJwtAlgorithm = "ES256" | "RS256";
-
-export type SupabaseAuthOptions = {
-  algorithm: SupabaseJwtAlgorithm;
-  audience: string;
-  supabaseUrl: string;
-};
-
-type SupabaseAuthDependencies = {
-  keyResolver?: JWTVerifyGetKey;
-};
-
-const EMAIL_MAX_LENGTH = 320;
-const NAME_MAX_LENGTH = 200;
-const AVATAR_URL_MAX_LENGTH = 2048;
-const JWKS_TIMEOUT_MS = 3_000;
-const CLOCK_TOLERANCE_SECONDS = 5;
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const CONTROL_CHARACTER_PATTERN = /\p{Cc}/u;
-
 export class AuthInfrastructureError extends Error {
   constructor() {
     super("Human identity verification is unavailable.");
     this.name = "AuthInfrastructureError";
   }
-}
-
-function validateOptions(options: SupabaseAuthOptions) {
-  if (options.algorithm !== "ES256" && options.algorithm !== "RS256") {
-    throw new TypeError("Supabase JWT algorithm must be ES256 or RS256.");
-  }
-
-  const audience = options.audience.trim();
-  if (!audience) throw new TypeError("Supabase JWT audience is required.");
-
-  let url: URL;
-  try {
-    url = new URL(options.supabaseUrl);
-  } catch {
-    throw new TypeError("Supabase URL must be a valid HTTPS origin.");
-  }
-  if (
-    url.protocol !== "https:" ||
-    url.username ||
-    url.password ||
-    url.pathname !== "/" ||
-    url.search ||
-    url.hash
-  ) {
-    throw new TypeError("Supabase URL must be a valid HTTPS origin.");
-  }
-
-  const baseUrl = url.origin;
-  return {
-    algorithm: options.algorithm,
-    audience,
-    issuer: `${baseUrl}/auth/v1`,
-    jwksUrl: new URL(`${baseUrl}/auth/v1/.well-known/jwks.json`)
-  };
 }
 
 function headerEntries(headers: AuthHeaders) {
@@ -100,7 +47,9 @@ function headerEntries(headers: AuthHeaders) {
     : Object.entries(headers as Record<string, string | string[] | undefined>);
 }
 
-function exactBearer(headers: AuthHeaders) {
+// The single bearer token, or null when the header is missing, repeated or
+// malformed.
+export function exactBearer(headers: AuthHeaders) {
   let authorization: string | undefined;
   let count = 0;
   for (const [name, value] of headerEntries(headers)) {
@@ -114,136 +63,134 @@ function exactBearer(headers: AuthHeaders) {
   return match?.[1] ?? null;
 }
 
-function normalizedEmail(value: unknown) {
-  if (typeof value !== "string") return null;
-  const email = value.trim().toLowerCase();
-  if (
-    email.length === 0 ||
-    email.length > EMAIL_MAX_LENGTH ||
-    CONTROL_CHARACTER_PATTERN.test(email)
-  ) {
-    return null;
-  }
-  return EMAIL_PATTERN.test(email) ? email : null;
-}
+// Opaque tokens: a readable prefix plus 32 random bytes. Only their SHA-256
+// hashes are stored.
+export const ACCESS_TOKEN_PREFIX = "orch_sess_";
+export const REFRESH_TOKEN_PREFIX = "orch_refresh_";
 
-function metadata(payload: JWTPayload) {
-  const value = payload.user_metadata;
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-}
+export const generateToken = (prefix: string) =>
+  `${prefix}${randomBytes(32).toString("base64url")}`;
 
-function boundedName(value: unknown) {
-  if (typeof value !== "string") return null;
-  const name = value.trim();
-  if (!name || CONTROL_CHARACTER_PATTERN.test(name)) return null;
-  return Array.from(name).slice(0, NAME_MAX_LENGTH).join("");
-}
+export const hashToken = (token: string) =>
+  createHash("sha256").update(token).digest("hex");
 
-function safeAvatarUrl(value: unknown) {
-  if (typeof value !== "string") return null;
-  const avatarUrl = value.trim();
-  if (!avatarUrl || avatarUrl.length > AVATAR_URL_MAX_LENGTH) return null;
+const TOKEN_BODY = /^[A-Za-z0-9_-]{43}$/;
+export const isTokenWithPrefix = (value: string, prefix: string) =>
+  value.startsWith(prefix) && TOKEN_BODY.test(value.slice(prefix.length));
+
+// Passwords: scrypt with a per-password salt, stored as
+// scrypt$<log2 N>$<r>$<p>$<salt>$<hash> (base64url).
+export const PASSWORD_MIN_LENGTH = 10;
+export const PASSWORD_MAX_LENGTH = 256;
+
+export type ScryptParams = { logN: number; r: number; p: number };
+// OWASP's scrypt equivalent of N=2^17, r=8, p=1 at a quarter of the memory.
+const CURRENT_PARAMS: ScryptParams = { logN: 15, r: 8, p: 3 };
+const KEY_LENGTH = 32;
+const SALT_LENGTH = 16;
+
+// scrypt runs on libuv's small thread pool; capping concurrent hashes keeps a
+// burst of logins from starving everything else that uses the pool.
+const MAX_CONCURRENT_HASHES = 2;
+let activeHashes = 0;
+const waitingHashes: (() => void)[] = [];
+async function withHashSlot<T>(work: () => Promise<T>) {
+  if (activeHashes >= MAX_CONCURRENT_HASHES)
+    await new Promise<void>((resolve) => waitingHashes.push(resolve));
+  else activeHashes += 1;
   try {
-    const url = new URL(avatarUrl);
-    if (url.protocol !== "https:" && url.protocol !== "http:") return null;
-    const canonicalUrl = url.toString();
-    return canonicalUrl.length <= AVATAR_URL_MAX_LENGTH ? canonicalUrl : null;
-  } catch {
-    return null;
+    return await work();
+  } finally {
+    const next = waitingHashes.shift();
+    if (next) next();
+    else activeHashes -= 1;
   }
 }
 
-function providerUsername(userMetadata: Record<string, unknown>) {
-  for (const value of [
-    userMetadata.preferred_username,
-    userMetadata.user_name,
-    userMetadata.username
-  ]) {
-    if (typeof value !== "string") continue;
-    const username = value.trim().replaceAll("-", "_").slice(0, 32);
-    if (/^[A-Za-z0-9_]{3,32}$/.test(username)) return username;
-  }
-  return null;
+const scrypt = (password: string, salt: Buffer, params: ScryptParams) =>
+  withHashSlot(() => rawScrypt(password, salt, params));
+
+const rawScrypt = (
+  password: string,
+  salt: Buffer,
+  { logN, r, p }: ScryptParams
+) =>
+  new Promise<Buffer>((resolve, reject) => {
+    const N = 2 ** logN;
+    const options: ScryptOptions = { N, r, p, maxmem: 256 * N * r };
+    scryptCallback(
+      password.normalize("NFKC"),
+      salt,
+      KEY_LENGTH,
+      options,
+      (error, key) => (error ? reject(error) : resolve(key))
+    );
+  });
+
+export async function hashPassword(
+  password: string,
+  params: ScryptParams = CURRENT_PARAMS
+) {
+  const salt = randomBytes(SALT_LENGTH);
+  const key = await scrypt(password, salt, params);
+  return [
+    "scrypt",
+    params.logN,
+    params.r,
+    params.p,
+    salt.toString("base64url"),
+    key.toString("base64url")
+  ].join("$");
 }
 
-function principal(payload: JWTPayload): HumanPrincipal | null {
+function parseHash(stored: string) {
+  const parts = stored.split("$");
+  if (parts.length !== 6 || parts[0] !== "scrypt") return null;
+  const [logN, r, p] = parts.slice(1, 4).map(Number) as [
+    number,
+    number,
+    number
+  ];
   if (
-    payload.role !== "authenticated" ||
-    typeof payload.sub !== "string" ||
-    !UUID_PATTERN.test(payload.sub) ||
-    typeof payload.iat !== "number" ||
-    !Number.isInteger(payload.iat) ||
-    payload.iat > Math.floor(Date.now() / 1000) + CLOCK_TOLERANCE_SECONDS
-  ) {
+    !Number.isInteger(logN) ||
+    !Number.isInteger(r) ||
+    !Number.isInteger(p) ||
+    logN < 10 ||
+    logN > 17 ||
+    r < 1 ||
+    r > 16 ||
+    p < 1 ||
+    p > 4
+  )
     return null;
-  }
-  const email = normalizedEmail(payload.email);
-  if (!email) return null;
-
-  const userMetadata = metadata(payload);
-  return {
-    authSubject: payload.sub.toLowerCase(),
-    avatarUrl: safeAvatarUrl(
-      userMetadata.avatar_url ?? userMetadata.picture ?? payload.picture
-    ),
-    email,
-    name: boundedName(
-      userMetadata.full_name ?? userMetadata.name ?? payload.name
-    ),
-    provider: "supabase",
-    username: providerUsername(userMetadata)
-  };
+  const salt = Buffer.from(parts[4]!, "base64url");
+  const key = Buffer.from(parts[5]!, "base64url");
+  if (salt.length < 8 || key.length !== KEY_LENGTH) return null;
+  return { params: { logN, r, p }, salt, key };
 }
 
-const INVALID_CREDENTIAL_CODES = new Set([
-  "ERR_JOSE_ALG_NOT_ALLOWED",
-  "ERR_JOSE_NOT_SUPPORTED",
-  "ERR_JWKS_NO_MATCHING_KEY",
-  "ERR_JWS_INVALID",
-  "ERR_JWS_SIGNATURE_VERIFICATION_FAILED",
-  "ERR_JWT_CLAIM_VALIDATION_FAILED",
-  "ERR_JWT_EXPIRED",
-  "ERR_JWT_INVALID"
-]);
+export type PasswordCheck = { valid: boolean; needsRehash: boolean };
 
-function isInvalidCredential(error: unknown) {
-  return (
-    error instanceof errors.JOSEError &&
-    INVALID_CREDENTIAL_CODES.has(error.code)
-  );
+export async function verifyPassword(
+  password: string,
+  stored: string
+): Promise<PasswordCheck> {
+  const parsed = parseHash(stored);
+  if (!parsed) return { valid: false, needsRehash: false };
+  const key = await scrypt(password, parsed.salt, parsed.params);
+  const valid = timingSafeEqual(key, parsed.key);
+  const needsRehash =
+    valid &&
+    (parsed.params.logN !== CURRENT_PARAMS.logN ||
+      parsed.params.r !== CURRENT_PARAMS.r ||
+      parsed.params.p !== CURRENT_PARAMS.p);
+  return { valid, needsRehash };
 }
 
-export function createSupabaseAuth(
-  options: SupabaseAuthOptions,
-  dependencies: SupabaseAuthDependencies = {}
-): HumanAuth {
-  const validated = validateOptions(options);
-  const keyResolver =
-    dependencies.keyResolver ??
-    createRemoteJWKSet(validated.jwksUrl, {
-      timeoutDuration: JWKS_TIMEOUT_MS
-    });
-
-  return {
-    async authenticate(request) {
-      const bearer = exactBearer(request.headers);
-      if (!bearer) return null;
-
-      try {
-        const { payload } = await jwtVerify(bearer, keyResolver, {
-          algorithms: [validated.algorithm],
-          audience: validated.audience,
-          clockTolerance: CLOCK_TOLERANCE_SECONDS,
-          issuer: validated.issuer,
-          requiredClaims: ["exp", "iat", "sub", "email", "role"]
-        });
-        return principal(payload);
-      } catch (error) {
-        if (isInvalidCredential(error)) return null;
-        throw new AuthInfrastructureError();
-      }
-    }
-  };
+// Burns the same scrypt work as a real check, so a login for an unknown
+// email takes as long as one with a wrong password.
+let dummyHash: Promise<string> | undefined;
+export async function verifyPasswordAgainstDummy(password: string) {
+  dummyHash ??= hashPassword("orchestrat-dummy-password");
+  await verifyPassword(password, await dummyHash);
 }

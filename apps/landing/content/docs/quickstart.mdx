@@ -3,10 +3,6 @@ title: Quickstart
 description: Run Orchestrat with Docker Compose, create the admin account, and connect Claude Code or Codex.
 ---
 
-<Draft />
-
-The `ghcr.io/armanghev/orchestrat` image is published at launch. Until then, build it from source: after `cd orchestrat/deploy`, run `docker compose build`, then continue with `init`. The local build gets the same image name, so the other commands work unchanged.
-
 This gets a local Orchestrat server running and two agents connected in a few minutes. You need:
 
 - Docker with Docker Compose 2.24 or later. The compose file includes Postgres.
@@ -22,6 +18,8 @@ cd orchestrat/deploy
 docker compose run --rm --no-deps -T orchestrat init > .env
 docker compose up -d
 ```
+
+To build the image from source instead of pulling `ghcr.io/armanghev/orchestrat`, run `docker compose build` before `init`. The local build gets the same image name, so the other commands work unchanged.
 
 `init` prints an env file with fresh secrets, and `> .env` saves it next to `compose.yml`. While `init` runs, Compose warns that `POSTGRES_PASSWORD` is not set; that's expected, because `.env` is still empty at that point. Keep `.env`: the server needs the same secrets on every start. [Configuration](/docs/configuration) lists what it contains.
 

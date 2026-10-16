@@ -5,7 +5,11 @@ import {
   DashboardApiError,
   type ApiTokenSource
 } from "@/lib/api/client";
-import { DesktopAuthClient } from "@/features/auth/desktop-auth-client";
+import { WebAuthClient } from "@/features/auth/web-auth-client";
+import {
+  AUTH_SESSION_STORAGE_KEY,
+  AuthSessionStorage
+} from "@/features/auth/web-auth-storage";
 import { documentDetail, organization, project } from "@/test/factories";
 import { handlers } from "@/test/handlers";
 import { server } from "@/test/msw-server";
@@ -216,14 +220,15 @@ describe("ApiClient", () => {
     expect(requests).toBe(2);
   });
 
-  it("does not replay an old JWT when forced native refresh is transient", async () => {
+  it("does not replay a rejected token when the forced refresh is transient", async () => {
     let requests = 0;
+    let refreshes = 0;
     server.use(
       http.get(`${apiUrl}/api/v1/organizations`, ({ request }) => {
         requests += 1;
         if (requests === 1) {
           expect(request.headers.get("authorization")).toBe(
-            "Bearer old-native-token"
+            "Bearer orch_sess_old"
           );
           return HttpResponse.json(
             {
@@ -238,43 +243,65 @@ describe("ApiClient", () => {
           );
         }
         expect(request.headers.get("authorization")).toBe(
-          "Bearer recovered-native-token"
+          "Bearer orch_sess_new"
         );
         return HttpResponse.json({ organizations: [organization()] });
+      }),
+      http.post(`${apiUrl}/api/v1/auth/refresh`, () => {
+        refreshes += 1;
+        if (refreshes === 1)
+          return HttpResponse.json(
+            {
+              error: {
+                code: "INTERNAL_ERROR",
+                message: "Try again.",
+                details: {},
+                request_id: "req_refresh"
+              }
+            },
+            { status: 503 }
+          );
+        return HttpResponse.json({
+          access_token: "orch_sess_new",
+          refresh_token: "orch_refresh_new",
+          token_type: "Bearer",
+          expires_in: 3600,
+          refresh_expires_in: 2592000,
+          user: {
+            user_id: "00000000-0000-4000-8000-000000000001",
+            email: "ada@example.com",
+            full_name: "Ada",
+            is_instance_admin: false
+          }
+        });
       })
     );
-    let now = 1_000;
-    const bridge = {
-      beginGitHub: vi.fn(async () => undefined),
-      sendMagicLink: vi.fn(async () => undefined),
-      complete: vi.fn(async () => ({
-        accessToken: "unused",
-        expiresAtMs: 90_000
-      })),
-      refresh: vi
-        .fn()
-        .mockRejectedValueOnce({
-          code: "provider_unavailable",
-          message: "Try again."
+    const values = new Map([
+      [
+        AUTH_SESSION_STORAGE_KEY,
+        JSON.stringify({
+          version: 1,
+          access_token: "orch_sess_old",
+          refresh_token: "orch_refresh_old",
+          access_expires_at: Date.now() + 3_600_000,
+          refresh_expires_at: Date.now() + 86_400_000,
+          user: {
+            user_id: "00000000-0000-4000-8000-000000000001",
+            email: "ada@example.com",
+            full_name: "Ada",
+            is_instance_admin: false
+          }
         })
-        .mockResolvedValueOnce({
-          accessToken: "recovered-native-token",
-          expiresAtMs: 90_000
-        }),
-      restore: vi.fn(async () => ({
-        accessToken: "old-native-token",
-        expiresAtMs: 60_000
-      })),
-      expire: vi.fn(async () => undefined),
-      signOut: vi.fn(async () => undefined)
-    };
-    const platform = {
-      kind: "desktop" as const,
-      preferences: { load: vi.fn(), save: vi.fn() },
-      openExternal: vi.fn(async () => undefined),
-      onAuthCallback: vi.fn(async () => () => undefined)
-    };
-    const auth = new DesktopAuthClient(platform, bridge, () => now);
+      ]
+    ]);
+    const auth = new WebAuthClient({
+      apiUrl,
+      storage: new AuthSessionStorage({
+        getItem: (key) => values.get(key) ?? null,
+        setItem: (key, value) => void values.set(key, value),
+        removeItem: (key) => void values.delete(key)
+      })
+    });
     await auth.initialize();
     const api = new ApiClient(apiUrl, auth);
 
@@ -283,12 +310,11 @@ describe("ApiClient", () => {
       status: null
     } satisfies Partial<DashboardApiError>);
     expect(requests).toBe(1);
-    expect(bridge.refresh).toHaveBeenCalledOnce();
-    expect(bridge.expire).not.toHaveBeenCalled();
+    expect(refreshes).toBe(1);
+    expect(auth.getSnapshot().status).toBe("signedIn");
 
-    now += 1_000;
     await expect(auth.getAccessToken({ forceRefresh: true })).resolves.toBe(
-      "recovered-native-token"
+      "orch_sess_new"
     );
     await expect(api.listOrganizations()).resolves.toEqual({
       organizations: [organization()]

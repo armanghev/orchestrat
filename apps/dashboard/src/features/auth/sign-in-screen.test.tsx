@@ -1,149 +1,265 @@
-import { render, screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
-import { AuthContext } from "./auth-context";
-import type { AuthCapabilities, AuthClient, AuthSnapshot } from "./auth-client";
-import { SignInScreen } from "./sign-in-screen";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { FakeAuthClient, signedIn, signedOut } from "@/test/fake-auth-client";
+import { renderDashboardRoute } from "@/test/render";
+import { AuthRequestError } from "./auth-client";
 
-function client(
-  snapshot: AuthSnapshot,
-  capabilities: AuthCapabilities = { github: true, magicLink: true }
-): AuthClient {
+function platform() {
   return {
-    capabilities,
-    initialize: vi.fn(async () => undefined),
-    getSnapshot: () => snapshot,
-    subscribe: () => () => undefined,
-    signInWithGitHub: vi.fn(async () => undefined),
-    sendMagicLink: vi.fn(async () => undefined),
-    completeSignIn: vi.fn(async () => ({ status: "error" as const })),
-    signOut: vi.fn(async () => undefined),
-    expireSession: vi.fn(async () => undefined),
-    getAccessToken: vi.fn(async () => null)
+    kind: "web" as const,
+    preferences: {
+      load: vi.fn(async () => null),
+      save: vi.fn(async () => undefined)
+    },
+    openExternal: vi.fn(async () => undefined),
+    onAuthCallback: vi.fn(async () => () => undefined)
   };
 }
 
-function renderScreen(auth: AuthClient) {
-  return render(
-    <AuthContext.Provider value={auth}>
-      <SignInScreen />
-    </AuthContext.Provider>
-  );
+function renderRoot(auth: FakeAuthClient, path = "/") {
+  return renderDashboardRoute({ path, auth, platform: platform() });
 }
 
-describe("SignInScreen", () => {
-  it("offers accessible GitHub and magic-link actions for web auth", async () => {
-    const auth = client({ status: "signedOut" });
-    renderScreen(auth);
-    await userEvent
-      .setup()
-      .click(screen.getByRole("button", { name: "Continue with GitHub" }));
-    expect(auth.signInWithGitHub).toHaveBeenCalledOnce();
-    expect(screen.getByRole("separator", { name: "or" })).toBeVisible();
+afterEach(() => window.sessionStorage.clear());
 
+describe("sign-in screen", () => {
+  it("signs in with email and password, then leaves for onboarding", async () => {
+    const auth = new FakeAuthClient(signedOut);
+    auth.signIn.mockImplementation(async () => auth.emit(signedIn()));
+    const view = await renderRoot(auth);
+    const user = userEvent.setup();
+
+    await user.type(
+      await screen.findByLabelText("Email"),
+      "  Ada@Example.com "
+    );
+    await user.type(screen.getByLabelText("Password"), "correct horse battery");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+    expect(auth.signIn).toHaveBeenCalledWith(
+      "ada@example.com",
+      "correct horse battery"
+    );
+    await waitFor(() =>
+      expect(view.router.state.location.pathname).toBe("/onboarding")
+    );
+  });
+
+  it("shows a wrong password inline and keeps the form", async () => {
+    const auth = new FakeAuthClient(signedOut);
+    auth.signIn.mockRejectedValueOnce(
+      new AuthRequestError("Nope", "INVALID_CREDENTIALS", 401)
+    );
+    await renderRoot(auth);
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText("Email"), "ada@example.com");
+    await user.type(screen.getByLabelText("Password"), "wrong-password");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Email or password is incorrect."
+    );
+    expect(screen.getByLabelText("Email")).toHaveValue("ada@example.com");
+    expect(screen.getByRole("button", { name: "Sign in" })).toBeEnabled();
+  });
+
+  it("says how long to wait when sign-in is rate limited", async () => {
+    const auth = new FakeAuthClient(signedOut);
+    auth.signIn.mockRejectedValueOnce(
+      new AuthRequestError("Too many", "RATE_LIMITED", 429, 42)
+    );
+    await renderRoot(auth);
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText("Email"), "ada@example.com");
+    await user.type(screen.getByLabelText("Password"), "secret-password");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Too many sign-in attempts. Try again in 42 seconds."
+    );
+  });
+
+  it("checks the fields before calling the server", async () => {
+    const auth = new FakeAuthClient(signedOut);
+    await renderRoot(auth);
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText("Email"), "a@.com");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+    const email = screen.getByLabelText("Email");
+    expect(email).toHaveAttribute("aria-invalid", "true");
+    expect(email).toHaveAccessibleDescription("Enter a valid email address.");
+    expect(email).toHaveFocus();
+    expect(screen.getByLabelText("Password")).toHaveAccessibleDescription(
+      "Enter your password."
+    );
+    expect(auth.signIn).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["invite", true],
+    ["open", true],
+    ["closed", false]
+  ] as const)(
+    "links to account creation in %s signup mode: %s",
+    async (mode, linked) => {
+      const auth = new FakeAuthClient(signedOut, {
+        needs_setup: false,
+        signup_mode: mode
+      });
+      await renderRoot(auth);
+      await screen.findByRole("heading", { name: "Sign in to Orchestrat" });
+      if (linked)
+        expect(
+          screen.getByRole("link", { name: "Create an account" })
+        ).toHaveAttribute("href", "/signup");
+      else {
+        expect(
+          screen.queryByRole("link", { name: "Create an account" })
+        ).not.toBeInTheDocument();
+        expect(
+          screen.getByText(
+            "Need an account? Ask an admin to create your account."
+          )
+        ).toBeVisible();
+      }
+    }
+  );
+
+  it("offers a retry when the server can't be reached", async () => {
+    const auth = new FakeAuthClient(signedOut);
+    auth.getInstance
+      .mockRejectedValueOnce(new AuthRequestError("x", "NETWORK_ERROR", null))
+      .mockResolvedValueOnce({ needs_setup: false, signup_mode: "open" });
+    await renderRoot(auth);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "We couldn't reach this Orchestrat server."
+    );
     await userEvent
       .setup()
-      .type(screen.getByLabelText("Email address"), " Person@Example.com ");
-    await userEvent
-      .setup()
-      .click(screen.getByRole("button", { name: "Email me a sign-in link" }));
-    expect(auth.sendMagicLink).toHaveBeenCalledWith("Person@Example.com");
+      .click(screen.getByRole("button", { name: "Retry" }));
     expect(
-      screen.getByRole("heading", { name: "Coordinate agents. Keep control." })
+      await screen.findByRole("link", { name: "Create an account" })
     ).toBeVisible();
+    expect(auth.getInstance).toHaveBeenLastCalledWith({ refresh: true });
   });
+});
 
-  it("hides magic-link controls when the selected adapter does not support them", () => {
-    renderScreen(
-      client({ status: "signedOut" }, { github: true, magicLink: false })
-    );
-    expect(
-      screen.getByRole("button", { name: "Continue with GitHub" })
-    ).toBeVisible();
-    expect(screen.queryByLabelText("Email address")).not.toBeInTheDocument();
-    expect(screen.queryByRole("separator")).not.toBeInTheDocument();
-  });
+describe("first-run setup", () => {
+  const empty = { needs_setup: true, signup_mode: "invite" } as const;
 
-  it("sends desktop users to the browser portal instead of showing providers", async () => {
-    const auth = client(
-      { status: "signedOut" },
-      { github: true, magicLink: false, browserPortal: true }
-    );
-    renderScreen(auth);
-    await userEvent
-      .setup()
-      .click(screen.getByRole("button", { name: "Continue in browser" }));
-    expect(auth.signInWithGitHub).toHaveBeenCalledOnce();
-    expect(screen.queryByLabelText("Email address")).not.toBeInTheDocument();
-    expect(screen.queryByText("Continue with GitHub")).not.toBeInTheDocument();
-  });
-
-  it("disables duplicate actions while each request is pending", () => {
-    const github = renderScreen(client({ status: "signingIn" }));
-    expect(
-      screen.getByRole("button", { name: "Connecting to GitHub…" })
-    ).toBeDisabled();
-    github.unmount();
-
-    renderScreen(
-      client({ status: "sendingMagicLink", email: "person@example.com" })
-    );
-    expect(screen.getByLabelText("Email address")).toBeDisabled();
-    expect(
-      screen.getByRole("button", { name: "Sending sign-in link…" })
-    ).toBeDisabled();
-    expect(
-      screen.getByRole("button", { name: "Continue with GitHub" })
-    ).toBeDisabled();
-  });
-
-  it("shows the confirmation when an in-place request transitions to accepted", () => {
-    const first = client({ status: "signedOut" });
-    const view = renderScreen(first);
-    const accepted = client({
-      status: "magicLinkSent",
-      email: "person@example.com"
+  it("creates the admin account with the setup token from the URL", async () => {
+    const auth = new FakeAuthClient(signedOut, empty);
+    auth.signUp.mockImplementation(async () => {
+      auth.emit(signedIn());
+      return { invitedProjectId: null };
     });
-    view.rerender(
-      <AuthContext.Provider value={accepted}>
-        <SignInScreen />
-      </AuthContext.Provider>
-    );
-    expect(screen.getByRole("status")).toHaveTextContent("Check your email");
-  });
-
-  it("honestly confirms request acceptance and supports retry or changing email", async () => {
-    const auth = client({
-      status: "magicLinkSent",
-      email: "person@example.com"
-    });
-    renderScreen(auth);
-    expect(screen.getByRole("status")).toHaveTextContent("Check your email");
-    expect(screen.getByText(/•••@example\.com/)).toBeVisible();
-    expect(screen.queryByText(/person@example\.com/)).not.toBeInTheDocument();
-    await userEvent
-      .setup()
-      .click(screen.getByRole("button", { name: "Send again" }));
-    expect(auth.sendMagicLink).toHaveBeenCalledWith("person@example.com");
-    await userEvent
-      .setup()
-      .click(screen.getByRole("button", { name: "Use a different email" }));
-    expect(screen.getByLabelText("Email address")).toHaveFocus();
-  });
-
-  it("never renders adapter error details", () => {
-    renderScreen(
-      client({
-        status: "error",
-        code: "provider_error",
-        message: "private provider details"
+    const view = await renderRoot(auth, "/?setup_token=tok_from_log");
+    expect(
+      await screen.findByRole("heading", {
+        name: "Set up this Orchestrat server"
       })
+    ).toBeVisible();
+    const token = screen.getByLabelText("Setup token");
+    expect(token).toHaveValue("tok_from_log");
+    expect(token).toHaveAccessibleDescription(
+      "Printed in the server log at startup, or set with ORCHESTRAT_SETUP_TOKEN."
     );
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      "We couldn't sign you in. Try again."
+
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText("Name"), "Ada Lovelace");
+    await user.type(screen.getByLabelText("Email"), "ada@example.com");
+    await user.type(screen.getByLabelText("Password"), "correct horse battery");
+    await user.type(
+      screen.getByLabelText("Confirm password"),
+      "correct horse battery"
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Create admin account" })
+    );
+
+    expect(auth.signUp).toHaveBeenCalledWith({
+      email: "ada@example.com",
+      password: "correct horse battery",
+      fullName: "Ada Lovelace",
+      inviteToken: undefined,
+      setupToken: "tok_from_log"
+    });
+    await waitFor(() =>
+      expect(view.router.state.location.pathname).toBe("/onboarding")
+    );
+  });
+
+  it("validates the form and shows a rejected setup token on its field", async () => {
+    const auth = new FakeAuthClient(signedOut, empty);
+    auth.signUp.mockRejectedValueOnce(
+      new AuthRequestError("x", "SETUP_TOKEN_REQUIRED", 403)
+    );
+    await renderRoot(auth);
+    const user = userEvent.setup();
+    await user.click(
+      await screen.findByRole("button", { name: "Create admin account" })
+    );
+    expect(screen.getByLabelText("Setup token")).toHaveFocus();
+    expect(screen.getByLabelText("Name")).toHaveAccessibleDescription(
+      "Enter your name."
+    );
+    expect(auth.signUp).not.toHaveBeenCalled();
+
+    await user.type(screen.getByLabelText("Setup token"), "wrong-token");
+    await user.type(screen.getByLabelText("Name"), "Ada");
+    await user.type(screen.getByLabelText("Email"), "ada@example.com");
+    await user.type(screen.getByLabelText("Password"), "short");
+    await user.type(screen.getByLabelText("Confirm password"), "different");
+    await user.click(
+      screen.getByRole("button", { name: "Create admin account" })
+    );
+    expect(screen.getByLabelText("Password")).toHaveAccessibleDescription(
+      /Use at least 10 characters\./
     );
     expect(
-      screen.queryByText("private provider details")
-    ).not.toBeInTheDocument();
+      screen.getByLabelText("Confirm password")
+    ).toHaveAccessibleDescription("The passwords don't match.");
+
+    await user.clear(screen.getByLabelText("Password"));
+    await user.type(screen.getByLabelText("Password"), "correct horse battery");
+    await user.clear(screen.getByLabelText("Confirm password"));
+    await user.type(
+      screen.getByLabelText("Confirm password"),
+      "correct horse battery"
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Create admin account" })
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText("Setup token")).toHaveAccessibleDescription(
+        /This setup token is missing or wrong\. Copy it from the server log\./
+      )
+    );
+    expect(screen.getByLabelText("Setup token")).toHaveFocus();
+  });
+
+  it("falls back to sign-in when someone else finished setup first", async () => {
+    const auth = new FakeAuthClient(signedOut, empty);
+    auth.signUp.mockImplementationOnce(async () => {
+      auth.setInstance({ needs_setup: false, signup_mode: "invite" });
+      throw new AuthRequestError("x", "INVITE_REQUIRED", 403);
+    });
+    await renderRoot(auth, "/?setup_token=late");
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText("Name"), "Ada");
+    await user.type(screen.getByLabelText("Email"), "ada@example.com");
+    await user.type(screen.getByLabelText("Password"), "correct horse battery");
+    await user.type(
+      screen.getByLabelText("Confirm password"),
+      "correct horse battery"
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Create admin account" })
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Sign in to Orchestrat" })
+    ).toBeVisible();
   });
 });

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "build": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/LICENSE",
+        "$TURBO_ROOT$/NOTICE"
+      ],
+      "outputs": ["dist/**", "LICENSE", "NOTICE", "THIRD_PARTY_LICENSES"]
+    }
+  }
+}

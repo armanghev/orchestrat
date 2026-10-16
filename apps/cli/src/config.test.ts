@@ -272,12 +272,13 @@ test("resolves credentials without exposing them in the public result", async ()
         projects: {
           "/tmp/project": {
             projectId: "p",
+            apiUrl: "http://localhost:8801",
             integrations: { codex: { agentId: "a" } }
           }
         }
       }),
     credentials: new MemoryCredentialReader(
-      new Map([["agent:p:codex:https://api.orchestrat.dev", "secret"]])
+      new Map([["agent:p:codex:http://localhost:8801", "secret"]])
     )
   });
   assert.deepEqual(resolved.public, {
@@ -302,6 +303,7 @@ test("resolves only the configured global Cursor projects", async () => {
             "550e8400-e29b-41d4-a716-446655440000": {
               name: "Project",
               organizationName: "Org",
+              apiUrl: "http://localhost:8801",
               agentId: "agent"
             }
           }
@@ -310,7 +312,7 @@ test("resolves only the configured global Cursor projects", async () => {
     credentials: new MemoryCredentialReader(
       new Map([
         [
-          "agent:550e8400-e29b-41d4-a716-446655440000:cursor:https://api.orchestrat.dev",
+          "agent:550e8400-e29b-41d4-a716-446655440000:cursor:http://localhost:8801",
           "secret"
         ]
       ])

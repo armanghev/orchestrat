@@ -77,7 +77,7 @@ function ProjectInvitationJoinRoute() {
       </main>
     );
 
-  if (auth.status === "signedOut") return <SignInScreen />;
+  if (auth.status === "signedOut") return <SignInScreen inviteToken={token} />;
 
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-6 text-center">

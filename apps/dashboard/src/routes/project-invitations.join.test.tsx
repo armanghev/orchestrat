@@ -1,7 +1,8 @@
 import { screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { AuthClient, AuthSnapshot } from "@/features/auth/auth-client";
+import { FakeAuthClient } from "@/test/fake-auth-client";
 import { PROJECT_INVITATION_TOKEN_KEY } from "@/features/settings/project-invitation-token";
 import { renderDashboardRoute } from "@/test/render";
 
@@ -21,29 +22,7 @@ const project = {
   archived_at: null
 };
 
-class Auth implements AuthClient {
-  readonly capabilities = { github: true, magicLink: true };
-  private listeners = new Set<() => void>();
-
-  constructor(private snapshot: AuthSnapshot) {}
-
-  initialize = async () => undefined;
-  completeSignIn = async () => ({
-    status: "success" as const,
-    identityKey: "user"
-  });
-  getSnapshot = () => this.snapshot;
-  subscribe = (listener: () => void) => {
-    this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
-  };
-  signInWithGitHub = async () => undefined;
-  sendMagicLink = async () => undefined;
-  signOut = async () => undefined;
-  expireSession = async () => undefined;
-  getAccessToken = async () =>
-    this.snapshot.status === "signedIn" ? "test-token" : null;
-}
+class Auth extends FakeAuthClient {}
 
 function platform() {
   return {
@@ -99,30 +78,69 @@ describe("project invitation join route", () => {
     ).toBeNull();
   });
 
-  it("stores the fragment token while signed out, then resumes it from the auth callback", async () => {
+  it("keeps the fragment token while signed out and resumes it after sign-in", async () => {
     await renderDashboardRoute({
       path: `/project-invitations/join#token=${token}`,
       auth: new Auth({ status: "signedOut" }),
       platform: platform()
     });
     expect(
-      await screen.findByRole("button", { name: "Continue with GitHub" })
+      await screen.findByText(
+        "Sign in or create an account to join the project."
+      )
     ).toBeVisible();
+    expect(
+      screen.getByRole("link", { name: "Create an account" })
+    ).toHaveAttribute("href", `/signup?invite=${token}`);
     expect(window.sessionStorage.getItem(PROJECT_INVITATION_TOKEN_KEY)).toBe(
       token
     );
 
-    const callback = await renderDashboardRoute({
-      path: "/auth/callback?code=one-time",
+    const signedIn = await renderDashboardRoute({
+      path: "/",
       auth: new Auth({ status: "signedIn", identityKey: "user" }),
       platform: platform()
     });
     await waitFor(() =>
-      expect(callback.router.state.location.pathname).toBe(
+      expect(signedIn.router.state.location.pathname).toBe(
         "/project-invitations/join"
       )
     );
-    expect(callback.router.state.location.hash).toBe(`token=${token}`);
+    expect(signedIn.router.state.location.hash).toBe(`token=${token}`);
+  });
+
+  it("accepts the invitation in place after signing in on the join page", async () => {
+    let accepted = 0;
+    const auth = new Auth({ status: "signedOut" });
+    auth.signIn.mockImplementation(async () =>
+      auth.emit({ status: "signedIn", identityKey: "user" })
+    );
+    const rendered = await renderDashboardRoute({
+      path: `/project-invitations/join#token=${token}`,
+      auth,
+      platform: platform(),
+      handlers: [
+        http.post(`${apiUrl}/project-invitations/accept`, () => {
+          accepted += 1;
+          return HttpResponse.json({ project });
+        })
+      ]
+    });
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText("Email"), "ada@example.com");
+    await user.type(screen.getByLabelText("Password"), "correct horse battery");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+    await waitFor(() =>
+      expect(rendered.router.state.location.pathname).toBe(
+        `/projects/${project.id}/overview`
+      )
+    );
+    expect(auth.signIn).toHaveBeenCalledWith(
+      "ada@example.com",
+      "correct horse battery"
+    );
+    expect(accepted).toBe(1);
   });
 
   it("ignores an invitation response after the join page unmounts", async () => {
