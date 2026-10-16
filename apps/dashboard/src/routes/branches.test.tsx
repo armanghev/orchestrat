@@ -129,7 +129,7 @@ describe("project branches in the dashboard", () => {
     );
     await user.click(screen.getByRole("menuitemradio", { name: /^main/ }));
     await waitFor(() => expect(view.router.state.location.search).toEqual({}));
-  });
+  }, 15_000); // several page loads; 5s is tight on slow CI runners
 
   it("lists archived branches in All branches and opens them read-only", async () => {
     const view = await render(`/projects/${projectId}/tasks`, branchHandlers());
