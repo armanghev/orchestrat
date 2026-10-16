@@ -35,7 +35,7 @@ export function Navbar() {
           <Link
             href="/"
             aria-label="Orchestrat home"
-            className="col-start-1 justify-self-start"
+            className="col-start-1 flex justify-self-start"
             onClick={() => setOpen(false)}
           >
             <OrchestratLogo />

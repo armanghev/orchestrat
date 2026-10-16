@@ -19,13 +19,12 @@ export function DocsNavbar() {
     <header className="fixed inset-x-0 top-0 z-30 border-b bg-background/95 backdrop-blur-md on-root:[--fd-nav-height:80px]">
       <nav aria-label="Main navigation" className="site-container">
         <div className="grid h-20 grid-cols-[1fr_auto_1fr] items-center gap-4">
-          <div className="col-start-1 flex items-center gap-2.5 justify-self-start text-lg tracking-tight">
-            <Link href="/" aria-label="Orchestrat home">
+          {/* Reads as one wordmark, "Orchestrat Docs": the name goes home,
+              "Docs" goes to the docs start page. */}
+          <div className="col-start-1 flex items-center gap-1.5 justify-self-start text-lg tracking-tight">
+            <Link href="/" aria-label="Orchestrat home" className="flex">
               <OrchestratLogo />
             </Link>
-            <span aria-hidden="true" className="text-muted-foreground">
-              /
-            </span>
             <Link
               href="/docs"
               className="text-muted-foreground transition-colors hover:text-primary-text"
