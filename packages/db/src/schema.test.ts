@@ -74,7 +74,7 @@ test("agent lifecycle idempotency is project/agent scoped and hash-only", async 
       "utf8"
     )
   ) as { entries: { tag: string }[] };
-  assert.equal(journal.entries.at(-1)?.tag, "0018_builtin_auth");
+  assert.equal(journal.entries.at(-1)?.tag, "0019_agent_history_cascade");
 });
 
 test("agent attention schema matches the 0015 migration", async () => {
