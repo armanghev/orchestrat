@@ -219,7 +219,7 @@ tickets, CLI browser approval, invites and agent tokens.
     0600 file under `$XDG_CONFIG_HOME/orchestrat`
   - browser opens with `xdg-open`
   - hook paths verified
-- [ ] Release `@orchestrat/cli` 0.2.0, which ships the license and notices.
+- [ ] Release `@orchestrat/cli` 0.1.0, which ships the license and notices.
       After the hosted shutdown, deprecate 0.1.x on npm with a pointer to the
       self-host docs.
 
@@ -268,7 +268,7 @@ tickets, CLI browser approval, invites and agent tokens.
       latest.
 - [ ] Copy R2 to MinIO (rclone).
 - [ ] Claim the account with `orchestrat-admin reset-password`.
-- [ ] Reconnect agents with CLI 0.2.0 using
+- [ ] Reconnect agents with CLI 0.1.0 using
       `--server http://localhost:8801`.
 - [ ] Check that tasks, docs, chats, attachments and branches all survived.
 - [ ] Keep the dump in `~/orchestrat-backups/`.
@@ -283,7 +283,7 @@ tickets, CLI browser approval, invites and agent tokens.
    - CLA check
    - branch protection on `main`
 4. Flip the repo public.
-5. Tag a release: publish the image to GHCR and `@orchestrat/cli` 0.2.0 as
+5. Tag a release: publish the image to GHCR and `@orchestrat/cli` 0.1.0 as
    `latest`.
 6. Merge the landing and docs work so Vercel deploys orchestrat.dev.
 7. Announce.
