@@ -49,9 +49,10 @@ RUN mkdir -p /out/app \
 
 FROM node:22.23.2-bookworm-slim
 WORKDIR /app
+# The port is 8801 unless ORCHESTRAT_API_PORT or a platform's PORT (Railway,
+# Render, Fly.io) says otherwise, so it isn't pinned here.
 ENV NODE_ENV=production \
     ORCHESTRAT_API_HOST=0.0.0.0 \
-    ORCHESTRAT_API_PORT=8801 \
     ORCHESTRAT_DASHBOARD_DIR=/app/apps/dashboard/dist
 COPY --from=runtime /out/app ./
 COPY --from=build /app/apps/dashboard/dist ./apps/dashboard/dist
@@ -62,6 +63,6 @@ RUN chmod 0755 /usr/local/bin/orchestrat \
  && chmod 0755 /usr/local/bin/orchestrat-admin
 USER node
 EXPOSE 8801
-HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=6 CMD node -e "fetch('http://127.0.0.1:'+(process.env.ORCHESTRAT_API_PORT||'8801')+'/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=6 CMD node -e "fetch('http://127.0.0.1:'+(process.env.ORCHESTRAT_API_PORT||process.env.PORT||'8801')+'/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 ENTRYPOINT ["orchestrat"]
 CMD ["serve"]
