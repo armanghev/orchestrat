@@ -157,8 +157,10 @@
 }
 
 @layer components {
+  /* Up to 80rem, or three quarters of the main area on wide desktop screens
+     (an ultrawide would otherwise leave most of it empty). */
   .dashboard-page {
-    @apply mx-auto flex w-full max-w-7xl flex-col gap-6 p-4 sm:p-6 lg:p-8;
+    @apply mx-auto flex w-full max-w-7xl flex-col gap-6 p-4 sm:p-6 lg:max-w-[max(80rem,75%)] lg:p-8;
   }
 
   .metric-card {
